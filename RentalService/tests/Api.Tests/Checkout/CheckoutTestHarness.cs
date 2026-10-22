@@ -44,6 +44,8 @@ internal sealed class CheckoutTestHarness
 
     public FakePaymentRentalClient Payment { get; } = new();
 
+    public FakeAuthRentalClient Auth { get; } = new();
+
     public FakeOrderCodeGenerator OrderCodes { get; } = new();
 
     public FakeOrderLockManager Locks { get; } = new();
@@ -145,6 +147,7 @@ internal sealed class CheckoutTestHarness
                 orders,
                 new RenterAddressRepository(context),
                 Listings,
+                Auth,
                 Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
                 {
                     CurrentVersion = "v1.0",
@@ -163,7 +166,9 @@ internal sealed class CheckoutTestHarness
             context,
             Clock,
             Payment);
-        return await service.SubmitAsync(new(renterId, true), request, key, cancellationToken);
+        Auth.UserId = renterId;
+        Auth.IsProfileCompleted = true;
+        return await service.SubmitAsync(new(renterId), request, key, cancellationToken);
     }
 
     /// <summary>Chạy một lượt quét hết hạn thanh toán như ExpiryScannerWorker, dùng chung Inventory và Payment giả.</summary>

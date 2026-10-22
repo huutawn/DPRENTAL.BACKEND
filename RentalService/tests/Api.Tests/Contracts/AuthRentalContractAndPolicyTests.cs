@@ -123,35 +123,6 @@ public sealed class AuthRentalContractAndPolicyTests
         Assert.True(context.IsProfileCompleted);
     }
 
-    // 2. Checkout Authorization Policy
-    [Fact]
-    public void AuthorizeCheckout_EnforcesProfileCompletionAndNonServiceUser()
-    {
-        Guid userId = Guid.NewGuid();
-
-        // 1. Unauthenticated -> 401
-        Result unauth = RentalAuthorizationPolicy.AuthorizeCheckout(RentalCallerContext.Anonymous);
-        Assert.True(unauth.IsFailure);
-        Assert.Equal("Auth.Unauthorized", unauth.Error.Code);
-
-        // 2. Service token -> Forbidden
-        IRentalCallerContext serviceCaller = CreateServiceCaller();
-        Result serviceRes = RentalAuthorizationPolicy.AuthorizeCheckout(serviceCaller);
-        Assert.True(serviceRes.IsFailure);
-        Assert.Equal("Auth.ServiceTokenNotAllowed", serviceRes.Error.Code);
-
-        // 3. User with incomplete profile -> Forbidden
-        IRentalCallerContext incompleteCaller = CreateUserCaller(userId, isProfileCompleted: false);
-        Result incompleteRes = RentalAuthorizationPolicy.AuthorizeCheckout(incompleteCaller);
-        Assert.True(incompleteRes.IsFailure);
-        Assert.Equal("Auth.ProfileIncomplete", incompleteRes.Error.Code);
-
-        // 4. Valid user with complete profile -> Success
-        IRentalCallerContext validCaller = CreateUserCaller(userId, isProfileCompleted: true);
-        Result validRes = RentalAuthorizationPolicy.AuthorizeCheckout(validCaller);
-        Assert.True(validRes.IsSuccess);
-    }
-
     // 3. Order & Resource Ownership Policy
     [Fact]
     public void AuthorizeOrderRead_BlocksServiceTokens_AllowsRenterAndAdmin_BlocksStrangers()

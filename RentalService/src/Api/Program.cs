@@ -34,7 +34,13 @@ builder.Services.AddScoped<IRentalCallerContext>(sp =>
     var http = sp.GetRequiredService<IHttpContextAccessor>();
     return RentalCallerContext.FromClaimsPrincipal(http.HttpContext?.User);
 });
-builder.Services.Configure<RentalTermsOptions>(builder.Configuration.GetSection(RentalTermsOptions.SectionName));
+builder.Services.AddOptions<RentalTermsOptions>()
+    .Bind(builder.Configuration.GetSection(RentalTermsOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddTransient<AuthTokenPropagationHandler>();
+builder.Services.AddHttpClient<IAuthRentalClient, HttpAuthRentalClient>()
+    .AddHttpMessageHandler<AuthTokenPropagationHandler>();
 builder.Services.AddScoped<ICurrentRenter, CurrentRenter>();
 builder.Services.AddAuthorization(options =>
 {
@@ -90,6 +96,12 @@ if (string.IsNullOrWhiteSpace(internalKey))
 {
     throw new InvalidOperationException("InternalAuthentication:ApiKey is required.");
 }
+string? authUrl = builder.Configuration["Services:Auth:BaseUrl"];
+if (!string.IsNullOrWhiteSpace(authUrl) && !Uri.TryCreate(authUrl, UriKind.Absolute, out _))
+{
+    throw new InvalidOperationException("Services:Auth:BaseUrl must be a valid absolute URL.");
+}
+
 
 string? inventoryUrl = builder.Configuration["Services:Inventory:BaseUrl"];
 if (!string.IsNullOrWhiteSpace(inventoryUrl) && !Uri.TryCreate(inventoryUrl, UriKind.Absolute, out _))

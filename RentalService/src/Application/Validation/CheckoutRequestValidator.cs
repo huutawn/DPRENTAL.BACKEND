@@ -33,10 +33,6 @@ public static partial class CheckoutRequestValidator
         ValidateDeliverySource(request, errors);
         ValidateRefundAccount(request.RefundAccount, errors);
 
-        if (string.IsNullOrWhiteSpace(request.TermsVersion))
-        {
-            errors.Add(new("termsVersion", Required, "Thiếu phiên bản Điều khoản thuê."));
-        }
 
         if (!request.TermsAccepted)
         {

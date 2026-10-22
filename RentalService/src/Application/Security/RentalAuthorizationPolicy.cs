@@ -29,7 +29,6 @@ public static class RentalAuthorizationPolicy
     public static class ErrorCodes
     {
         public const string Unauthorized = "Auth.Unauthorized";
-        public const string ProfileIncomplete = "Auth.ProfileIncomplete";
         public const string Forbidden = "Auth.Forbidden";
         public const string ServiceTokenNotAllowed = "Auth.ServiceTokenNotAllowed";
 
@@ -39,25 +38,6 @@ public static class RentalAuthorizationPolicy
         public const string EvidenceNotFound = "Media.EvidenceNotFound";
     }
 
-    /// <summary>
-    /// Evaluates whether the caller is eligible to perform checkout.
-    /// Invariant: Must be authenticated, interactive user (not a service token), and have IsProfileCompleted == true in JWT claims.
-    /// </summary>
-    public static Result AuthorizeCheckout(IRentalCallerContext caller)
-    {
-        Result<Guid> user = RequireUser(caller, "Service token không được thực hiện đặt đơn thuê của người dùng.");
-        if (user.IsFailure)
-        {
-            return user.Error;
-        }
-
-        if (!caller.IsProfileCompleted)
-        {
-            return Error.Forbidden(ErrorCodes.ProfileIncomplete, "Hồ sơ cá nhân chưa hoàn thiện (yêu cầu hoàn tất hồ sơ trước khi thuê thiết bị).");
-        }
-
-        return Result.Success();
-    }
 
     /// <summary>
     /// Evaluates read access to a RentalOrder.

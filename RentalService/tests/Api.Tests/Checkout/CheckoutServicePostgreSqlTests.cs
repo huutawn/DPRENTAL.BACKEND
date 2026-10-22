@@ -39,6 +39,13 @@ public sealed class CheckoutServicePostgreSqlTests
     private readonly FakeInventoryListingClient _listings = new();
     private readonly FakeInventoryRentalClient _inventory = new();
     private readonly FakePaymentRentalClient _payment = new();
+    private readonly FakeAuthRentalClient _auth = new();
+
+    public CheckoutServicePostgreSqlTests()
+    {
+        _auth.UserId = _renterId;
+        _auth.IsProfileCompleted = true;
+    }
 
     [Fact]
     public async Task Submit_ConcurrentAndRepeatedSameKey_CreatesOnePayableOrder()
@@ -731,7 +738,7 @@ public sealed class CheckoutServicePostgreSqlTests
         CheckoutSubmitResult result;
         await using (RentalServiceDbContext context = new(options))
         {
-            result = await NewService(context, locks, completion).SubmitAsync(new(_renterId, true), request, Key);
+            result = await NewService(context, locks, completion).SubmitAsync(new(_renterId), request, Key);
         }
 
         if (result.IsFailure)
@@ -772,6 +779,7 @@ public sealed class CheckoutServicePostgreSqlTests
                 orders,
                 new RenterAddressRepository(context),
                 _listings,
+                _auth,
                 Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
                 {
                     CurrentVersion = "v1.0",

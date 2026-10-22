@@ -21,7 +21,6 @@ namespace Dprental.RentalService.Api.Controllers;
 [Route("~/rental/checkout")]
 public sealed class RentalCheckoutController(
     ICurrentRenter currentRenter,
-    IRentalCallerContext callerContext,
     ICheckoutService checkout) : ControllerBase
 {
     /// <summary>
@@ -63,7 +62,7 @@ public sealed class RentalCheckoutController(
         }
 
         var result = await checkout.SubmitAsync(
-            new CheckoutRenterContext(currentRenter.RenterId, callerContext.IsProfileCompleted),
+            new CheckoutRenterContext(currentRenter.RenterId),
             request,
             idempotencyKey,
             cancellationToken);

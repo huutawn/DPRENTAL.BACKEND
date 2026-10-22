@@ -29,6 +29,12 @@ public sealed class SynchronousCheckoutFlowTests
     private readonly CheckoutTestHarness _harness = new();
     private readonly Guid _renterId = Guid.NewGuid();
 
+    public SynchronousCheckoutFlowTests()
+    {
+        _harness.Auth.UserId = _renterId;
+        _harness.Auth.IsProfileCompleted = true;
+    }
+
     private CheckoutService CreateService(RentalServiceDbContext context, IOrderLockManager? locks = null)
     {
         RentalOrderRepository orders = new(context);
@@ -46,6 +52,7 @@ public sealed class SynchronousCheckoutFlowTests
                 orders,
                 new RenterAddressRepository(context),
                 _harness.Listings,
+                _harness.Auth,
                 Options.Create(new RentalTermsOptions
                 {
                     CurrentVersion = "v1.0",
@@ -77,7 +84,7 @@ public sealed class SynchronousCheckoutFlowTests
         await using var context = _harness.NewContext();
         var service = CreateService(context);
 
-        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), request, "single-line-key");
+        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId), request, "single-line-key");
 
         Assert.True(result.IsSuccess, result.Error.Message);
         var resp = result.Value;
@@ -109,7 +116,7 @@ public sealed class SynchronousCheckoutFlowTests
         await using var context = _harness.NewContext();
         var service = CreateService(context);
 
-        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), request, "multi-line-key");
+        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId), request, "multi-line-key");
 
         Assert.True(result.IsSuccess, result.Error.Message);
         var resp = result.Value;
@@ -178,7 +185,7 @@ public sealed class SynchronousCheckoutFlowTests
         await using var context = _harness.NewContext();
         var service = CreateService(context);
 
-        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), request, "missing-qr-key");
+        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId), request, "missing-qr-key");
 
         Assert.True(result.IsFailure);
         Assert.Equal(CheckoutErrors.CheckoutNotReady, result.Error);
@@ -200,7 +207,7 @@ public sealed class SynchronousCheckoutFlowTests
         await using var context = _harness.NewContext();
         var service = CreateService(context);
 
-        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), request, "out-of-stock-key");
+        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId), request, "out-of-stock-key");
 
         Assert.True(result.IsFailure);
         Assert.Equal(InventoryContractSpec.ErrorCodes.InsufficientAvailability, result.Error.Code);
@@ -230,7 +237,7 @@ public sealed class SynchronousCheckoutFlowTests
         await using (var context = _harness.NewContext())
         {
             var service = CreateService(context);
-            var initial = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), request, "replay-paid-key");
+            var initial = await service.SubmitAsync(new CheckoutRenterContext(_renterId), request, "replay-paid-key");
             Assert.True(initial.IsSuccess);
 
             // Đơn chuyển sang Paid
@@ -242,7 +249,7 @@ public sealed class SynchronousCheckoutFlowTests
         await using (var context = _harness.NewContext())
         {
             var service = CreateService(context);
-            var replay = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), request, "replay-paid-key");
+            var replay = await service.SubmitAsync(new CheckoutRenterContext(_renterId), request, "replay-paid-key");
 
             Assert.True(replay.IsFailure);
             Assert.Equal("ORDER_ALREADY_PAID", replay.Error.Code);
@@ -260,7 +267,7 @@ public sealed class SynchronousCheckoutFlowTests
         await using (var context = _harness.NewContext())
         {
             var service = CreateService(context);
-            var initial = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), request, "replay-exp-key");
+            var initial = await service.SubmitAsync(new CheckoutRenterContext(_renterId), request, "replay-exp-key");
             Assert.True(initial.IsSuccess);
 
             var order = await context.RentalOrders.FirstAsync(o => o.Id == initial.Value.OrderId);
@@ -271,7 +278,7 @@ public sealed class SynchronousCheckoutFlowTests
         await using (var context = _harness.NewContext())
         {
             var service = CreateService(context);
-            var replay = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), request, "replay-exp-key");
+            var replay = await service.SubmitAsync(new CheckoutRenterContext(_renterId), request, "replay-exp-key");
 
             Assert.True(replay.IsFailure);
             Assert.Equal("ORDER_ALREADY_EXPIRED", replay.Error.Code);
@@ -293,7 +300,7 @@ public sealed class SynchronousCheckoutFlowTests
         {
             var service = CreateService(context);
             _harness.Payment.AlwaysFailWith = FakePaymentRentalClient.Down;
-            var res = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), request, "resume-key");
+            var res = await service.SubmitAsync(new CheckoutRenterContext(_renterId), request, "resume-key");
             Assert.True(res.IsFailure);
             Assert.Equal(CheckoutErrors.CheckoutNotReady, res.Error);
         }

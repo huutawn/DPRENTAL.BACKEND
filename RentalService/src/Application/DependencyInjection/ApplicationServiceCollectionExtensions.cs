@@ -63,6 +63,8 @@ public static class ApplicationServiceCollectionExtensions
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IInventoryRentalClient, HttpInventoryRentalClient>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        services.AddHttpClient<IAuthRentalClient, HttpAuthRentalClient>()
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 
         // Checkout
         services.AddScoped<ICheckoutPreparationService, CheckoutPreparationService>();

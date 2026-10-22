@@ -48,6 +48,8 @@ public sealed class CheckoutServiceTests
             (_cameraListingId, 2),
             (_lensListingId, 1),
             (_tripodListingId, 1)).GetAwaiter().GetResult();
+        _harness.Auth.UserId = _renterId;
+        _harness.Auth.IsProfileCompleted = true;
     }
 
     private CheckoutRequest Request(decimal expectedTotal = CameraAndLensTotal, params Guid[] cartItemIds) =>
@@ -70,6 +72,7 @@ public sealed class CheckoutServiceTests
                 orders,
                 new RenterAddressRepository(context),
                 _harness.Listings,
+                _harness.Auth,
                 Options.Create(new RentalTermsOptions
                 {
                     CurrentVersion = "v1.0",
@@ -96,7 +99,7 @@ public sealed class CheckoutServiceTests
         await using var context = _harness.NewContext();
         var service = CreateService(context);
 
-        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
+        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(), Key);
 
         Assert.True(result.IsSuccess);
         var resp = result.Value;
@@ -120,7 +123,7 @@ public sealed class CheckoutServiceTests
         await using var context = _harness.NewContext();
         var service = CreateService(context);
 
-        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
+        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(), Key);
 
         Assert.True(result.IsSuccess);
         // Giỏ thuê 12, 13, 14; đơn lưu [12, 15). Inventory nhận ngày cuối có tính: endDate = 14, không phải 15.
@@ -137,10 +140,10 @@ public sealed class CheckoutServiceTests
         await using var context = _harness.NewContext();
         var service = CreateService(context);
 
-        var first = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
+        var first = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(), Key);
         Assert.True(first.IsSuccess);
 
-        var second = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
+        var second = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(), Key);
         Assert.True(second.IsSuccess);
         Assert.Equal(first.Value.OrderId, second.Value.OrderId);
         Assert.Equal(first.Value.OrderCode, second.Value.OrderCode);
@@ -155,10 +158,10 @@ public sealed class CheckoutServiceTests
         await using var context = _harness.NewContext();
         var service = CreateService(context);
 
-        var first = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
+        var first = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(), Key);
         Assert.True(first.IsSuccess);
 
-        var second = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(TripodTotal, _cartItemIds[2]), Key);
+        var second = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(TripodTotal, _cartItemIds[2]), Key);
         Assert.True(second.IsFailure);
         Assert.Equal(CheckoutErrors.IdempotencyKeyReused, second.Error);
     }
@@ -173,7 +176,7 @@ public sealed class CheckoutServiceTests
             firstOpId, _renterId, "fp", Guid.NewGuid(), Now.AddMinutes(30), "{}", "[]", Now);
         context.RentalCheckoutOperations.Add(op);
         await context.SaveChangesAsync();
-        var second = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(TripodTotal, _cartItemIds[2]), OtherKey);
+        var second = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(TripodTotal, _cartItemIds[2]), OtherKey);
         Assert.True(second.IsFailure);
         Assert.Equal("ACTIVE_CHECKOUT_IN_PROGRESS", second.Error.Code);
     }
@@ -184,7 +187,7 @@ public sealed class CheckoutServiceTests
         await using var context = _harness.NewContext();
         var service = CreateService(context, locks: new BusyLockManager());
 
-        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
+        var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(), Key);
 
         Assert.True(result.IsFailure);
         Assert.Equal(CheckoutErrors.InProgress, result.Error);
@@ -196,7 +199,7 @@ public sealed class CheckoutServiceTests
         await using var context = _harness.NewContext();
         var service = CreateService(context);
 
-        var submitResult = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
+        var submitResult = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(), Key);
         Assert.True(submitResult.IsSuccess);
 
         string operationId = CheckoutRules.DeriveOperationId(_renterId, Key);
@@ -214,7 +217,7 @@ public sealed class CheckoutServiceTests
         await using (var context = _harness.NewContext())
         {
             var submitted = await CreateService(context).SubmitAsync(
-                new CheckoutRenterContext(_renterId, true), Request(), Key);
+                new CheckoutRenterContext(_renterId), Request(), Key);
             Assert.True(submitted.IsSuccess);
             orderId = submitted.Value.OrderId;
         }
@@ -245,7 +248,7 @@ public sealed class CheckoutServiceTests
         await using (var context = _harness.NewContext())
         {
             var submitted = await CreateService(context).SubmitAsync(
-                new CheckoutRenterContext(_renterId, true), Request(), Key);
+                new CheckoutRenterContext(_renterId), Request(), Key);
             Assert.True(submitted.IsFailure);
             Assert.Equal(CheckoutErrors.CheckoutNotReady, submitted.Error);
             orderId = (await new RentalCheckoutOperationRepository(context)
@@ -300,7 +303,7 @@ public sealed class CheckoutServiceTests
         await using var context = _harness.NewContext();
         var service = CreateService(context);
 
-        var submitResult = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
+        var submitResult = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(), Key);
         Assert.True(submitResult.IsSuccess);
 
         string operationId = CheckoutRules.DeriveOperationId(_renterId, Key);

@@ -92,6 +92,64 @@ public sealed class RentalCheckoutApiTests
     }
 
     [Fact]
+    public async Task Submit_WhenTokenHasPcFalseOrMissing_AndAuthReturnsCompleted_Proceeds()
+    {
+        using CheckoutApiFactory factory = new();
+        using HttpClient client = factory.CreateRenterClient("key-pc-false", profileCompleted: false);
+        factory.Auth.UserId = factory.RenterId;
+        factory.Auth.IsProfileCompleted = true;
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(Route, factory.Request());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        JsonElement body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("PendingPayment", body.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Submit_WhenTokenHasPcTrue_AndAuthReturnsIncomplete_Returns403AndDoesNotCreateHoldOrInvoice()
+    {
+        using CheckoutApiFactory factory = new();
+        using HttpClient client = factory.CreateRenterClient("key-pc-true-auth-false", profileCompleted: true);
+        factory.Auth.UserId = factory.RenterId;
+        factory.Auth.IsProfileCompleted = false;
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(Route, factory.Request());
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal("Checkout.ProfileIncomplete", (await ReadAsync(response)).GetProperty("title").GetString());
+        Assert.Empty(factory.Inventory.HoldRequests);
+        Assert.Empty(factory.Payment.InvoiceRequests);
+        Assert.Empty(factory.LoadCreateHoldCommands());
+    }
+
+    [Fact]
+    public async Task Submit_WhenTermsVersionMissingOrWhitespace_ProceedsUsingConfiguredVersion()
+    {
+        using CheckoutApiFactory factory = new();
+        using HttpClient client = factory.CreateRenterClient("key-terms-null");
+
+        var requestWithoutTermsVersion = factory.Request() with { TermsVersion = null };
+        using HttpResponseMessage response = await client.PostAsJsonAsync(Route, requestWithoutTermsVersion);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Submit_WhenTermsNotAccepted_Returns400()
+    {
+        using CheckoutApiFactory factory = new();
+        using HttpClient client = factory.CreateRenterClient("key-terms-rejected");
+
+        var requestWithoutTerms = factory.Request() with { TermsAccepted = false };
+        using HttpResponseMessage response = await client.PostAsJsonAsync(Route, requestWithoutTerms);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        JsonElement problem = await ReadAsync(response);
+        Assert.Equal("Checkout.InvalidRequest", problem.GetProperty("title").GetString());
+    }
+
+    [Fact]
     public async Task Submit_Returns200WithOrderAndQrUrl_ThenTheSameOnReplay()
     {
         using CheckoutApiFactory factory = new();
@@ -344,6 +402,8 @@ public sealed class RentalCheckoutApiTests
         public FakeInventoryRentalClient Inventory { get; } = new();
 
         public FakePaymentRentalClient Payment { get; } = new();
+        public FakeAuthRentalClient Auth { get; } = new();
+
 
         /// <summary>Sửa thông tin máy mà Inventory giả trả về (gọi sau <see cref="Request"/>, khi dữ liệu đã được tạo).</summary>
         public void ChangeListing(Func<ListingRentalSnapshotDto, ListingRentalSnapshotDto> change) =>
@@ -372,8 +432,10 @@ public sealed class RentalCheckoutApiTests
 
         public HttpClient CreateRenterClient(string? idempotencyKey = null, bool profileCompleted = true)
         {
+            Auth.UserId = RenterId;
+            Auth.IsProfileCompleted = profileCompleted;
             HttpClient client = CreateClient();
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-bearer-token");
             client.DefaultRequestHeaders.Add(SubjectHeader, RenterId.ToString("D"));
             client.DefaultRequestHeaders.Add(ProfileCompletedHeader, profileCompleted ? "true" : "false");
             if (idempotencyKey is not null)
@@ -417,6 +479,8 @@ public sealed class RentalCheckoutApiTests
                 services.RemoveAll<IPaymentRentalClient>();
                 services.AddSingleton<IPaymentRentalClient>(Payment);
 
+                services.RemoveAll<IAuthRentalClient>();
+                services.AddSingleton<IAuthRentalClient>(Auth);
                 services.AddAuthentication("TestScheme")
                     .AddScheme<AuthenticationSchemeOptions, HeaderAuthHandler>("TestScheme", _ => { });
             });
