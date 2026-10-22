@@ -145,8 +145,11 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             }
             foreach (var receipt in order.OperationReceipts)
             {
-                if (_dbContext.Entry(receipt).State == EntityState.Detached)
-                    _dbContext.Entry(receipt).State = EntityState.Added;
+                var rEntry = _dbContext.Entry(receipt);
+                if (rEntry.State == EntityState.Detached)
+                    rEntry.State = EntityState.Added;
+                else if (rEntry.State == EntityState.Unchanged)
+                    rEntry.State = EntityState.Modified;
             }
             foreach (var transition in order.StateTransitions)
             {

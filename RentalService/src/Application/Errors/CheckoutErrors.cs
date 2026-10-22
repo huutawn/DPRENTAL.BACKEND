@@ -57,4 +57,7 @@ public static class CheckoutErrors
 
     public static readonly Error DependencyUnavailable =
         Error.ServiceUnavailable("Checkout.DependencyUnavailable", "Chưa kiểm tra được thiết bị. Vui lòng thử lại.");
+
+    public static readonly Error CheckoutNotReady =
+        Error.ServiceUnavailable("CHECKOUT_NOT_READY", "Đang xử lý tạo đơn và hóa đơn thanh toán; vui lòng thử lại sau.");
 }

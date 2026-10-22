@@ -77,6 +77,19 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
             ct);
     }
 
+    public async Task<Result<CreateHoldResponse>> CreateHoldAsync(
+        CreateHoldRequest request,
+        CancellationToken ct = default)
+    {
+        string route = InventoryContractSpec.Routes.CreateHold(request.ListingId);
+        return await SendAsync<CreateHoldRequest, CreateHoldResponse>(
+            HttpMethod.Post,
+            route,
+            request,
+            InventoryContractSpec.Scopes.WriteAllocation,
+            ct);
+    }
+
     private async Task<Result<TResponse>> SendAsync<TRequest, TResponse>(
         HttpMethod method,
         string relativeRoute,
@@ -125,7 +138,12 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
             try
             {
                 using var doc = JsonDocument.Parse(responseJson);
-                if (doc.RootElement.TryGetProperty("title", out var titleProp))
+                if (doc.RootElement.TryGetProperty("extensions", out var extProp) &&
+                    extProp.TryGetProperty("code", out var extCodeProp))
+                {
+                    errorCode = extCodeProp.GetString() ?? errorCode;
+                }
+                else if (doc.RootElement.TryGetProperty("title", out var titleProp))
                 {
                     errorCode = titleProp.GetString() ?? errorCode;
                 }

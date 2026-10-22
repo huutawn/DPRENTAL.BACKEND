@@ -8,11 +8,11 @@ namespace Dprental.RentalService.Application.DTOs.Checkout;
 /// </summary>
 public sealed class CheckoutSubmitResult
 {
-    private readonly CheckoutOperationAcceptedResponse? _accepted;
+    private readonly CheckoutResponse? _value;
 
-    private CheckoutSubmitResult(CheckoutOperationAcceptedResponse? accepted, CheckoutResult? failure)
+    private CheckoutSubmitResult(CheckoutResponse? value, CheckoutResult? failure)
     {
-        _accepted = accepted;
+        _value = value;
         Failure = failure;
     }
 
@@ -22,16 +22,16 @@ public sealed class CheckoutSubmitResult
 
     public Error Error => Failure?.Error ?? Error.None;
 
-    public CheckoutOperationAcceptedResponse Value => _accepted
-        ?? throw new InvalidOperationException("Không thể truy xuất thao tác checkout từ một kết quả thất bại.");
+    public CheckoutResponse Value => _value
+        ?? throw new InvalidOperationException("Không thể truy xuất kết quả checkout từ một kết quả thất bại.");
 
     /// <summary>Chi tiết lỗi, chỉ có khi thất bại.</summary>
     public CheckoutResult? Failure { get; }
 
-    public static CheckoutSubmitResult Accepted(CheckoutOperationAcceptedResponse accepted)
+    public static CheckoutSubmitResult Success(CheckoutResponse value)
     {
-        ArgumentNullException.ThrowIfNull(accepted);
-        return new(accepted, null);
+        ArgumentNullException.ThrowIfNull(value);
+        return new(value, null);
     }
 
     public static CheckoutSubmitResult Rejected(CheckoutResult failure)
@@ -45,7 +45,8 @@ public sealed class CheckoutSubmitResult
         return new(null, failure);
     }
 
-    public static implicit operator CheckoutSubmitResult(CheckoutOperationAcceptedResponse accepted) => Accepted(accepted);
+    public static implicit operator CheckoutSubmitResult(CheckoutResponse value) => Success(value);
+    public static implicit operator CheckoutSubmitResult(CheckoutResult failure) => Rejected(failure);
 
     public static implicit operator CheckoutSubmitResult(Error error) => Rejected(CheckoutResult.Failure(error));
 

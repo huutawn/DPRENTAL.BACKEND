@@ -41,20 +41,48 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<Result> EnsureInvoiceAsync(RentalOrder order, CancellationToken cancellationToken = default)
+    public async Task<Result<CreateInvoiceResponse>> EnsureInvoiceAsync(RentalOrder order, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(order);
-
-        if (!string.IsNullOrWhiteSpace(order.InvoiceRef))
-        {
-            return await CompleteInvoiceLocalAsync(order, _timeProvider.GetUtcNow(), null, cancellationToken);
-        }
 
         if (order.Status != RentalOrderStatus.PendingPayment || _timeProvider.GetUtcNow() >= order.PaymentDeadline)
         {
             return CheckoutErrors.OrderExpired;
         }
 
+        if (!string.IsNullOrWhiteSpace(order.InvoiceRef))
+        {
+            string opKey = RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString());
+            var receipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
+            if (!string.IsNullOrWhiteSpace(receipt?.ApiResponseJson))
+            {
+                try
+                {
+                    var cached = JsonSerializer.Deserialize<CreateInvoiceResponse>(receipt.ApiResponseJson);
+                    if (cached != null && (!string.IsNullOrWhiteSpace(cached.QrUrl) || order.TotalPayableAmount == 0))
+                    {
+                        return cached;
+                    }
+                }
+                catch { }
+            }
+
+            var localRes = await CompleteInvoiceLocalAsync(order, _timeProvider.GetUtcNow(), null, cancellationToken);
+            if (localRes.IsFailure) return localRes.Error;
+
+            string qrUrl = $"https://vietqr.app/img?acc=101010101010&bank=ICB&amount={order.TotalPayableAmount}&des={order.OrderCode}";
+            return new CreateInvoiceResponse(
+                order.InvoiceRef,
+                order.TotalPayableAmount,
+                order.Currency,
+                order.PaymentDeadline,
+                "Pending",
+                qrUrl,
+                "VietinBank",
+                "101010101010",
+                order.OrderCode,
+                IsReplay: true);
+        }
         // OperationKey tính từ mã đơn nên gọi lại bao nhiêu lần Payment cũng chỉ tạo một hóa đơn.
         CreateInvoiceRequest request = new(
             order.Id,
@@ -111,16 +139,24 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
             return CheckoutErrors.InvoiceRejected;
         }
         DateTimeOffset completedAt = _timeProvider.GetUtcNow();
-        Result attached = order.AttachInvoice(invoice.InvoiceRef, completedAt);
-        if (attached.IsFailure)
+        if (string.IsNullOrWhiteSpace(order.InvoiceRef))
         {
-            _logger.LogError("Không gắn được hóa đơn vào đơn {OrderCode}: {ErrorCode}.", order.OrderCode, attached.Error.Code);
-            return CheckoutErrors.InvoiceRejected;
+            Result attached = order.AttachInvoice(invoice.InvoiceRef, completedAt);
+            if (attached.IsFailure)
+            {
+                _logger.LogError("Không gắn được hóa đơn vào đơn {OrderCode}: {ErrorCode}.", order.OrderCode, attached.Error.Code);
+                return CheckoutErrors.InvoiceRejected;
+            }
         }
 
-        return await CompleteInvoiceLocalAsync(order, completedAt, invoice, cancellationToken);
-    }
+        var localResult = await CompleteInvoiceLocalAsync(order, completedAt, invoice, cancellationToken);
+        if (localResult.IsFailure)
+        {
+            return localResult.Error;
+        }
 
+        return invoice;
+    }
     private async Task<Result> CompleteInvoiceLocalAsync(
         RentalOrder order,
         DateTimeOffset completedAt,

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Services.Checkout;
+using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Configuration;
@@ -54,6 +55,7 @@ public sealed class CheckoutTimeoutScannerWorker : BackgroundService
             try
             {
                 await ProcessTimeoutsAsync(stoppingToken);
+                await ProcessPendingOperationsAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -144,6 +146,31 @@ public sealed class CheckoutTimeoutScannerWorker : BackgroundService
                 await unitOfWork.CommitAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
                 _logger.LogInformation("Checkout operation {OperationId} timed out and compensated", current.OperationId);
+            }
+        }
+    }
+
+    private async Task ProcessPendingOperationsAsync(CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var operationRepo = scope.ServiceProvider.GetRequiredService<IRentalCheckoutOperationRepository>();
+        var checkoutService = scope.ServiceProvider.GetRequiredService<ICheckoutService>();
+        var timeProvider = scope.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+
+        var utcNow = timeProvider.GetUtcNow();
+        var pendingOps = await operationRepo.GetPendingProcessingOperationsAsync(utcNow, limit: 10, cancellationToken);
+        if (pendingOps.Count == 0) return;
+
+        foreach (var op in pendingOps)
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            try
+            {
+                await checkoutService.ContinueOperationAsync(op.OperationId, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Lỗi khi worker tiếp tục operation {OperationId}", op.OperationId);
             }
         }
     }

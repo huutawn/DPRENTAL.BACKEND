@@ -53,11 +53,19 @@ internal sealed class FakePaymentRentalClient : IPaymentRentalClient
 
         if (!_invoicesByOperationKey.TryGetValue(request.OperationKey, out CreateInvoiceResponse? invoice))
         {
+            string? qrUrl = request.TotalAmount > 0
+                ? $"https://vietqr.app/img?acc=101010101010&bank=ICB&amount={request.TotalAmount}&des={request.OrderCode}"
+                : null;
             invoice = new(
                 $"INV-{_invoicesByOperationKey.Count + 1}",
                 request.TotalAmount,
                 request.Currency,
                 request.PaymentDeadline,
+                request.TotalAmount > 0 ? "Pending" : "Paid",
+                qrUrl,
+                "VietinBank",
+                "101010101010",
+                request.OrderCode,
                 false);
             _invoicesByOperationKey[request.OperationKey] = invoice;
         }

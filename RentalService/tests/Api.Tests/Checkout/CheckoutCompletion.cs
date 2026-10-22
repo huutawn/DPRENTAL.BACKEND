@@ -54,6 +54,9 @@ internal sealed class CheckoutCompletion
         Replies = new InventoryReplySimulator(newContext, clock, payment, orderCodes, locks);
     }
 
+
+    public FakeInventoryRentalClient Inventory => _inventory;
+    public IPaymentRentalClient Payment => _payment;
     public InventoryReplySimulator Replies { get; }
 
     public async Task<CheckoutResult> CompleteAsync(Guid renterId, string key, CancellationToken cancellationToken = default)
