@@ -39,7 +39,7 @@ Tài liệu này xác lập bộ contract tích hợp và kiến trúc chuẩn h
                      rec:v1:user:{id}:equipment-types
                      rec:v1:global:popular-listings
                                  ▲
-                     Inventory   │ Read-only
+                     Inventory   │ Read-only (sort=recommended)
                      Fallback    │ (100ms budget)
                      Engine      │
 ```
@@ -54,7 +54,7 @@ Tài liệu này xác lập bộ contract tích hợp và kiến trúc chuẩn h
   - Sở hữu hoàn toàn thông tin thiết bị (`EquipmentListing`), hình ảnh, giá thuê, kho bãi, trạng thái khả dụng.
   - Sử dụng `Category` và `EquipmentType` từ Catalog để phân loại, lọc và tìm kiếm listing.
   - Phát sinh sự kiện hành vi `ListingViewed` khi người dùng xem trang chi tiết và `SearchPerformed` khi người dùng tìm kiếm có chủ đích tại trang đầu tiên (`page = 1`).
-  - Đọc cache snapshot đề xuất từ Valkey với vai trò người tiêu dùng chỉ đọc (`read-only consumer`), tự thực thi bộ lọc trạng thái khả dụng, áp dụng phân trang và fallback theo thứ tự ưu tiên mà không phụ thuộc đồng bộ vào RecommendationService.
+-   - Đọc cache snapshot đề xuất từ Valkey với vai trò người tiêu dùng chỉ đọc (`read-only consumer`) khi người dùng opt-in qua query parameter `sort=recommended`. Tự thực thi bộ lọc trạng thái khả dụng, áp dụng phân trang, owner exclusion và fallback theo thứ tự ưu tiên (Personalized -> Global -> Inventory Default) mà không phụ thuộc đồng bộ vào RecommendationService.
 
 - **RentalService**:
   - Sở hữu giỏ hàng (`Cart`, `CartItem`), đơn thuê thiết bị (`RentalOrder`, `RentalOrderItem`), quy trình thanh toán và máy trạng thái vòng đời thuê thiết bị.
@@ -262,12 +262,13 @@ Các key được lưu trữ trên Valkey (Redis compatible) dưới dạng ZSET
 
 **Lệnh đọc của InventoryService**:
 ```bash
-# User personalized top equipment types
+# Personal: Human user đọc song song Top 20 equipment types
 ZRANGE rec:v1:user:<userId>:equipment-types 0 19 REV WITHSCORES
 
-# Global popular listings with pagination
-ZRANGE rec:v1:global:popular-listings <offset> <offset+pageSize-1> REV WITHSCORES
+# Global: Anonymous hoặc fallback đọc Top 300 popular listings
+ZRANGE rec:v1:global:popular-listings 0 299 REV WITHSCORES
 ```
+*(Lưu ý: InventoryService đọc toàn bộ snapshot Top 20/300 và truyền vào SQL parameters của PostgreSQL để thực thi lọc tính khả dụng, owner exclusion, sắp xếp lexicographic, backfill default và phân trang tại database engine; tuyệt đối không phân trang trực tiếp bằng offset trên Valkey).*
 
 **Quy chuẩn dữ liệu cache**:
 - `{userId}` trong key là chuỗi UUID chuẩn định dạng D (lowercase, không chứa dấu ngoặc nhọn, ví dụ: `rec:v1:user:22222222-2222-4222-8222-222222222222:equipment-types`).
@@ -285,45 +286,87 @@ ZRANGE rec:v1:global:popular-listings <offset> <offset+pageSize-1> REV WITHSCORE
   - Tuyệt đối không dùng lệnh `ZINCRBY` từ event delta để cập nhật ZSET; mỗi lần publish đọc lại toàn bộ top N từ PostgreSQL.
 ---
 
-### Chiến Lược Fallback Ba Tầng Tại InventoryService
+### Chiến Lược Tích Hợp Recommendation Ranking & Fallback Ba Tầng Tại InventoryService
 
-Khi phục vụ các yêu cầu khám phá danh mục (`Discovery / Home Feed` không có từ khóa tìm kiếm và không có sort tường minh), InventoryService áp dụng quy trình fallback 3 tầng với **tổng ngân sách thời gian tối đa là 100 ms**, không thực hiện retry đồng bộ:
+InventoryService mở rộng endpoint duyệt thiết bị công khai hiện hữu:
+```http
+GET /api/v1/inventory/public/equipment-listings?sort=recommended
+```
+Endpoint giữ nguyên attribute `[AllowAnonymous]`, kiểu trả về `PagedResponse<PublicEquipmentListingResponse>`, và toàn bộ các query parameter hiện hữu (`categoryId`, `equipmentTypeId`, `brandId`, `provinceCode`, `wardCode`, `minPrice`, `maxPrice`, `from`, `to`, `requestedQuantity`, `page`, `pageSize`, `q`, `sort`).
+
+#### Ma Trận Kích Hoạt & Thứ Tự Ưu Tiên (Precedence)
+
+| Request Query | Danh Tính Người Gọi | Hành Vi Xếp Hạng & Nguồn Dữ Liệu |
+|---|---|---|
+| Không truyền `sort` | Mọi đối tượng | Giữ nguyên logic mặc định hiện tại (`created_at DESC, id DESC`), **không đọc Valkey** |
+| `sort` hiện hữu (`price_asc`, `newest`, ...) | Mọi đối tượng | Giữ nguyên logic sắp xếp người dùng chọn, **không đọc Valkey** |
+| `sort=recommended` và `q=keyword` (sau trim không rỗng) | Mọi đối tượng | Chuẩn hóa sang `sort=relevance`, **không đọc Valkey**, dùng pipeline Meilisearch / Full-text search hiện hữu |
+| `sort=recommended` và `q` rỗng | Anonymous / Service Principal / Non-Human | Kích hoạt Recommendation: Đọc Global Popular Listings (`ranks 0..299`), ưu tiên Top Popularity |
+| `sort=recommended` và `q` rỗng | Human JWT hợp lệ (`IsHuman == true`, `UserId` GUID hợp lệ) | Kích hoạt Recommendation: Đọc song song Personal Types (`ranks 0..19`) và Global Popular (`ranks 0..299`), xếp hạng lexicographic |
+| `sort=recommended`, Valkey timeout / lỗi / rỗng | Mọi đối tượng | Fallback an toàn về `Inventory Default` (`created_at DESC, id DESC`), HTTP 200 |
 
 ```mermaid
 flowchart TD
-    Start([Khách truy cập Discovery]) --> IsAuth{Đã đăng nhập?}
+    Start([Request: sort=recommended]) --> CheckKeyword{Có từ khóa q?}
+    CheckKeyword -- Có --> ApplyRelevance[Chuẩn hóa Relevance: Dùng Search Pipeline Hiện Hữu]
+    CheckKeyword -- Không --> CheckAuth{Human JWT hợp lệ?}
 
-    IsAuth -- Có --> ReadPersonalized[Đọc Cache rec:v1:user:{id}:equipment-types]
-    IsAuth -- Không --> ReadGlobal[Đọc Cache rec:v1:global:popular-listings]
+    CheckAuth -- Có (IsHuman & UserId) --> ReadParallel[Đọc song song Valkey 100ms:<br>Personal 0..19 & Global 0..299]
+    CheckAuth -- Không (Anonymous/Service) --> ReadGlobal[Đọc Valkey 100ms:<br>Global 0..299]
 
-    ReadPersonalized --> CheckPersonalized{Hợp lệ & còn ứng viên khả dụng?}
-    CheckPersonalized -- Có --> ApplyPersonalized[Ưu tiên Listing thuộc Top EquipmentType đề xuất]
-    CheckPersonalized -- Không / Miss / Timeout --> ReadGlobal
+    ReadParallel --> EvaluatePersonal{Khớp Personal Types & còn listing khả dụng?}
+    EvaluatePersonal -- Có --> TierPersonalized[Tầng 1: Personalized<br>interest DESC, popularity DESC, updated_at DESC, id ASC]
+    EvaluatePersonal -- Không / Miss / Filtered --> EvaluateGlobal
 
-    ReadGlobal --> CheckGlobal{Hợp lệ & còn ứng viên khả dụng?}
-    CheckGlobal -- Có --> ApplyGlobal[Ưu tiên Top Listing đề xuất toàn hệ thống]
-    CheckGlobal -- Không / Miss / Timeout --> ApplyDefault[Sử dụng Inventory Default Ranking]
+    ReadGlobal --> EvaluateGlobal{Khớp Global Popular & còn listing khả dụng?}
+    EvaluateGlobal -- Có --> TierGlobal[Tầng 2: Global<br>popularity DESC, updated_at DESC, id ASC]
+    EvaluateGlobal -- Không / Miss / Timeout / Outage --> TierDefault[Tầng 3: Default Fallback<br>created_at DESC, id DESC]
 
-    ApplyPersonalized --> FillRemaining[Điền phần còn lại bằng Inventory Default]
-    ApplyGlobal --> FillRemaining
-    FillRemaining --> Paginate[Thực hiện Phân trang Trang & Trả kết quả]
-    ApplyDefault --> Paginate
+    TierPersonalized --> FillDefault[Điền phần còn lại bằng Default: created_at DESC, id DESC]
+    TierGlobal --> FillDefault
+    FillDefault --> Paginate[Thực thi Phân Trang & Trả PagedResponse]
+    TierDefault --> Paginate
 ```
 
-#### Quy tắc xếp hạng và ghép dữ liệu:
-1. **Ưu tiên phân tầng, không trộn điểm**: Khi một tầng cung cấp danh sách ứng viên hợp lệ sau khi đã lọc qua điều kiện khả dụng của Inventory, tầng đó được dùng làm ưu tiên hàng đầu. Các listing còn lại được xếp tiếp theo sau bằng thuật toán `Inventory Default`. Tuyệt đối không trộn lẫn điểm số giữa tầng cá nhân hóa và tầng toàn hệ thống.
-2. **Bộ lọc luôn đi trước phân trang và thực thi tại Database Engine**:
-   - Mọi thao tác lọc tính khả dụng (Active, còn hàng, không khóa), sắp xếp ưu tiên và phân trang bắt buộc phải được biên dịch và thực thi trực tiếp tại database engine (`server-side evaluation`).
-   - Kết quả phân trang trả về **tối đa `pageSize`**, có thể ít hơn khi tập listing hợp lệ không đủ; không bao giờ tải toàn bộ danh sách vào bộ nhớ rồi mới lọc hay cắt trang.
-3. **Phạm vi áp dụng**:
-   - Chỉ áp dụng cơ chế đề xuất cho màn hình khám phá (Browse/Discovery) mặc định.
-   - Khi người dùng nhập từ khóa tìm kiếm, áp dụng xếp hạng theo mức độ phù hợp tìm kiếm (`Search Relevance`).
-   - Khi người dùng chủ động chọn bộ lọc sắp xếp (ví dụ: `Price ASC`, `Newest`), áp dụng đúng thứ tự người dùng chọn.
-4. **Inventory Default**: Thuật toán mặc định của Inventory tiếp tục là thứ tự hiện hữu: `created_at DESC, id DESC`.
-5. **Cách ly cache response**: Cache tầng HTTP của Inventory cho màn hình Discovery nhận diện snapshot bằng **hash nội dung snapshot** kết hợp với `userId` và query filter; tuyệt đối không dùng `version=1` làm dấu hiệu snapshot đã thay đổi.
-6. **Ngân sách 100 ms**: Khi hết tổng ngân sách đọc 100 ms hoặc cache gặp lỗi/timeout, Inventory chuyển thẳng sang fallback `Inventory Default`, không retry đồng bộ.
-7. **Thu thập tín hiệu ngoài cache factory**: Luồng bắt tín hiệu xem trang (`ListingViewed`) và tìm kiếm (`SearchPerformed`) phải được kích hoạt độc lập ở pipeline ngoài, đảm bảo khi response được phục vụ từ cache hit của Inventory thì sự kiện vẫn được ghi nhận đầy đủ.
+#### Quy Tắc Xếp Hạng & Thực Thi Truy Vấn Tại Database Engine (Server-Side Evaluation)
 
+1. **Một nguồn chân lý và một đường truy vấn duy nhất**:
+   - Toàn bộ quá trình lọc, chọn tầng đề xuất, xếp hạng, backfill và phân trang bắt buộc phải được biên dịch và thực thi trực tiếp tại database engine (`PostgreSQL`) trong một transaction `RepeatableRead` duy nhất.
+   - Tuyệt đối không tải toàn bộ danh sách vào bộ nhớ rồi mới lọc hay cắt trang; không thêm endpoint hoặc pipeline hydrate song song.
+2. **Bộ lọc đi trước xếp hạng & Owner Exclusion**:
+   - Bộ lọc Inventory bắt buộc áp dụng trên toàn bộ listing trước khi tính thứ tự: `status = Active`, category, equipment type, brand, location (tỉnh/huyện/xã), dynamic filters, khoảng ngày thuê khả dụng và số lượng yêu cầu (`requestedQuantity`).
+   - **Owner Exclusion**: Đối với human recommendation, bắt buộc loại trừ các listing do chính người dùng sở hữu (`owner_id != userId`). Quy tắc này áp dụng xuyên suốt ở cả tầng Personalized, Global và khi fallback về Default. Request từ khóa (`q`) tiếp tục đi qua search flow hiện hữu và không áp dụng owner exclusion này.
+3. **Truyền Score vào SQL Parameters**:
+   - Snapshot đọc từ Valkey chỉ tồn tại trong bộ nhớ request và được truyền vào SQL dưới dạng Npgsql parameters (mảng ID và score, join qua `unnest`).
+   - Tuyệt đối không ghi dữ liệu ranking snapshot xuống các bảng dữ liệu của Inventory.
+4. **Chọn tầng và thứ tự xếp hạng Lexicographic**:
+   - Tầng được xác định trên toàn bộ tập listing hợp lệ trước khi áp dụng `OFFSET` / `LIMIT`:
+     - **Tầng Personalized** (khi có ít nhất một listing hợp lệ thuộc personal equipment types):
+       - Nhóm thuộc personal types: `interest DESC, popularity DESC, updated_at DESC, id ASC`
+       - Nhóm còn lại (backfill): `created_at DESC, id DESC`
+       *(Listing không có trong global snapshot được gán popularity = 0; listing thuộc global snapshot nhưng nằm ngoài personal types vẫn nằm ở phần backfill default).*
+     - **Tầng Global** (khi không có personal match nhưng có ít nhất một listing khớp global snapshot):
+       - Nhóm thuộc global snapshot: `popularity DESC, updated_at DESC, id ASC`
+       - Nhóm còn lại (backfill): `created_at DESC, id DESC`
+     - **Tầng Default** (khi không còn match nào, key miss hoặc outage):
+       - `created_at DESC, id DESC`
+5. **Backfill và tính ổn định phân trang (Pagination)**:
+   - Các listing được đề xuất đứng trước; toàn bộ phần còn lại của trang được điền đầy đủ bằng các listing hợp lệ theo thứ tự Default (`created_at DESC, id DESC`), bảo đảm trang không bị thiếu hụt khi trong kho vẫn còn hàng.
+   - Mỗi listing chỉ xuất hiện duy nhất một lần trong toàn bộ kết quả (`no duplicates`).
+   - `TotalCount` và `TotalPages` phản ánh toàn bộ tập listing hợp lệ sau bộ lọc và owner exclusion.
+   - Nếu số trang vượt quá tổng số trang, trả về danh sách rỗng (`items: []`); không chuyển tầng chỉ vì trang hiện tại rỗng.
+6. **Cách Ly Cache Response**:
+   - Toàn bộ các request chứa `sort=recommended` **bắt buộc bypass HTTP response cache công khai của Inventory** (kể cả khi đã fallback về default), nhằm ngăn ngừa rò rỉ dữ liệu cá nhân hóa hoặc phục vụ nhầm kết quả giữa các users.
+   - Giữ nguyên cơ chế cache metadata, schema và categories hiện có. Nhánh duyệt mặc định và tìm kiếm từ khóa tiếp tục sử dụng response cache hiện hữu (request `q + sort=recommended` dùng cache key với effective sort `relevance`).
+7. **Ngân Sách Đọc & Failure Modes**:
+   - Tổng thời gian chờ đọc Valkey tối đa là **100 ms** cho toàn bộ request, dùng chung một deadline duy nhất; không retry đồng bộ trong request.
+   - Nếu timeout, lỗi kết nối, unconfigured hoặc dữ liệu ZSET không hợp lệ: bỏ ranking cho request đó và chuyển sang `Inventory Default`, trả HTTP 200 bình thường.
+   - Personal key miss vẫn cho phép sử dụng Global popular snapshot đã đọc.
+   - Request cancellation token từ client tiếp tục được propagate; không chuyển request bị hủy thành fallback thành công.
+8. **Bảo Mật Danh Tính & Không Làm Lộ Metadata Hạ Tầng**:
+   - Bắt buộc trích xuất `UserId` từ `IInventoryCallerContext` đã xác thực; tuyệt đối không đọc từ query parameter hoặc các header không tin cậy như `X-User-Id`.
+   - Response công khai giữ nguyên schema `PagedResponse<PublicEquipmentListingResponse>`, không thêm trường score, điểm số hay thông tin ranking nội bộ.
+   - Header `X-Search-Backend` giữ nguyên ý nghĩa hạ tầng PostgreSQL.
 ---
 
 ## 6. Ma Trận Kịch Bản Kiểm Thử & Biên Nghiệp Vụ
@@ -345,14 +388,28 @@ Tất cả các thành phần triển khai phải thỏa mãn 4 nhóm kịch b�
 - **Crash trước và sau commit**: Nếu consumer sập trước khi DB transaction commit -> Offset chưa commit, tin nhắn được xử lý lại sau khi hồi phục. Nếu sập sau khi DB commit nhưng trước khi commit offset -> Tin nhắn được gửi lại nhưng cơ chế deduplication sẽ bảo vệ dữ liệu.
 - **Toàn vẹn Rebuild**: Thực thi quy trình `rebuild_projections()` xóa trắng 2 bảng projection và tính toán lại từ `interaction_events` -> Kết quả điểm số và thứ tự ranking đầu ra phải trùng khớp 100% với trạng thái tích lũy thời gian thực.
 
-### Kịch bản 3: Fallback & Resilience tầng Discovery
+### Kịch bản 3: Tích hợp Recommendation Ranking, Opt-in sort=recommended & Fallback
+- **Opt-in tường minh**:
+  - Request không truyền `sort` -> Inventory dùng default (`created_at DESC, id DESC`), không đọc Valkey.
+  - Request `sort=recommended` và `q=keyword` -> Chuẩn hóa sang `sort=relevance`, không đọc Valkey, đi qua pipeline search hiện hữu.
+  - Request `sort=recommended` không keyword:
+    - Anonymous / Service Principal -> Chỉ đọc snapshot `rec:v1:global:popular-listings` (`ranks 0..299`).
+    - Human JWT hợp lệ -> Đọc song song `rec:v1:user:{id}:equipment-types` (`ranks 0..19`) và `rec:v1:global:popular-listings` (`ranks 0..299`).
+- **Xếp hạng Lexicographic & Backfill tại Database**:
+  - Personal candidates: Interest cao hơn luôn đứng trước; cùng interest thì popularity quyết định; tie-break bằng `updated_at DESC, id ASC`.
+  - Giá trị popularity bị thiếu trong global snapshot được gán mặc định bằng 0.
+  - Backfill: Các listing được đề xuất đứng trước; phần còn lại của trang được điền bằng default (`created_at DESC, id DESC`), không trùng lặp item.
+  - Dynamic filters, availability/dates áp dụng trước khi chọn tầng; nếu candidate bị xóa/hết hàng/không khả dụng -> tự động bị loại bỏ trước khi phân trang.
+- **Owner Exclusion**: Listing do chính user sở hữu bị loại trừ khỏi kết quả đề xuất (áp dụng cho personalized, global và khi fallback default).
 - **Fallback 3 tầng hoàn chỉnh**:
-  - Tầng 1: User đăng nhập có danh sách type quan tâm trong cache -> Lấy sản phẩm theo các type này trước.
-  - Tầng 2: User mới đăng nhập chưa có lịch sử (cache rỗng) -> Fallback sang Top Global Popular Listings.
-  - Tầng 3: Cache toàn hệ thống gặp sự cố/timeout -> Fallback về danh sách Inventory Default (`created_at DESC, id DESC`). Khách hàng vẫn xem được hàng hóa bình thường mà không thấy thông báo lỗi.
-- **Listing không còn khả dụng & phân trang**: Listing được Recommendation xếp hạng cao nhưng đã bị xóa hoặc hết hàng trong kho -> Inventory lọc bỏ listing này trước khi phân trang; kết quả trang trả về tối đa `pageSize` bản ghi khả dụng, có thể ít hơn nếu toàn bộ tập hợp lệ không đủ.
-- **Timeout Cache 100ms**: Valkey bị nghẽn mạng phản hồi quá 100ms -> Inventory ngắt kết nối đọc cache ngay lập tức, chuyển sang fallback mặc định, không làm chậm response của người dùng cuối.
-
+  - Tầng 1 (Personalized): Có ít nhất 1 listing khả dụng khớp personal types -> Dùng tầng cá nhân hóa.
+  - Tầng 2 (Global): Không có personal match hoặc personal candidate bị lọc hết, nhưng có global match -> Fallback sang tầng Global.
+  - Tầng 3 (Default): Toàn bộ candidates bị lọc hết, cache miss, timeout hoặc outage -> Fallback về Inventory Default (`created_at DESC, id DESC`).
+- **Ngân sách 100ms & Outage Resilience**:
+  - Đọc Valkey quá 100ms hoặc mất kết nối -> Ngắt ngay, fallback về Inventory Default, trả HTTP 200, không gây HTTP 500.
+  - Request cancellation token được propagate chính xác.
+- **Cách ly Response Cache**:
+  - Request `sort=recommended` bypass hoàn toàn HTTP response cache công khai của Inventory; user A không bao giờ nhận nhầm kết quả đề xuất của user B.
 ### Kịch bản 4: Cô lập sự cố hệ thống
 - **RecommendationService hoặc Valkey sập hoàn toàn**: InventoryService và RentalService vẫn duy trì trạng thái Ready (HTTP 200 trên endpoint `/health`). Các thao tác nghiệp vụ cốt lõi như duyệt kho, tạo đơn, thanh toán, thuê đồ diễn ra bình thường, chỉ chuyển sang chế độ fallback danh mục mặc định.
 - **Kafka ngừng hoạt động tạm thời**: Producer lưu trữ sự kiện trong outbox/buffer cục bộ. Không có bất kỳ ngoại lệ nào từ message broker được phép lan truyền làm hỏng kết quả trả về của các API đọc hoặc ghi nghiệp vụ.
@@ -516,9 +573,9 @@ Kết quả trả về:
 #### 2. Global Listing Popularity
 Key: `rec:v1:global:popular-listings` (Type: `zset`, TTL: 300s)
 
-Truy vấn đọc phân trang (ví dụ offset 0, page size 20):
+Truy vấn đọc toàn bộ ranking snapshot (tối đa 300 entries):
 ```bash
-ZRANGE rec:v1:global:popular-listings 0 19 REV WITHSCORES
+ZRANGE rec:v1:global:popular-listings 0 299 REV WITHSCORES
 ```
 
 Kết quả trả về:
@@ -550,16 +607,15 @@ Giả định User `U1`, Listing `L1` (thuộc Type `T1`):
 ## 8. Checklist Trách Nhiệm Từng Service
 
 ### Checklist Dành Cho InventoryService
-- [ ] Tạo topic Kafka `inventory.behavior.events.v1` với retention tối thiểu 7 ngày.
-- [ ] Triển khai producer phát `ListingViewed` khi trả về chi tiết listing công khai thành công (kể cả cache hit).
-- [ ] Triển khai producer phát `SearchPerformed` cho lượt tìm kiếm tại `page = 1` có từ khóa hoặc bộ lọc; chỉ trích xuất `equipmentTypeId` khi có trong filter rõ ràng.
-- [ ] Thiết lập boundary an toàn cho việc phát event: sử dụng bounded memory queue best-effort, không làm hỏng hoặc làm chậm response người dùng nếu hàng đợi bị đầy hoặc Kafka broker tạm ngưng.
-- [ ] Xây dựng client đọc Valkey cho hai cache key: `rec:v1:user:{userId}:equipment-types` và `rec:v1:global:popular-listings`.
-- [ ] Thiết lập timeout nghiêm ngặt **100 ms** cho toàn bộ thao tác đọc cache đề xuất, không retry đồng bộ.
-- [ ] Triển khai cơ chế Fallback 3 tầng (Personalized -> Global -> Inventory Default).
-- [ ] Đảm bảo bộ lọc trạng thái khả dụng và phân trang luôn được áp dụng sau khi lấy ứng viên từ đề xuất.
-- [ ] Cách ly cache HTTP discovery theo `userId` để chống rò rỉ dữ liệu cá nhân hóa.
-
+- [ ] Bổ sung giá trị `Recommended` vào whitelist enum/sort tại validator của public listings; từ chối `recommended` tại các endpoint owner/admin.
+- [ ] Triển khai `IRecommendationRankingReader` (thuộc tầng Application) đọc `rec:v1:user:{userId:D}:equipment-types` (ranks 0..19) và `rec:v1:global:popular-listings` (ranks 0..299) với deadline 100 ms qua kết nối `ConnectionStrings:RecommendationRedis`.
+- [ ] Chuẩn hóa `sort=recommended` khi có `q` thành `Relevance` và bypass đọc Valkey; chỉ kích hoạt recommendation khi `q` rỗng.
+- [ ] Phân biệt danh tính qua `IInventoryCallerContext`: chỉ personalized khi `IsHuman == true` và `UserId` GUID hợp lệ; anonymous hoặc service principal chỉ đọc global.
+- [ ] Áp dụng Owner Exclusion (`owner_id != userId`) cho human recommendation trên cả 3 tầng.
+- [ ] Truyền snapshot ID và score vào SQL parameters (unnest) trong một truy vấn duy nhất tại PostgreSQL; thực thi lọc, xếp hạng lexicographic, backfill default và phân trang tại server-side.
+- [ ] Bypass hoàn toàn HTTP response cache công khai của Inventory cho mọi request `sort=recommended`.
+- [ ] Bổ sung metrics thời gian đọc Valkey và phân bổ tầng kết quả (personalized/global/default) kèm lý do fallback có bounded cardinality, không chứa PII/userId.
+- [ ] Giữ nguyên các luồng sự kiện hành vi: producer phát `ListingViewed` và `SearchPerformed` qua bounded memory queue best-effort lên topic `inventory.behavior.events.v1`.
 ### Checklist Dành Cho RentalService
 - [ ] Xác nhận topic `rental.events.v1` sẵn sàng nhận các loại sự kiện mới.
 - [ ] Triển khai producer phát `CartItemAdded` khi thao tác thêm giỏ hàng được commit thành công (kể cả khi gộp dòng).
@@ -576,5 +632,6 @@ Giả định User `U1`, Listing `L1` (thuộc Type `T1`):
 - [ ] Triển khai cơ chế deduplication và xử lý transaction an toàn với atomic upsert (`GREATEST` trên `last_occurred_at`).
 - [ ] Định tuyến các thông điệp sai schema, sai version hoặc xung đột ID sang `${topic}.recommendation.dlq`.
 - [ ] Triển khai Background Service định kỳ (mỗi 60 giây) tính toán và ghi đè snapshot nguyên tử lên Valkey với TTL 300 giây.
+- [ ] Cung cấp cấu hình ACL `inventory_user` với quyền chỉ đọc trên namespace `~rec:*` (`zrange`, `zcard`, `get`, `ttl`) theo file `valkey-acl.conf`.
 - [ ] Tuân thủ ranh giới Clean Architecture: persistence thuộc `Domain`, điều phối use case thuộc `Application`, không để `Api` hay `Application` thao tác trực tiếp với `DbContext`.
 - [ ] Cung cấp thủ tục rebuild toàn bộ projection từ bảng lịch sử `interaction_events`.

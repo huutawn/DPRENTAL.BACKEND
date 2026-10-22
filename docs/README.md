@@ -49,7 +49,7 @@ Phase 1 định nghĩa bộ contract chuẩn và schema để `InventoryService`
   - Envelope v1 và đặc tả ngữ nghĩa của 5 sự kiện hành vi
   - Kafka topology, partition keys, delivery guarantees và DLQ routing
   - Bảng trọng số tính điểm, quy tắc cộng dồn độc lập và cập nhật projection
-  - Định dạng snapshot cache Valkey và cơ chế fallback 3 tầng của InventoryService
+  - Định dạng snapshot cache Valkey ZSET, tích hợp opt-in `sort=recommended` và cơ chế fallback 3 tầng của InventoryService
   - Checklist trách nhiệm riêng cho từng service và ma trận kịch bản kiểm thử
 - **JSON Schemas Draft 2020-12 & Fixtures**: [`docs/contracts/schemas/`](contracts/schemas/)
   - Schemas cho 5 event: `ListingViewed`, `SearchPerformed`, `CartItemAdded`, `RentalItemPaid`, `RentalItemCompleted`
