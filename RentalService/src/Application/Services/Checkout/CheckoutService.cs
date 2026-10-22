@@ -136,17 +136,11 @@ public sealed class CheckoutService : ICheckoutService
                     }
                 }
 
-                // 2. Kiểm tra giới hạn: Mỗi renter chỉ có 1 checkout đang chạy hoặc 1 đơn chờ thanh toán
+                // 2. Kiểm tra giới hạn: Mỗi renter chỉ có 1 checkout đang chạy
                 var activeOp = await _operationRepository.GetActiveOperationByRenterAsync(renter.RenterId, budgetToken);
                 if (activeOp is not null)
                 {
                     return Error.Conflict("ACTIVE_CHECKOUT_IN_PROGRESS", "Bạn đang có một thao tác gửi đơn đang được xử lý.");
-                }
-
-                var pendingOrder = await _orders.GetPendingPaymentByRenterIdAsync(renter.RenterId, budgetToken);
-                if (pendingOrder is not null)
-                {
-                    return CheckoutPreparationResult.PendingOrder(pendingOrder.OrderCode);
                 }
 
                 // 3. Chuẩn bị checkout (snapshot, bảng giá, giỏ hàng)

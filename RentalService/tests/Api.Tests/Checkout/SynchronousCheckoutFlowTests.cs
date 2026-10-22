@@ -49,7 +49,6 @@ public sealed class SynchronousCheckoutFlowTests
         return new CheckoutService(
             new CheckoutPreparationService(
                 carts,
-                orders,
                 new RenterAddressRepository(context),
                 _harness.Listings,
                 _harness.Auth,

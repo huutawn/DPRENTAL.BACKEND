@@ -50,9 +50,6 @@ public sealed class SupplierConfirmationStatisticsApplicationAndApiTests
             return Task.FromResult(RecordedStats);
         }
 
-        public Task<RentalOrder?> GetPendingPaymentByRenterIdAsync(Guid renterId, CancellationToken ct = default) =>
-            Task.FromResult<RentalOrder?>(null);
-
         public Task<RentalOrder?> GetByIdAsync(Guid id, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetByOrderCodeAsync(string code, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetByCheckoutOperationIdAsync(string opId, CancellationToken ct = default) => throw new NotImplementedException();

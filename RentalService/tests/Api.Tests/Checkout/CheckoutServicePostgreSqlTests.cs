@@ -776,7 +776,6 @@ public sealed class CheckoutServicePostgreSqlTests
         return new CheckoutService(
             new CheckoutPreparationService(
                 carts,
-                orders,
                 new RenterAddressRepository(context),
                 _listings,
                 _auth,

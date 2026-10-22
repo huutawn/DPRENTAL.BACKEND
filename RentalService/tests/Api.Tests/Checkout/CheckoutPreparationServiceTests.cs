@@ -26,7 +26,6 @@ public sealed class CheckoutPreparationServiceTests
     private readonly Guid _thumbnailMediaId = Guid.NewGuid();
 
     private readonly FakeCartRepository _carts = new();
-    private readonly FakeOrderRepository _orders = new();
     private readonly FakeRenterAddressRepository _addresses = new();
     private readonly FakeAuthRentalClient _auth = new();
     private readonly FakeInventoryListingClient _inventory = new();
@@ -71,7 +70,6 @@ public sealed class CheckoutPreparationServiceTests
 
     private CheckoutPreparationService CreateService(DateTimeOffset? utcNow = null, IInventoryRentalClient? inventory = null, IAuthRentalClient? auth = null) => new(
         _carts,
-        _orders,
         _addresses,
         inventory ?? _inventory,
         auth ?? _auth,
@@ -82,41 +80,6 @@ public sealed class CheckoutPreparationServiceTests
             ContentHash = "hash123456"
         }),
         new FixedTimeProvider(utcNow ?? Now));
-
-    private RentalOrder CreatePendingOrder(DateTimeOffset createdAt) =>
-        RentalOrder.Create(
-            Guid.NewGuid(),
-            "DH-2026-000007",
-            _renterId,
-            "VND",
-            "Delivery",
-            "Nguyen Van A",
-            "0901234567",
-            "123 Nguyen Hue",
-            null,
-            "bank-ref",
-            "v1.0",
-            "terms/v1.0.pdf",
-            "hash123456",
-            "op-previous",
-            createdAt,
-            [
-                new InitialRentalItemDto(
-                    Guid.NewGuid(),
-                    Guid.NewGuid(),
-                    _supplierId,
-                    1,
-                    Start,
-                    End,
-                    "Lens",
-                    null,
-                    "Pickup",
-                    100_000m,
-                    200_000m,
-                    "rental-item:previous",
-                    [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
-                    TestListingSnapshots.Default)
-            ]).Value;
 
     [Fact]
     public async Task Prepare_ReturnsPlanWithSnapshotAndTotals()
@@ -291,27 +254,6 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(0, _inventory.ListingReadCount);
     }
 
-    [Fact]
-    public async Task Prepare_RejectsWhenRenterHasUnexpiredPendingPaymentOrder()
-    {
-        _orders.PendingPaymentOrder = CreatePendingOrder(Now.AddMinutes(-10));
-
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
-
-        Assert.Equal(CheckoutErrors.PendingOrderExists, result.Error);
-        Assert.Equal("DH-2026-000007", result.PendingOrderCode);
-        Assert.Equal(0, _inventory.ListingReadCount);
-    }
-
-    [Fact]
-    public async Task Prepare_IgnoresPendingPaymentOrderPastItsDeadline()
-    {
-        _orders.PendingPaymentOrder = CreatePendingOrder(Now.AddMinutes(-31));
-
-        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
-
-        Assert.True(result.IsSuccess);
-    }
 
     [Fact]
     public async Task Prepare_RejectsWhenCartDoesNotExist()

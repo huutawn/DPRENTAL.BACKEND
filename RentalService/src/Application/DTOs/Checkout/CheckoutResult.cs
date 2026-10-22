@@ -24,7 +24,6 @@ public sealed class CheckoutResult
         FieldErrors = preparation?.FieldErrors ?? [];
         LineIssues = preparation?.LineIssues ?? [];
         CurrentQuote = preparation?.CurrentQuote;
-        PendingOrderCode = preparation?.PendingOrderCode;
         HoldConflicts = holdConflicts ?? [];
         OperationId = operationId;
     }
@@ -53,9 +52,6 @@ public sealed class CheckoutResult
 
     /// <summary>Giá và số tiền hiện tại, chỉ có khi lỗi là <see cref="CheckoutErrors.PriceChanged"/>.</summary>
     public CheckoutPlan? CurrentQuote { get; }
-
-    /// <summary>Mã đơn đang chờ thanh toán, chỉ có khi lỗi là <see cref="CheckoutErrors.PendingOrderExists"/>.</summary>
-    public string? PendingOrderCode { get; }
 
     /// <summary>Các dòng không giữ được lịch, chỉ có khi lỗi là <see cref="CheckoutErrors.HoldFailed"/>.</summary>
     public IReadOnlyList<CheckoutHoldConflict> HoldConflicts { get; }

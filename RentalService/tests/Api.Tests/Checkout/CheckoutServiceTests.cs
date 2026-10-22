@@ -69,7 +69,6 @@ public sealed class CheckoutServiceTests
         return new CheckoutService(
             new CheckoutPreparationService(
                 carts,
-                orders,
                 new RenterAddressRepository(context),
                 _harness.Listings,
                 _harness.Auth,
@@ -181,6 +180,92 @@ public sealed class CheckoutServiceTests
         Assert.Equal("ACTIVE_CHECKOUT_IN_PROGRESS", second.Error.Code);
     }
 
+
+    [Fact]
+    public async Task SubmitAsync_WhenRenterHasPendingPaymentOrder_NewCheckoutWithNewKeySucceeds()
+    {
+        await using var context = _harness.NewContext();
+        var service = CreateService(context);
+
+        var first = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(), Key);
+        Assert.True(first.IsSuccess);
+        Assert.Equal("PendingPayment", first.Value.Status);
+
+        var second = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(TripodTotal, _cartItemIds[2]), OtherKey);
+        Assert.True(second.IsSuccess);
+        Assert.Equal("PendingPayment", second.Value.Status);
+
+        Assert.NotEqual(first.Value.OrderId, second.Value.OrderId);
+        Assert.NotEqual(first.Value.OrderCode, second.Value.OrderCode);
+
+        var order1 = await context.RentalOrders.FindAsync(first.Value.OrderId);
+        var order2 = await context.RentalOrders.FindAsync(second.Value.OrderId);
+        Assert.NotNull(order1);
+        Assert.NotNull(order2);
+        Assert.Equal(RentalOrderStatus.PendingPayment, order1.Status);
+        Assert.Equal(RentalOrderStatus.PendingPayment, order2.Status);
+        Assert.NotEqual(order1.PaymentDeadline, default);
+        Assert.NotEqual(order2.PaymentDeadline, default);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_WhenRenterHasExpiredPendingOrder_NewCheckoutSucceeds()
+    {
+        await using var context = _harness.NewContext();
+        var service = CreateService(context);
+
+        var first = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(), Key);
+        Assert.True(first.IsSuccess);
+
+        var order1 = await context.RentalOrders.FindAsync(first.Value.OrderId);
+        Assert.NotNull(order1);
+        order1.MarkPaymentExpired(Now.AddMinutes(31), "expiry-op-1");
+        await context.SaveChangesAsync();
+
+        var second = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(TripodTotal, _cartItemIds[2]), OtherKey);
+        Assert.True(second.IsSuccess);
+        Assert.Equal("PendingPayment", second.Value.Status);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_MultiplePendingOrders_PaymentOrExpiryOrCancellationOfOneDoesNotAffectOther()
+    {
+        await using var context = _harness.NewContext();
+        var service = CreateService(context);
+
+        var first = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(), Key);
+        Assert.True(first.IsSuccess);
+
+        var second = await service.SubmitAsync(new CheckoutRenterContext(_renterId), Request(TripodTotal, _cartItemIds[2]), OtherKey);
+        Assert.True(second.IsSuccess);
+
+        var order1 = await context.RentalOrders.FindAsync(first.Value.OrderId);
+        var order2 = await context.RentalOrders.FindAsync(second.Value.OrderId);
+        Assert.NotNull(order1);
+        Assert.NotNull(order2);
+
+        var originalDeadline2 = order2.PaymentDeadline;
+        var originalInvoiceRef2 = order2.InvoiceRef;
+
+        // Pay order 1
+        order1.MarkAsPaid("INV-ORD-1", "PAY-ORD-1", Now.AddMinutes(5), Now.AddMinutes(5));
+        await context.SaveChangesAsync();
+
+        // Reload order 2 and assert it remains PendingPayment with same deadline and invoiceRef
+        var reloadedOrder2 = await context.RentalOrders.FindAsync(second.Value.OrderId);
+        Assert.NotNull(reloadedOrder2);
+        Assert.Equal(RentalOrderStatus.PendingPayment, reloadedOrder2.Status);
+        Assert.Equal(originalDeadline2, reloadedOrder2.PaymentDeadline);
+        Assert.Equal(originalInvoiceRef2, reloadedOrder2.InvoiceRef);
+
+        // Expire order 2 should likewise not affect order 1
+        order2.MarkPaymentExpired(Now.AddMinutes(35), "expiry-op-2");
+        await context.SaveChangesAsync();
+
+        var reloadedOrder1 = await context.RentalOrders.FindAsync(first.Value.OrderId);
+        Assert.NotNull(reloadedOrder1);
+        Assert.Equal(RentalOrderStatus.Paid, reloadedOrder1.Status);
+    }
     [Fact]
     public async Task SubmitAsync_WhenLockBusy_ReturnsInProgress()
     {

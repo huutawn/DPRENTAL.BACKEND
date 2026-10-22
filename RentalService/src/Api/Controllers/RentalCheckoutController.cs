@@ -128,11 +128,6 @@ public sealed class RentalCheckoutController(
             details.Extensions["currentQuote"] = CheckoutQuoteResponse.From(result.CurrentQuote);
         }
 
-        if (result.PendingOrderCode is not null)
-        {
-            details.Extensions["pendingOrderCode"] = result.PendingOrderCode;
-        }
-
         if (result.HoldConflicts.Count > 0)
         {
             details.Extensions["conflicts"] = result.HoldConflicts;

@@ -16,8 +16,6 @@ public interface IRentalOrderRepository
 
     Task<IReadOnlyList<RentalOrder>> GetByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default);
 
-    Task<RentalOrder?> GetPendingPaymentByRenterIdAsync(Guid renterId, CancellationToken cancellationToken = default);
-
     Task<IReadOnlyList<RentalOrder>> GetBySupplierIdAsync(Guid supplierId, CancellationToken cancellationToken = default);
 
     Task<RentalOrder> CreateAsync(RentalOrder order, CancellationToken cancellationToken = default);

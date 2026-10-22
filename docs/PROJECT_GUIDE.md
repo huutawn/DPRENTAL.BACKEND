@@ -553,6 +553,33 @@ return conflict details
 
 Không tự checkout partial cart trong MVP.
 
+## 11.2. Hỗ trợ nhiều đơn chờ thanh toán (Multiple Pending Payment Orders)
+
+- Renter có thể có nhiều đơn hàng ở trạng thái `PENDING_PAYMENT` cùng lúc, không bị giới hạn chỉ 1 đơn chờ thanh toán.
+- Mỗi đơn hàng sở hữu hoàn toàn độc lập:
+  - Mã đơn (`OrderCode`), `PaymentDeadline` và thời hạn thanh toán riêng.
+  - Danh sách giữ chỗ (Inventory holds) và allocation riêng biệt.
+  - Mã tham chiếu hóa đơn (`invoiceRef`) riêng.
+- Việc thanh toán thành công, hủy bỏ hoặc quá hạn (expiry) của một đơn hàng hoàn toàn không làm thay đổi trạng thái hoặc thời hạn của các đơn hàng khác của cùng renter.
+- Cơ chế bảo vệ và kiểm soát tranh chấp:
+  - Khóa chống tranh chấp (PostgreSQL advisory lock theo `RenterId`).
+  - Kiểm tra Idempotency theo key (chống trùng lặp hoặc tái sử dụng key khác payload).
+  - Giới hạn một checkout đang xử lý: chỉ có tối đa 1 thao tác checkout đang chạy (`ACTIVE_CHECKOUT_IN_PROGRESS`) tại một thời điểm cho mỗi renter.
+
+## 11.3. Luồng tiếp tục thanh toán đơn cũ
+
+Khi renter muốn tiếp tục thanh toán đơn hàng cũ đang chờ thanh toán, sử dụng các API hiện có (không tạo endpoint thanh toán mới trong Rental và không tạo checkout thay thế):
+
+1. `GET /api/v1/rental/orders?status=PendingPayment` để tìm danh sách đơn chờ thanh toán của người thuê.
+2. `GET /api/v1/rental/orders/{orderId}` để lấy `invoiceRef` và `paymentDeadline`.
+3. `GET /api/v1/invoices/{invoiceRef}` (Payment Service) để lấy mã QR, số tiền cần trả và nội dung chuyển khoản.
+4. `GET /api/v1/invoices/{invoiceRef}/status` (Payment Service) để theo dõi trạng thái thanh toán.
+
+*Lưu ý nghiệp vụ:*
+- Nếu đơn chưa có `invoiceRef` (hóa đơn đang trong hàng đợi tạo), client chờ xử lý tạo hóa đơn thay vì tạo checkout mới thay thế.
+- Đơn đã quá hạn (`now >= PaymentDeadline`) không được tự ý gia hạn thời gian thanh toán khi mở lại.
+- Payment Service tiếp tục chịu trách nhiệm kiểm tra quyền sở hữu hóa đơn của người dùng.
+
 ---
 
 # 12. Payment and Supplier Confirmation

@@ -20,7 +20,6 @@ namespace Dprental.RentalService.Application.Services.Checkout;
 public sealed class CheckoutPreparationService : ICheckoutPreparationService
 {
     private readonly IRentalCartRepository _carts;
-    private readonly IRentalOrderRepository _orders;
     private readonly IRenterAddressRepository _addresses;
     private readonly IInventoryRentalClient _inventory;
     private readonly IAuthRentalClient _auth;
@@ -32,7 +31,6 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 
     public CheckoutPreparationService(
         IRentalCartRepository carts,
-        IRentalOrderRepository orders,
         IRenterAddressRepository addresses,
         IInventoryRentalClient inventory,
         IAuthRentalClient auth,
@@ -42,7 +40,6 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         ArgumentNullException.ThrowIfNull(termsOptions);
 
         _carts = carts ?? throw new ArgumentNullException(nameof(carts));
-        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _addresses = addresses ?? throw new ArgumentNullException(nameof(addresses));
         _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
@@ -103,12 +100,6 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         }
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-
-        RentalOrder? pendingOrder = await _orders.GetPendingPaymentByRenterIdAsync(renter.RenterId, cancellationToken);
-        if (pendingOrder is not null && pendingOrder.PaymentDeadline > utcNow)
-        {
-            return CheckoutPreparationResult.PendingOrder(pendingOrder.OrderCode);
-        }
 
         CheckoutDeliveryDto delivery;
         if (request.AddressId is { } addressId)
