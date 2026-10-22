@@ -62,7 +62,8 @@ public sealed partial class AdminOrderQueryService(
                 r.ItemCount,
                 r.InvoiceRef,
                 r.PaidAt,
-                r.CreatedAt))
+                r.CreatedAt,
+                r.Items.Select(OrderQueryMapper.ToSummaryItem).ToList()))
             .ToList();
 
         return OrderQueryMapper.ToPage(items, page, pageSize, records.TotalCount);

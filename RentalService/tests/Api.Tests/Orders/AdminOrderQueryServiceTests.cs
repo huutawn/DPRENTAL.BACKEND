@@ -19,6 +19,7 @@ namespace Dprental.RentalService.Api.Tests.Orders;
 /// </summary>
 public sealed class AdminOrderQueryServiceTests
 {
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
     private readonly string _dbName = $"AdminOrders_{Guid.NewGuid():N}";
     private readonly Guid _admin = Guid.NewGuid();
     private readonly Guid _an = Guid.NewGuid();
@@ -52,6 +53,55 @@ public sealed class AdminOrderQueryServiceTests
         Assert.Equal(2, waiting.ItemCount);
         Assert.Equal(37_400_000m, waiting.TotalAmount);
         Assert.Null(result.Value.Items[0].InvoiceRef);
+        Assert.Equal(2, waiting.Items.Count);
+        OrderSummaryItemResponse adminExcavator = waiting.Items.Single(i => i.Name == "Máy xúc CAT 320");
+        Assert.Equal(1, adminExcavator.Quantity);
+        Assert.Equal(_binh, adminExcavator.SupplierId);
+        Assert.Equal(3_000_000m, adminExcavator.DailyRate);
+        Assert.Equal(9_000_000m, adminExcavator.RentalAmount);
+        Assert.Equal(20_000_000m, adminExcavator.DepositAmount);
+
+        OrderSummaryItemResponse adminMixer = waiting.Items.Single(i => i.Name == "Máy trộn bê tông 350L");
+        Assert.Equal(2, adminMixer.Quantity);
+        Assert.Equal(_cuong, adminMixer.SupplierId);
+        Assert.Equal(400_000m, adminMixer.DailyRate);
+        Assert.Equal(2_400_000m, adminMixer.RentalAmount);
+        Assert.Equal(6_000_000m, adminMixer.DepositAmount);
+    }
+
+    [Fact]
+    public async Task Admin_OrderSummary_SerializesBasicItemInformationForUi()
+    {
+        await SeedAsync();
+
+        Result<PagedResponse<AdminOrderSummaryResponse>> result = await Search(new AdminOrderSearchRequest());
+
+        Assert.True(result.IsSuccess);
+        AdminOrderSummaryResponse waiting = result.Value.Items[1];
+
+        string json = JsonSerializer.Serialize(waiting, WebJson);
+        using JsonDocument doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
+
+        Assert.True(root.TryGetProperty("items", out JsonElement itemsElement));
+        Assert.Equal(JsonValueKind.Array, itemsElement.ValueKind);
+        Assert.Equal(2, itemsElement.GetArrayLength());
+
+        JsonElement firstItem = itemsElement[0];
+        Assert.True(firstItem.TryGetProperty("name", out JsonElement nameProp));
+        Assert.False(string.IsNullOrWhiteSpace(nameProp.GetString()));
+        Assert.True(firstItem.TryGetProperty("rentalItemId", out _));
+        Assert.True(firstItem.TryGetProperty("equipmentListingId", out _));
+        Assert.True(firstItem.TryGetProperty("supplierId", out _));
+        Assert.True(firstItem.TryGetProperty("quantity", out JsonElement qtyProp));
+        Assert.True(qtyProp.GetInt32() > 0);
+        Assert.True(firstItem.TryGetProperty("rentalDays", out _));
+        Assert.True(firstItem.TryGetProperty("dailyRate", out _));
+        Assert.True(firstItem.TryGetProperty("rentalAmount", out _));
+        Assert.True(firstItem.TryGetProperty("depositAmount", out _));
+        Assert.True(firstItem.TryGetProperty("startDate", out _));
+        Assert.True(firstItem.TryGetProperty("endDate", out _));
+        Assert.True(firstItem.TryGetProperty("status", out _));
     }
 
     [Fact]

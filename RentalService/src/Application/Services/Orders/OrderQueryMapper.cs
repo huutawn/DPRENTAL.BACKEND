@@ -7,6 +7,8 @@ using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.IRepositories;
+using Dprental.RentalService.Domain.Policies;
 
 namespace Dprental.RentalService.Application.Services.Orders;
 
@@ -104,6 +106,29 @@ internal static class OrderQueryMapper
         .ThenBy(i => i.Id)
         .Select(i => ToItem(i, isSupplier))
         .ToList();
+
+    public static OrderSummaryItemResponse ToSummaryItem(OrderItemSummaryRecord item)
+    {
+        Result<(DateOnly StartDate, DateOnly EndDate)> dates =
+            RentalInventoryDateAdapter.ToInventoryDates(item.StartDate, item.EndDate);
+        DateOnly endDate = dates.IsSuccess ? dates.Value.EndDate : item.EndDate;
+        int rentalDays = RentalPricingPolicy.CalculateRentalDays(item.StartDate, item.EndDate);
+
+        return new OrderSummaryItemResponse(
+            item.RentalItemId,
+            item.EquipmentListingId,
+            item.SupplierId,
+            item.Name,
+            item.ThumbnailMediaId,
+            item.Quantity,
+            rentalDays,
+            item.DailyRate,
+            item.RentalAmount,
+            item.DepositAmount,
+            item.StartDate,
+            endDate,
+            item.Status);
+    }
 
     public static OrderHandoverResponse? ToHandover(RentalItem item) => item.HandoverRecord is { } handover
         ? new OrderHandoverResponse(

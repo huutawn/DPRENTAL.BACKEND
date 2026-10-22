@@ -64,6 +64,7 @@ public sealed class AdminOrderSearchRequest
 /// <param name="InvoiceRef">Mã hóa đơn bên PaymentService.</param>
 /// <param name="PaidAt">Thời điểm thanh toán.</param>
 /// <param name="CreatedAt">Thời điểm đặt hàng.</param>
+/// <param name="Items">Các dòng thiết bị trong đơn kèm thông tin nhận biết cơ bản.</param>
 public sealed record AdminOrderSummaryResponse(
     Guid OrderId,
     string OrderCode,
@@ -77,7 +78,27 @@ public sealed record AdminOrderSummaryResponse(
     int ItemCount,
     string? InvoiceRef,
     DateTimeOffset? PaidAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    IReadOnlyList<OrderSummaryItemResponse> Items)
+{
+    public AdminOrderSummaryResponse(
+        Guid orderId,
+        string orderCode,
+        RentalOrderStatus status,
+        Guid renterId,
+        IReadOnlyList<Guid> supplierIds,
+        string currency,
+        decimal totalRentalAmount,
+        decimal totalDepositAmount,
+        decimal totalAmount,
+        int itemCount,
+        string? invoiceRef,
+        DateTimeOffset? paidAt,
+        DateTimeOffset createdAt)
+        : this(orderId, orderCode, status, renterId, supplierIds, currency, totalRentalAmount, totalDepositAmount, totalAmount, itemCount, invoiceRef, paidAt, createdAt, [])
+    {
+    }
+}
 
 /// <summary>
 /// Tài khoản nhận hoàn tiền của người thuê; số tài khoản chỉ hiện 4 số cuối.

@@ -145,7 +145,7 @@ Dịch vụ triển khai mô hình nghiệp vụ canonical theo AGENTS.md và th
 ## API Xem đơn hàng (đơn cha cho Renter, đơn con cho Supplier)
 
 - Người thuê (`[Authorize(Policy = "Renter")]`, danh tính từ `sub`):
-  - `GET /api/v1/rental/orders?page=1&pageSize=20`: đơn của chính mình, mới nhất trước, kèm tổng tiền thuê, tổng cọc, số dòng, số đơn con.
+-  `GET /api/v1/rental/orders?page=1&pageSize=20`: đơn của chính mình, mới nhất trước, kèm tổng tiền thuê, tổng cọc, số dòng, số đơn con và danh sách các dòng thiết bị (`items`) mang thông tin nhận biết cơ bản: tên thiết bị (`name`), hình ảnh (`thumbnailMediaId`), số lượng (`quantity`), số ngày thuê (`rentalDays`), giá ngày (`dailyRate`), tiền thuê (`rentalAmount`), tiền cọc (`depositAmount`), ngày thuê (`startDate`, `endDate` tính gồm ngày dùng cuối), trạng thái (`status`).
   - `GET /api/v1/rental/orders/{orderId}`: đơn cha kèm thông tin nhận máy, `invoiceRef`, tổng tiền và mọi đơn con cùng thiết bị. Đơn của người khác trả `404 Order.NotFound`.
 - Nhà cung cấp (người dùng đã đăng nhập, danh tính từ `sub` giống API nhận/từ chối):
   - `GET /api/v1/rental/supplier/sub-orders?page=1&pageSize=20`: đơn con của chính mình, mới nhất trước.
@@ -170,7 +170,7 @@ Mọi quyết định "ai được làm gì" nằm trong `RentalAuthorizationPol
 - **Quy tắc IDOR:** tài nguyên của người khác trả đúng phản hồi như tài nguyên không tồn tại (`404`, cùng `title` và `detail`), nên không dò được mã nào có thật. Đơn → `Order.NotFound`; dòng → `RentalItem.NotFound`; đơn con → `SUB_ORDER_NOT_FOUND`; bằng chứng → `Media.EvidenceNotFound`.
 - **403 chỉ dành cho sai vai trò**, không phụ thuộc mã tài nguyên: người không phải Admin gọi API admin, hoặc service token gọi API của người dùng (`Auth.ServiceTokenNotAllowed`).
 - **Thay đổi so với trước:** bàn giao, trả máy và đề xuất khấu trừ trên dòng của supplier khác không còn trả `403 Return.Unauthorized` / `403 SUPPLIER_MISMATCH` mà trả `404 RentalItem.NotFound`; mã `ITEM_NOT_FOUND` của API bàn giao đổi thành `RentalItem.NotFound`; tác vụ của đơn người khác trả `404 Order.NotFound` thay cho `403 FORBIDDEN` / `404 ORDER_NOT_FOUND`.
-- Admin xem đơn qua `GET /api/v1/rental/admin/orders` và `GET /api/v1/rental/admin/orders/{orderId}`; số tài khoản hoàn tiền chỉ hiện 4 số cuối và mỗi lần xem chi tiết được ghi log kèm mã Admin.
+- Admin xem đơn qua `GET /api/v1/rental/admin/orders` (kèm danh sách thiết bị `items` với thông tin nhận biết cơ bản tương tự) và `GET /api/v1/rental/admin/orders/{orderId}`; số tài khoản hoàn tiền chỉ hiện 4 số cuối và mỗi lần xem chi tiết được ghi log kèm mã Admin.
 
 ## API Lịch thuê cá nhân (Renter Calendar)
 
