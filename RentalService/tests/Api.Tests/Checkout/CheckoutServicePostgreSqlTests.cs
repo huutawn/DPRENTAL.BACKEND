@@ -98,13 +98,9 @@ public sealed class CheckoutServicePostgreSqlTests
             Assert.Equal(2, Assert.Single(order.Items).UnitAssignments.Count);
             Assert.Equal(0, await context.RentalCartItems.CountAsync());
 
-            // Cùng Idempotency-Key chỉ ghi một lệnh giữ lịch và Inventory chỉ giữ máy một lần.
-            var holdMsg = await context.RentalOutboxMessages.SingleAsync(m => m.MessageType == KafkaContractSpec.CommandTypes.CreateHold);
-            using (var doc = System.Text.Json.JsonDocument.Parse(holdMsg.Payload))
-            {
-                var holdDeadline = doc.RootElement.GetProperty("payload").GetProperty("holdExpiresAt").GetDateTimeOffset();
-                Assert.Equal(order.PaymentDeadline, holdDeadline);
-            }
+            // Cùng Idempotency-Key chỉ ghi một sự kiện RentalOrderCreated và Inventory chỉ giữ máy một lần.
+            var orderCreatedMsg = await context.RentalOutboxMessages.SingleAsync(m => m.MessageType == KafkaContractSpec.EventTypes.RentalOrderCreated);
+            Assert.NotNull(orderCreatedMsg);
             Assert.Single(_inventory.HoldRequests);
             Assert.Empty(_inventory.Releases);
             var invReq = Assert.Single(_payment.InvoiceRequests);
@@ -732,24 +728,43 @@ public sealed class CheckoutServicePostgreSqlTests
         CheckoutRequest request,
         CheckoutCompletion completion)
     {
-        CheckoutSubmitResult accepted;
+        CheckoutSubmitResult result;
         await using (RentalServiceDbContext context = new(options))
         {
-            accepted = await NewService(context, locks).SubmitAsync(new(_renterId, true), request, Key);
+            result = await NewService(context, locks, completion).SubmitAsync(new(_renterId, true), request, Key);
         }
 
-        return accepted.IsFailure
-            ? accepted.Failure!
-            : await completion.CompleteAsync(_renterId, Key);
+        if (result.IsFailure)
+        {
+            return result.Failure!;
+        }
+
+        await using (RentalServiceDbContext context = new(options))
+        {
+            var order = await context.RentalOrders
+                .Include(o => o.Items)
+                    .ThenInclude(i => i.UnitAssignments)
+                .Include(o => o.OperationReceipts)
+                .AsNoTracking()
+                .FirstAsync(o => o.Id == result.Value.OrderId);
+            return CheckoutResult.Success(order, result.Value.IsReplay);
+        }
     }
 
-    private CheckoutService NewService(RentalServiceDbContext context, PostgresOrderLockManager locks)
+    private CheckoutService NewService(
+        RentalServiceDbContext context,
+        PostgresOrderLockManager locks,
+        CheckoutCompletion completion)
     {
         RentalOrderRepository orders = new(context);
         RentalCartRepository carts = new(context);
         OutboxRepository outbox = new(context);
         FixedTimeProvider clock = new(Now);
+        RentalCheckoutOperationRepository operations = new(context);
         InventoryCommandProducer inventoryCommands = new(outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), clock);
+        CheckoutOrderWriter orderWriter = new(orders, carts, new PostgresOrderCodeGenerator(context), context, NullLogger<CheckoutOrderWriter>.Instance);
+        RentalEventProducer rentalEvents = new(new KafkaOutboxWriter(outbox), Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), clock);
+        CheckoutInvoiceIssuer invoiceIssuer = new(completion.Payment, orders, operations, context, clock, NullLogger<CheckoutInvoiceIssuer>.Instance);
 
         return new CheckoutService(
             new CheckoutPreparationService(
@@ -764,11 +779,16 @@ public sealed class CheckoutServicePostgreSqlTests
                     ContentHash = "hash123456"
                 }),
                 clock),
-            new RentalCheckoutOperationRepository(context),
+            operations,
             orders,
             locks,
+            completion.Inventory,
             inventoryCommands,
+            orderWriter,
+            rentalEvents,
+            invoiceIssuer,
             context,
-            clock);
+            clock,
+            completion.Payment);
     }
 }

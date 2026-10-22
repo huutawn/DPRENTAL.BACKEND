@@ -99,13 +99,21 @@ internal sealed class CheckoutTestHarness
         CheckoutRequest request,
         CancellationToken cancellationToken = default)
     {
-        CheckoutSubmitResult accepted = await AcceptAsync(renterId, key, request, cancellationToken);
-        if (accepted.IsFailure)
+        CheckoutSubmitResult result = await AcceptAsync(renterId, key, request, cancellationToken);
+        if (result.IsFailure)
         {
-            return accepted.Failure!;
+            return result.Failure!;
         }
 
-        return await Completion.CompleteAsync(renterId, key, cancellationToken);
+        await using RentalServiceDbContext context = NewContext();
+        RentalOrder order = await context.RentalOrders
+            .Include(o => o.Items)
+                .ThenInclude(i => i.UnitAssignments)
+            .Include(o => o.OperationReceipts)
+            .AsNoTracking()
+            .FirstAsync(o => o.Id == result.Value.OrderId, cancellationToken);
+
+        return CheckoutResult.Success(order, result.Value.IsReplay);
     }
 
     /// <summary>Chạy phần bất đồng bộ của checkout: Inventory giả, dispatcher và worker tạo hóa đơn dùng chung cho mọi renter.</summary>
@@ -127,6 +135,9 @@ internal sealed class CheckoutTestHarness
         RentalCheckoutOperationRepository operations = new(context);
         OutboxRepository outbox = new(context);
         InventoryCommandProducer inventoryCommands = new(outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), Clock);
+        CheckoutOrderWriter orderWriter = new(orders, carts, OrderCodes, context, NullLogger<CheckoutOrderWriter>.Instance);
+        RentalEventProducer rentalEvents = new(new KafkaOutboxWriter(outbox), Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), Clock);
+        CheckoutInvoiceIssuer invoiceIssuer = new(Payment, orders, operations, context, Clock, NullLogger<CheckoutInvoiceIssuer>.Instance);
 
         CheckoutService service = new(
             new CheckoutPreparationService(
@@ -144,10 +155,14 @@ internal sealed class CheckoutTestHarness
             operations,
             orders,
             Locks,
+            Inventory,
             inventoryCommands,
+            orderWriter,
+            rentalEvents,
+            invoiceIssuer,
             context,
-            Clock);
-
+            Clock,
+            Payment);
         return await service.SubmitAsync(new(renterId, true), request, key, cancellationToken);
     }
 

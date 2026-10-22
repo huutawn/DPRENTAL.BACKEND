@@ -15,7 +15,8 @@ public sealed class CheckoutResult
         RentalOrder? order = null,
         bool isReplay = false,
         CheckoutPreparationResult? preparation = null,
-        IReadOnlyList<CheckoutHoldConflict>? holdConflicts = null)
+        IReadOnlyList<CheckoutHoldConflict>? holdConflicts = null,
+        string? operationId = null)
     {
         Error = error;
         Order = order;
@@ -25,6 +26,7 @@ public sealed class CheckoutResult
         CurrentQuote = preparation?.CurrentQuote;
         PendingOrderCode = preparation?.PendingOrderCode;
         HoldConflicts = holdConflicts ?? [];
+        OperationId = operationId;
     }
 
     public bool IsSuccess => Error == Error.None;
@@ -42,8 +44,9 @@ public sealed class CheckoutResult
     public bool IsReplay { get; }
 
     /// <summary>Gửi lại đúng yêu cầu này với cùng Idempotency-Key có thể thành công.</summary>
-    public bool IsRetryable => Error.Type == ErrorType.ServiceUnavailable || Error == CheckoutErrors.InProgress;
+    public bool IsRetryable => Error.Type == ErrorType.ServiceUnavailable || Error == CheckoutErrors.InProgress || Error == CheckoutErrors.CheckoutNotReady;
 
+    public string? OperationId { get; }
     public IReadOnlyList<CheckoutFieldError> FieldErrors { get; }
 
     public IReadOnlyList<CheckoutLineIssue> LineIssues { get; }
@@ -83,6 +86,12 @@ public sealed class CheckoutResult
         ArgumentNullException.ThrowIfNull(hold);
         return new(RequireError(hold.Error), holdConflicts: hold.Conflicts);
     }
+
+    public static CheckoutResult HoldFailure(Error error, IReadOnlyList<CheckoutHoldConflict> conflicts) =>
+        new(RequireError(error), holdConflicts: conflicts);
+
+    public static CheckoutResult CheckoutNotReady(string operationId) =>
+        new(CheckoutErrors.CheckoutNotReady, operationId: operationId);
 
     private static Error RequireError(Error error)
     {

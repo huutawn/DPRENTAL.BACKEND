@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
@@ -17,5 +18,5 @@ public interface ICheckoutInvoiceIssuer
     /// Thành công khi đơn có hóa đơn. Thất bại là một trong <see cref="CheckoutErrors.InvoiceTemporarilyUnavailable"/>,
     /// <see cref="CheckoutErrors.InvoiceRejected"/>, <see cref="CheckoutErrors.OrderExpired"/> hoặc <see cref="CheckoutErrors.InvoicePersistenceConflict"/>; đơn hàng vẫn được giữ nguyên.
     /// </returns>
-    Task<Result> EnsureInvoiceAsync(RentalOrder order, CancellationToken cancellationToken = default);
+    Task<Result<CreateInvoiceResponse>> EnsureInvoiceAsync(RentalOrder order, CancellationToken cancellationToken = default);
 }

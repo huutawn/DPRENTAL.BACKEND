@@ -57,6 +57,11 @@ public sealed class PaymentRentalContractAndEventsTests
             TotalAmount: 1_500_000m,
             Currency: "VND",
             PaymentDeadline: _fixedTime.AddMinutes(30),
+            Status: "Pending",
+            QrUrl: "https://vietqr.app/img?acc=123",
+            Bank: "VietinBank",
+            Account: "101010101010",
+            TransferContent: "ORD-001",
             IsReplay: false);
 
         string respJson = JsonSerializer.Serialize(response, JsonOptions);

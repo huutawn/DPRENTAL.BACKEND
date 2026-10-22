@@ -95,7 +95,8 @@ public sealed class CheckoutScenarioTests
         Assert.Equal(winner.Order!.Id, order.Id);
         Assert.Single(_harness.Payment.InvoiceRequests);
 
-        // Người thua đã giữ được chân máy trước khi hết máy ảnh: hold đó phải được nhả, giỏ còn nguyên.
+        // Người thua đã giữ được chân máy trước khi hết máy ảnh: bù trừ release được enqueue qua Kafka
+        await _harness.Completion.RunInventoryAsync(Guid.Empty);
         Assert.Equal(3, _harness.Inventory.HeldUnits(camera));
         Assert.Equal(1, _harness.Inventory.HeldUnits(tripod));
         Guid loserId = order.RenterId == _an ? _binh : _an;
@@ -121,9 +122,8 @@ public sealed class CheckoutScenarioTests
         Assert.Equal(1, await _harness.CountCartItemsAsync(_an));
         Assert.Equal(2, _harness.Inventory.HeldUnits(camera));
 
-        // Consumer xử lý lại message trong Inbox: đơn được tạo từ đúng lần giữ máy cũ, không giữ thêm.
-        Assert.True((await _harness.Completion.Replies.ReprocessPendingInboxAsync()).IsSuccess);
-        CheckoutResult completed = await _harness.Completion.CompleteAsync(_an, "key-1");
+        // Thử lại POST checkout với cùng Idempotency-Key và payload: đơn được tạo từ đúng lần giữ máy cũ, không giữ thêm.
+        CheckoutResult completed = await _harness.SubmitAsync(_an, "key-1", request);
 
         Assert.True(completed.IsSuccess, completed.Error.Code);
         Assert.Single(await _harness.LoadOrdersAsync());
@@ -181,7 +181,8 @@ public sealed class CheckoutScenarioTests
         // Payment sập suốt thời gian chờ thanh toán: đơn được tạo nhưng không có hóa đơn.
         _harness.Payment.AlwaysFailWith = FakePaymentRentalClient.Down;
         CheckoutResult failed = await _harness.SubmitAsync(_an, "key-1", CheckoutTestHarness.Request(3_000_000m, cart[0]));
-        Assert.Equal(CheckoutErrors.InvoiceTemporarilyUnavailable, failed.Error);
+        Assert.Equal(CheckoutErrors.CheckoutNotReady, failed.Error);
+        Assert.True(failed.IsRetryable);
         Assert.Equal(2, _harness.Inventory.HeldUnits(camera));
 
         _harness.Clock.UtcNow = Now.AddMinutes(31);

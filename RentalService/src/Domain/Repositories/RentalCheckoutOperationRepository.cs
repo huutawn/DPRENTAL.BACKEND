@@ -50,6 +50,15 @@ public sealed class RentalCheckoutOperationRepository : IRentalCheckoutOperation
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<RentalCheckoutOperation>> GetPendingProcessingOperationsAsync(DateTimeOffset now, int limit = 50, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalCheckoutOperations
+            .Where(o => o.Status == CheckoutOperationStatus.Processing && o.HoldExpiresAt > now)
+            .OrderBy(o => o.CreatedAt)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task AddAsync(RentalCheckoutOperation operation, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(operation);

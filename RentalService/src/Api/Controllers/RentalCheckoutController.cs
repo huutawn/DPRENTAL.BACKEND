@@ -1,5 +1,6 @@
 using Dprental.RentalService.Api.Filters;
 using Dprental.RentalService.Api.Security;
+using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.Policies;
@@ -29,7 +30,7 @@ public sealed class RentalCheckoutController(
     /// <param name="idempotencyKey">Khóa chống trùng lặp gửi qua header HTTP (bắt buộc, tối đa 64 ký tự).</param>
     /// <param name="request">Các dòng giỏ được chọn, nơi giao, tài khoản nhận hoàn tiền, điều khoản và tổng tiền người thuê đã thấy.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
-    /// <response code="202">Đã nhận yêu cầu và gửi lệnh giữ lịch; theo dõi kết quả qua <c>statusUrl</c>. Gửi lại cùng Idempotency-Key trả lại đúng thao tác này.</response>
+    /// <response code="200">Gửi đơn hàng thành công, trả về thông tin đơn hàng và mã thanh toán QR.</response>
     /// <response code="400">Thiếu hoặc sai header Idempotency-Key, dữ liệu gửi lên không hợp lệ (Checkout.InvalidRequest) hoặc ngày thuê không còn hợp lệ (Checkout.InvalidRentalDates).</response>
     /// <response code="401">Người dùng chưa được xác thực.</response>
     /// <response code="403">Người dùng không có quyền Renter hoặc chưa hoàn thiện hồ sơ (Checkout.ProfileIncomplete).</response>
@@ -39,7 +40,7 @@ public sealed class RentalCheckoutController(
     /// <returns>Mã thao tác gửi đơn và đường dẫn xem trạng thái.</returns>
     [HttpPost]
     [Consumes("application/json")]
-    [ProducesResponseType(typeof(CheckoutOperationAcceptedResponse), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(CheckoutResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
@@ -71,10 +72,7 @@ public sealed class RentalCheckoutController(
         {
             return ToProblem(result.Failure!);
         }
-
-        var accepted = result.Value;
-        Response.Headers.Location = accepted.StatusUrl;
-        return Accepted(accepted.StatusUrl, accepted);
+        return Ok(result.Value);
     }
 
     /// <summary>
@@ -134,6 +132,20 @@ public sealed class RentalCheckoutController(
         if (result.PendingOrderCode is not null)
         {
             details.Extensions["pendingOrderCode"] = result.PendingOrderCode;
+        }
+
+        if (result.HoldConflicts.Count > 0)
+        {
+            details.Extensions["conflicts"] = result.HoldConflicts;
+        }
+
+        if (result.Error == CheckoutErrors.CheckoutNotReady)
+        {
+            Response.Headers.RetryAfter = "2";
+            if (!string.IsNullOrWhiteSpace(result.OperationId))
+            {
+                details.Extensions["operationId"] = result.OperationId;
+            }
         }
 
         return problem;

@@ -11,6 +11,10 @@ public interface ICheckoutService
         string idempotencyKey,
         CancellationToken cancellationToken = default);
 
+    Task<CheckoutSubmitResult> ContinueOperationAsync(
+        string operationId,
+        CancellationToken cancellationToken = default);
+
     Task<Result<CheckoutOperationStatusResponse>> GetOperationStatusAsync(
         string operationId,
         Guid renterUserId,

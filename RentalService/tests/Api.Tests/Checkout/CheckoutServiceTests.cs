@@ -60,6 +60,9 @@ public sealed class CheckoutServiceTests
         RentalCheckoutOperationRepository operations = new(context);
         OutboxRepository outbox = new(context);
         InventoryCommandProducer inventoryCommands = new(outbox, Options.Create(new KafkaOptions { Enabled = true }), _harness.Clock);
+        CheckoutOrderWriter orderWriter = new(orders, carts, _harness.OrderCodes, context, NullLogger<CheckoutOrderWriter>.Instance);
+        RentalEventProducer rentalEvents = new(new KafkaOutboxWriter(outbox), Options.Create(new KafkaOptions { Enabled = true }), _harness.Clock);
+        CheckoutInvoiceIssuer invoiceIssuer = new(_harness.Payment, orders, operations, context, _harness.Clock, NullLogger<CheckoutInvoiceIssuer>.Instance);
 
         return new CheckoutService(
             new CheckoutPreparationService(
@@ -77,13 +80,18 @@ public sealed class CheckoutServiceTests
             operations,
             orders,
             locks ?? _harness.Locks,
+            _harness.Inventory,
             inventoryCommands,
+            orderWriter,
+            rentalEvents,
+            invoiceIssuer,
             context,
-            _harness.Clock);
+            _harness.Clock,
+            _harness.Payment);
     }
 
     [Fact]
-    public async Task SubmitAsync_EnqueuesHolds_AndReturnsAccepted()
+    public async Task SubmitAsync_HoldsLines_AndReturnsOrderAndQrUrl()
     {
         await using var context = _harness.NewContext();
         var service = CreateService(context);
@@ -91,24 +99,19 @@ public sealed class CheckoutServiceTests
         var result = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
 
         Assert.True(result.IsSuccess);
-        var accepted = result.Value;
-        Assert.Equal(CheckoutRules.DeriveOperationId(_renterId, Key), accepted.OperationId);
-        Assert.Equal($"/api/v1/rental/checkout/operations/{accepted.OperationId}", accepted.StatusUrl);
+        var resp = result.Value;
+        Assert.NotEqual(Guid.Empty, resp.OrderId);
+        Assert.StartsWith("DH-", resp.OrderCode);
+        Assert.Equal("PendingPayment", resp.Status);
+        Assert.NotNull(resp.Payment);
+        Assert.NotEmpty(resp.Payment.QrUrl);
+        Assert.Equal("Pending", resp.Payment.Status);
 
         var operations = new RentalCheckoutOperationRepository(context);
-        var op = await operations.GetByOperationIdAsync(accepted.OperationId);
+        string operationId = CheckoutRules.DeriveOperationId(_renterId, Key);
+        var op = await operations.GetByOperationIdAsync(operationId);
         Assert.NotNull(op);
-        Assert.Equal(CheckoutOperationStatus.Processing, op.Status);
-        Assert.Equal(Now.AddMinutes(30), op.HoldExpiresAt);
-
-        var outboxMessages = await context.RentalOutboxMessages.ToListAsync();
-        Assert.Equal(2, outboxMessages.Count);
-        Assert.All(outboxMessages, m =>
-        {
-            Assert.Equal(KafkaContractSpec.Topics.InventoryCommands, m.Topic);
-            Assert.Equal(KafkaContractSpec.CommandTypes.CreateHold, m.MessageType);
-            Assert.Equal(op.ExpectedRentalOrderId.ToString("D"), m.PartitionKey);
-        });
+        Assert.Equal(CheckoutOperationStatus.Succeeded, op.Status);
     }
 
     [Fact]
@@ -121,12 +124,10 @@ public sealed class CheckoutServiceTests
 
         Assert.True(result.IsSuccess);
         // Giỏ thuê 12, 13, 14; đơn lưu [12, 15). Inventory nhận ngày cuối có tính: endDate = 14, không phải 15.
-        Assert.All(await context.RentalOutboxMessages.ToListAsync(), m =>
+        Assert.All(_harness.Inventory.HoldRequests, r =>
         {
-            using var envelope = System.Text.Json.JsonDocument.Parse(m.Payload);
-            var payload = envelope.RootElement.GetProperty("payload");
-            Assert.Equal("2026-10-12", payload.GetProperty("startDate").GetString());
-            Assert.Equal("2026-10-14", payload.GetProperty("endDate").GetString());
+            Assert.Equal(new DateOnly(2026, 10, 12), r.StartDate);
+            Assert.Equal(new DateOnly(2026, 10, 14), r.EndDate);
         });
     }
 
@@ -141,10 +142,11 @@ public sealed class CheckoutServiceTests
 
         var second = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
         Assert.True(second.IsSuccess);
-        Assert.Equal(first.Value.OperationId, second.Value.OperationId);
-
-        var outboxCount = await context.RentalOutboxMessages.CountAsync();
-        Assert.Equal(2, outboxCount);
+        Assert.Equal(first.Value.OrderId, second.Value.OrderId);
+        Assert.Equal(first.Value.OrderCode, second.Value.OrderCode);
+        Assert.True(second.Value.IsReplay);
+        Assert.NotNull(second.Value.Payment);
+        Assert.NotEmpty(second.Value.Payment.QrUrl);
     }
 
     [Fact]
@@ -166,10 +168,11 @@ public sealed class CheckoutServiceTests
     {
         await using var context = _harness.NewContext();
         var service = CreateService(context);
-
-        var first = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
-        Assert.True(first.IsSuccess);
-
+        string firstOpId = CheckoutRules.DeriveOperationId(_renterId, Key);
+        var op = new RentalCheckoutOperation(
+            firstOpId, _renterId, "fp", Guid.NewGuid(), Now.AddMinutes(30), "{}", "[]", Now);
+        context.RentalCheckoutOperations.Add(op);
+        await context.SaveChangesAsync();
         var second = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(TripodTotal, _cartItemIds[2]), OtherKey);
         Assert.True(second.IsFailure);
         Assert.Equal("ACTIVE_CHECKOUT_IN_PROGRESS", second.Error.Code);
@@ -196,38 +199,26 @@ public sealed class CheckoutServiceTests
         var submitResult = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
         Assert.True(submitResult.IsSuccess);
 
-        var statusResult = await service.GetOperationStatusAsync(submitResult.Value.OperationId, _renterId);
+        string operationId = CheckoutRules.DeriveOperationId(_renterId, Key);
+        var statusResult = await service.GetOperationStatusAsync(operationId, _renterId);
         Assert.True(statusResult.IsSuccess);
-        Assert.Equal("Processing", statusResult.Value.Status);
-        Assert.False(statusResult.Value.ReadyForPayment);
+        Assert.Equal("Succeeded", statusResult.Value.Status);
+        Assert.True(statusResult.Value.ReadyForPayment);
     }
 
     [Fact]
     public async Task GetOperationStatusAsync_OnlyReadyAfterInvoiceIsAttached()
     {
-        string operationId;
+        string operationId = CheckoutRules.DeriveOperationId(_renterId, Key);
         Guid orderId;
         await using (var context = _harness.NewContext())
         {
             var submitted = await CreateService(context).SubmitAsync(
                 new CheckoutRenterContext(_renterId, true), Request(), Key);
             Assert.True(submitted.IsSuccess);
-            operationId = submitted.Value.OperationId;
-            orderId = (await new RentalCheckoutOperationRepository(context)
-                .GetByOperationIdAsync(operationId))!.ExpectedRentalOrderId;
+            orderId = submitted.Value.OrderId;
         }
 
-        await _harness.Completion.RunInventoryAsync(orderId);
-        await using (var context = _harness.NewContext())
-        {
-            var pending = await CreateService(context).GetOperationStatusAsync(operationId, _renterId);
-            Assert.True(pending.IsSuccess);
-            Assert.Equal("Succeeded", pending.Value.Status);
-            Assert.Equal("Pending", pending.Value.InvoiceStatus);
-            Assert.False(pending.Value.ReadyForPayment);
-        }
-
-        Assert.True((await _harness.Completion.RunPendingInvoiceAsync(orderId)).IsSuccess);
         await using (var context = _harness.NewContext())
         {
             var ready = await CreateService(context).GetOperationStatusAsync(operationId, _renterId);
@@ -248,18 +239,18 @@ public sealed class CheckoutServiceTests
     [Fact]
     public async Task CreateInvoice_KeepsRetryingPastGenericBudgetUntilPaymentDeadline()
     {
+        _harness.Payment.AlwaysFailWith = FakePaymentRentalClient.Down;
+        string opId = CheckoutRules.DeriveOperationId(_renterId, Key);
         Guid orderId;
         await using (var context = _harness.NewContext())
         {
             var submitted = await CreateService(context).SubmitAsync(
                 new CheckoutRenterContext(_renterId, true), Request(), Key);
-            Assert.True(submitted.IsSuccess);
+            Assert.True(submitted.IsFailure);
+            Assert.Equal(CheckoutErrors.CheckoutNotReady, submitted.Error);
             orderId = (await new RentalCheckoutOperationRepository(context)
-                .GetByOperationIdAsync(submitted.Value.OperationId))!.ExpectedRentalOrderId;
+                .GetByOperationIdAsync(opId))!.ExpectedRentalOrderId;
         }
-
-        await _harness.Completion.RunInventoryAsync(orderId);
-        _harness.Payment.AlwaysFailWith = FakePaymentRentalClient.Down;
         for (int attempt = 0; attempt < 11; attempt++)
         {
             Assert.True((await _harness.Completion.RunPendingInvoiceAsync(orderId)).IsFailure);
@@ -288,10 +279,13 @@ public sealed class CheckoutServiceTests
         await using var context = _harness.NewContext();
         var service = CreateService(context);
 
-        var submitResult = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
-        Assert.True(submitResult.IsSuccess);
+        string opId = CheckoutRules.DeriveOperationId(_renterId, Key);
+        var op = new RentalCheckoutOperation(
+            opId, _renterId, "fp", Guid.NewGuid(), Now.AddMinutes(30), "{}", "[]", Now);
+        context.RentalCheckoutOperations.Add(op);
+        await context.SaveChangesAsync();
 
-        var statusResult = await service.GetOperationStatusAsync(submitResult.Value.OperationId, _renterId);
+        var statusResult = await service.GetOperationStatusAsync(opId, _renterId);
         Assert.True(statusResult.IsSuccess);
         Assert.Equal("Processing", statusResult.Value.Status);
         Assert.False(statusResult.Value.ReadyForPayment);
@@ -309,7 +303,8 @@ public sealed class CheckoutServiceTests
         var submitResult = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
         Assert.True(submitResult.IsSuccess);
 
-        var statusResult = await service.GetOperationStatusAsync(submitResult.Value.OperationId, Guid.NewGuid());
+        string operationId = CheckoutRules.DeriveOperationId(_renterId, Key);
+        var statusResult = await service.GetOperationStatusAsync(operationId, Guid.NewGuid());
         Assert.True(statusResult.IsFailure);
         Assert.Equal("CHECKOUT_OPERATION_NOT_FOUND", statusResult.Error.Code);
     }
@@ -320,14 +315,12 @@ public sealed class CheckoutServiceTests
         await using var context = _harness.NewContext();
         var service = CreateService(context);
 
-        var submitResult = await service.SubmitAsync(new CheckoutRenterContext(_renterId, true), Request(), Key);
-        Assert.True(submitResult.IsSuccess);
-        string opId = submitResult.Value.OperationId;
-
-        var operations = new RentalCheckoutOperationRepository(context);
-        var op = (await operations.GetByOperationIdAsync(opId))!;
-        Guid expectedOrderId = op.ExpectedRentalOrderId;
-
+        string opId = CheckoutRules.DeriveOperationId(_renterId, Key);
+        Guid expectedOrderId = Guid.NewGuid();
+        var op = new RentalCheckoutOperation(
+            opId, _renterId, "fp", expectedOrderId, Now.AddMinutes(30), "{}", "[]", Now);
+        context.RentalCheckoutOperations.Add(op);
+        await context.SaveChangesAsync();
         // Case 1: Succeeded but Order not created yet in DB
         op.MarkSucceeded(Now, invoiceStatus: "Pending");
         await context.SaveChangesAsync();
@@ -350,7 +343,7 @@ public sealed class CheckoutServiceTests
         Assert.Equal("Succeeded", resPendingInvoice.Value.Status);
         Assert.Equal("Pending", resPendingInvoice.Value.InvoiceStatus);
         Assert.False(resPendingInvoice.Value.ReadyForPayment);
-        Assert.Null(resPendingInvoice.Value.Order!.InvoiceRef);
+        Assert.Null(resPendingInvoice.Value.Order!.Payment);
 
         // Case 3: Order has valid InvoiceRef, PendingPayment, before deadline -> Ready, readyForPayment true
         order.AttachInvoice("INV-001", Now.AddMinutes(1));
@@ -362,7 +355,7 @@ public sealed class CheckoutServiceTests
         Assert.Equal("Succeeded", resReady.Value.Status);
         Assert.Equal("Ready", resReady.Value.InvoiceStatus);
         Assert.True(resReady.Value.ReadyForPayment);
-        Assert.Equal("INV-001", resReady.Value.Order!.InvoiceRef);
+        Assert.Equal("INV-001", resReady.Value.Order!.Payment!.InvoiceRef);
 
         string jsonReady = System.Text.Json.JsonSerializer.Serialize(resReady.Value, CamelCaseOptions);
         Assert.Contains("\"readyForPayment\":true", jsonReady);
