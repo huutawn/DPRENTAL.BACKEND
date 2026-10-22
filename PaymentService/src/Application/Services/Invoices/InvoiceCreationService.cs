@@ -77,7 +77,7 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
             if (OperationReceiptReplayHelper.TryReplay<CreateInvoiceResponse>(
                 existingReceipt,
                 "CreateInvoice",
-                fingerprint,
+                ReplayFingerprint(existingReceipt, request, fingerprint),
                 parsed => parsed,
                 out var replayResult))
             {
@@ -103,7 +103,7 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
                 if (OperationReceiptReplayHelper.TryReplay<CreateInvoiceResponse>(
                     racedReceipt,
                     "CreateInvoice",
-                    fingerprint,
+                    ReplayFingerprint(racedReceipt, request, fingerprint),
                     parsed => parsed,
                     out var replayResult))
                 {
@@ -268,7 +268,7 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
                         if (OperationReceiptReplayHelper.TryReplay<CreateInvoiceResponse>(
                             raced,
                             "CreateInvoice",
-                            fingerprint,
+                            ReplayFingerprint(raced, request, fingerprint),
                             parsed => parsed,
                             out var replayResult))
                         {
@@ -296,6 +296,31 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
         }
 
         return Error.Failure("PAYMENT_CODE_COLLISION_EXHAUSTED", "Không thể sinh mã thanh toán duy nhất sau 5 lần thử.");
+    }
+
+    private static string ReplayFingerprint(OperationReceipt receipt, CreateInvoiceRequest request, string fingerprint)
+    {
+        // PostgreSQL truncates 100ns ticks to microseconds. Reuse the original deadline only
+        // when the request identifies the same persisted instant; all other fields remain hashed.
+        try
+        {
+            var original = JsonSerializer.Deserialize<CreateInvoiceResponse>(receipt.ResultJson);
+            if (original is not null &&
+                original.PaymentDeadline.UtcTicks / TimeSpan.TicksPerMicrosecond ==
+                request.PaymentDeadline.UtcTicks / TimeSpan.TicksPerMicrosecond)
+            {
+                return PayloadFingerprinter.ComputeCreateFingerprint(
+                    request.RentalOrderId, request.OrderCode, request.RenterId, original.PaymentDeadline,
+                    request.Items?.Where(i => i is not null)
+                        .Select(i => (i.RentalItemId, i.SupplierId, i.RentalAmount, i.DepositAmount)));
+            }
+        }
+        catch (JsonException)
+        {
+            // The replay helper reports an invalid stored receipt through its existing error path.
+        }
+
+        return fingerprint;
     }
 
     private async Task<Result<CreateInvoiceResponse>> BuildReplayResponseAsync(

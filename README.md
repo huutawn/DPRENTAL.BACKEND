@@ -82,7 +82,7 @@ không trả exception message hoặc payload; request bị hủy không chuyể
 
 ## API Hóa đơn, QR & Webhook SePay (Payment Contract v1)
 
-- `POST /api/v1/invoices`: Tạo hóa đơn từ items `RentalOrder` (tính tiền độc lập, không truy cập Rental DB). Tự động replay an toàn bằng `OperationKey` và snapshot fingerprint. Hóa đơn tổng 0 khởi tạo `PAID` kèm outbox message `InvoicePaid`.
+- `POST /api/v1/invoices`: Tạo hóa đơn từ items `RentalOrder` (tính tiền độc lập, không truy cập Rental DB). Tự động replay an toàn bằng `OperationKey` và snapshot fingerprint. Hóa đơn tổng 0 khởi tạo `PAID` kèm outbox message `InvoicePaid`. Response tạo mới và replay gồm trạng thái, QR và thông tin nhận tiền từ snapshot hóa đơn. Replay receipt cũ khôi phục phần lẻ deadline gốc khi request chỉ mất độ chính xác do PostgreSQL (microsecond); fingerprint vẫn kiểm tra toàn bộ các trường còn lại và receipt không bị sửa.
 - `POST /api/v1/invoices/{invoiceRef}/cancel`: Hủy hóa đơn chưa thanh toán. Trả về 409 `INVOICE_ALREADY_PAID` nếu đã thanh toán. Hóa đơn `EXPIRED` được xác nhận đóng và giữ nguyên trạng thái.
 - `GET /api/v1/invoices/{invoiceRef}`: Trả về thông tin hóa đơn và ảnh VietQR SePay (`https://vietqr.app/img?acc=...&bank=...&amount=...&des=...&template=compact`). Chỉ renter sở hữu mới được xem (404 nếu không khớp hoặc không tìm thấy). `qrUrl` là null khi không ở trạng thái PENDING hoặc tổng 0.
 - `POST /api/v1/payment/webhooks`: Tiếp nhận webhook chuyển khoản từ SePay với xác thực `Authorization: Apikey <key>` (constant-time). Controller mỏng chỉ làm model binding DTO `SePayWebhookPayload` và map ProblemDetails qua `ToProblem()`; Application (`InvoicePaymentProcessor`, `SePayTransactionNormalizer`) sở hữu toàn bộ use case validation, chuẩn hóa, deduplicate và matching transaction.

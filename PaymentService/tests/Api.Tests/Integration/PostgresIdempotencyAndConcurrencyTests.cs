@@ -241,7 +241,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             var clock = new FakeTimeProvider(new DateTimeOffset(2026, 10, 12, 10, 0, 0, TimeSpan.Zero));
             var item = new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 4000m, 0m);
             var request = new CreateInvoiceRequest(Guid.NewGuid(), "OLD-RECEIPT", Guid.NewGuid(), "VND",
-                clock.GetUtcNow().AddMinutes(30), [item], "old-create-invoice");
+                clock.GetUtcNow().AddMinutes(30).AddTicks(3), [item], "old-create-invoice");
             var invoice = Invoice.Create(request.RentalOrderId, request.OrderCode, request.RenterId, request.Currency,
                 request.PaymentDeadline, [InvoiceItem.Create(item.RentalItemId, item.SupplierId, 4000m, 0m).Value],
                 "DPR 23456789AB", "VCB", "snapshot-account", clock.GetUtcNow()).Value;
@@ -261,7 +261,11 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
                 oldJson, invoice.InvoiceRef, invoice.RentalOrderId, clock.GetUtcNow()));
             await ctx.SaveChangesAsync();
 
-            var result = await CreateCreationService(ctx, MerchantOptions, clock).CreateInvoiceAsync(request);
+            ctx.ChangeTracker.Clear();
+            var persisted = await ctx.Invoices.AsNoTracking().SingleAsync();
+            var replayRequest = request with { PaymentDeadline = persisted.PaymentDeadline };
+            var service = CreateCreationService(ctx, MerchantOptions, clock);
+            var result = await service.CreateInvoiceAsync(replayRequest);
 
             Assert.True(result.IsSuccess);
             Assert.True(result.Value.IsReplay);
@@ -272,6 +276,12 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             Assert.Equal(invoice.PaymentCode, result.Value.TransferContent);
             Assert.Equal(Dprental.PaymentService.Common.Utils.VietQrUrlGenerator.Generate(
                 "VCB", "snapshot-account", 4000m, invoice.PaymentCode), result.Value.QrUrl);
+            var conflict = await service.CreateInvoiceAsync(replayRequest with
+            {
+                Items = [item with { RentalAmount = 5000m }]
+            });
+            Assert.True(conflict.IsFailure);
+            Assert.Equal("DUPLICATE_OPERATION_KEY", conflict.Error.Code);
             Assert.Equal(oldJson, (await ctx.OperationReceipts.SingleAsync()).ResultJson);
             Assert.Equal(1, await ctx.Invoices.CountAsync());
             Assert.Equal(1, await ctx.OperationReceipts.CountAsync());
