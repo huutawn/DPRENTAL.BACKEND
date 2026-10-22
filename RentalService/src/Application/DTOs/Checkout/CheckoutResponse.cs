@@ -3,44 +3,53 @@ using Dprental.RentalService.Domain.Entities;
 
 namespace Dprental.RentalService.Application.DTOs.Checkout;
 
-/// <summary>Đơn hàng vừa tạo (hoặc đã tạo từ lần gửi trước). Không chứa mã máy hay mã giữ lịch nội bộ.</summary>
+/// <summary>Thông tin thanh toán trả về để frontend render mã QR.</summary>
+/// <param name="InvoiceRef">Mã hóa đơn bên PaymentService.</param>
+/// <param name="Status">Trạng thái thanh toán (Pending).</param>
+/// <param name="QrUrl">Đường dẫn ảnh QR VietQR.</param>
+/// <param name="Bank">Ngân hàng thụ hưởng.</param>
+/// <param name="Account">Số tài khoản thụ hưởng.</param>
+/// <param name="TransferContent">Nội dung chuyển khoản.</param>
+public sealed record CheckoutPaymentInfoDto(
+    string InvoiceRef,
+    string Status,
+    string QrUrl,
+    string Bank,
+    string Account,
+    string TransferContent);
+
+/// <summary>Đơn hàng vừa tạo (hoặc đã tạo từ lần gửi trước).</summary>
 /// <param name="OrderId">Mã định danh duy nhất của đơn hàng.</param>
 /// <param name="OrderCode">Mã đơn hàng hiển thị cho người dùng, dạng DH-YYYY-NNNNNN.</param>
-/// <param name="Status">Trạng thái đơn hàng; đơn mới tạo là PENDING_PAYMENT.</param>
+/// <param name="Status">Trạng thái đơn hàng (PendingPayment hoặc Paid).</param>
 /// <param name="PaymentDeadline">Hạn thanh toán, cũng là hạn giữ lịch (thời điểm gửi đơn + 30 phút).</param>
-/// <param name="InvoiceRef">Mã hóa đơn bên PaymentService, dùng để thanh toán.</param>
 /// <param name="Currency">Loại tiền của đơn hàng (VND).</param>
-/// <param name="TotalRentalAmount">Tổng tiền thuê của mọi dòng.</param>
-/// <param name="TotalDepositAmount">Tổng tiền cọc của mọi dòng.</param>
-/// <param name="TotalAmount">Số tiền phải thanh toán = tổng tiền thuê + tổng tiền cọc.</param>
+/// <param name="TotalAmount">Số tiền phải thanh toán.</param>
 /// <param name="IsReplay">true khi đơn đã được tạo từ lần gửi trước với cùng Idempotency-Key.</param>
+/// <param name="Payment">Thông tin thanh toán và mã QR (null khi đơn có tổng tiền bằng 0).</param>
 public sealed record CheckoutResponse(
     Guid OrderId,
     string OrderCode,
-    RentalOrderStatus Status,
+    string Status,
     DateTimeOffset PaymentDeadline,
-    string? InvoiceRef,
     string Currency,
-    decimal TotalRentalAmount,
-    decimal TotalDepositAmount,
     decimal TotalAmount,
-    bool IsReplay)
+    bool IsReplay,
+    CheckoutPaymentInfoDto? Payment = null)
 {
-    public static CheckoutResponse From(RentalOrder order, bool isReplay)
+    public static CheckoutResponse From(RentalOrder order, bool isReplay, CheckoutPaymentInfoDto? payment = null)
     {
         ArgumentNullException.ThrowIfNull(order);
 
         return new(
             order.Id,
             order.OrderCode,
-            order.Status,
+            order.Status.ToString(),
             order.PaymentDeadline,
-            order.InvoiceRef,
             order.Currency,
-            order.TotalRentalAmount,
-            order.TotalDepositAmount,
             order.TotalPayableAmount,
-            isReplay);
+            isReplay,
+            payment);
     }
 }
 

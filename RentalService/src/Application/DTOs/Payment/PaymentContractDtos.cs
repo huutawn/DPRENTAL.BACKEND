@@ -97,6 +97,11 @@ public sealed record CreateInvoiceResponse(
     decimal TotalAmount,
     [Required] string Currency,
     DateTimeOffset PaymentDeadline,
+    [Required] string Status,
+    string? QrUrl,
+    string? Bank,
+    string? Account,
+    string? TransferContent,
     bool IsReplay);
 
 // 2. Cancel Invoice

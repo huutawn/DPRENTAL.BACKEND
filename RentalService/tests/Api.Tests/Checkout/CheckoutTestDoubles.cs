@@ -91,6 +91,25 @@ internal static class CheckoutTestOrders
     }
 }
 
+/// <summary>Sổ địa chỉ giả cho test checkout: chỉ trả địa chỉ đúng của người thuê đã hỏi.</summary>
+internal sealed class FakeRenterAddressRepository : IRenterAddressRepository
+{
+    public List<RenterAddress> Addresses { get; } = [];
+
+    public Task<RenterAddress?> GetByIdAsync(Guid renterId, Guid addressId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Addresses.FirstOrDefault(a => a.Id == addressId && a.RenterId == renterId));
+
+    public Task<IReadOnlyList<RenterAddress>> ListByRenterAsync(Guid renterId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<RenterAddress>>(Addresses.Where(a => a.RenterId == renterId).ToList());
+
+    public Task<IReadOnlyList<RenterAddress>> ListForUpdateAsync(Guid renterId, CancellationToken cancellationToken = default) =>
+        ListByRenterAsync(renterId, cancellationToken);
+
+    public void Add(RenterAddress address) => Addresses.Add(address);
+
+    public void Remove(RenterAddress address) => Addresses.Remove(address);
+}
+
 internal sealed class FakeCartRepository : IRentalCartRepository
 {
     public RentalCart? Cart { get; set; }

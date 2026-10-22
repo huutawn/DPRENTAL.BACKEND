@@ -768,7 +768,14 @@ public sealed class RentalOperationExecutorAdvancedTests
     private sealed class FakeInvoiceIssuer : ICheckoutInvoiceIssuer
     {
         public Func<RentalOrder, Task<Result>>? Handler { get; set; }
-        public Task<Result> EnsureInvoiceAsync(RentalOrder order, CancellationToken cancellationToken = default) =>
-            Handler != null ? Handler(order) : Task.FromResult(Result.Success());
+        public async Task<Result<CreateInvoiceResponse>> EnsureInvoiceAsync(RentalOrder order, CancellationToken cancellationToken = default)
+        {
+            if (Handler != null)
+            {
+                var res = await Handler(order);
+                if (res.IsFailure) return res.Error;
+            }
+            return new CreateInvoiceResponse("INV-TEST", order.TotalPayableAmount, order.Currency, order.PaymentDeadline, "Pending", "https://qr", "Bank", "Account", "ORD", false);
+        }
     }
 }

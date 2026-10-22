@@ -12,10 +12,6 @@ namespace Dprental.RentalService.Api.Controllers;
 /// <summary>
 /// Quản trị số liệu thống kê xác nhận của Nhà cung cấp (Supplier Confirmation Statistics).
 /// </summary>
-/// <remarks>
-/// Cung cấp endpoint dành riêng cho Quản trị viên (Admin) để theo dõi và đánh giá hiệu suất phản hồi đơn thuê của Supplier
-/// (số lượng chấp nhận, từ chối, quá hạn xác nhận, hủy sau khi chấp nhận) dựa trên lịch sử chuyển trạng thái trong RentalService.
-/// </remarks>
 [ApiController]
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 [Authorize]
@@ -37,17 +33,6 @@ public sealed class AdminSupplierStatisticsController : ControllerBase
     /// <summary>
     /// Thống kê số lượng xác nhận của Supplier theo khoảng thời gian.
     /// </summary>
-    /// <remarks>
-    /// Trả về số liệu thống kê các quyết định của Supplier trong khoảng thời gian chỉ định:
-    /// - <c>AcceptedCount</c>: Số lượng mục thuê Supplier đã chấp nhận (chuyển sang AWAITING_HANDOVER, IN_RENTAL, COMPLETED, v.v.).
-    /// - <c>RejectedCount</c>: Số lượng mục thuê Supplier đã chủ động từ chối (REJECTED).
-    /// - <c>ConfirmationTimeoutCount</c>: Số lượng mục thuê bị hệ thống tự động hủy do Supplier quá hạn phản hồi (EXPIRED).
-    /// - <c>CancelAfterAcceptCount</c>: Số lượng mục thuê bị hủy sau khi Supplier đã chấp nhận.
-    /// <para>Đếm từng RentalItem theo lịch sử chuyển trạng thái, không suy từ trạng thái hiện tại; phản hồi chỉ chứa số lượng, không có tỷ lệ.</para>
-    /// <para>Khoảng lọc [fromUtc, toUtc): gồm đầu, loại cuối. Cả hai tham số bắt buộc, fromUtc phải nhỏ hơn toUtc.
-    /// ISO-8601 phải có Z hoặc offset ±HH:mm (dấu + cần URL-encode thành %2B); kết quả chuẩn hóa về UTC.
-    /// Không có lịch sử phù hợp trả 200 với các số đếm bằng 0. Chỉ Admin cá nhân, từ chối Service token.</para>
-    /// </remarks>
     /// <param name="supplierId">Mã định danh duy nhất của nhà cung cấp (SupplierId dạng GUID).</param>
     /// <param name="fromUtc">Thời điểm bắt đầu khoảng thống kê theo chuẩn ISO-8601 UTC (bắt buộc, ví dụ: 2026-01-01T00:00:00Z).</param>
     /// <param name="toUtc">Thời điểm kết thúc khoảng thống kê theo chuẩn ISO-8601 UTC (bắt buộc, ví dụ: 2026-02-01T00:00:00Z).</param>

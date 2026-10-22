@@ -10,6 +10,8 @@ public interface IRenterAddressService
 {
     Task<IReadOnlyList<RenterAddressResponse>> ListAsync(Guid renterId, CancellationToken cancellationToken = default);
 
+    Task<Result<RenterAddressResponse>> GetAsync(Guid renterId, Guid addressId, CancellationToken cancellationToken = default);
+
     Task<Result<RenterAddressResponse>> CreateAsync(Guid renterId, SaveRenterAddressRequest request, CancellationToken cancellationToken = default);
 
     Task<Result<RenterAddressResponse>> UpdateAsync(Guid renterId, Guid addressId, SaveRenterAddressRequest request, CancellationToken cancellationToken = default);

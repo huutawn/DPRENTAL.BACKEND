@@ -10,6 +10,7 @@ using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Security.Jwt;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Domain.DependencyInjection;
 using Dprental.RentalService.Domain.Repositories;
 using Dprental.RentalService.Domain.Entities;
@@ -91,43 +92,54 @@ public sealed class RentalCheckoutApiTests
     }
 
     [Fact]
-    public async Task Submit_Returns202WithOperation_ThenTheSameOperationOnReplay()
+    public async Task Submit_Returns200WithOrderAndQrUrl_ThenTheSameOnReplay()
     {
         using CheckoutApiFactory factory = new();
         using HttpClient client = factory.CreateRenterClient("key-1");
 
-        using HttpResponseMessage accepted = await client.PostAsJsonAsync(Route, factory.Request());
+        using HttpResponseMessage response = await client.PostAsJsonAsync(Route, factory.Request());
 
-        Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
-        string acceptedJson = await accepted.Content.ReadAsStringAsync();
-        JsonElement operation = JsonDocument.Parse(acceptedJson).RootElement;
-        string operationId = operation.GetProperty("operationId").GetString()!;
-        string statusUrl = $"/api/v1/rental/checkout/operations/{operationId}";
-        Assert.Equal(statusUrl, operation.GetProperty("statusUrl").GetString());
-        Assert.Equal(statusUrl, accepted.Headers.Location?.OriginalString);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        string responseJson = await response.Content.ReadAsStringAsync();
+        JsonElement body = JsonDocument.Parse(responseJson).RootElement;
+        string orderId = body.GetProperty("orderId").GetString()!;
+        Assert.NotEmpty(orderId);
+        Assert.Equal("PendingPayment", body.GetProperty("status").GetString());
+        Assert.Equal("VND", body.GetProperty("currency").GetString());
+        Assert.Equal(Total, body.GetProperty("totalAmount").GetDecimal());
+        Assert.False(body.GetProperty("isReplay").GetBoolean());
 
-        // Mã máy và mã giữ lịch là dữ liệu nội bộ, không trả cho renter.
-        Assert.DoesNotContain("asset", acceptedJson, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("allocation", acceptedJson, StringComparison.OrdinalIgnoreCase);
+        JsonElement payment = body.GetProperty("payment");
+        Assert.NotEmpty(payment.GetProperty("invoiceRef").GetString()!);
+        Assert.Equal("Pending", payment.GetProperty("status").GetString());
+        Assert.NotEmpty(payment.GetProperty("qrUrl").GetString()!);
+        Assert.NotEmpty(payment.GetProperty("bank").GetString()!);
+        Assert.NotEmpty(payment.GetProperty("account").GetString()!);
+        Assert.NotEmpty(payment.GetProperty("transferContent").GetString()!);
 
         using HttpResponseMessage replayed = await client.PostAsJsonAsync(Route, factory.Request());
 
-        Assert.Equal(HttpStatusCode.Accepted, replayed.StatusCode);
-        Assert.Equal(operationId, (await ReadAsync(replayed)).GetProperty("operationId").GetString());
-
-        // Lệnh giữ lịch chỉ đi qua Outbox một lần; đơn và hóa đơn chỉ được tạo khi Inventory trả lời.
-        Assert.Single(factory.LoadCreateHoldCommands());
-        Assert.Empty(factory.Inventory.HoldRequests);
-        Assert.Empty(factory.Payment.InvoiceRequests);
+        Assert.Equal(HttpStatusCode.OK, replayed.StatusCode);
+        JsonElement replayedBody = await ReadAsync(replayed);
+        Assert.Equal(orderId, replayedBody.GetProperty("orderId").GetString());
+        Assert.True(replayedBody.GetProperty("isReplay").GetBoolean());
     }
 
     [Fact]
-    public async Task OperationStatus_IsProcessingUntilInventoryReplies_AndHiddenFromOtherRenters()
+    public async Task OperationStatus_IsProcessingUntilCompleted_AndHiddenFromOtherRenters()
     {
         using CheckoutApiFactory factory = new();
         using HttpClient client = factory.CreateRenterClient("key-1");
-        using HttpResponseMessage accepted = await client.PostAsJsonAsync(Route, factory.Request());
-        string statusUrl = (await ReadAsync(accepted)).GetProperty("statusUrl").GetString()!;
+        string operationId = CheckoutRules.DeriveOperationId(factory.RenterId, "key-1");
+        string statusUrl = $"/api/v1/rental/checkout/operations/{operationId}";
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            var op = new RentalCheckoutOperation(operationId, factory.RenterId, "fp", Guid.NewGuid(), Now.AddMinutes(30), "{}", "[]", Now);
+            context.RentalCheckoutOperations.Add(op);
+            await context.SaveChangesAsync();
+        }
 
         using HttpResponseMessage status = await client.GetAsync(statusUrl);
 
@@ -207,10 +219,14 @@ public sealed class RentalCheckoutApiTests
         using HttpClient client = factory.CreateRenterClient("key-1");
 
         // 1. Submit checkout to get accepted operation
-        using HttpResponseMessage submitResponse = await client.PostAsJsonAsync(Route, factory.Request());
-        Assert.Equal(HttpStatusCode.Accepted, submitResponse.StatusCode);
-        JsonElement submitJson = await ReadAsync(submitResponse);
-        string opId = submitJson.GetProperty("operationId").GetString()!;
+        string opId = CheckoutRules.DeriveOperationId(factory.RenterId, "key-1");
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            var op = new RentalCheckoutOperation(opId, factory.RenterId, "fp", Guid.NewGuid(), Now.AddMinutes(30), "{}", "[]", Now);
+            context.RentalCheckoutOperations.Add(op);
+            await context.SaveChangesAsync();
+        }
 
         string getRoute = $"/api/v1/rental/checkout/operations/{opId}";
 
@@ -289,7 +305,7 @@ public sealed class RentalCheckoutApiTests
         Assert.Equal("Succeeded", readyJson.GetProperty("status").GetString());
         Assert.Equal("Ready", readyJson.GetProperty("invoiceStatus").GetString());
         Assert.True(readyJson.GetProperty("readyForPayment").GetBoolean());
-        Assert.Equal("INV-HTTP-001", readyJson.GetProperty("order").GetProperty("invoiceRef").GetString());
+        Assert.Equal("INV-HTTP-001", readyJson.GetProperty("order").GetProperty("payment").GetProperty("invoiceRef").GetString());
 
         // 8. Order marked Paid -> readyForPayment: false, invoiceStatus: Ready
         using (IServiceScope scope = factory.Services.CreateScope())

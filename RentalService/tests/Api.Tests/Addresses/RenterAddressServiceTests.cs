@@ -68,6 +68,18 @@ public sealed class RenterAddressServiceTests
     }
 
     [Fact]
+    public async Task Get_ReturnsOwnAddress_AndHidesOtherRenters()
+    {
+        RenterAddressResponse address = await AddAsync(Site());
+
+        await using RentalServiceDbContext context = NewContext();
+        RenterAddressService service = CreateService(context);
+
+        Assert.Equal(address, (await service.GetAsync(_renterId, address.Id)).Value);
+        Assert.Equal(RenterAddressErrors.NotFound, (await service.GetAsync(Guid.NewGuid(), address.Id)).Error);
+    }
+
+    [Fact]
     public async Task Create_RejectsTheEleventhAddress()
     {
         for (int i = 0; i < RenterAddressService.MaxAddresses; i++)

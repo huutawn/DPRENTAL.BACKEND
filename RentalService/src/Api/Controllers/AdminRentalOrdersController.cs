@@ -11,11 +11,6 @@ namespace Dprental.RentalService.Api.Controllers;
 /// <summary>
 /// Quản trị viên (Admin) tra cứu mọi đơn thuê.
 /// </summary>
-/// <remarks>
-/// Admin tìm đơn theo mã đơn, đơn con, dòng, thiết bị, máy cụ thể, nhà cung cấp, người thuê, trạng thái và ngày đặt;
-/// xem chi tiết kèm mã nội bộ (hóa đơn, thanh toán, giữ lịch, hoàn tiền, quyết toán), máy cụ thể và lịch sử trạng thái.
-/// Chỉ Admin cá nhân; service token bị từ chối.
-/// </remarks>
 [ApiController]
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 [Authorize]
@@ -27,16 +22,6 @@ public sealed class AdminRentalOrdersController(
     /// <summary>
     /// Tìm đơn thuê.
     /// </summary>
-    /// <remarks>
-    /// - Mọi tham số đều tùy chọn và kết hợp với nhau bằng AND; không tham số nào là mọi đơn, mới nhất trước.
-    /// - <c>orderCode</c>, <c>subOrderCode</c> khớp chính xác, không phân biệt hoa thường.
-    /// - <c>rentalItemId</c>, <c>listingId</c>, <c>assetId</c>, <c>supplierId</c>, <c>itemStatus</c> phải cùng khớp trên
-    ///   một dòng: ví dụ supplierId + itemStatus=IN_RENTAL chỉ ra đơn có chính dòng của nhà cung cấp đó đang thuê.
-    /// - <c>status</c> là trạng thái đơn (<c>PAID</c>…), <c>itemStatus</c> là trạng thái dòng (<c>IN_RENTAL</c>…).
-    /// - <c>createdFrom</c> (gồm) và <c>createdTo</c> (không gồm) là thời điểm ISO 8601 bắt buộc có Z hoặc ±HH:mm
-    ///   (dấu + cần URL-encode thành %2B).
-    /// - page nhỏ hơn 1 được đổi thành 1; pageSize được giới hạn trong 1–100.
-    /// </remarks>
     /// <param name="request">Điều kiện tìm và phân trang.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <response code="200">Tìm thành công.</response>
@@ -61,12 +46,6 @@ public sealed class AdminRentalOrdersController(
     /// <summary>
     /// Chi tiết đầy đủ một đơn thuê.
     /// </summary>
-    /// <remarks>
-    /// - Toàn bộ đơn con và dòng của mọi nhà cung cấp, kèm InvoiceRef, PaymentRef, AllocationGroupId,
-    ///   InventoryConfirmationRef, RefundRef, SettlementRef và các máy cụ thể (assetId, allocationId).
-    /// - <c>history</c>: lịch sử trạng thái của đơn và từng dòng, cũ nhất trước, kèm người thực hiện và lý do.
-    /// - Số tài khoản hoàn tiền chỉ hiện 4 số cuối. Mỗi lần xem được ghi log kèm mã Admin.
-    /// </remarks>
     /// <param name="orderId">Mã định danh đơn.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <response code="200">Lấy chi tiết thành công.</response>
