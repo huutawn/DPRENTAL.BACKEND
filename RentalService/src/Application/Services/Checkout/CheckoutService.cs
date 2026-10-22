@@ -577,15 +577,6 @@ public sealed class CheckoutService : ICheckoutService
 
         var invoice = invoiceResult.Value;
 
-        if (string.IsNullOrWhiteSpace(invoice.InvoiceRef) ||
-            invoice.TotalAmount != order.TotalPayableAmount ||
-            !string.Equals(invoice.Currency, order.Currency, StringComparison.OrdinalIgnoreCase) ||
-            invoice.PaymentDeadline != order.PaymentDeadline)
-        {
-            _logger.LogError("Payment invoice không khớp dữ liệu cho order {OrderId}", order.Id);
-            return CheckoutResult.Failure(CheckoutErrors.InvoiceRejected);
-        }
-
         if (string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase))
         {
             return CheckoutResult.Failure(Error.Conflict("ORDER_ALREADY_PAID", $"Đơn hàng {order.OrderCode} đã được thanh toán."));

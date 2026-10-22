@@ -195,6 +195,16 @@ public sealed class CheckoutInvoiceIssuerTests
     }
 
     [Fact]
+    public async Task EnsureInvoice_CachedDeadlineWithSubMicrosecondTicks_ReplaysAfterDatabaseRoundtrip()
+    {
+        _payment.Tamper = invoice => invoice with { PaymentDeadline = invoice.PaymentDeadline.AddTicks(3) };
+        Assert.True((await EnsureInvoiceAsync()).IsSuccess);
+        Assert.True((await EnsureInvoiceAsync()).IsSuccess);
+        Assert.Single(_payment.InvoiceRequests);
+        Assert.Equal(1, _payment.CreatedInvoiceCount);
+    }
+
+    [Fact]
     public async Task EnsureInvoice_RetriesOnceWithTheSameOperationKey_WhenPaymentFailsTemporarily()
     {
         _payment.Failures.Enqueue(FakePaymentRentalClient.Down);

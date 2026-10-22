@@ -206,7 +206,8 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
         (string.IsNullOrWhiteSpace(order.InvoiceRef) || string.Equals(invoice.InvoiceRef, order.InvoiceRef, StringComparison.Ordinal)) &&
         invoice.TotalAmount == order.TotalPayableAmount &&
         string.Equals(invoice.Currency, order.Currency, StringComparison.OrdinalIgnoreCase) &&
-        invoice.PaymentDeadline == order.PaymentDeadline;
+        invoice.PaymentDeadline.UtcTicks / TimeSpan.TicksPerMicrosecond ==
+        order.PaymentDeadline.UtcTicks / TimeSpan.TicksPerMicrosecond;
 
     private static bool IsReady(CreateInvoiceResponse invoice, RentalOrder order) =>
         order.TotalPayableAmount == 0
