@@ -75,16 +75,10 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
                 existingReceipt,
                 "CreateInvoice",
                 fingerprint,
-                parsed => new CreateInvoiceResponse(
-                    parsed.InvoiceRef,
-                    parsed.TotalAmount,
-                    parsed.Currency,
-                    parsed.PaymentDeadline.ToUniversalTime(),
-                    IsReplay: true),
+                parsed => parsed,
                 out var replayResult))
             {
-                await _lifecycleService.EnsureExpiredIfPastDeadlineAsync(replayResult.Value.InvoiceRef, utcNow, ct);
-                return replayResult;
+                return await BuildReplayResponseAsync(replayResult.Value.InvoiceRef, utcNow, ct);
             }
 
             return replayResult;
@@ -107,16 +101,10 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
                     racedReceipt,
                     "CreateInvoice",
                     fingerprint,
-                    parsed => new CreateInvoiceResponse(
-                        parsed.InvoiceRef,
-                        parsed.TotalAmount,
-                        parsed.Currency,
-                        parsed.PaymentDeadline.ToUniversalTime(),
-                        IsReplay: true),
+                    parsed => parsed,
                     out var replayResult))
                 {
-                    await _lifecycleService.EnsureExpiredIfPastDeadlineAsync(replayResult.Value.InvoiceRef, utcNow, ct);
-                    return replayResult;
+                    return await BuildReplayResponseAsync(replayResult.Value.InvoiceRef, utcNow, ct);
                 }
 
                 return replayResult;
@@ -172,11 +160,26 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
                 outbox = PaymentOutboxFactory.CreateInvoicePaidOutboxMessage(invoice, utcNow);
             }
 
+            string? qrUrl = null;
+            if (invoice.Status == InvoiceStatus.Pending && invoice.TotalAmount > 0m)
+            {
+                qrUrl = VietQrUrlGenerator.Generate(
+                    invoice.MerchantBank,
+                    invoice.MerchantAccount,
+                    invoice.TotalAmount,
+                    invoice.PaymentCode);
+            }
+
             var response = new CreateInvoiceResponse(
                 invoice.InvoiceRef,
                 invoice.TotalAmount,
                 invoice.Currency,
                 invoice.PaymentDeadline,
+                invoice.Status.ToString(),
+                qrUrl,
+                invoice.MerchantBank,
+                invoice.MerchantAccount,
+                invoice.PaymentCode,
                 IsReplay: false);
 
             var receipt = OperationReceipt.Create(
@@ -259,16 +262,10 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
                             raced,
                             "CreateInvoice",
                             fingerprint,
-                            parsed => new CreateInvoiceResponse(
-                                parsed.InvoiceRef,
-                                parsed.TotalAmount,
-                                parsed.Currency,
-                                parsed.PaymentDeadline.ToUniversalTime(),
-                                IsReplay: true),
+                            parsed => parsed,
                             out var replayResult))
                         {
-                            await _lifecycleService.EnsureExpiredIfPastDeadlineAsync(replayResult.Value.InvoiceRef, utcNow, ct);
-                            return replayResult;
+                            return await BuildReplayResponseAsync(replayResult.Value.InvoiceRef, utcNow, ct);
                         }
 
                         return replayResult;
@@ -292,5 +289,41 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
         }
 
         return Error.Failure("PAYMENT_CODE_COLLISION_EXHAUSTED", "Không thể sinh mã thanh toán duy nhất sau 5 lần thử.");
+    }
+
+    private async Task<Result<CreateInvoiceResponse>> BuildReplayResponseAsync(
+        string invoiceRef,
+        DateTimeOffset utcNow,
+        CancellationToken ct)
+    {
+        await _lifecycleService.EnsureExpiredIfPastDeadlineAsync(invoiceRef, utcNow, ct);
+        var currentInvoice = await _repository.GetInvoiceSnapshotAsync(invoiceRef, ct);
+        if (currentInvoice is null)
+        {
+            return Error.NotFound("INVOICE_NOT_FOUND", "Hóa đơn không tồn tại.");
+        }
+
+        string currentStatus = currentInvoice.Status.ToString();
+        string? currentQrUrl = null;
+        if (currentInvoice.Status == InvoiceStatus.Pending && currentInvoice.TotalAmount > 0m && utcNow < currentInvoice.PaymentDeadline)
+        {
+            currentQrUrl = VietQrUrlGenerator.Generate(
+                currentInvoice.MerchantBank,
+                currentInvoice.MerchantAccount,
+                currentInvoice.TotalAmount,
+                currentInvoice.PaymentCode);
+        }
+
+        return Result.Success(new CreateInvoiceResponse(
+            currentInvoice.InvoiceRef,
+            currentInvoice.TotalAmount,
+            currentInvoice.Currency,
+            currentInvoice.PaymentDeadline.ToUniversalTime(),
+            currentStatus,
+            currentQrUrl,
+            currentInvoice.MerchantBank,
+            currentInvoice.MerchantAccount,
+            currentInvoice.PaymentCode,
+            IsReplay: true));
     }
 }
