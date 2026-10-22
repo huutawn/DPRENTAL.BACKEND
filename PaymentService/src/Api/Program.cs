@@ -13,11 +13,13 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Dprental.PaymentService.Application.Hub.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddPaymentDomainPersistence(builder.Configuration.GetConnectionString("Postgres")!);
 builder.Services.AddPaymentApplication(builder.Configuration);
+builder.Services.AddPaymentHub(builder.Configuration);
 builder.Services.AddHttpClient<ITransactionIntegrityChecker, IntegrityHostClient>((sp, client) =>
 {
     string hostUrl = builder.Configuration["IntegrityHost:BaseUrl"]
@@ -240,6 +242,7 @@ if (hasProxyConfig)
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UsePaymentHubOriginGuard();
 HealthCheckOptions livenessOptions = new()
 {
     Predicate = _ => false,
@@ -255,6 +258,7 @@ HealthCheckOptions readinessOptions = new()
 app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
 
 app.MapControllers();
+app.MapPaymentHub();
 
 // Eager validation of encryption key at startup
 using (var scope = app.Services.CreateScope())

@@ -134,6 +134,7 @@ không trả exception message hoặc payload; request bị hủy không chuyể
 
 SePay gửi webhook JSON với các trường: `id`, `gateway`, `transactionDate`, `accountNumber`, `subAccount`, `code`, `content`, `transferType`, `description`, `transferAmount`, `accumulated`, `referenceCode`.
 
+- **Nhận diện mã thanh toán:** Ưu tiên mã hợp lệ trong `description`. Nếu không tìm thấy mã, dùng quy tắc đối chiếu `code` và `content` hiện có. Nếu `description` chứa nhiều mã khác nhau, giao dịch cần kiểm tra thủ công (`REVIEW_REQUIRED`), không fallback và không phát `InvoicePaid`.
 - **Chuẩn hóa thời gian:** `transactionDate` theo giờ Việt Nam (UTC+7) được chuẩn hóa sang UTC. Giữ riêng thời điểm giao dịch ngân hàng (`TransactionDate`) và thời điểm hệ thống xử lý sau khi lấy khóa (`ProcessedAt`).
 - **Phân loại giao dịch:**
   - `MATCHED`: Tiền vào (`transferType = "in"`), mã thanh toán khớp duy nhất, số tiền khớp đúng `TotalAmount`, tài khoản khớp cấu hình/snapshot, còn hạn -> Hóa đơn chuyển `PAID` và phát 1 sự kiện Outbox `InvoicePaid`.

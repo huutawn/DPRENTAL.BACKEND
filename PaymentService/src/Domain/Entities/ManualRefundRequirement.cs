@@ -35,11 +35,20 @@ public sealed class ManualRefundRequirement
         foreach (var item in items) item.AssignRequirement(id);
         return new ManualRefundRequirement
         {
-            Id = id, RequirementRef = $"MRF-{id:N}", InvoiceId = invoiceId, RenterId = renterId,
-            PaymentRef = paymentRef, OperationKey = operationKey, Reason = reason, Kind = kind,
-            SettlementId = settlementId, RentalItemId = items.Count == 1 ? items[0].RentalItemId : null,
-            Amount = items.Sum(x => x.RentalAmount + x.DepositAmount), Items = items.ToList(),
-            Status = ManualRefundStatus.PendingManualRefund, CreatedAt = now.ToUniversalTime()
+            Id = id,
+            RequirementRef = $"MRF-{id:N}",
+            InvoiceId = invoiceId,
+            RenterId = renterId,
+            PaymentRef = paymentRef,
+            OperationKey = operationKey,
+            Reason = reason,
+            Kind = kind,
+            SettlementId = settlementId,
+            RentalItemId = items.Count == 1 ? items[0].RentalItemId : null,
+            Amount = items.Sum(x => x.RentalAmount + x.DepositAmount),
+            Items = items.ToList(),
+            Status = ManualRefundStatus.PendingManualRefund,
+            CreatedAt = now.ToUniversalTime()
         };
     }
 

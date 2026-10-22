@@ -23,6 +23,7 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
     private readonly IOptionsMonitor<SePayOptions> _sePayOptions;
     private readonly IPaymentDataEncryptor _encryptor;
     private readonly TimeProvider _timeProvider;
+    private readonly Dprental.PaymentService.Application.Hub.IPaymentHubNotifier? _notifier;
 
     public InvoicePaymentProcessor(
         IInvoiceRepository repository,
@@ -30,7 +31,8 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
         IOptionsMonitor<SePayOptions> sePayOptions,
         ITransactionJournalRepository? journalRepository,
         IPaymentDataEncryptor encryptor,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Dprental.PaymentService.Application.Hub.IPaymentHubNotifier? notifier = null)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _journalRepository = journalRepository;
@@ -38,6 +40,7 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
         _merchantOptions = merchantOptions ?? throw new ArgumentNullException(nameof(merchantOptions));
         _sePayOptions = sePayOptions ?? throw new ArgumentNullException(nameof(sePayOptions));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _notifier = notifier;
     }
 
 
@@ -223,6 +226,11 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
             // 8. Persist atomically and commit
             await _repository.SavePaymentTransactionAsync(pt, invoiceToPersist, outbox, bankJournal, invoiceJournal, cancellationToken);
             await tx.CommitAsync(cancellationToken);
+            if (_notifier is not null && classification.Status == PaymentTransactionStatus.Matched && invoiceToPersist is not null && invoiceJournal is not null)
+            {
+                await _notifier.NotifyPaymentCompletedAsync(
+                    invoiceToPersist.RenterId, invoiceJournal.EventId, invoiceToPersist, cancellationToken);
+            }
             return Result.Success();
         }
         catch (StorageConstraintViolationException ex)
@@ -286,7 +294,7 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
         NormalizedBankTransaction transaction,
         CancellationToken ct)
     {
-        var extraction = PaymentCodeExtractor.Extract(transaction.Code, transaction.Content);
+        var extraction = PaymentCodeExtractor.Extract(transaction.Code, transaction.Content, transaction.Description);
         if (extraction.Status != CodeExtractionStatus.SingleMatch)
         {
             return (extraction, null);

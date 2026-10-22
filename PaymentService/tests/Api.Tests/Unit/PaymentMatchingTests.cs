@@ -108,6 +108,63 @@ public sealed class PaymentMatchingTests
             ReferenceCode: $"REF-{id}");
     }
 
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData(AnotherValidCode, AnotherValidCode)]
+    [InlineData("invalid", "no payment code")]
+    public async Task ProcessAsync_DescriptionCodeTakesPriority_MarksPaidAndCreatesOutbox(string? code, string? content)
+    {
+        var invoice = CreatePendingInvoice();
+        var (processor, repo) = CreateProcessor(invoice);
+        var payload = CreateTx(code: code, content: content) with
+        {
+            Description = $"Thanh toan {ValidCode} chuyen khoan"
+        };
+
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(InvoiceStatus.Paid, invoice.Status);
+        Assert.Equal(PaymentTransactionStatus.Matched, repo.SavedTransaction!.Status);
+        Assert.Equal("InvoicePaid", repo.SavedOutbox!.MessageType);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("Khong co ma")]
+    [InlineData("DPR invalid")]
+    public async Task ProcessAsync_DescriptionWithoutValidCode_FallsBackToContent(string? description)
+    {
+        var invoice = CreatePendingInvoice();
+        var (processor, repo) = CreateProcessor(invoice);
+        var payload = CreateTx(code: null) with { Description = description };
+
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(InvoiceStatus.Paid, invoice.Status);
+        Assert.Equal(PaymentTransactionStatus.Matched, repo.SavedTransaction!.Status);
+        Assert.Equal("InvoicePaid", repo.SavedOutbox!.MessageType);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_AmbiguousDescription_DoesNotFallBackOrCreateOutbox()
+    {
+        var invoice = CreatePendingInvoice();
+        var (processor, repo) = CreateProcessor(invoice);
+        var payload = CreateTx() with { Description = $"{ValidCode} {AnotherValidCode}" };
+
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(PaymentTransactionStatus.ReviewRequired, repo.SavedTransaction!.Status);
+        Assert.Equal(PaymentTransactionReason.AmbiguousPaymentCode, repo.SavedTransaction.ReasonCode);
+        Assert.Equal(InvoiceStatus.Pending, invoice.Status);
+        Assert.Null(repo.SavedOutbox);
+    }
+
     [Fact]
     public async Task ProcessAsync_NullPayload_ReturnsValidationError_DoesNotCallRepository()
     {

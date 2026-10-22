@@ -16,7 +16,7 @@ public static class PaymentCodeExtractor
     private const string CodePrefix = "DPR ";
     private const int FullCodeLength = 14;
 
-    public static CodeExtractionResult Extract(string? codeField, string? contentField)
+    public static CodeExtractionResult Extract(string? codeField, string? contentField, string? descriptionField)
     {
         string? validCodeFromField = null;
         bool hasInvalidCodeField = false;
@@ -35,36 +35,18 @@ public static class PaymentCodeExtractor
             }
         }
 
-        var contentCodes = new HashSet<string>(StringComparer.Ordinal);
-        if (!string.IsNullOrEmpty(contentField))
+        var descriptionCodes = FindCodes(descriptionField);
+        if (descriptionCodes.Count > 1)
         {
-            int startIndex = 0;
-            while (startIndex <= contentField.Length - FullCodeLength)
-            {
-                int prefixIndex = contentField.IndexOf(CodePrefix, startIndex, StringComparison.Ordinal);
-                if (prefixIndex < 0 || prefixIndex + FullCodeLength > contentField.Length)
-                {
-                    break;
-                }
-
-                // Check boundary before: must be start of string or whitespace
-                bool beforeOk = prefixIndex == 0 || char.IsWhiteSpace(contentField[prefixIndex - 1]);
-                // Check boundary after: must be end of string or whitespace
-                bool afterOk = prefixIndex + FullCodeLength == contentField.Length ||
-                               char.IsWhiteSpace(contentField[prefixIndex + FullCodeLength]);
-
-                if (beforeOk && afterOk)
-                {
-                    string candidate = contentField.Substring(prefixIndex, FullCodeLength);
-                    if (PaymentCodeGenerator.IsValid(candidate))
-                    {
-                        contentCodes.Add(candidate);
-                    }
-                }
-
-                startIndex = prefixIndex + 1;
-            }
+            return new CodeExtractionResult(CodeExtractionStatus.Ambiguous, null);
         }
+
+        if (descriptionCodes.Count == 1)
+        {
+            return new CodeExtractionResult(CodeExtractionStatus.SingleMatch, descriptionCodes.Single());
+        }
+
+        var contentCodes = FindCodes(contentField);
 
         // If multiple distinct codes found in content -> Ambiguous
         if (contentCodes.Count > 1)
@@ -109,5 +91,41 @@ public static class PaymentCodeExtractor
         }
 
         return new CodeExtractionResult(CodeExtractionStatus.Missing, null);
+    }
+
+    private static HashSet<string> FindCodes(string? text)
+    {
+        var codes = new HashSet<string>(StringComparer.Ordinal);
+        if (!string.IsNullOrEmpty(text))
+        {
+            int startIndex = 0;
+            while (startIndex <= text.Length - FullCodeLength)
+            {
+                int prefixIndex = text.IndexOf(CodePrefix, startIndex, StringComparison.Ordinal);
+                if (prefixIndex < 0 || prefixIndex + FullCodeLength > text.Length)
+                {
+                    break;
+                }
+
+                // Check boundary before: must be start of string or whitespace
+                bool beforeOk = prefixIndex == 0 || char.IsWhiteSpace(text[prefixIndex - 1]);
+                // Check boundary after: must be end of string or whitespace
+                bool afterOk = prefixIndex + FullCodeLength == text.Length ||
+                               char.IsWhiteSpace(text[prefixIndex + FullCodeLength]);
+
+                if (beforeOk && afterOk)
+                {
+                    string candidate = text.Substring(prefixIndex, FullCodeLength);
+                    if (PaymentCodeGenerator.IsValid(candidate))
+                    {
+                        codes.Add(candidate);
+                    }
+                }
+
+                startIndex = prefixIndex + 1;
+            }
+        }
+
+        return codes;
     }
 }

@@ -23,7 +23,9 @@ public sealed partial class ManualRefundService(
             return Error.Validation("Payment.InvalidRefundConfirmation", "Valid requirement, transfer reference and OperationKey are required.");
         string fingerprint = CanonicalJournalHasher.ComputeOutboxDigest(JsonSerializer.Serialize(new
         {
-            RequirementId = requirementId, Reference = request.ExternalTransferReference.Trim(), AdminId = adminId
+            RequirementId = requirementId,
+            Reference = request.ExternalTransferReference.Trim(),
+            AdminId = adminId
         }));
         var stored = await invoices.GetOperationReceiptAsync(request.OperationKey.Trim(), ct);
         if (stored is not null) return ReadReplay<CompleteManualRefundResponse>(stored, "ConfirmManualRefund", fingerprint,

@@ -22,8 +22,11 @@ public sealed class SettlementService(
         if (validation.IsFailure) return validation.Error;
         string fingerprint = CanonicalJournalHasher.ComputeOutboxDigest(JsonSerializer.Serialize(request with
         {
-            InvoiceRef = request.InvoiceRef.Trim(), PaymentRef = request.PaymentRef.Trim(),
-            DecisionRef = request.DecisionRef.Trim(), OperationKey = request.OperationKey.Trim(), Currency = "VND"
+            InvoiceRef = request.InvoiceRef.Trim(),
+            PaymentRef = request.PaymentRef.Trim(),
+            DecisionRef = request.DecisionRef.Trim(),
+            OperationKey = request.OperationKey.Trim(),
+            Currency = "VND"
         }));
         var replay = await invoices.GetOperationReceiptAsync(request.OperationKey.Trim(), ct);
         if (replay is not null) return Replay(replay, fingerprint);

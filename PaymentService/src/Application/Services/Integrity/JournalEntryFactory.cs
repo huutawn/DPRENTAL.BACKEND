@@ -117,7 +117,8 @@ public static class JournalEntryFactory
             actor, now, previous?.EntryHash ?? CanonicalJournalHasher.GenesisHash, encryptor,
             relatedEntities: new Dictionary<string, string?>
             {
-                ["invoiceRef"] = invoice.InvoiceRef, ["paymentRef"] = invoice.PaymentRef,
+                ["invoiceRef"] = invoice.InvoiceRef,
+                ["paymentRef"] = invoice.PaymentRef,
                 ["rentalOrderId"] = invoice.RentalOrderId.ToString("D")
             }, entityClaims: claims, outboxDigest: message is null ? null : CanonicalJournalHasher.ComputeOutboxDigest(message.Payload),
             outboxMessageId: message?.MessageId, paymentRef: invoice.PaymentRef,

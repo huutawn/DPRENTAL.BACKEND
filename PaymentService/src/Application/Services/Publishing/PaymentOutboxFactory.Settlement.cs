@@ -54,15 +54,28 @@ internal static partial class PaymentOutboxFactory
         Guid id = Guid.NewGuid();
         var payload = new
         {
-            invoice.RentalOrderId, invoice.InvoiceRef, invoice.PaymentRef,
-            RefundRef = refund.RequirementRef, refund.OperationKey,
-            TotalRefundedAmount = refund.Amount, invoice.Currency,
+            invoice.RentalOrderId,
+            invoice.InvoiceRef,
+            invoice.PaymentRef,
+            RefundRef = refund.RequirementRef,
+            refund.OperationKey,
+            TotalRefundedAmount = refund.Amount,
+            invoice.Currency,
             Items = refund.Items.Select(x => new { x.RentalItemId, RefundedRentalAmount = x.RentalAmount, RefundedDepositAmount = x.DepositAmount }),
             CompletedAt = now
         };
-        var envelope = new { MessageId = id, MessageType = "RefundCompleted", Version = 1,
-            Producer = "payment-service", AggregateId = invoice.RentalOrderId.ToString("D"), OccurredAt = now,
-            CorrelationId = refund.OperationKey, CausationId = (Guid?)null, Payload = payload };
+        var envelope = new
+        {
+            MessageId = id,
+            MessageType = "RefundCompleted",
+            Version = 1,
+            Producer = "payment-service",
+            AggregateId = invoice.RentalOrderId.ToString("D"),
+            OccurredAt = now,
+            CorrelationId = refund.OperationKey,
+            CausationId = (Guid?)null,
+            Payload = payload
+        };
         return OutboxMessage.Create(id, "RefundCompleted", "RentalOrder", envelope.AggregateId,
             JsonSerializer.Serialize(envelope, JsonOptions), now);
     }

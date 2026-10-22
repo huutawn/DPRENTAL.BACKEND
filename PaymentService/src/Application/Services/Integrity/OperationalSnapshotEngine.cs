@@ -131,7 +131,8 @@ public static class OperationalSnapshotEngine
             ["operationKey"] = refund.OperationKey,
             ["items"] = JsonSerializer.Serialize(refund.Items.OrderBy(x => x.RentalItemId).Select(x => new
             {
-                x.RentalItemId, RentalAmount = CanonicalJournalCodec.FormatVndAmount(x.RentalAmount),
+                x.RentalItemId,
+                RentalAmount = CanonicalJournalCodec.FormatVndAmount(x.RentalAmount),
                 DepositAmount = CanonicalJournalCodec.FormatVndAmount(x.DepositAmount)
             })),
             ["status"] = refund.Status.ToString(),

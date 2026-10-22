@@ -24,6 +24,7 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
     private readonly IPaymentDataEncryptor _encryptor;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<InvoiceCreationService>? _logger;
+    private readonly Dprental.PaymentService.Application.Hub.IPaymentHubNotifier? _notifier;
 
     public InvoiceCreationService(
         IInvoiceRepository repository,
@@ -31,7 +32,8 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
         IInvoiceLifecycleService lifecycleService,
         IPaymentDataEncryptor encryptor,
         TimeProvider? timeProvider = null,
-        ILogger<InvoiceCreationService>? logger = null)
+        ILogger<InvoiceCreationService>? logger = null,
+        Dprental.PaymentService.Application.Hub.IPaymentHubNotifier? notifier = null)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _merchantOptions = merchantOptions ?? throw new ArgumentNullException(nameof(merchantOptions));
@@ -39,6 +41,7 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
         _encryptor = encryptor ?? throw new ArgumentNullException(nameof(encryptor));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
+        _notifier = notifier;
     }
 
     public async Task<Result<CreateInvoiceResponse>> CreateInvoiceAsync(
@@ -240,6 +243,10 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
             {
                 await _repository.SaveNewInvoiceAsync(invoice, receipt, outbox, journalEntry, ct);
                 await tx.CommitAsync(ct);
+                if (_notifier is not null && invoice.TotalAmount == 0m)
+                {
+                    await _notifier.NotifyPaymentCompletedAsync(invoice.RenterId, eventId, invoice, ct);
+                }
 
                 return Result.Success(response);
             }

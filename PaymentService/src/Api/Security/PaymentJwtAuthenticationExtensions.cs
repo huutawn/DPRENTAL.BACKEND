@@ -64,7 +64,19 @@ public static class PaymentJwtAuthenticationExtensions
                         if (context.Request.Path.StartsWithSegments("/api/v1/payment/webhooks", StringComparison.OrdinalIgnoreCase))
                         {
                             context.NoResult();
+                            return Task.CompletedTask;
                         }
+
+                        if (context.Request.Path.StartsWithSegments("/hubs/payments", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (string.IsNullOrWhiteSpace(context.Token) &&
+                                context.Request.Cookies.TryGetValue(Dprental.PaymentService.Application.Hub.Security.PaymentHubSecurityConstants.AccessTokenCookieName, out string? cookieToken) &&
+                                !string.IsNullOrWhiteSpace(cookieToken))
+                            {
+                                context.Token = cookieToken;
+                            }
+                        }
+
                         return Task.CompletedTask;
                     }
                 };

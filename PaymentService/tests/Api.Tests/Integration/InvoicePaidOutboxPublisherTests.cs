@@ -266,9 +266,9 @@ public class InvoicePaidOutboxPublisherTests
                 var msg = CreateOutbox("InvoicePaid", orderId, FixedNow.AddMinutes(-10 + i));
                 await using var ctx = new PaymentServiceDbContext(options);
                 ctx.OutboxMessages.Add(msg);
-                    var journal = AddConfirmedJournal(ctx, msg, harness);
+                var journal = AddConfirmedJournal(ctx, msg, harness);
                 await ctx.SaveChangesAsync();
-                    await harness.RecordJournalAttestationAsync(journal);
+                await harness.RecordJournalAttestationAsync(journal);
             }
 
             var worker1 = new InvoicePaidOutboxPublisherWorker(
