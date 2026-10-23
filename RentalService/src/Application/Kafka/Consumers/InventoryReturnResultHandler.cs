@@ -87,7 +87,7 @@ public sealed class InventoryReturnResultHandler(
         {
             var published = await rentalEvents.EnqueueRentalItemReturnedAsync(
                 new RentalItemReturnedPayload(order.Id, item.Id, order.RenterId, item.SupplierId,
-                    item.EquipmentListingId, item.Quantity, item.ReturnsCompletedAt ?? now),
+                    item.EquipmentListingId, item.Quantity, item.ReturnsCompletedAt ?? now, order.Version),
                 correlationId: order.Id.ToString("D"), causationId: envelope.MessageId, cancellationToken: ct);
             if (published.IsFailure) return published.Error;
         }

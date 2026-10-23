@@ -205,51 +205,49 @@ public sealed partial class RentalOperationExecutor
         // 5. Chỉ đánh dấu Cancelled sau khi invoice đã hủy (hoặc không có) và mọi release đã được enqueue.
         // Inventory xác nhận bất đồng bộ; trạng thái assignment vẫn được giữ cho đến callback thành công.
         utcNow = _timeProvider.GetUtcNow();
-        order.MarkCancelled(utcNow, normalizedKey, normalizedReason, renterId, ActorRole.Renter);
-        order.RecordReadModelUpdate(utcNow);
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            order.MarkCancelled(utcNow, normalizedKey, normalizedReason, renterId, ActorRole.Renter);
+            order.RecordReadModelUpdate(utcNow);
 
-        var response = new CancelOrderResponse(order.Id, order.OrderCode, order.Status.ToString(), utcNow);
+            var response = new CancelOrderResponse(order.Id, order.OrderCode, order.Status.ToString(), utcNow);
 
-        order.AddOperationReceipt(new RentalOperationReceipt(
-            Guid.NewGuid(),
-            order.Id,
-            normalizedKey,
-            CancelOrderAction,
-            fingerprint,
-            isSuccess: true,
-            errorCode: null,
-            errorMessage: null,
-            createdAt: utcNow,
-            status: RentalOperationReceipt.StatusSucceeded,
-            completedAt: utcNow,
-            apiResponseJson: JsonSerializer.Serialize(response, JsonOptions)));
+            order.AddOperationReceipt(new RentalOperationReceipt(
+                Guid.NewGuid(),
+                order.Id,
+                normalizedKey,
+                CancelOrderAction,
+                fingerprint,
+                isSuccess: true,
+                errorCode: null,
+                errorMessage: null,
+                createdAt: utcNow,
+                status: RentalOperationReceipt.StatusSucceeded,
+                completedAt: utcNow,
+                apiResponseJson: JsonSerializer.Serialize(response, JsonOptions)));
 
-        var envelope = new KafkaMessageEnvelope<RentalOrderCancelledPayload>(
-            OutboxMessageIdGenerator.ComputeDeterministicId(
-                KafkaContractSpec.Producers.RentalService,
-                KafkaContractSpec.EventTypes.RentalOrderCancelled,
-                normalizedKey),
-            KafkaContractSpec.EventTypes.RentalOrderCancelled,
-            1,
-            KafkaContractSpec.Producers.RentalService,
-            order.Id.ToString("D"),
-            utcNow,
-            normalizedKey,
-            null,
-            new RentalOrderCancelledPayload(order.Id, order.RenterId, utcNow, normalizedReason));
+            var cancelOrderRes = await _rentalEvents.EnqueueRentalOrderCancelledAsync(
+                new RentalOrderCancelledPayload(order.Id, order.RenterId, utcNow, KafkaContractSpec.ReasonCodes.RenterCancelled, order.Version),
+                correlationId: normalizedKey,
+                cancellationToken: cancellationToken);
+            if (cancelOrderRes.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return cancelOrderRes.Error;
+            }
 
-        await _outboxRepository.AddAsync(
-            new RentalOutboxMessage(
-                envelope.MessageId,
-                _rentalEventsTopic,
-                order.Id.ToString("D"),
-                KafkaContractSpec.EventTypes.RentalOrderCancelled,
-                JsonSerializer.Serialize(envelope, JsonOptions),
-                utcNow),
-            cancellationToken);
-
-        await CommitLocalChangesAsync(order, cancellationToken);
-        return response;
+            await CommitLocalChangesAsync(order, cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            return response;
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
+            throw;
+        }
     }
 
     /// <summary>

@@ -123,12 +123,11 @@ public sealed class ReturnService(
                 return enqueueResult.Error;
             }
 
-            var returnedEvent = await rentalEvents.EnqueueDomainEventAsync(
-                KafkaContractSpec.EventTypes.RentalUnitsReturned, recorded.Value.Id.ToString("D"),
-                order.Id.ToString("D"), now,
+            var returnedEvent = await rentalEvents.EnqueueRentalUnitsReturnedAsync(
                 new RentalUnitsReturnedPayload(order.Id, item.Id, recorded.Value.Id,
                     request.ActualReturnAt.ToUniversalTime(), now,
-                    request.Units.Select(u => u.RentalUnitAssignmentId).ToArray()),
+                    request.Units.Select(u => u.RentalUnitAssignmentId).ToArray(),
+                    order.Version),
                 correlationId: key, cancellationToken: cancellationToken);
             if (returnedEvent.IsFailure)
             {

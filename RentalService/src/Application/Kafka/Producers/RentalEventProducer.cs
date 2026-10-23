@@ -80,6 +80,10 @@ public sealed class RentalEventProducer : IRentalEventProducer
             return Error.Validation("INVALID_RENTAL_ORDER_ID", "RentalOrderId cannot be empty.");
         }
 
+        if (payload.OrderVersion <= 0)
+        {
+            return Error.Validation("INVALID_ORDER_VERSION", "OrderVersion must be a positive integer.");
+        }
         if (string.IsNullOrWhiteSpace(payload.OrderCode))
         {
             return Error.Validation("INVALID_ORDER_CODE", "OrderCode cannot be empty.");
@@ -172,9 +176,8 @@ public sealed class RentalEventProducer : IRentalEventProducer
     {
         if (payload == null || payload.RentalOrderId == Guid.Empty || payload.RenterId == Guid.Empty ||
             string.IsNullOrWhiteSpace(payload.InvoiceRef) || string.IsNullOrWhiteSpace(payload.PaymentRef) ||
-            payload.PaidAmount < 0 || payload.PaidAt == default)
+            payload.PaidAmount < 0 || payload.PaidAt == default || payload.OrderVersion <= 0)
             return Error.Validation("INVALID_PAYLOAD", "RentalOrderPaid payload is incomplete or invalid.");
-
         DateTimeOffset occurredAt = payload.PaidAt;
         string operationId = $"{payload.RentalOrderId:D}:{payload.PaymentRef}";
         Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
@@ -197,9 +200,8 @@ public sealed class RentalEventProducer : IRentalEventProducer
         Guid? causationId = null,
         CancellationToken cancellationToken = default)
     {
-        if (payload == null || payload.RentalOrderId == Guid.Empty || payload.RenterId == Guid.Empty || payload.CompletedAt == default)
+        if (payload == null || payload.RentalOrderId == Guid.Empty || payload.RenterId == Guid.Empty || payload.CompletedAt == default || payload.OrderVersion <= 0)
             return Error.Validation("INVALID_PAYLOAD", "RentalOrderCompleted payload is incomplete or invalid.");
-
         string operationId = payload.RentalOrderId.ToString("D");
         Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
             KafkaContractSpec.Producers.RentalService,
@@ -233,7 +235,8 @@ public sealed class RentalEventProducer : IRentalEventProducer
             return Error.Validation("INVALID_ORDER_ID", "RentalOrderId cannot be empty.");
         if (payload.RentalItemId == Guid.Empty)
             return Error.Validation("INVALID_ITEM_ID", "RentalItemId cannot be empty.");
-
+        if (payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_ORDER_VERSION", "OrderVersion must be a positive integer.");
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
             KafkaContractSpec.Producers.RentalService,
@@ -275,7 +278,8 @@ public sealed class RentalEventProducer : IRentalEventProducer
             return Error.Validation("INVALID_ORDER_ID", "RentalOrderId cannot be empty.");
         if (payload.RentalItemId == Guid.Empty)
             return Error.Validation("INVALID_ITEM_ID", "RentalItemId cannot be empty.");
-
+        if (payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_ORDER_VERSION", "OrderVersion must be a positive integer.");
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
             KafkaContractSpec.Producers.RentalService,
@@ -307,9 +311,8 @@ public sealed class RentalEventProducer : IRentalEventProducer
     {
         if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RentalItemId == Guid.Empty ||
             payload.RenterId == Guid.Empty || payload.EquipmentListingId == Guid.Empty ||
-            payload.Quantity <= 0 || payload.ReturnsCompletedAt == default)
+            payload.Quantity <= 0 || payload.ReturnsCompletedAt == default || payload.OrderVersion <= 0)
             return Error.Validation("INVALID_PAYLOAD", "RentalItemReturned payload is incomplete or invalid.");
-
         string aggregateId = payload.RentalOrderId.ToString("D");
         Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
             KafkaContractSpec.Producers.RentalService,
@@ -319,6 +322,268 @@ public sealed class RentalEventProducer : IRentalEventProducer
             messageId, KafkaContractSpec.EventTypes.RentalItemReturned,
             KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
             aggregateId, _timeProvider.GetUtcNow(), correlationId, causationId, payload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalOrderExpiredAsync(
+        RentalOrderExpiredPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RenterId == Guid.Empty ||
+            payload.ExpiredAt == default || string.IsNullOrWhiteSpace(payload.Reason) || payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_PAYLOAD", "RentalOrderExpired payload is incomplete or invalid.");
+
+        string aggregateId = payload.RentalOrderId.ToString("D");
+        string logicalEntityId = correlationId ?? aggregateId;
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalOrderExpired,
+            logicalEntityId);
+        var envelope = new KafkaMessageEnvelope<RentalOrderExpiredPayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalOrderExpired,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, payload.ExpiredAt, correlationId, causationId, payload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalOrderCancelledAsync(
+        RentalOrderCancelledPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RenterId == Guid.Empty ||
+            payload.CancelledAt == default || string.IsNullOrWhiteSpace(payload.Reason) || payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_PAYLOAD", "RentalOrderCancelled payload is incomplete or invalid.");
+
+        string aggregateId = payload.RentalOrderId.ToString("D");
+        string logicalEntityId = correlationId ?? aggregateId;
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalOrderCancelled,
+            logicalEntityId);
+        var envelope = new KafkaMessageEnvelope<RentalOrderCancelledPayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalOrderCancelled,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, payload.CancelledAt, correlationId, causationId, payload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalUnitsReturnedAsync(
+        Dprental.RentalService.Application.DTOs.Integration.RentalUnitsReturnedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.OrderId == Guid.Empty || payload.RentalItemId == Guid.Empty ||
+            payload.ReturnRecordId == Guid.Empty || payload.ActualReturnAt == default || payload.SubmittedAt == default ||
+            payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_PAYLOAD", "RentalUnitsReturned payload is incomplete or invalid.");
+
+        string aggregateId = payload.OrderId.ToString("D");
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalUnitsReturned,
+            payload.ReturnRecordId.ToString("D"));
+        var envelope = new KafkaMessageEnvelope<Dprental.RentalService.Application.DTOs.Integration.RentalUnitsReturnedPayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalUnitsReturned,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, payload.SubmittedAt, correlationId, causationId, payload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalSupplierConfirmationRequestedAsync(
+        RentalSupplierConfirmationRequestedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RentalItemId == Guid.Empty ||
+            payload.SupplierId == Guid.Empty || payload.EquipmentListingId == Guid.Empty || payload.Quantity <= 0 ||
+            payload.SupplierConfirmationDeadline == default || payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_PAYLOAD", "RentalSupplierConfirmationRequested payload is incomplete or invalid.");
+
+        string aggregateId = payload.RentalOrderId.ToString("D");
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested,
+            payload.RentalItemId.ToString("D"));
+        var envelope = new KafkaMessageEnvelope<RentalSupplierConfirmationRequestedPayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, _timeProvider.GetUtcNow(), correlationId, causationId, payload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalItemConfirmedAsync(
+        RentalItemConfirmedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RentalItemId == Guid.Empty ||
+            payload.SupplierId == Guid.Empty || payload.DecisionAt == default ||
+            string.IsNullOrWhiteSpace(payload.InventoryConfirmationRef) || payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_PAYLOAD", "RentalItemConfirmed payload is incomplete or invalid.");
+
+        string aggregateId = payload.RentalOrderId.ToString("D");
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalItemConfirmed,
+            payload.RentalItemId.ToString("D"));
+        var envelope = new KafkaMessageEnvelope<RentalItemConfirmedPayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalItemConfirmed,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, payload.DecisionAt, correlationId, causationId, payload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalItemRejectedAsync(
+        RentalItemRejectedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RentalItemId == Guid.Empty ||
+            payload.SupplierId == Guid.Empty || payload.DecisionAt == default ||
+            string.IsNullOrWhiteSpace(payload.Reason) || payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_PAYLOAD", "RentalItemRejected payload is incomplete or invalid.");
+
+        string aggregateId = payload.RentalOrderId.ToString("D");
+        string logicalEntityId = correlationId ?? $"{payload.RentalOrderId:D}:{payload.RentalItemId:D}";
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalItemRejected,
+            logicalEntityId);
+
+        var sanitizedPayload = payload.OptionalNote is not null ? payload with { OptionalNote = null } : payload;
+        var envelope = new KafkaMessageEnvelope<RentalItemRejectedPayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalItemRejected,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, payload.DecisionAt, correlationId, causationId, sanitizedPayload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalItemExpiredAsync(
+        RentalItemExpiredPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RentalItemId == Guid.Empty ||
+            payload.SupplierId == Guid.Empty || payload.ExpiredAt == default ||
+            string.IsNullOrWhiteSpace(payload.Reason) || payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_PAYLOAD", "RentalItemExpired payload is incomplete or invalid.");
+
+        string aggregateId = payload.RentalOrderId.ToString("D");
+        string logicalEntityId = correlationId ?? $"{payload.RentalOrderId:D}:{payload.RentalItemId:D}";
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalItemExpired,
+            logicalEntityId);
+        var envelope = new KafkaMessageEnvelope<RentalItemExpiredPayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalItemExpired,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, payload.ExpiredAt, correlationId, causationId, payload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalItemCancelledAsync(
+        RentalItemCancelledPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RentalItemId == Guid.Empty ||
+            payload.ActorId == Guid.Empty || payload.CancelledAt == default ||
+            string.IsNullOrWhiteSpace(payload.Reason) || payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_PAYLOAD", "RentalItemCancelled payload is incomplete or invalid.");
+
+        string aggregateId = payload.RentalOrderId.ToString("D");
+        string logicalEntityId = correlationId ?? $"{payload.RentalOrderId:D}:{payload.RentalItemId:D}";
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalItemCancelled,
+            logicalEntityId);
+        var envelope = new KafkaMessageEnvelope<RentalItemCancelledPayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalItemCancelled,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, payload.CancelledAt, correlationId, causationId, payload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalItemHandoverCompletedAsync(
+        RentalItemHandoverCompletedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RentalItemId == Guid.Empty ||
+            payload.RenterId == Guid.Empty || payload.SupplierId == Guid.Empty ||
+            payload.EquipmentListingId == Guid.Empty || payload.Quantity <= 0 ||
+            payload.HandoverRecordId == Guid.Empty || payload.ActualHandoverAt == default ||
+            payload.CompletedAt == default || payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_PAYLOAD", "RentalItemHandoverCompleted payload is incomplete or invalid.");
+
+        string aggregateId = payload.RentalOrderId.ToString("D");
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalItemHandoverCompleted,
+            payload.HandoverRecordId.ToString("D"));
+        var envelope = new KafkaMessageEnvelope<RentalItemHandoverCompletedPayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalItemHandoverCompleted,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, payload.CompletedAt, correlationId, causationId, payload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalHandoverOverdueAsync(
+        RentalHandoverOverduePayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RentalItemId == Guid.Empty ||
+            payload.SupplierId == Guid.Empty || payload.RenterId == Guid.Empty ||
+            payload.OverdueAt == default || payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_PAYLOAD", "RentalHandoverOverdue payload is incomplete or invalid.");
+
+        string aggregateId = payload.RentalOrderId.ToString("D");
+        string logicalEntityId = correlationId ?? $"{payload.RentalOrderId:D}:{payload.RentalItemId:D}";
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalHandoverOverdue,
+            logicalEntityId);
+        var envelope = new KafkaMessageEnvelope<RentalHandoverOverduePayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalHandoverOverdue,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, payload.OverdueAt, correlationId, causationId, payload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueLatePaymentRefundRequestedAsync(
+        LatePaymentRefundRequestedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RenterId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(payload.InvoiceRef) || string.IsNullOrWhiteSpace(payload.PaymentRef) ||
+            payload.TotalRefundAmount < 0 || payload.RequestedAt == default)
+            return Error.Validation("INVALID_PAYLOAD", "LatePaymentRefundRequested payload is incomplete or invalid.");
+
+        string aggregateId = payload.RentalOrderId.ToString("D");
+        string operationId = $"{payload.RentalOrderId:D}:{payload.PaymentRef}";
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
+            operationId);
+        var envelope = new KafkaMessageEnvelope<LatePaymentRefundRequestedPayload>(
+            messageId, KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, payload.RequestedAt, correlationId, causationId, payload);
         return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
     }
 }

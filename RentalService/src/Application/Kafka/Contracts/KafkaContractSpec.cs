@@ -62,4 +62,14 @@ public static class KafkaContractSpec
         public const string MarkAssetsHandedOver = "MarkAssetsHandedOver";
         public const string MarkAssetsOverdue = "MarkAssetsOverdue";
     }
+
+    public static class ReasonCodes
+    {
+        public const string SupplierRejected = "SUPPLIER_REJECTED";
+        public const string RenterCancelled = "RENTER_CANCELLED";
+        public const string HandoverNotDelivered = "HANDOVER_NOT_DELIVERED";
+        public const string SupplierConfirmationExpired = "SUPPLIER_CONFIRMATION_EXPIRED";
+        public const string HandoverExpired = "HANDOVER_EXPIRED";
+        public const string PaymentExpired = "PAYMENT_EXPIRED";
+    }
 }

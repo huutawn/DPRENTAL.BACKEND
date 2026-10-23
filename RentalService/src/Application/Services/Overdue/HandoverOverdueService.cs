@@ -5,6 +5,7 @@ using Dprental.RentalService.Application.IServices.Operations;
 using Dprental.RentalService.Application.IServices.Overdue;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Services.Operations;
@@ -24,8 +25,13 @@ public sealed class HandoverOverdueService(
     IUnitOfWork unitOfWork,
     TimeProvider timeProvider,
     IOptions<HandoverOverdueOptions> options,
-    ILogger<HandoverOverdueService> logger) : IHandoverOverdueService
+    ILogger<HandoverOverdueService> logger,
+    IRentalEventProducer? rentalEvents = null) : IHandoverOverdueService
 {
+    private readonly IRentalEventProducer _rentalEvents = rentalEvents ?? new Dprental.RentalService.Application.Kafka.Producers.RentalEventProducer(
+        outboxRepository,
+        Microsoft.Extensions.Options.Options.Create(new Dprental.RentalService.Application.Kafka.Configuration.KafkaOptions { RentalEventsTopic = KafkaContractSpec.Topics.RentalEvents }),
+        timeProvider);
     private readonly int _autoExpireGraceHours = options.Value.AutoExpireGraceHours;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -128,34 +134,26 @@ public sealed class HandoverOverdueService(
                         targetItemId: freshItem.Id);
                     freshOrder.AddOperationReceipt(noticeReceipt);
 
-                    var notifyEnvelope = new KafkaMessageEnvelope<RentalHandoverOverduePayload>(
-                        Guid.NewGuid(),
-                        KafkaContractSpec.EventTypes.RentalHandoverOverdue,
-                        KafkaContractSpec.CurrentEnvelopeVersion,
-                        KafkaContractSpec.Producers.RentalService,
-                        freshOrder.Id.ToString("D"),
-                        now,
-                        noticeOpKey,
-                        null,
+                    freshOrder.RecordReadModelUpdate(now);
+
+                    var notifyResult = await _rentalEvents.EnqueueRentalHandoverOverdueAsync(
                         new RentalHandoverOverduePayload(
                             freshOrder.Id,
                             freshItem.Id,
                             freshItem.SupplierId,
                             freshOrder.RenterId,
                             freshItem.ExpectedStartDate,
-                            HandoverDeadlinePolicy.NoticeAt(freshItem.ExpectedStartDate)));
+                            HandoverDeadlinePolicy.NoticeAt(freshItem.ExpectedStartDate),
+                            freshOrder.Version),
+                        correlationId: noticeOpKey,
+                        cancellationToken: cancellationToken);
 
-                    var outbox = new RentalOutboxMessage(
-                        notifyEnvelope.MessageId,
-                        KafkaContractSpec.Topics.RentalEvents,
-                        freshOrder.Id.ToString("D"),
-                        KafkaContractSpec.EventTypes.RentalHandoverOverdue,
-                        JsonSerializer.Serialize(notifyEnvelope, JsonOptions),
-                        now);
+                    if (notifyResult.IsFailure)
+                    {
+                        logger.LogWarning("Không thể enqueue sự kiện cảnh báo quá hạn giao cho Item {ItemId}: {Error}", freshItem.Id, notifyResult.Error.Message);
+                        continue;
+                    }
 
-                    await outboxRepository.AddAsync(outbox, cancellationToken);
-
-                    freshOrder.RecordReadModelUpdate(now);
                     await orders.UpdateAsync(freshOrder, cancellationToken);
                     await unitOfWork.SaveChangesAsync(cancellationToken);
 

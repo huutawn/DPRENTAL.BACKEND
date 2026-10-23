@@ -333,35 +333,32 @@ public sealed partial class RentalOperationExecutor
 
         // 3. Mark Expired ONLY after valid cancel and all releases succeeded
         utcNow = _timeProvider.GetUtcNow();
-        order.MarkPaymentExpired(utcNow, operationKey);
-        order.RecordReadModelUpdate(utcNow);
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            order.MarkPaymentExpired(utcNow, operationKey);
+            order.RecordReadModelUpdate(utcNow);
 
-        var outboxEnvelope = new KafkaMessageEnvelope<RentalOrderExpiredPayload>(
-            OutboxMessageIdGenerator.ComputeDeterministicId(
-                KafkaContractSpec.Producers.RentalService,
-                KafkaContractSpec.EventTypes.RentalOrderExpired,
-                operationKey),
-            KafkaContractSpec.EventTypes.RentalOrderExpired,
-            1,
-            KafkaContractSpec.Producers.RentalService,
-            order.Id.ToString("D"),
-            utcNow,
-            operationKey,
-            null,
-            new RentalOrderExpiredPayload(order.Id, order.RenterId, utcNow, "Payment window expired without payment"));
-
-        var outbox = new RentalOutboxMessage(
-            outboxEnvelope.MessageId,
-            _rentalEventsTopic,
-            order.Id.ToString("D"),
-            KafkaContractSpec.EventTypes.RentalOrderExpired,
-            JsonSerializer.Serialize(outboxEnvelope, JsonOptions),
-            utcNow);
-
-        await _outboxRepository.AddAsync(outbox, cancellationToken);
-        await CommitLocalChangesAsync(order, cancellationToken);
-
-        return Result.Success();
+            var expiredRes = await _rentalEvents.EnqueueRentalOrderExpiredAsync(
+                new RentalOrderExpiredPayload(order.Id, order.RenterId, utcNow, KafkaContractSpec.ReasonCodes.PaymentExpired, order.Version),
+                correlationId: operationKey,
+                cancellationToken: cancellationToken);
+            if (expiredRes.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return expiredRes.Error;
+            }
+            await CommitLocalChangesAsync(order, cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            return Result.Success();
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
+            throw;
+        }
     }
 
     internal async Task<Result> PaymentExpiryCoreAsync(

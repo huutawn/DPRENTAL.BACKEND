@@ -29,9 +29,20 @@ public interface IRentalEventProducer
         string? correlationId = null,
         Guid? causationId = null,
         CancellationToken cancellationToken = default);
-
     Task<Result<ProducerEnqueueResult>> EnqueueRentalOrderCompletedAsync(
         RentalOrderCompletedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalOrderExpiredAsync(
+        RentalOrderExpiredPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalOrderCancelledAsync(
+        RentalOrderCancelledPayload payload,
         string? correlationId = null,
         Guid? causationId = null,
         CancellationToken cancellationToken = default);
@@ -56,6 +67,60 @@ public interface IRentalEventProducer
 
     Task<Result<ProducerEnqueueResult>> EnqueueRentalItemReturnedAsync(
         RentalItemReturnedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalUnitsReturnedAsync(
+        Dprental.RentalService.Application.DTOs.Integration.RentalUnitsReturnedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalSupplierConfirmationRequestedAsync(
+        RentalSupplierConfirmationRequestedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalItemConfirmedAsync(
+        RentalItemConfirmedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalItemRejectedAsync(
+        RentalItemRejectedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalItemExpiredAsync(
+        RentalItemExpiredPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalItemCancelledAsync(
+        RentalItemCancelledPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalItemHandoverCompletedAsync(
+        RentalItemHandoverCompletedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalHandoverOverdueAsync(
+        RentalHandoverOverduePayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ProducerEnqueueResult>> EnqueueLatePaymentRefundRequestedAsync(
+        LatePaymentRefundRequestedPayload payload,
         string? correlationId = null,
         Guid? causationId = null,
         CancellationToken cancellationToken = default);

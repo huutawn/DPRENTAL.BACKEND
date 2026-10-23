@@ -148,9 +148,12 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         {
             var markResult = order.MarkAsPaid(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
             if (markResult.IsFailure) return markResult.Error;
+
+            order.RecordReadModelUpdate(utcNow);
+
             var orderPaidResult = await _rentalEventProducer.EnqueueRentalOrderPaidAsync(
                 new RentalOrderPaidPayload(order.Id, order.RenterId, payload.InvoiceRef,
-                    payload.PaymentRef, order.TotalPayableAmount, payload.PaidAt),
+                    payload.PaymentRef, order.TotalPayableAmount, payload.PaidAt, order.Version),
                 correlationId: envelope.CorrelationId,
                 causationId: envelope.MessageId,
                 cancellationToken: cancellationToken);
@@ -165,12 +168,11 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
 
                 var enqueueResult = await _rentalEventProducer.EnqueueRentalItemPaidAsync(
                     new RentalItemPaidPayload(order.RenterId, item.EquipmentListingId,
-                        item.EquipmentTypeId, order.Id, item.Id),
+                        item.EquipmentTypeId, order.Id, item.Id, order.Version),
                     correlationId: envelope.CorrelationId,
                     causationId: envelope.MessageId,
                     cancellationToken: cancellationToken);
                 if (enqueueResult.IsFailure) return enqueueResult.Error;
-
                 string opKey = RentalOperationExecutor.ComputeOperationKey("ExtendHold", $"{order.Id}:{item.Id}");
                 var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
                 if (existingReceipt == null)
@@ -226,7 +228,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
 
             _logger.LogInformation("Payment arrived late/hold expired for Order {OrderId}. Initiating recovery re-allocation before cutoff {Cutoff}.", order.Id, cutoff);
             order.RecordPaymentReceived(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
-
+            order.RecordReadModelUpdate(utcNow);
             foreach (var item in order.Items)
             {
                 string recGroupId = $"rental-item:{item.Id}:rec-1";
@@ -356,35 +358,21 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             }
         }
 
-        var outboxEnvelope = new KafkaMessageEnvelope<LatePaymentRefundRequestedPayload>(
-            OutboxMessageIdGenerator.ComputeDeterministicId(
-                KafkaContractSpec.Producers.RentalService,
-                KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
-                $"{order.Id:D}:{payload.PaymentRef}"),
-            KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
-            1,
-            KafkaContractSpec.Producers.RentalService,
-            order.Id.ToString("D"),
-            utcNow,
-            order.Id.ToString("D"),
-            null,
+        var enqRes = await _rentalEventProducer.EnqueueLatePaymentRefundRequestedAsync(
             new LatePaymentRefundRequestedPayload(
                 order.Id,
                 order.RenterId,
                 payload.InvoiceRef,
                 payload.PaymentRef,
                 order.TotalPayableAmount,
-                utcNow));
-
-        var outboxMessage = new RentalOutboxMessage(
-            outboxEnvelope.MessageId,
-            _rentalEventsTopic,
-            order.Id.ToString("D"),
-            KafkaContractSpec.EventTypes.LatePaymentRefundRequested,
-            JsonSerializer.Serialize(outboxEnvelope, JsonOptions),
-            utcNow);
-
-        await _outboxRepository.AddAsync(outboxMessage, cancellationToken);
+                utcNow,
+                order.Version),
+            correlationId: order.Id.ToString("D"),
+            cancellationToken: cancellationToken);
+        if (enqRes.IsFailure)
+        {
+            _logger.LogWarning("Failed to enqueue LatePaymentRefundRequested event for Order {OrderId}: {Error}", order.Id, enqRes.Error.Message);
+        }
     }
 
     public async Task<Result> ProcessInvoicePaidAsync(
@@ -451,7 +439,6 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
 
                 if (result.Value)
                 {
-                    order.RecordReadModelUpdate(utcNow);
                     await _orderRepository.UpdateAsync(order, cancellationToken);
                 }
 

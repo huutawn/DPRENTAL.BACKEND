@@ -34,7 +34,7 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ExpiryWorkflowService> _logger;
     private readonly string _rentalEventsTopic;
-
+    private readonly IRentalEventProducer _rentalEvents;
     public ExpiryWorkflowService(
         IRentalOrderRepository orderRepository,
         IOutboxRepository outboxRepository,
@@ -43,7 +43,8 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
         IUnitOfWork unitOfWork,
         IConfiguration configuration,
         ILogger<ExpiryWorkflowService> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IRentalEventProducer? rentalEvents = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _outboxRepository = outboxRepository ?? throw new ArgumentNullException(nameof(outboxRepository));
@@ -53,8 +54,11 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _rentalEventsTopic = configuration["Kafka:RentalEventsTopic"] ?? "rental.events.v1";
+        _rentalEvents = rentalEvents ?? new Dprental.RentalService.Application.Kafka.Producers.RentalEventProducer(
+            outboxRepository,
+            Microsoft.Extensions.Options.Options.Create(new Dprental.RentalService.Application.Kafka.Configuration.KafkaOptions { RentalEventsTopic = _rentalEventsTopic }),
+            _timeProvider);
     }
-
     public async Task<int> ProcessPaymentTimeoutsAsync(CancellationToken cancellationToken = default)
     {
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
@@ -201,32 +205,49 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                         payloadJson: JsonSerializer.Serialize(refundCmd, JsonOptions));
                     order.AddOperationReceipt(refundReceipt);
                 }
-                var outboxEnvelope = new KafkaMessageEnvelope<RentalItemExpiredPayload>(
-                    OutboxMessageIdGenerator.ComputeDeterministicId(
-                        KafkaContractSpec.Producers.RentalService,
-                        KafkaContractSpec.EventTypes.RentalItemExpired,
-                        timeoutOpKey),
-                    KafkaContractSpec.EventTypes.RentalItemExpired,
-                    1,
-                    KafkaContractSpec.Producers.RentalService,
-                    order.Id.ToString("D"),
-                    utcNow,
-                    timeoutOpKey,
-                    null,
-                    new RentalItemExpiredPayload(order.Id, item.Id, item.SupplierId, utcNow, "Supplier confirmation deadline expired without decision"));
 
-                var outbox = new RentalOutboxMessage(
-                    outboxEnvelope.MessageId,
-                    _rentalEventsTopic,
-                    order.Id.ToString("D"),
-                    KafkaContractSpec.EventTypes.RentalItemExpired,
-                    JsonSerializer.Serialize(outboxEnvelope, JsonOptions),
-                    utcNow);
+                await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    RentalOrderStatus previousOrderStatus = order.Status;
+                    RentalOrderStatusPolicy.Apply(order, utcNow, timeoutOpKey);
+                    order.RecordReadModelUpdate(utcNow);
 
-                await _outboxRepository.AddAsync(outbox, cancellationToken);
-                order.RecordReadModelUpdate(utcNow);
-                await _orderRepository.UpdateAsync(order, cancellationToken);
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    var expiredRes = await _rentalEvents.EnqueueRentalItemExpiredAsync(
+                        new RentalItemExpiredPayload(order.Id, item.Id, item.SupplierId, utcNow, KafkaContractSpec.ReasonCodes.SupplierConfirmationExpired, order.Version),
+                        correlationId: timeoutOpKey,
+                        cancellationToken: cancellationToken);
+                    if (expiredRes.IsFailure)
+                    {
+                        await tx.RollbackAsync(cancellationToken);
+                        _unitOfWork.DiscardChanges();
+                        return expiredRes.Error;
+                    }
+
+                    if (previousOrderStatus != RentalOrderStatus.Completed && order.Status == RentalOrderStatus.Completed)
+                    {
+                        var orderCompletedRes = await _rentalEvents.EnqueueRentalOrderCompletedAsync(
+                            new RentalOrderCompletedPayload(order.Id, order.RenterId, utcNow, order.Version),
+                            correlationId: timeoutOpKey,
+                            cancellationToken: cancellationToken);
+                        if (orderCompletedRes.IsFailure)
+                        {
+                            await tx.RollbackAsync(cancellationToken);
+                            _unitOfWork.DiscardChanges();
+                            return orderCompletedRes.Error;
+                        }
+                    }
+
+                    await _orderRepository.UpdateAsync(order, cancellationToken);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    await tx.CommitAsync(cancellationToken);
+                }
+                catch
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    throw;
+                }
             }
         }
 
