@@ -1,4 +1,5 @@
 using Dprental.PaymentService.Common.Utils;
+using System.Text.RegularExpressions;
 
 namespace Dprental.PaymentService.Application.Services;
 
@@ -13,8 +14,11 @@ public sealed record CodeExtractionResult(CodeExtractionStatus Status, string? C
 
 public static class PaymentCodeExtractor
 {
-    private const string CodePrefix = "DPR ";
-    private const int FullCodeLength = 14;
+    private static readonly Regex CodePattern = new(
+        @"(?<![\p{L}\p{N}_])" + Regex.Escape(PaymentCodeGenerator.Prefix) +
+        @"[A-Z0-9]{" + PaymentCodeGenerator.CodeLength + @"}(?![\p{L}\p{N}_])",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
 
     public static CodeExtractionResult Extract(string? codeField, string? contentField, string? descriptionField)
     {
@@ -98,31 +102,12 @@ public static class PaymentCodeExtractor
         var codes = new HashSet<string>(StringComparer.Ordinal);
         if (!string.IsNullOrEmpty(text))
         {
-            int startIndex = 0;
-            while (startIndex <= text.Length - FullCodeLength)
+            foreach (Match match in CodePattern.Matches(text))
             {
-                int prefixIndex = text.IndexOf(CodePrefix, startIndex, StringComparison.Ordinal);
-                if (prefixIndex < 0 || prefixIndex + FullCodeLength > text.Length)
+                if (PaymentCodeGenerator.IsValid(match.Value))
                 {
-                    break;
+                    codes.Add(match.Value);
                 }
-
-                // Check boundary before: must be start of string or whitespace
-                bool beforeOk = prefixIndex == 0 || char.IsWhiteSpace(text[prefixIndex - 1]);
-                // Check boundary after: must be end of string or whitespace
-                bool afterOk = prefixIndex + FullCodeLength == text.Length ||
-                               char.IsWhiteSpace(text[prefixIndex + FullCodeLength]);
-
-                if (beforeOk && afterOk)
-                {
-                    string candidate = text.Substring(prefixIndex, FullCodeLength);
-                    if (PaymentCodeGenerator.IsValid(candidate))
-                    {
-                        codes.Add(candidate);
-                    }
-                }
-
-                startIndex = prefixIndex + 1;
             }
         }
 
