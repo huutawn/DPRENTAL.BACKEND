@@ -118,7 +118,7 @@ public sealed class PaymentMatchingTests
         var (processor, repo) = CreateProcessor(invoice);
         var payload = CreateTx(code: code, content: content) with
         {
-            Description = $"Thanh toan {ValidCode} chuyen khoan"
+            Description = $"Thanh toan-{ValidCode}-chuyen khoan"
         };
 
         var result = await processor.ProcessAsync(payload);
@@ -149,12 +149,58 @@ public sealed class PaymentMatchingTests
         Assert.Equal("InvoicePaid", repo.SavedOutbox!.MessageType);
     }
 
-    [Fact]
-    public async Task ProcessAsync_AmbiguousDescription_DoesNotFallBackOrCreateOutbox()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProcessAsync_SePayHyphenatedContent_MarksPaidAndCreatesOutbox(bool useDescription)
+    {
+        const string paymentCode = "DPR PX7PRQ3XVL";
+        const string bankContent = "123456789012-DPR PX7PRQ3XVL-CHUYEN TIEN-REFERENCE-MOMO123456789012MOMO";
+        var invoice = CreatePendingInvoice(paymentCode: paymentCode);
+        var (processor, repo) = CreateProcessor(invoice);
+        var payload = CreateTx(code: null, content: useDescription ? null : bankContent) with
+        {
+            Description = useDescription ? $"BankAPINotify {bankContent}" : null
+        };
+
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(paymentCode, repo.SavedTransaction!.PaymentCode);
+        Assert.Equal(PaymentTransactionStatus.Matched, repo.SavedTransaction.Status);
+        Assert.Equal(InvoiceStatus.Paid, invoice.Status);
+        Assert.Equal("InvoicePaid", repo.SavedOutbox!.MessageType);
+    }
+
+    [Theory]
+    [InlineData("-DPR PX7PRQ3XV-")]
+    [InlineData("-DPR PX7PRQ3XVL2-")]
+    [InlineData("-DPR PX7PRQ3XV0-")]
+    [InlineData("ADPR PX7PRQ3XVL-")]
+    [InlineData("-DPR PX7PRQ3XVL_abc")]
+    public async Task ProcessAsync_MalformedEmbeddedCode_RemainsUnmatched(string bankContent)
+    {
+        var invoice = CreatePendingInvoice(paymentCode: "DPR PX7PRQ3XVL");
+        var (processor, repo) = CreateProcessor(invoice);
+        var payload = CreateTx(code: null, content: bankContent) with { Description = bankContent };
+
+        var result = await processor.ProcessAsync(payload);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(PaymentTransactionStatus.Unmatched, repo.SavedTransaction!.Status);
+        Assert.Equal(PaymentTransactionReason.MissingPaymentCode, repo.SavedTransaction.ReasonCode);
+        Assert.Equal(InvoiceStatus.Pending, invoice.Status);
+        Assert.Null(repo.SavedOutbox);
+    }
+
+    [Theory]
+    [InlineData(" ")]
+    [InlineData("-")]
+    public async Task ProcessAsync_AmbiguousDescription_DoesNotFallBackOrCreateOutbox(string separator)
     {
         var invoice = CreatePendingInvoice();
         var (processor, repo) = CreateProcessor(invoice);
-        var payload = CreateTx() with { Description = $"{ValidCode} {AnotherValidCode}" };
+        var payload = CreateTx() with { Description = $"{ValidCode}{separator}{AnotherValidCode}" };
 
         var result = await processor.ProcessAsync(payload);
 
