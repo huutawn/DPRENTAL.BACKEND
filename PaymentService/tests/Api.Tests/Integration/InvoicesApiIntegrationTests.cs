@@ -347,6 +347,47 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetInvoiceStatus_AccessTokenCookie_Returns200()
+    {
+        Guid renterId = Guid.NewGuid();
+        string invoiceRef;
+
+        using (var serviceClient = _factory.CreateClient())
+        {
+            serviceClient.DefaultRequestHeaders.Add(
+                "X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
+            var createResponse = await serviceClient.PostAsJsonAsync(
+                "/api/v1/invoices",
+                new CreateInvoiceRequest(
+                    Guid.NewGuid(),
+                    "ORD-STATUS-COOKIE-001",
+                    renterId,
+                    "VND",
+                    DateTimeOffset.UtcNow.AddMinutes(30),
+                    [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 10_000m, 0m)],
+                    "op-status-cookie-001"));
+            Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+            invoiceRef = (await createResponse.Content.ReadFromJsonAsync<CreateInvoiceResponse>())!.InvoiceRef;
+        }
+
+        using var renterClient = _factory.CreateClient();
+        renterClient.DefaultRequestHeaders.Add(
+            "Cookie", $"accessToken={CreateUserToken(renterId)}");
+
+        using var statusResponse = await renterClient.GetAsync(
+            $"/api/v1/invoices/{invoiceRef}/status");
+
+        Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
+
+        using var otherRenterClient = _factory.CreateClient();
+        otherRenterClient.DefaultRequestHeaders.Add(
+            "Cookie", $"accessToken={CreateUserToken(Guid.NewGuid())}");
+        using var otherRenterResponse = await otherRenterClient.GetAsync(
+            $"/api/v1/invoices/{invoiceRef}/status");
+        Assert.Equal(HttpStatusCode.NotFound, otherRenterResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task AuthenticationAndAuthorization_EnforcesSecurityBoundaries()
     {
         using var client = _factory.CreateClient();
@@ -372,6 +413,10 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         client.DefaultRequestHeaders.Authorization = null;
         using var noUserJwtResp = await client.GetAsync("/api/v1/invoices/INV-TEST");
         Assert.Equal(HttpStatusCode.Unauthorized, noUserJwtResp.StatusCode);
+
+        client.DefaultRequestHeaders.Add("Cookie", "accessToken=invalid-token");
+        using var invalidCookieResp = await client.GetAsync("/api/v1/invoices/INV-TEST/status");
+        Assert.Equal(HttpStatusCode.Unauthorized, invalidCookieResp.StatusCode);
     }
 
     [Fact]
