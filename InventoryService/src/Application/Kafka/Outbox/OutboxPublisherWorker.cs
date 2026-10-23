@@ -25,6 +25,8 @@ public sealed class OutboxPublisherWorker : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IKafkaProducer _producer;
     private readonly ILogger<OutboxPublisherWorker>? _logger;
+    private readonly TimeProvider _timeProvider;
+    private DateTimeOffset _nextCleanupAt = DateTimeOffset.MinValue;
     public int BatchSize { get; set; } = 20;
     public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromSeconds(30);
     public TimeSpan IdleDelay { get; set; } = TimeSpan.FromMilliseconds(100);
@@ -32,11 +34,13 @@ public sealed class OutboxPublisherWorker : BackgroundService
     public OutboxPublisherWorker(
         IServiceScopeFactory scopeFactory,
         IKafkaProducer producer,
-        ILogger<OutboxPublisherWorker>? logger = null)
+        ILogger<OutboxPublisherWorker>? logger = null,
+        TimeProvider? timeProvider = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _producer = producer ?? throw new ArgumentNullException(nameof(producer));
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -48,6 +52,7 @@ public sealed class OutboxPublisherWorker : BackgroundService
             try
             {
                 var processedCount = await ProcessBatchAsync(stoppingToken);
+                await TryCleanupBehaviorMessagesAsync(stoppingToken);
 
                 if (processedCount == 0)
                 {
@@ -72,6 +77,38 @@ public sealed class OutboxPublisherWorker : BackgroundService
         }
 
         _logger?.LogInformation("OutboxPublisherWorker đã dừng.");
+    }
+
+    /// <summary>
+    /// Thực hiện dọn dẹp các behavior messages đã publish quá 7 ngày (tối đa 500 messages/phút).
+    /// </summary>
+    public async Task<int> TryCleanupBehaviorMessagesAsync(CancellationToken cancellationToken = default)
+    {
+        var now = _timeProvider.GetUtcNow();
+        if (now < _nextCleanupAt) return 0;
+
+        _nextCleanupAt = now.AddMinutes(1);
+        try
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var store = scope.ServiceProvider.GetRequiredService<IOutboxStore>();
+            var cutoff = now.AddDays(-7);
+            var deleted = await store.CleanupPublishedBehaviorMessagesAsync(cutoff, 500, cancellationToken);
+            if (deleted > 0)
+            {
+                _logger?.LogInformation("OutboxPublisherWorker đã xóa {Count} behavior messages đã xuất bản quá hạn 7 ngày.", deleted);
+            }
+            return deleted;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Lỗi khi dọn dẹp behavior messages trong Outbox.");
+            return 0;
+        }
     }
 
     /// <summary>

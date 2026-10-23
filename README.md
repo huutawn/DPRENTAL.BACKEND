@@ -286,3 +286,18 @@ public/mine, Bearer/cookie, ưu tiên header, owner/Admin, service token, valida
 Inventory outage. Smoke test cũng đi qua Gateway thực. Process, database và khóa RSA tạm được thu hồi khi kết thúc.
 Không trỏ harness vào PostgreSQL production. Meilisearch/Kafka không bị mock; các
 request discovery này không dùng search keyword và không cần search index sẵn sàng.
+
+## Recommendation: contract tests và chu kỳ
+
+`sort=recommended` dùng snapshot điểm cố định theo chu kỳ 5 phút và lựa chọn có trọng số tại PostgreSQL. Điểm cao tăng xác suất, không luôn đứng đầu. Các sort khác và keyword relevance giữ nguyên. Snapshot hết hạn tuyệt đối tại cuối chu kỳ; thay đổi availability hoặc qua chu kỳ có thể dịch chuyển OFFSET pagination. Cache FE có thể trì hoãn việc thấy kết quả mới.
+
+Canonical contract thuộc RecommendationService. Hai schema behavior được nhúng vào test assembly từ `Contracts/Recommendation`, kèm commit và SHA-256 trong manifest. Đây là fixture versioned, không chỉnh tay. Checkout Inventory độc lập có thể build/test mà không cần RecommendationService hoặc đường dẫn home của tác giả.
+
+```bash
+python3 scripts/sync-recommendation-contracts.py --check
+python3 scripts/sync-recommendation-contracts.py --check --source /path/to/RecommendationService
+```
+
+Để cập nhật contract có chủ đích, dùng `--update --source /path/to/RecommendationService --revision <commit>` rồi review diff fixtures/manifest và chạy cả hai test suites. Test bình thường không truy cập mạng để tải schemas.
+
+View/search ghi nhận cả cache hit và miss qua outbox. GET thành công là tín hiệu request; không thể phân biệt SSR/prefetch nếu client/proxy không chuyển header nhận diện. Personal snapshot có 0–20 types, global có 0–300 listings, ít nhất một danh sách không rỗng. Lỗi ghi outbox không làm hỏng kết quả đọc; client cancellation vẫn truyền ra ngoài.

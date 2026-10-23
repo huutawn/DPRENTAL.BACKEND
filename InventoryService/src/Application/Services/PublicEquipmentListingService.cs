@@ -20,7 +20,7 @@ namespace Dprental.InventoryService.Application.Services;
 /// <summary>
 /// Dịch vụ ứng dụng tìm kiếm, lọc và đọc chi tiết EquipmentListing công khai (Public Equipment Listing Discovery).
 /// </summary>
-public sealed class PublicEquipmentListingService : IPublicEquipmentListingService
+public sealed partial class PublicEquipmentListingService : IPublicEquipmentListingService
 {
     private readonly IEquipmentListingRepository _listingRepository;
     private readonly AssetSearchQueryValidator _queryValidator;
@@ -35,6 +35,7 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
     private readonly Dprental.InventoryService.Application.Caching.InventoryCacheOptions _cacheOptions;
     private readonly IRecommendationRankingReader? _recommendationReader;
     private readonly IRecommendationMetrics? _recommendationMetrics;
+    private readonly IBehaviorEventRecorder? _behaviorRecorder;
 
     public PublicEquipmentListingService(
         IEquipmentListingRepository listingRepository,
@@ -49,7 +50,8 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
         Dprental.InventoryService.Application.Caching.IInventoryReadCache? cache = null,
         IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions = null,
         IRecommendationRankingReader? recommendationReader = null,
-        IRecommendationMetrics? recommendationMetrics = null)
+        IRecommendationMetrics? recommendationMetrics = null,
+        IBehaviorEventRecorder? behaviorRecorder = null)
     {
         _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _queryValidator = queryValidator ?? throw new ArgumentNullException(nameof(queryValidator));
@@ -65,98 +67,9 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
         _cacheOptions = cacheOptions?.Value ?? new Dprental.InventoryService.Application.Caching.InventoryCacheOptions();
         _recommendationReader = recommendationReader;
         _recommendationMetrics = recommendationMetrics;
+        _behaviorRecorder = behaviorRecorder;
     }
 
-    /// <inheritdoc />
-    public async Task<Result<PublicEquipmentListingResponse>> GetPublicListingByIdAsync(
-        Guid id,
-        CancellationToken cancellationToken = default)
-    {
-        if (id == Guid.Empty)
-        {
-            return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
-        }
-
-        var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
-        var today = BusinessDateTime.ToVietnamDate(nowUtc);
-
-        string scope = $"listing:{id:D}";
-        string queryType = "public-detail";
-        string inputHash = today.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
-
-        return await _cache.GetOrCreateAsync<PublicEquipmentListingResponse>(
-            scope,
-            queryType,
-            inputHash,
-            async (genToken, ct) =>
-            {
-                var snapshot = await _listingRepository.GetCalendarSnapshotAsync(id, today, today, ct);
-                if (snapshot is null || snapshot.Status != EquipmentListingStatus.Active)
-                {
-                    return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
-                }
-
-                var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
-
-                int totalQuantity = snapshot.Assets.Count(a => a.AcceptingBookings);
-                int availableQuantity = snapshot.Assets.Count(a =>
-                    a.AcceptingBookings &&
-                    a.CalendarBlocks.Count == 0 &&
-                    !a.Allocations.Any(al =>
-                        al.Status == AllocationStatus.Allocated ||
-                        (al.Status == AllocationStatus.Held && al.HoldExpiresAt > evaluationNowUtc)));
-
-                var response = PublicEquipmentListingMapper.ToResponse(
-                    snapshot,
-                    totalQuantity,
-                    availableQuantity,
-                    _mediaOptions.PublicGatewayUrl);
-
-                var baseTtl = TimeSpan.FromSeconds(_cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15);
-                DateTimeOffset? nearestHold = snapshot.Assets
-                    .SelectMany(a => a.Allocations)
-                    .Where(al => al.Status == AllocationStatus.Held && al.HoldExpiresAt.HasValue && al.HoldExpiresAt.Value > evaluationNowUtc)
-                    .Select(al => al.HoldExpiresAt)
-                    .OrderBy(t => t!.Value)
-                    .FirstOrDefault();
-
-                var allAllocations = snapshot.Assets.SelectMany(a => a.Allocations);
-                var deadline = Dprental.InventoryService.Application.Caching.CacheKeyHelper.CalculateOccupancyDeadline(
-                    evaluationNowUtc.Add(baseTtl),
-                    nearestHold,
-                    allAllocations,
-                    evaluationNowUtc);
-
-                DateTimeOffset? finalDeadline = deadline > evaluationNowUtc ? deadline : null;
-                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<PublicEquipmentListingResponse>(response, finalDeadline));
-            },
-            cancellationToken);
-    }
-    /// <inheritdoc />
-    public async Task<Result<EquipmentListingStatisticsResponse>> GetStatisticsAsync(
-        CancellationToken cancellationToken = default)
-    {
-        string scope = "public-discovery";
-        string queryType = "public-stats";
-        string inputHash = "active";
-
-        return await _cache.GetOrCreateAsync<EquipmentListingStatisticsResponse>(
-            scope,
-            queryType,
-            inputHash,
-            async (genToken, ct) =>
-            {
-                var criteria = new EquipmentListingStatisticsCriteria(
-                    OwnerUserId: null,
-                    Status: EquipmentListingStatus.Active);
-
-                var result = await _listingRepository.GetListingStatisticsAsync(criteria, ct);
-                var statsResponse = new EquipmentListingStatisticsResponse(result.ByEquipmentType, result.ByBrand);
-                var ttl = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.MetadataTtlSeconds > 0 ? _cacheOptions.MetadataTtlSeconds : 120);
-                return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<EquipmentListingStatisticsResponse>(statsResponse, ttl));
-            },
-            cancellationToken);
-    }
     private sealed record CoreSearchResult(
         Dprental.InventoryService.Application.Caching.CachedRead<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>> Cached,
         string? EffectiveTier);
@@ -169,6 +82,7 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(callerContext);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var valResult = ValidatePublicListingRequest(request);
         if (valResult.IsFailure)
@@ -232,7 +146,16 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
             }
 
             _recommendationMetrics?.RecordRequest(tier, reason);
-            return Result.Success(coreResult.Value.Cached.Value);
+            var recResult = Result.Success(coreResult.Value.Cached.Value);
+            if (recResult.IsSuccess && _behaviorRecorder != null)
+            {
+                await _behaviorRecorder.RecordSearchPerformedAsync(
+                    request,
+                    recResult.Value.Value.TotalCount,
+                    callerContext,
+                    cancellationToken);
+            }
+            return recResult;
         }
         else
         {
@@ -258,7 +181,7 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
                 request.RequestedQuantity,
                 todayVn);
 
-            return await _cache.GetOrCreateAsync<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>(
+            var searchResult = await _cache.GetOrCreateAsync<SearchExecution<PagedResponse<PublicEquipmentListingResponse>>>(
                 searchScope,
                 searchQueryType,
                 searchHash,
@@ -279,6 +202,17 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
                     return Result.Success(coreResult.Value.Cached);
                 },
                 cancellationToken);
+
+            if (searchResult.IsSuccess && _behaviorRecorder != null)
+            {
+                await _behaviorRecorder.RecordSearchPerformedAsync(
+                    request,
+                    searchResult.Value.Value.TotalCount,
+                    callerContext,
+                    cancellationToken);
+            }
+
+            return searchResult;
         }
     }
 
@@ -546,7 +480,8 @@ public sealed class PublicEquipmentListingService : IPublicEquipmentListingServi
             take: validated.Take,
             personalScores: personalScores,
             globalScores: globalScores,
-            excludedOwnerUserId: excludedOwnerUserId);
+            excludedOwnerUserId: excludedOwnerUserId,
+            seed: recommendationSnapshot?.Seed);
 
         var searchResult = await _listingRepository.SearchPublicAsync(searchCriteria, ct);
         int totalCount = searchResult.TotalCount;

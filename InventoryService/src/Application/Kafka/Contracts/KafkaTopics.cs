@@ -11,13 +11,15 @@ public static class KafkaTopics
     public const string InventoryAllocationEventsV1 = "inventory.allocation.events.v1";
     public const string InventoryAssetEventsV1 = "inventory.asset.events.v1";
     public const string InventoryProjectionEventsV1 = "inventory.projection.events.v1";
+    public const string InventoryBehaviorEventsV1 = "inventory.behavior.events.v1";
 
     public static readonly IReadOnlyList<string> BaselineTopics =
     [
         InventoryAllocationCommandsV1,
         InventoryAllocationEventsV1,
         InventoryAssetEventsV1,
-        InventoryProjectionEventsV1
+        InventoryProjectionEventsV1,
+        InventoryBehaviorEventsV1
     ];
 
     /// <summary>

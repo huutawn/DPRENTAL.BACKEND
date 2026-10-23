@@ -363,11 +363,13 @@ public sealed partial class EquipmentListingRepository
             var personalScores = criteria.PersonalScores?.Select(s => s.Score).ToArray() ?? Array.Empty<long>();
             var globalListingIds = criteria.GlobalScores?.Select(s => s.ListingId).ToArray() ?? Array.Empty<Guid>();
             var globalScores = criteria.GlobalScores?.Select(s => s.Score).ToArray() ?? Array.Empty<long>();
+            string effectiveSeed = !string.IsNullOrWhiteSpace(criteria.Seed) ? criteria.Seed : "default_seed";
 
             pageParamsList.Add(new NpgsqlParameter("pPersonalTypeIds", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Uuid) { Value = personalTypeIds });
             pageParamsList.Add(new NpgsqlParameter("pPersonalScores", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bigint) { Value = personalScores });
             pageParamsList.Add(new NpgsqlParameter("pGlobalListingIds", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Uuid) { Value = globalListingIds });
             pageParamsList.Add(new NpgsqlParameter("pGlobalScores", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bigint) { Value = globalScores });
+            pageParamsList.Add(new NpgsqlParameter("pSeed", effectiveSeed));
 
             pageSql = $"""
                 WITH valid_listings AS (
@@ -391,38 +393,54 @@ public sealed partial class EquipmentListingRepository
                 tier_summary AS (
                     SELECT
                         COALESCE(bool_or(interest > 0), false) AS has_personal,
-                        COALESCE(bool_or(popularity > 0), false) AS has_global
+                        COALESCE(bool_or(popularity > 0), false) AS has_global,
+                        COALESCE(max(interest), 0)::double precision AS max_interest,
+                        COALESCE(max(popularity), 0)::double precision AS max_popularity
                     FROM valid_listings
                 ),
-                ordered_page AS (
+                scored_listings AS (
                     SELECT
                         v.id,
+                        v.created_at,
+                        t.has_personal,
+                        t.has_global,
                         CASE
                             WHEN t.has_personal THEN 'personalized'
                             WHEN t.has_global THEN 'global'
                             ELSE 'default'
                         END AS effective_tier,
+                        CASE
+                            WHEN t.has_personal THEN
+                                1.0 + 12.0 * (CASE WHEN t.max_interest > 0 THEN v.interest::double precision / t.max_interest ELSE 0.0 END)
+                                    + 4.0 * (CASE WHEN t.max_popularity > 0 THEN v.popularity::double precision / t.max_popularity ELSE 0.0 END)
+                            WHEN t.has_global THEN
+                                1.0 + 8.0 * (CASE WHEN t.max_popularity > 0 THEN v.popularity::double precision / t.max_popularity ELSE 0.0 END)
+                            ELSE 1.0
+                        END AS weight,
+                        (('x' || substr(md5(@pSeed || ':' || v.id::text), 1, 8))::bit(32)::bigint + 1.0) / 4294967297.0 AS u
+                    FROM valid_listings v
+                    CROSS JOIN tier_summary t
+                ),
+                ordered_page AS (
+                    SELECT
+                        s.id,
+                        s.effective_tier,
                         row_number() OVER (
                             ORDER BY
                                 CASE
-                                    WHEN t.has_personal THEN
-                                        CASE WHEN v.interest > 0 THEN 1 ELSE 2 END
-                                    WHEN t.has_global THEN
-                                        CASE WHEN v.popularity > 0 THEN 1 ELSE 2 END
-                                    ELSE 1
-                                END ASC,
-                                CASE WHEN t.has_personal AND v.interest > 0 THEN v.interest END DESC NULLS LAST,
-                                CASE WHEN t.has_personal AND v.interest > 0 THEN v.popularity END DESC NULLS LAST,
-                                CASE WHEN t.has_personal AND v.interest > 0 THEN v.updated_at END DESC NULLS LAST,
-                                CASE WHEN t.has_personal AND v.interest > 0 THEN v.id END ASC NULLS LAST,
-                                CASE WHEN NOT t.has_personal AND t.has_global AND v.popularity > 0 THEN v.popularity END DESC NULLS LAST,
-                                CASE WHEN NOT t.has_personal AND t.has_global AND v.popularity > 0 THEN v.updated_at END DESC NULLS LAST,
-                                CASE WHEN NOT t.has_personal AND t.has_global AND v.popularity > 0 THEN v.id END ASC NULLS LAST,
-                                v.created_at DESC,
-                                v.id DESC
+                                    WHEN s.has_personal OR s.has_global THEN (-ln(s.u) / s.weight)
+                                END ASC NULLS LAST,
+                                CASE
+                                    WHEN NOT (s.has_personal OR s.has_global) THEN s.created_at
+                                END DESC NULLS LAST,
+                                CASE
+                                    WHEN s.has_personal OR s.has_global THEN s.id
+                                END ASC NULLS LAST,
+                                CASE
+                                    WHEN NOT (s.has_personal OR s.has_global) THEN s.id
+                                END DESC NULLS LAST
                         ) AS page_ord
-                    FROM valid_listings v
-                    CROSS JOIN tier_summary t
+                    FROM scored_listings s
                     ORDER BY page_ord ASC
                     LIMIT @pTake OFFSET @pSkip
                 )

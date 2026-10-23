@@ -31,6 +31,7 @@ public sealed class PublicEquipmentListingsControllerTests
 
         public Task<Result<PublicEquipmentListingResponse>> GetPublicListingByIdAsync(
             Guid id,
+            IInventoryCallerContext callerContext,
             CancellationToken cancellationToken = default) =>
             GetHandler != null
                 ? GetHandler(id)

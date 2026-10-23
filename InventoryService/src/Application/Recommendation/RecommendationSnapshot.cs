@@ -24,16 +24,20 @@ public sealed record RecommendationSnapshot(
     IReadOnlyList<EquipmentTypeInterestScore> PersonalInterests,
     IReadOnlyList<ListingPopularityScore> GlobalPopularity,
     RecommendationOutcome Outcome,
-    string Reason)
+    string Reason,
+    long Cycle = 0,
+    string? Seed = null)
 {
-    public static RecommendationSnapshot Miss(string reason = RecommendationReasons.Miss) =>
-        new([], [], RecommendationOutcome.Miss, reason);
+    public static RecommendationSnapshot Miss(string reason = RecommendationReasons.Miss, long cycle = 0, string? seed = null) =>
+        new([], [], RecommendationOutcome.Miss, reason, cycle, seed);
 
-    public static RecommendationSnapshot Unavailable(string reason = RecommendationReasons.Unavailable) =>
-        new([], [], RecommendationOutcome.Unavailable, reason);
+    public static RecommendationSnapshot Unavailable(string reason = RecommendationReasons.Unavailable, long cycle = 0, string? seed = null) =>
+        new([], [], RecommendationOutcome.Unavailable, reason, cycle, seed);
 
     public static RecommendationSnapshot Available(
         IReadOnlyList<EquipmentTypeInterestScore> personalInterests,
-        IReadOnlyList<ListingPopularityScore> globalPopularity) =>
-        new(personalInterests, globalPopularity, RecommendationOutcome.Available, RecommendationReasons.Available);
+        IReadOnlyList<ListingPopularityScore> globalPopularity,
+        long cycle = 0,
+        string? seed = null) =>
+        new(personalInterests, globalPopularity, RecommendationOutcome.Available, RecommendationReasons.Available, cycle, seed);
 }

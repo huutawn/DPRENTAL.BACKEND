@@ -1,0 +1,14 @@
+{
+  "owner": "RecommendationService",
+  "revision": "dbd5f3e938d8b285652f0d359f0174a67797bb62",
+  "files": {
+    "listing-viewed.schema.json": {
+      "sourcePath": "docs/contracts/schemas/listing-viewed.schema.json",
+      "sha256": "95a91f60cca91e9fcc815f96095941c866af5e055e775602237ce993d5bc416a"
+    },
+    "search-performed.schema.json": {
+      "sourcePath": "docs/contracts/schemas/search-performed.schema.json",
+      "sha256": "442cba28629228496c6786577006c7fda1f5ec93a1140aac9285689ef63af2d2"
+    }
+  }
+}

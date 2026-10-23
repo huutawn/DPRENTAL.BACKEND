@@ -762,6 +762,10 @@ namespace InventoryService.Domain.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("PublishedAt", "Id")
+                        .HasDatabaseName("ix_outbox_messages_behavior_cleanup")
+                        .HasFilter("topic = 'inventory.behavior.events.v1' AND published_at IS NOT NULL");
+
                     b.HasIndex("KafkaKey", "PublishedAt", "CreatedAt")
                         .HasDatabaseName("ix_outbox_messages_key_ordering");
 

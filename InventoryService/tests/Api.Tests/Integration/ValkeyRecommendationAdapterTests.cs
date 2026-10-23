@@ -19,15 +19,25 @@ public sealed class ValkeyRecommendationAdapterTests
 
     private IDatabase Db => _valkey.Multiplexer.GetDatabase();
 
+    private async Task ResetDbAsync()
+    {
+        foreach (var endpoint in _valkey.Multiplexer.GetEndPoints())
+        {
+            var server = _valkey.Multiplexer.GetServer(endpoint);
+            if (server.IsConnected)
+            {
+                await server.FlushDatabaseAsync();
+            }
+        }
+    }
+
     [Fact]
     public async Task KeyFormat_And_Limits_AreEnforced()
     {
         var userId = Guid.NewGuid();
         string userKey = $"rec:v1:user:{userId:D}:equipment-types";
         string globalKey = "rec:v1:global:popular-listings";
-
-        await Db.KeyDeleteAsync(userKey);
-        await Db.KeyDeleteAsync(globalKey);
+        await ResetDbAsync();
 
         // Populate 25 user items (exceeding 20 limit)
         var userEntries = Enumerable.Range(1, 25)
@@ -60,8 +70,7 @@ public sealed class ValkeyRecommendationAdapterTests
         var typeId = Guid.NewGuid();
         var listingId = Guid.NewGuid();
 
-        await Db.KeyDeleteAsync(userKey);
-        await Db.KeyDeleteAsync(globalKey);
+        await ResetDbAsync();
 
         await Db.SortedSetAddAsync(userKey, typeId.ToString("D"), 99);
         await Db.SortedSetAddAsync(globalKey, listingId.ToString("D"), 50);
@@ -85,7 +94,7 @@ public sealed class ValkeyRecommendationAdapterTests
         string globalKey = "rec:v1:global:popular-listings";
         var listingId = Guid.NewGuid();
 
-        await Db.KeyDeleteAsync(globalKey);
+        await ResetDbAsync();
         await Db.SortedSetAddAsync(globalKey, listingId.ToString("D"), 75);
 
         var reader = new ValkeyRecommendationRankingReader(_valkey.Multiplexer);
@@ -102,11 +111,8 @@ public sealed class ValkeyRecommendationAdapterTests
     public async Task EmptyKeys_ReturnsMiss()
     {
         var userId = Guid.NewGuid();
-        string userKey = $"rec:v1:user:{userId:D}:equipment-types";
-        string globalKey = "rec:v1:global:popular-listings";
 
-        await Db.KeyDeleteAsync(userKey);
-        await Db.KeyDeleteAsync(globalKey);
+        await ResetDbAsync();
 
         var reader = new ValkeyRecommendationRankingReader(_valkey.Multiplexer);
         var snapshot = await reader.ReadAsync(userId);
@@ -122,7 +128,7 @@ public sealed class ValkeyRecommendationAdapterTests
     {
         string globalKey = "rec:v1:global:popular-listings";
 
-        await Db.KeyDeleteAsync(globalKey);
+        await ResetDbAsync();
         // Set string instead of zset
         await Db.StringSetAsync(globalKey, "invalid-type-value");
 
@@ -138,7 +144,7 @@ public sealed class ValkeyRecommendationAdapterTests
     {
         string globalKey = "rec:v1:global:popular-listings";
 
-        await Db.KeyDeleteAsync(globalKey);
+        await ResetDbAsync();
         await Db.SortedSetAddAsync(globalKey, Guid.Empty.ToString("D"), 100);
 
         var reader = new ValkeyRecommendationRankingReader(_valkey.Multiplexer);
@@ -155,8 +161,7 @@ public sealed class ValkeyRecommendationAdapterTests
         string userKey = $"rec:v1:user:{userId:D}:equipment-types";
         string globalKey = "rec:v1:global:popular-listings";
 
-        await Db.KeyDeleteAsync(userKey);
-        await Db.KeyDeleteAsync(globalKey);
+        await ResetDbAsync();
 
         var dupId = Guid.NewGuid();
         // Valkey sorted set by member is unique in Valkey, but test non-canonical casing or duplicate member simulation
@@ -178,7 +183,7 @@ public sealed class ValkeyRecommendationAdapterTests
     {
         string globalKey = "rec:v1:global:popular-listings";
 
-        await Db.KeyDeleteAsync(globalKey);
+        await ResetDbAsync();
         await Db.SortedSetAddAsync(globalKey, Guid.NewGuid().ToString("D"), invalidScore);
 
         var reader = new ValkeyRecommendationRankingReader(_valkey.Multiplexer);
@@ -193,7 +198,7 @@ public sealed class ValkeyRecommendationAdapterTests
     {
         string globalKey = "rec:v1:global:popular-listings";
 
-        await Db.KeyDeleteAsync(globalKey);
+        await ResetDbAsync();
         await Db.SortedSetAddAsync(globalKey, Guid.NewGuid().ToString("D"), 10.5);
 
         var reader = new ValkeyRecommendationRankingReader(_valkey.Multiplexer);
@@ -210,8 +215,7 @@ public sealed class ValkeyRecommendationAdapterTests
         string userKey = $"rec:v1:user:{userId:D}:equipment-types";
         string globalKey = "rec:v1:global:popular-listings";
 
-        await Db.KeyDeleteAsync(userKey);
-        await Db.KeyDeleteAsync(globalKey);
+        await ResetDbAsync();
 
         // User data has fractional score -> invalid
         await Db.SortedSetAddAsync(userKey, Guid.NewGuid().ToString("D"), 12.34);
@@ -265,5 +269,79 @@ public sealed class ValkeyRecommendationAdapterTests
         {
             await reader.ReadAsync(Guid.NewGuid(), cts.Token);
         });
+    }
+
+    [Fact]
+    public async Task Rotation_SnapshotCachedInInventoryNamespace_WithCycleAndSeed()
+    {
+        await ResetDbAsync();
+        var userId = Guid.NewGuid();
+        string userKey = $"rec:v1:user:{userId:D}:equipment-types";
+        string globalKey = "rec:v1:global:popular-listings";
+        var typeId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+
+        await Db.SortedSetAddAsync(userKey, typeId.ToString("D"), 50);
+        await Db.SortedSetAddAsync(globalKey, listingId.ToString("D"), 100);
+
+        var reader = new ValkeyRecommendationRankingReader(_valkey.Multiplexer);
+        var snapshot1 = await reader.ReadAsync(userId);
+
+        Assert.Equal(RecommendationOutcome.Available, snapshot1.Outcome);
+        Assert.True(snapshot1.Cycle > 0);
+        Assert.Equal($"{userId:D}:{snapshot1.Cycle}", snapshot1.Seed);
+
+        // Verify key exists in Inventory namespace
+        string snapshotKey = ValkeyRecommendationRankingReader.GetSnapshotKey(userId, snapshot1.Cycle);
+        Assert.True(await Db.KeyExistsAsync(snapshotKey));
+
+        // Verify TTL is bounded within cycle (<= 300s)
+        var ttl = await Db.KeyTimeToLiveAsync(snapshotKey);
+        Assert.NotNull(ttl);
+        Assert.True(ttl.Value.TotalSeconds > 0 && ttl.Value.TotalSeconds <= 300);
+
+        // Second read hits the snapshot cache
+        var snapshot2 = await reader.ReadAsync(userId);
+        Assert.Equal(RecommendationOutcome.Available, snapshot2.Outcome);
+        Assert.Equal(snapshot1.Cycle, snapshot2.Cycle);
+        Assert.Equal(snapshot1.Seed, snapshot2.Seed);
+        Assert.Equal(snapshot1.PersonalInterests.Count, snapshot2.PersonalInterests.Count);
+    }
+
+    [Fact]
+    public async Task Rotation_OversizedPayload_Exceeding64KiB_RejectedAsInvalid()
+    {
+        await ResetDbAsync();
+        var userId = Guid.NewGuid();
+        long cycle = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 300;
+        string snapshotKey = ValkeyRecommendationRankingReader.GetSnapshotKey(userId, cycle);
+
+        // Write oversized payload > 64 KiB
+        byte[] oversized = new byte[65 * 1024];
+        Array.Fill(oversized, (byte)'a');
+        await Db.StringSetAsync(snapshotKey, oversized, TimeSpan.FromMinutes(5));
+
+        var reader = new ValkeyRecommendationRankingReader(_valkey.Multiplexer);
+        var snapshot = await reader.ReadAsync(userId);
+
+        Assert.Equal(RecommendationOutcome.Unavailable, snapshot.Outcome);
+        Assert.Equal(RecommendationReasons.Invalid, snapshot.Reason);
+    }
+
+    [Fact]
+    public async Task Rotation_CorruptJson_RejectedAsInvalid()
+    {
+        await ResetDbAsync();
+        var userId = Guid.NewGuid();
+        long cycle = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 300;
+        string snapshotKey = ValkeyRecommendationRankingReader.GetSnapshotKey(userId, cycle);
+
+        await Db.StringSetAsync(snapshotKey, "{not-a-valid-json", TimeSpan.FromMinutes(5));
+
+        var reader = new ValkeyRecommendationRankingReader(_valkey.Multiplexer);
+        var snapshot = await reader.ReadAsync(userId);
+
+        Assert.Equal(RecommendationOutcome.Unavailable, snapshot.Outcome);
+        Assert.Equal(RecommendationReasons.Invalid, snapshot.Reason);
     }
 }
