@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "AnalyticsService.Api": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:51309;http://localhost:41309"
+    }
+  }
+}
