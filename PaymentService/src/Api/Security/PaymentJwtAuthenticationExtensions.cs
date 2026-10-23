@@ -1,5 +1,6 @@
 using Dprental.PaymentService.Application.Security.Jwt;
 using Dprental.PaymentService.Application.Options;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Configuration;
@@ -67,7 +68,8 @@ public static class PaymentJwtAuthenticationExtensions
                             return Task.CompletedTask;
                         }
 
-                        if (context.Request.Path.StartsWithSegments("/hubs/payments", StringComparison.OrdinalIgnoreCase))
+                        if (context.Request.Path.StartsWithSegments("/hubs/payments", StringComparison.OrdinalIgnoreCase) ||
+                            IsInvoiceReadRequest(context.Request))
                         {
                             if (string.IsNullOrWhiteSpace(context.Token) &&
                                 context.Request.Cookies.TryGetValue(Dprental.PaymentService.Application.Hub.Security.PaymentHubSecurityConstants.AccessTokenCookieName, out string? cookieToken) &&
@@ -99,5 +101,25 @@ public static class PaymentJwtAuthenticationExtensions
             });
 
         return services;
+    }
+
+    private static bool IsInvoiceReadRequest(HttpRequest request)
+    {
+        if (!HttpMethods.IsGet(request.Method)) return false;
+
+        string[] segments = request.Path.Value?
+            .Split('/', StringSplitOptions.RemoveEmptyEntries) ?? [];
+
+        if (segments.Length is not (4 or 5) ||
+            !string.Equals(segments[0], "api", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(segments[1], "v1", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(segments[2], "invoices", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(segments[3]))
+        {
+            return false;
+        }
+
+        return segments.Length == 4 ||
+               string.Equals(segments[4], "status", StringComparison.OrdinalIgnoreCase);
     }
 }
