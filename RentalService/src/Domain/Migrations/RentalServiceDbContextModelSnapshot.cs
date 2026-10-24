@@ -1095,6 +1095,47 @@ namespace RentalService.Domain.Migrations
                     b.ToTable("renter_addresses", "rental");
                 });
 
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RenterBankAccount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AccountHolderName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("BankCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("RenterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RenterId", "BankCode", "AccountNumber")
+                        .IsUnique();
+
+                    b.ToTable("renter_bank_accounts", "rental");
+                });
+
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRecord", b =>
                 {
                     b.Property<Guid>("Id")

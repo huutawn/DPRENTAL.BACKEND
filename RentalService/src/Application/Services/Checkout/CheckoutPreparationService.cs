@@ -21,6 +21,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 {
     private readonly IRentalCartRepository _carts;
     private readonly IRenterAddressRepository _addresses;
+    private readonly IRenterBankAccountRepository _bankAccounts;
     private readonly IInventoryRentalClient _inventory;
     private readonly IAuthRentalClient _auth;
     private readonly RentalTermsOptions _terms;
@@ -32,6 +33,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     public CheckoutPreparationService(
         IRentalCartRepository carts,
         IRenterAddressRepository addresses,
+        IRenterBankAccountRepository bankAccounts,
         IInventoryRentalClient inventory,
         IAuthRentalClient auth,
         IOptions<RentalTermsOptions> termsOptions,
@@ -41,6 +43,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 
         _carts = carts ?? throw new ArgumentNullException(nameof(carts));
         _addresses = addresses ?? throw new ArgumentNullException(nameof(addresses));
+        _bankAccounts = bankAccounts ?? throw new ArgumentNullException(nameof(bankAccounts));
         _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
         _terms = termsOptions.Value;
@@ -118,6 +121,23 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             delivery = request.Delivery!;
         }
 
+        CheckoutRefundAccountDto refundAccount;
+        if (request.RefundAccountId is { } refundAccountId)
+        {
+            // Chọn từ sổ tài khoản: chỉ tài khoản của chính người thuê; đơn chép lại tài khoản lúc đặt.
+            RenterBankAccount? bankAccount = await _bankAccounts.GetByIdAsync(renter.RenterId, refundAccountId, cancellationToken);
+            if (bankAccount is null)
+            {
+                return CheckoutPreparationResult.Failure(RenterBankAccountErrors.NotFound);
+            }
+
+            refundAccount = new(bankAccount.BankCode, bankAccount.AccountNumber, bankAccount.AccountHolderName);
+        }
+        else
+        {
+            refundAccount = request.RefundAccount!;
+        }
+
         Guid? cartId = null;
         List<CheckoutSelection> selections;
         if (request.BuyNow is { } buyNow)
@@ -181,7 +201,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             renter.RenterId,
             cartId,
             Normalize(delivery),
-            Normalize(request.RefundAccount!),
+            Normalize(refundAccount),
             effectiveTermsVersion,
             _terms.DocumentRef.Trim(),
             _terms.ContentHash.Trim(),

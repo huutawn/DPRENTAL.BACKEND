@@ -110,6 +110,25 @@ internal sealed class FakeRenterAddressRepository : IRenterAddressRepository
     public void Remove(RenterAddress address) => Addresses.Remove(address);
 }
 
+/// <summary>Sổ tài khoản ngân hàng giả cho test checkout: chỉ trả tài khoản đúng của người thuê đã hỏi.</summary>
+internal sealed class FakeRenterBankAccountRepository : IRenterBankAccountRepository
+{
+    public List<RenterBankAccount> BankAccounts { get; } = [];
+
+    public Task<RenterBankAccount?> GetByIdAsync(Guid renterId, Guid bankAccountId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(BankAccounts.FirstOrDefault(a => a.Id == bankAccountId && a.RenterId == renterId));
+
+    public Task<IReadOnlyList<RenterBankAccount>> ListByRenterAsync(Guid renterId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<RenterBankAccount>>(BankAccounts.Where(a => a.RenterId == renterId).ToList());
+
+    public Task<IReadOnlyList<RenterBankAccount>> ListForUpdateAsync(Guid renterId, CancellationToken cancellationToken = default) =>
+        ListByRenterAsync(renterId, cancellationToken);
+
+    public void Add(RenterBankAccount bankAccount) => BankAccounts.Add(bankAccount);
+
+    public void Remove(RenterBankAccount bankAccount) => BankAccounts.Remove(bankAccount);
+}
+
 internal sealed class FakeCartRepository : IRentalCartRepository
 {
     public RentalCart? Cart { get; set; }

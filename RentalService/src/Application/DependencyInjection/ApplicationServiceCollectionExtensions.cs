@@ -3,6 +3,7 @@ using Dprental.RentalService.Application.Kafka.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.IServices.Addresses;
+using Dprental.RentalService.Application.IServices.BankAccounts;
 using Dprental.RentalService.Application.IServices.Calendar;
 using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.IServices.Expiry;
@@ -19,6 +20,7 @@ using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Addresses;
+using Dprental.RentalService.Application.Services.BankAccounts;
 using Dprental.RentalService.Application.Services.Calendar;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Application.Services.Checkout;
@@ -87,6 +89,9 @@ public static class ApplicationServiceCollectionExtensions
 
         // Addresses
         services.AddScoped<IRenterAddressService, RenterAddressService>();
+
+        // Bank accounts
+        services.AddScoped<IRenterBankAccountService, RenterBankAccountService>();
 
         // Operations
         services.AddScoped<IRentalOperationExecutor, RentalOperationExecutor>();
