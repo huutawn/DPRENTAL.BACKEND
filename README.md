@@ -118,19 +118,20 @@ dotnet build RecommendationService.sln -c Release
 dotnet test RecommendationService.sln -c Release
 ```
 
-## CI/CD dev
+## CI/CD dev với self-hosted runner
 
-Workflow `.github/workflows/recommendationservice-dev.yml` được duy trì trên nhánh
-`recommendation/develop-ci-cd`, theo cùng luồng RentalService: publish runtime và
-migrator lên GHCR với tag commit SHA, SSH tới VPS, cập nhật `release.env`, chạy
-migration, recreate service, kiểm tra container healthy, Gateway và JWKS.
-Migrator dùng lệnh `--migrate` hiện có; không thêm cơ chế migration thứ hai.
+Workflow chỉ nhận push vào `recommendation/develop-ci-cd`. Build/publish vẫn chạy trên
+`ubuntu-24.04`, giữ nguyên Dockerfile, build context và toàn bộ targets/tag full SHA.
+CI kiểm thử script deployment trên runner hosted; job deploy chỉ được gửi tới
+`self-hosted, linux, x64, dprental-deploy` sau khi GitHub API xác nhận repository private.
 
-VPS dùng `/opt/dprental/dev/compose.yaml`, `.env`, `release.env` với hai biến
-`RECOMMENDATION_SERVICE_IMAGE` và `RECOMMENDATION_MIGRATOR_IMAGE`. Runtime dùng
-PostgreSQL schema `recommendation` (tạo sẵn trên VPS trước lần migration đầu), Kafka nội bộ và Valkey dùng chung với
-`ConnectionStrings__RecommendationRedis` của InventoryService. Gateway chuyển
-`GET /recommendation/health/ready` tới `/health/ready`; service chưa có business
-HTTP endpoints. Không tự rollback schema hoặc image khi triển khai thất bại.
+Deployment gọi entrypoint do root quản lý; không checkout shell để chạy bằng sudo,
+không dùng SSH trong pipeline. Shared release state được khóa bằng `flock`, sử dụng
+candidate, backup và phê duyệt có hạn theo SHA; chỉ ghi `release.env` sau health/smoke.
 
-Kiểm thử script: `bash scripts/tests/deploy-recommendationservice.test.sh`.
+Xem [hướng dẫn vận hành và recovery](docs/SELF_HOSTED_DEPLOYMENT.md) và
+[audit/validation](docs/CICD_AUDIT.md). Không cấp runner quyền Docker trực tiếp.
+
+```bash
+python3 -m unittest discover -s scripts/tests -p 'test_deploy*.py' -v
+```
