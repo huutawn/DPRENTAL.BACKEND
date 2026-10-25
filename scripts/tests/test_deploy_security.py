@@ -98,8 +98,16 @@ class SecurityTests(unittest.TestCase):
                     patch('os.execve', side_effect=lambda *args: executed.append(args)), \
                     patch.dict(os.environ, {'BASH_ENV': '/evil', 'DOCKER_HOST': 'tcp://evil', 'PYTHONPATH': '/evil', 'SSL_CERT_FILE': '/evil'}), \
                     patch.object(__import__('sys'), 'argv', ['wrapper', 'auth', SHA]):
-                with patch('sys.stdin', io.StringIO('test\nfake_token\n')): CODE['main']()
-                self.assertEqual(1, len(executed))
+                tokens = ['fake_token', 'opaque.token-with-+/=~', 'a' * 8192]
+                for token in tokens:
+                    with patch('sys.stdin', io.StringIO('test\n' + token + '\n')):
+                        CODE['main']()
+                    self.assertEqual(token, executed[-1][2]['GHCR_TOKEN'])
+                self.assertEqual(len(tokens), len(executed))
+                for token in ['', 'white space', 'bad\x00control', 'bad\x7fcontrol', 'bad\rheader', 'unicode-ệ', 'a' * 8193]:
+                    with patch('sys.stdin', io.StringIO('test\n' + token + '\n')):
+                        with self.assertRaises(ValueError): CODE['main']()
+                self.assertEqual(len(tokens), len(executed))
                 executable, arguments, env = executed[0]
                 self.assertEqual('/bin/bash', executable)
                 self.assertEqual(['bash', str(root / 'deploy-authservice.sh'), SHA], arguments)
