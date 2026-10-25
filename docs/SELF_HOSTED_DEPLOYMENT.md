@@ -6,15 +6,25 @@ cho đợt kích hoạt đã được phê duyệt, không phải các lệnh đ
 
 ## Trạng thái bàn giao và điều kiện kích hoạt
 
-Repository được GitHub API xác nhận **public**. Environment `dev` chưa có protection
-rules hoặc deployment branch policy. Runner đang online nhưng chưa có Docker/sudo.
-VM có `/opt/dprental/dev` mode **777**, cấu hình thuộc `tawn`: wrapper sẽ từ chối.
-Không cấp sudoers trước khi giải quyết những điều kiện này.
+Repository hiện đã được GitHub API xác nhận **private**. Sau khi người dùng cho phép,
+đã harden `/opt/dprental/dev` về root:root 0700 và cài sudoers chỉ cho entrypoint.
+Auth PEM/Firebase dùng root:1654 0440; đã kiểm tra đọc lại trong container UID 1654.
+Không đổi nội dung cấu hình, Docker group/socket, DB, volumes hoặc restart container.
+Metadata trước hardening lưu tại
+`/opt/dprental/permission-backups/20261025T092304Z/metadata.json`.
+
+**Deployment Phase 3 chưa được bật.** Job deploy chỉ được lên lịch khi repository private
+và **repository variable** `DEV_DEPLOY_ENABLED` bằng chuỗi `true`. Variable này hiện chưa
+được tạo; deploy được skip, build/publish và preflight vẫn chạy. Chỉ đặt repository
+variable này sau khi được duyệt deployment riêng, không đặt ở Environment scope vì job
+condition được đánh giá trước khi runner chạy. Per-SHA approval trên VM vẫn bắt buộc.
+Đây là khóa kích hoạt Phase 3, không chọn giữa hai implementation: đường SSH đã bỏ.
 
 Build/publish vẫn dùng hosted `ubuntu-24.04`, Buildx, GHCR và full commit SHA.
 Payment giữ đủ bốn targets. Gateway không có migrator. Job hosted xác minh trạng thái
 private bằng API trước khi lên lịch job local; wrapper kiểm tra lại bằng API ngay
-trước thao tác Docker. Chỉ dùng event push trên đúng branch và repository.
+trước thao tác Docker. Hosted preflight dùng token `packages: read` để inspect
+manifest của đủ runtime/migrator/integrity images, không pull layers hay thay runtime. Chỉ dùng event push trên đúng branch và repository.
 PR, kể cả `pull_request_target`, không phải trigger của các workflow này.
 
 Quản trị viên cần chuyển repo private, bảo vệ tám branch, giới hạn quyền sửa workflow,
@@ -59,7 +69,8 @@ có cùng bản helper/entrypoint vì được phát hành độc lập; kiểm 
 khi gom gói cài. Không cài tám bản khác nhau vào cùng đường dẫn một cách tùy ý.
 File `/etc/dprental-deploy/namespace` chỉ chứa `huutawn`, owner root, mode 0600.
 
-Mẫu sudoers **chỉ là đề xuất, chưa cài** (`scripts/dprental-deploy.sudoers`):
+Sudoers đã được cài theo phê duyệt người dùng; bản nguồn là
+`scripts/dprental-deploy.sudoers`:
 
 ```sudoers
 Defaults:gha-deploy env_reset, !setenv
@@ -67,7 +78,7 @@ gha-deploy ALL=(root) NOPASSWD: NOSETENV: /usr/local/sbin/dprental-deploy
 ```
 
 Entry point tự giới hạn arguments; sudoers không cho thêm command khác. Dùng
-`visudo -cf` kiểm tra file trước khi admin cài root:root 0440. Chạy `sudo -l -U gha-deploy`
+`visudo -cf` kiểm tra file khi cài lại root:root 0440. Lần này đã chạy cả `visudo -cf` và `visudo -c`. Chạy `sudo -l -U gha-deploy`
 để xác nhận quyền hiệu lực, kể cả sudoers từ nhóm khác. Không thêm runner vào nhóm docker,
 không cấp quyền socket, không cấp `NOPASSWD: ALL`.
 
@@ -95,8 +106,8 @@ Token chỉ đi stdin tới wrapper rồi Docker `--password-stdin`; Docker conf
 bị xóa khi script exit/signal được xử lý, kể cả login thất bại. SIGKILL/mất điện có thể
 để lại config tạm; admin xử lý thư mục tạm cũ sau khi xác nhận không còn deployment,
 token job đã hết hạn. Không log credentials hoặc dùng `set -x`. Không dùng token đăng ký
-runner làm GHCR token. Manifest check hiện tại của root bị unauthorized; đây không phải
-bằng chứng image không tồn tại. Quyền pull của job token chưa được kiểm chứng thực tế.
+runner làm GHCR token. Manifest check ban đầu của root không có credential bị unauthorized; đây không phải
+bằng chứng image không tồn tại. Hosted preflight mới kiểm tra quyền đọc bằng job token; Docker pull trên VM chưa chạy.
 
 ## Phê duyệt một release và deployment thủ công
 
@@ -140,7 +151,8 @@ tiếp scripts trong checkout bằng sudo hoặc stream shell qua SSH.
 Một `flock` trên `.deployment.lock` bao trùm toàn bộ transaction; Actions cùng group
 `dprental-dev`, `cancel-in-progress: false`. GitHub concurrency mặc định có thể thay
 pending job, không bảo đảm FIFO hoặc mọi revision đều deploy. Theo dõi run bị hủy/chờ;
-không thêm queue option mới trong refactor này. Các công cụ seed/reset/frontend cũ
+không thêm queue option mới vì actionlint 1.7.12 chưa hỗ trợ. Khi bật Phase 3,
+chạy lần lượt từng service; hai job trong lượt push đầu đã bị thay thế khi pending. Các công cụ seed/reset/frontend cũ
 chưa dùng lock này: không được chạy chúng đồng thời, phải audit/migrate trước cutover
 toàn platform. File lock chỉ ngăn các caller tuân thủ giao thức, không thể khóa admin
 cố tình sửa tay. Trong tám workflow đã refactor không có hai writer đồng thời.
