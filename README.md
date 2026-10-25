@@ -50,7 +50,7 @@ Swagger UI Development có CatalogService tại `/catalog/swagger/v1/swagger.jso
 ở Development; khi Catalog chạy Staging/Production, route tài liệu trả 401 nếu anonymous hoặc 404 với
 token hợp lệ. API Catalog vẫn hoạt động.
 
-VPS sử dụng Compose trong `deploy/dev` của platform repository: thêm `CATALOG_SERVICE_IMAGE` và
+Ubuntu VM sử dụng Compose trong `deploy/dev` của platform repository: thêm `CATALOG_SERVICE_IMAGE` và
 `CATALOG_MIGRATOR_IMAGE` vào `release.env`, mount public key Auth, chạy catalog-migrate trước khi start
 catalog-service và deploy Gateway chứa routes mới. Xem quy trình Catalog trong `deploy/dev/README.md`.
 Gateway readiness chỉ kiểm tra JWKS/configuration, không thay thế readiness của Catalog.
@@ -277,35 +277,20 @@ Container dùng địa chỉ service từ `appsettings.json` và biến môi tr�
 
 Runtime lắng nghe cổng `8080`, chạy non-root user `$APP_UID` và tích hợp sẵn `HEALTHCHECK` tự động thăm dò endpoint `/health/ready`.
 
-## CI/CD Gateway cho dev
+## CI/CD dev với self-hosted runner
 
-Workflow [gateway-dev.yml](.github/workflows/gateway-dev.yml) chỉ chạy khi có push vào `gateway/develop-ci-cd`; nó không chạy cho pull request và không kiểm tra branch nền hoặc chạy test. Job publish build và đẩy Docker image lên GHCR một lần, sau đó job deploy chạy trên VPS. Kiểm tra build và test .NET vẫn có trong [pre-push hook](scripts/pre-push-check.sh) ở máy lập trình viên, nhưng hook này có thể bị bỏ qua và không thay thế CI.
+Workflow chỉ nhận push vào `gateway/develop-ci-cd`. Build/publish vẫn chạy trên
+`ubuntu-24.04`, giữ nguyên Dockerfile, build context và toàn bộ targets/tag full SHA.
+CI kiểm thử script deployment trên runner hosted; job deploy chỉ được gửi tới
+`self-hosted, linux, x64, dprental-deploy` sau khi GitHub API xác nhận repository private.
 
-Mỗi push sẽ publish image GHCR bất biến bằng full Git SHA:
+Deployment gọi entrypoint do root quản lý; không checkout shell để chạy bằng sudo,
+không dùng SSH trong pipeline. Shared release state được khóa bằng `flock`, sử dụng
+candidate, backup và phê duyệt có hạn theo SHA; chỉ ghi `release.env` sau health/smoke.
 
-```text
-ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-gateway:<git-sha>
-```
-
-Thiết lập GitHub Environment variable `GHCR_IMAGE_NAMESPACE` bằng namespace GHCR viết thường (ví dụ `huutawn`). Workflow gắn OCI source metadata để package mới tự liên kết repository. Với package đã từng được push thủ công, vào package GHCR và cấp repository workflow quyền **Write** trong phần Actions access trước lần CI đầu tiên. Tạo GitHub Environment tên `dev` với các secrets sau:
-
-```text
-DEV_VPS_HOST              # IP hoặc hostname VPS
-DEV_VPS_USER              # user deploy thuộc group docker
-DEV_VPS_SSH_PRIVATE_KEY   # private key riêng của user deploy
-DEV_VPS_KNOWN_HOSTS       # dòng host key theo định dạng known_hosts
-DEV_VPS_PORT              # tùy chọn, mặc định 22
-```
-
-Workflow nạp deploy key vào `ssh-agent` qua stdin và kiểm tra host key đã lưu trong `DEV_VPS_KNOWN_HOSTS`. Nó truyền `GITHUB_TOKEN` cùng deploy script qua stdin của kết nối SSH, không đặt token trong câu lệnh SSH. Trên VPS, script đăng nhập GHCR bằng Docker config tạm rồi thực thi [deploy-gateway.sh](scripts/deploy-gateway.sh) từ commit đang phát hành. Docker credential tạm bị xóa ngay khi script kết thúc; user SSH của workflow cần quyền đọc `.env` và ghi `release.env`.
-
-Script cập nhật **chỉ duy nhất biến `GATEWAY_IMAGE`** trong `/opt/dprental/dev/release.env`, bảo toàn nguyên vẹn mọi image khác (`AUTH_SERVICE_IMAGE`, `AUTH_MIGRATOR_IMAGE`...). Nó pull duy nhất image `gateway`, khởi động lại container với `--no-deps --force-recreate gateway`, chờ Gateway đạt trạng thái healthy và thực hiện kiểm thử khói (smoke tests) health cả nội bộ lẫn qua domain công khai và GET brands anonymous.
-
-Ví dụ cấp quyền ghi `release.env` cho user GitHub Actions trên VPS (thay `deploy` bằng user thực tế):
+Xem [hướng dẫn vận hành và recovery](docs/SELF_HOSTED_DEPLOYMENT.md) và
+[audit/validation](docs/CICD_AUDIT.md). Không cấp runner quyền Docker trực tiếp.
 
 ```bash
-sudo chown deploy:deploy /opt/dprental/dev/release.env
-sudo chmod 600 /opt/dprental/dev/release.env
+python3 -m unittest discover -s scripts/tests -p 'test_deploy*.py' -v
 ```
-
-User `deploy` phải thuộc group `docker`; quyền Docker tương đương quyền quản trị VPS nên deploy key chỉ dùng cho automation này. Khóa host SSH có thể lấy từ máy tin cậy bằng `ssh-keyscan -H <vps-host>` rồi lưu nguyên kết quả vào `DEV_VPS_KNOWN_HOSTS`. Nếu chỉ muốn triển khai sau khi merge PR, cấu hình branch protection/ruleset cho `gateway/develop-ci-cd` để yêu cầu PR và chặn push trực tiếp; event `push` tự nó không bảo đảm commit đến từ PR.

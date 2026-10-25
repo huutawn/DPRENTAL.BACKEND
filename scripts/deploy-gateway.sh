@@ -24,15 +24,6 @@ require_file() {
   [ -f "$1" ] || fail "không tìm thấy file bắt buộc: $1"
 }
 
-image_repository() {
-  local image="$1"
-  local last_component="${image##*/}"
-
-  [[ "$image" != *@* ]] || fail "image trong release.env phải dùng tag, không dùng digest."
-  [[ "$last_component" == *:* ]] || fail "image trong release.env phải có tag: $image"
-  printf '%s\n' "${image%:*}"
-}
-
 read_release_value() {
   local variable_name="$1"
   local line
@@ -51,42 +42,13 @@ read_environment_value() {
   printf '%s\n' "${line#*=}"
 }
 
-update_release_image() {
-  local gateway_image="$1"
-  local temporary_file
-
-  temporary_file="$(mktemp "$DEPLOY_DIRECTORY/.release.env.XXXXXX")" || \
-    fail 'không thể tạo file release tạm thời.'
-  trap 'rm -f "$temporary_file"' RETURN
-
-  awk \
-    -v gateway_image="$gateway_image" \
-    '
-      /^GATEWAY_IMAGE=/ {
-        print "GATEWAY_IMAGE=" gateway_image
-        gateway_found = 1
-        next
-      }
-      { print }
-      END {
-        if (!gateway_found) {
-          exit 42
-        }
-      }
-    ' "$RELEASE_FILE" > "$temporary_file" || fail 'release.env thiếu image Gateway.'
-
-  chmod 0600 "$temporary_file"
-  mv "$temporary_file" "$RELEASE_FILE"
-  trap - RETURN
-}
-
 wait_for_gateway_health() {
   local container_id
   local health_status
   local attempt
 
   for ((attempt = 1; attempt <= HEALTH_ATTEMPTS; attempt++)); do
-    container_id="$(${compose_command[@]} ps -q gateway)"
+    container_id="$("${compose_command[@]}" ps -q gateway)"
     if [ -n "$container_id" ]; then
       health_status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container_id")"
       if [ "$health_status" = healthy ]; then
@@ -107,11 +69,11 @@ wait_for_gateway_health() {
 smoke_test_gateway_public_health() {
   local domain="$1"
 
-  curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
+  public_curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
     "https://${domain}/health/ready" >/dev/null || \
     fail 'health endpoint công khai qua Gateway thất bại; không tự rollback image.'
 
-  curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
+  public_curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
     "https://${domain}/api/v1/catalog/brands" >/dev/null || \
     fail 'API brands anonymous qua Gateway thất bại; không tự rollback image.'
 }
@@ -122,6 +84,9 @@ smoke_test_gateway_internal_health() {
     fail 'health check nội bộ của Gateway thất bại; không tự rollback image.'
 }
 
+# shellcheck source=scripts/deploy-common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/deploy-common.sh"
+
 [ "$#" -le 1 ] || usage
 release_sha="${1:-${GITHUB_SHA:-}}"
 [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || fail 'release SHA phải là commit SHA gồm đúng 40 ký tự hex thường.'
@@ -130,29 +95,26 @@ require_file "$ENVIRONMENT_FILE"
 require_file "$RELEASE_FILE"
 require_file "$COMPOSE_FILE"
 
-[ -n "${GHCR_USERNAME:-}" ] || fail 'thiếu GitHub username để pull image private.'
-[ -n "${GHCR_TOKEN:-}" ] || fail 'thiếu GitHub token để pull image private.'
-docker_config_dir="$(mktemp -d)" || fail 'không thể tạo Docker config tạm thời.'
-trap 'rm -rf "$docker_config_dir"' EXIT
-export DOCKER_CONFIG="$docker_config_dir"
-docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin <<< "$GHCR_TOKEN" >/dev/null
-unset GHCR_TOKEN
+begin_deployment gateway
 
-readonly -a compose_command=(docker compose --project-directory "$DEPLOY_DIRECTORY" --file "$COMPOSE_FILE" --env-file "$ENVIRONMENT_FILE" --env-file "$RELEASE_FILE")
-
-current_gateway_image="$(read_release_value GATEWAY_IMAGE)"
-gateway_image="$(image_repository "$current_gateway_image"):$release_sha"
 dev_domain="$(read_environment_value DEV_DOMAIN)"
 
 printf 'Đang phát hành Gateway revision %s...\n' "$release_sha"
-update_release_image "$gateway_image"
+prepare_release GATEWAY_IMAGE=dprental-gateway
 
-"${compose_command[@]}" config --quiet
 "${compose_command[@]}" pull gateway
-"${compose_command[@]}" up -d --no-deps --force-recreate gateway
+require_dependencies auth-service catalog-service inventory-service media-service
+deployment_phase mutation
 
+deployment_phase runtime
+"${compose_command[@]}" up -d --no-deps --force-recreate --pull never --no-build gateway
+
+deployment_phase health
 wait_for_gateway_health
 smoke_test_gateway_internal_health
+deployment_phase public-smoke
 smoke_test_gateway_public_health "$dev_domain"
+
+commit_release
 
 printf 'Gateway revision %s đã healthy; Gateway health và API brands anonymous đã pass.\n' "$release_sha"
