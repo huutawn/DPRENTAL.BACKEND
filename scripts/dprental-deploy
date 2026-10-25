@@ -132,10 +132,14 @@ def main():
     if not re.fullmatch('[a-z0-9][a-z0-9._-]*', namespace):
         raise ValueError('Invalid administrator-configured GHCR namespace.')
     trusted_path(DEPLOY / 'approvals' / service / sha)
-    username = sys.stdin.readline(102).rstrip('\n')
-    token = sys.stdin.readline(8194).rstrip('\n')
-    if not re.fullmatch('[A-Za-z0-9_-]{1,100}', username) or not re.fullmatch('[A-Za-z0-9_]{1,8192}', token):
-        raise ValueError('Invalid stdin credentials.')
+    username = sys.stdin.readline(102).rstrip('\r\n')
+    token = sys.stdin.readline(8194).rstrip('\r\n')
+    if not re.fullmatch('[A-Za-z0-9_-]{1,100}', username):
+        raise ValueError('Invalid GitHub username on stdin.')
+    # Tokens are opaque: do not assume an alphanumeric-only GitHub token format.
+    # Controls/whitespace are rejected before constructing an HTTP header.
+    if not 1 <= len(token) <= 8192 or any(not 33 <= ord(char) <= 126 for char in token):
+        raise ValueError('Invalid token length or control/whitespace characters on stdin.')
     private_repository(token)
     environment = {
         'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/root', 'LANG': 'C.UTF-8',
