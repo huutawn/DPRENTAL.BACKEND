@@ -86,8 +86,10 @@ jobs:
     name: Verify private repository before scheduling local runner
     needs: publish
     runs-on: ubuntu-24.04
+    environment: dev
     permissions:
       contents: read
+      packages: read
     outputs:
       private: ${{ steps.visibility.outputs.private }}
     steps:
@@ -101,11 +103,30 @@ jobs:
           visibility="$(gh api repos/huutawn/DPRENTAL.BACKEND --jq '.private')"
           test "$visibility" = true
           printf 'private=true\n' >> "$GITHUB_OUTPUT"
+      - name: Login to GHCR with read-only package permission
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify every published image is readable without pulling layers
+        env:
+          IMAGE_NAMESPACE: ${{ vars.GHCR_IMAGE_NAMESPACE }}
+          RELEASE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_NAMESPACE" =~ ^[a-z0-9][a-z0-9._-]*$ ]]
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for image in dprental-auth dprental-auth-migrator; do
+            timeout 60s docker manifest inspect "ghcr.io/$IMAGE_NAMESPACE/$image:$RELEASE_SHA" >/dev/null
+            printf 'Readable image: %s\n' "$image"
+          done
 
   deploy-dev:
     name: Deploy authservice locally on Ubuntu VM
     needs: [publish, deployment-policy]
-    if: ${{ github.event_name == 'push' && github.repository == 'huutawn/DPRENTAL.BACKEND' && github.ref == 'refs/heads/auth/develop-ci-cd' && needs.deployment-policy.outputs.private == 'true' }}
+    if: ${{ github.event_name == 'push' && github.repository == 'huutawn/DPRENTAL.BACKEND' && github.ref == 'refs/heads/auth/develop-ci-cd' && needs.deployment-policy.outputs.private == 'true' && vars.DEV_DEPLOY_ENABLED == 'true' }}
     runs-on:
       - self-hosted
       - linux
