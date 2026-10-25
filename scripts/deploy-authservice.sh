@@ -24,15 +24,6 @@ require_file() {
   [ -f "$1" ] || fail "không tìm thấy file bắt buộc: $1"
 }
 
-image_repository() {
-  local image="$1"
-  local last_component="${image##*/}"
-
-  [[ "$image" != *@* ]] || fail "image trong release.env phải dùng tag, không dùng digest."
-  [[ "$last_component" == *:* ]] || fail "image trong release.env phải có tag: $image"
-  printf '%s\n' "${image%:*}"
-}
-
 read_release_value() {
   local variable_name="$1"
   local line
@@ -51,49 +42,13 @@ read_environment_value() {
   printf '%s\n' "${line#*=}"
 }
 
-update_release_images() {
-  local runtime_image="$1"
-  local migrator_image="$2"
-  local temporary_file
-
-  temporary_file="$(mktemp "$DEPLOY_DIRECTORY/.release.env.XXXXXX")" || \
-    fail 'không thể tạo file release tạm thời.'
-  trap 'rm -f "$temporary_file"' RETURN
-
-  awk \
-    -v runtime_image="$runtime_image" \
-    -v migrator_image="$migrator_image" \
-    '
-      /^AUTH_SERVICE_IMAGE=/ {
-        print "AUTH_SERVICE_IMAGE=" runtime_image
-        runtime_found = 1
-        next
-      }
-      /^AUTH_MIGRATOR_IMAGE=/ {
-        print "AUTH_MIGRATOR_IMAGE=" migrator_image
-        migrator_found = 1
-        next
-      }
-      { print }
-      END {
-        if (!runtime_found || !migrator_found) {
-          exit 42
-        }
-      }
-    ' "$RELEASE_FILE" > "$temporary_file" || fail 'release.env thiếu image AuthService hoặc migrator.'
-
-  chmod 0600 "$temporary_file"
-  mv "$temporary_file" "$RELEASE_FILE"
-  trap - RETURN
-}
-
 wait_for_auth_health() {
   local container_id
   local health_status
   local attempt
 
   for ((attempt = 1; attempt <= HEALTH_ATTEMPTS; attempt++)); do
-    container_id="$(${compose_command[@]} ps -q auth-service)"
+    container_id="$("${compose_command[@]}" ps -q auth-service)"
     if [ -n "$container_id" ]; then
       health_status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container_id")"
       if [ "$health_status" = healthy ]; then
@@ -114,16 +69,21 @@ wait_for_auth_health() {
 smoke_test_gateway_health() {
   local domain="$1"
 
-  curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
+  public_curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
     "https://${domain}/health/ready" >/dev/null || \
     fail 'health endpoint công khai qua Gateway thất bại; không tự rollback schema hoặc image.'
 }
 
 smoke_test_auth_jwks() {
+  # Perl variables must reach Perl unchanged.
+  # shellcheck disable=SC2016
   "${compose_command[@]}" exec -T auth-service \
     perl -MIO::Socket::INET -e '$s=IO::Socket::INET->new("127.0.0.1:8080") or exit 1; print $s "GET /.well-known/jwks.json HTTP/1.0\r\n\r\n"; my $r=<$s>; exit($r =~ /200/ ? 0 : 1)' </dev/null || \
     fail 'JWKS nội bộ của AuthService thất bại; không tự rollback schema hoặc image.'
 }
+
+# shellcheck source=scripts/deploy-common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/deploy-common.sh"
 
 [ "$#" -le 1 ] || usage
 release_sha="${1:-${GITHUB_SHA:-}}"
@@ -132,32 +92,30 @@ release_sha="${1:-${GITHUB_SHA:-}}"
 require_file "$ENVIRONMENT_FILE"
 require_file "$RELEASE_FILE"
 require_file "$COMPOSE_FILE"
-[ -n "${GHCR_USERNAME:-}" ] || fail 'thiếu GitHub username để pull image private.'
-[ -n "${GHCR_TOKEN:-}" ] || fail 'thiếu GitHub token để pull image private.'
-docker_config_dir="$(mktemp -d)" || fail 'không thể tạo Docker config tạm thời.'
-trap 'rm -rf "$docker_config_dir"' EXIT
-export DOCKER_CONFIG="$docker_config_dir"
-docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin <<< "$GHCR_TOKEN" >/dev/null
-unset GHCR_TOKEN
+begin_deployment auth
 
-readonly -a compose_command=(docker compose --project-directory "$DEPLOY_DIRECTORY" --file "$COMPOSE_FILE" --env-file "$ENVIRONMENT_FILE" --env-file "$RELEASE_FILE")
-
-current_runtime_image="$(read_release_value AUTH_SERVICE_IMAGE)"
-current_migrator_image="$(read_release_value AUTH_MIGRATOR_IMAGE)"
-runtime_image="$(image_repository "$current_runtime_image"):$release_sha"
-migrator_image="$(image_repository "$current_migrator_image"):$release_sha"
 dev_domain="$(read_environment_value DEV_DOMAIN)"
 
 printf 'Đang phát hành AuthService revision %s...\n' "$release_sha"
-update_release_images "$runtime_image" "$migrator_image"
+prepare_release AUTH_SERVICE_IMAGE=dprental-auth AUTH_MIGRATOR_IMAGE=dprental-auth-migrator
 
 "${compose_command[@]}" --profile migration pull auth-service auth-migrate
-"${compose_command[@]}" up -d postgres valkey
-"${compose_command[@]}" --profile migration run --rm auth-migrate </dev/null
-"${compose_command[@]}" up -d --no-deps --force-recreate auth-service
+require_dependencies postgres valkey
+deployment_phase mutation
+backup_database postgres
 
+deployment_phase migration
+"${compose_command[@]}" --profile migration run --rm --no-deps --pull never auth-migrate </dev/null
+deployment_phase runtime
+"${compose_command[@]}" up -d --no-deps --force-recreate --pull never --no-build auth-service
+
+deployment_phase health
 wait_for_auth_health
+"${compose_command[@]}" exec -T gateway wget --quiet --tries=1 --spider http://127.0.0.1:8080/health/ready </dev/null
+deployment_phase public-smoke
 smoke_test_gateway_health "$dev_domain"
 smoke_test_auth_jwks
+
+commit_release
 
 printf 'AuthService revision %s đã healthy; Gateway health và JWKS nội bộ đã pass.\n' "$release_sha"
