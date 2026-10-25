@@ -72,24 +72,23 @@ dotnet test PaymentService.sln
 
 Sau khi khởi tạo Git trong thư mục service, chạy `./scripts/setup-git-hooks.sh` (hoặc bản `.ps1` trên PowerShell). Hook kiểm tra branch nền `origin/payment/develop`, rồi build và test trước khi push.
 
-## CI/CD PaymentService cho dev
+## CI/CD dev với self-hosted runner
 
-Workflow [paymentservice-dev.yml](.github/workflows/paymentservice-dev.yml) chạy khi push vào `payment/develop-ci-cd`. Giữ luồng của RentalService: job `publish` đẩy image lên GHCR, sau đó `deploy-dev` triển khai cùng revision qua SSH. Workflow không chạy cho pull request và không chạy test .NET; việc kiểm tra build, test và migrations nằm ở pre-push hook.
+Workflow chỉ nhận push vào `payment/develop-ci-cd`. Build/publish vẫn chạy trên
+`ubuntu-24.04`, giữ nguyên Dockerfile, build context và toàn bộ targets/tag full SHA.
+CI kiểm thử script deployment trên runner hosted; job deploy chỉ được gửi tới
+`self-hosted, linux, x64, dprental-deploy` sau khi GitHub API xác nhận repository private.
 
-Mỗi push publish bốn image với full Git SHA:
+Deployment gọi entrypoint do root quản lý; không checkout shell để chạy bằng sudo,
+không dùng SSH trong pipeline. Shared release state được khóa bằng `flock`, sử dụng
+candidate, backup và phê duyệt có hạn theo SHA; chỉ ghi `release.env` sau health/smoke.
 
-```text
-ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-payment:<git-sha>
-ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-payment-migrator:<git-sha>
-ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-payment-integrity:<git-sha>
-ghcr.io/<GHCR_IMAGE_NAMESPACE>/dprental-payment-integrity-migrator:<git-sha>
+Xem [hướng dẫn vận hành và recovery](docs/SELF_HOSTED_DEPLOYMENT.md) và
+[audit/validation](docs/CICD_AUDIT.md). Không cấp runner quyền Docker trực tiếp.
+
+```bash
+python3 -m unittest discover -s scripts/tests -p 'test_deploy*.py' -v
 ```
-
-Dockerfile tạo bundle cho `PaymentServiceDbContext` và `IntegrityDbContext`; từng migrator image chứa bundle cùng appsettings, không chứa SDK hoặc source. Runtime image chạy non-root: Payment API trên cổng `8080` với `/health/ready`, IntegrityHost trên cổng `8081` với `/health`.
-
-Tạo GitHub Environment `dev`, khai báo biến `GHCR_IMAGE_NAMESPACE` và các secrets `DEV_VPS_HOST`, `DEV_VPS_USER`, `DEV_VPS_SSH_PRIVATE_KEY`, `DEV_VPS_KNOWN_HOSTS`; `DEV_VPS_PORT` là tùy chọn, mặc định `22`. Trên VPS, thư mục `/opt/dprental/dev` phải có `.env`, `compose.yaml` của DPRENTAL và `release.env` gồm đủ bốn biến `PAYMENT_SERVICE_IMAGE`, `PAYMENT_MIGRATOR_IMAGE`, `PAYMENT_INTEGRITY_HOST_IMAGE`, `PAYMENT_INTEGRITY_MIGRATOR_IMAGE`. Payment API, Payment migrator và kết nối Payment của IntegrityHost dùng database chung trên `postgres` với `Search Path=payment`; chỉ database bằng chứng Integrity dùng PostgreSQL riêng. Schema `payment` cần được tạo khi chuẩn bị database chung, trước lần chạy Payment migration đầu tiên. Script deploy đăng nhập GHCR bằng Docker config tạm, cập nhật tag SHA, chạy hai migration theo thứ tự, recreate IntegrityHost rồi Payment API, chờ healthcheck và kiểm tra Gateway readiness cùng JWKS nội bộ AuthService. Script không tự rollback database hoặc image nếu bước migration hay healthcheck thất bại.
-
-Regression test deploy chạy bằng `bash scripts/tests/deploy-paymentservice.test.sh`.
 
 ## Common và xử lý lỗi
 
