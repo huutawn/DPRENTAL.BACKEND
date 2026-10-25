@@ -1,5 +1,24 @@
 # Audit và validation CI/CD DP Rental — 25/10/2026
 
+## Cập nhật sau phê duyệt của người dùng
+
+Repository đã chuyển từ public sang **private** trong lúc chạy CI; agent không sửa
+repository settings. Theo phê duyệt tiếp theo, đã cấp sudo chỉ cho entrypoint và harden
+356 filesystem entries dưới runtime directory; root directory 0700, config root-owned,
+Auth PEM/Firebase root:1654 0440 giữ quyền đọc của container. Đã kiểm tra lại read access,
+Compose/mount/volume policy, sudoers syntax, runner không thể ghi code/config/socket
+và không thể sudo Docker. Không tạo approval release, không chạy deployment thật.
+Metadata rollback quyền ở `/opt/dprental/permission-backups/20261025T092304Z/metadata.json`.
+
+Lượt Actions đầu sau push: 8/8 script-validation jobs, cả 17 build/publish jobs và
+8/8 private-policy jobs đều đạt. Sáu deploy jobs lỗi do sudo chưa được cấp tại thời điểm
+đó; hai job pending bị GitHub concurrency thay thế. Bản sửa tiếp theo thêm khóa kích hoạt
+Phase 3 `vars.DEV_DEPLOY_ENABLED == 'true'` (repository variable, mặc định chưa có), để
+push kiểm thử skip deploy cho tới khi được phê duyệt. Đường local vẫn là implementation
+duy nhất; đây không phải flag giữ SSH cũ. Hosted preflight còn inspect đủ 17 image
+manifests bằng token `packages: read`, không pull layers lên VM. Kết quả từng run/commit
+được ghi trong bản bàn giao cuối.
+
 ## Phạm vi và bằng chứng nguồn
 
 Đã dùng `git ls-remote --heads origin '*/develop-ci-cd'`, fetch đúng pattern và đọc
@@ -91,14 +110,16 @@ mô phỏng đúng biên Docker/HTTP. Tests SSH streaming bị loại vì execut
 README được thay phần CI/CD cũ bằng runbook; tài liệu migration lịch sử vẫn áp dụng
 cho kế hoạch thủ công, không phải phê duyệt tự động destructive migration.
 
-## Audit trực tiếp Ubuntu VM
+## Audit trực tiếp Ubuntu VM (snapshot ban đầu; cập nhật ở đầu báo cáo)
 
 Người dùng bổ sung cho phép `ssh ubuntu-vm` và sửa file trực tiếp. Đã cài code mới tại
 `/usr/local/sbin/dprental-deploy`, tám script service cùng helper tại
 `/usr/local/libexec/dprental`, namespace root-owned tại `/etc/dprental-deploy/namespace`.
 Các đích này trước đó chưa tồn tại; không ghi đè file người dùng. Bộ review/test nguồn
 ở `/opt/dprental/cicd-review-20261025`, có manifest checksum file đã cài.
-Không cài sudoers, không đổi nhóm runner hoặc quyền Docker/runtime configuration.
+Ở thời điểm cài code ban đầu chưa cài sudoers. Sau phê duyệt đã harden quyền file và
+cấp entrypoint-only sudo như cập nhật đầu báo cáo; không đổi nhóm/socket Docker hoặc
+nội dung runtime configuration.
 
 Các script VM cũ trong `/opt/dprental/dev/scripts` chưa cutover:
 giữ tạm vì activation/deployment chưa được duyệt và VM chưa đáp ứng boundary an toàn.
@@ -133,19 +154,18 @@ bundle hoặc git; bản lưu tạm local đã xóa, chỉ giữ cấu trúc red
 ## Validation
 
 PASS bên dưới chỉ nói kiểm tra được nêu, không khẳng định deployment đã thành công.
-“Reviewed/BLOCKED” nghĩa code đã review và boundary tests đạt, nhưng quyền runtime
-thực tế còn các điều kiện ngăn kích hoạt. Cả tám service **chưa ready để deploy**.
+“Reviewed/BLOCKED” nghĩa code đã review và boundary tests đạt, quyền runtime đã được harden, nhưng activation/approval và rehearsal còn chờ. Cả tám service **chưa ready để deploy**.
 
 | Service | Workflow valid | Shell valid | Security reviewed | Ready for deploy |
 | --- | --- | --- | --- | --- |
-| Auth | PASS | PASS | Reviewed / BLOCKED | NO |
-| Catalog | PASS | PASS | Reviewed / BLOCKED | NO |
-| Gateway | PASS | PASS | Reviewed / BLOCKED | NO |
-| Inventory | PASS | PASS | Reviewed / BLOCKED | NO |
-| Media | PASS | PASS | Reviewed / BLOCKED | NO |
-| Payment | PASS | PASS | Reviewed / BLOCKED | NO |
-| Recommendation | PASS | PASS | Reviewed / BLOCKED | NO |
-| Rental | PASS | PASS | Reviewed / BLOCKED | NO |
+| Auth | PASS | PASS | PASS boundary / Phase 3 pending | NO |
+| Catalog | PASS | PASS | PASS boundary / Phase 3 pending | NO |
+| Gateway | PASS | PASS | PASS boundary / Phase 3 pending | NO |
+| Inventory | PASS | PASS | PASS boundary / Phase 3 pending | NO |
+| Media | PASS | PASS | PASS boundary / Phase 3 pending | NO |
+| Payment | PASS | PASS | PASS boundary / Phase 3 pending | NO |
+| Recommendation | PASS | PASS | PASS boundary / Phase 3 pending | NO |
+| Rental | PASS | PASS | PASS boundary / Phase 3 pending | NO |
 
 Các lệnh kiểm tra local:
 
@@ -203,11 +223,11 @@ riêng. Xem test plan và recovery cụ thể trong `SELF_HOSTED_DEPLOYMENT.md`.
 
 ## Rủi ro và việc còn lại trước cutover
 
-1. Chuyển repo private thực tế, bảo vệ branch/environment/runner và audit mọi workflow.
-2. Harden owner/mode/ACL cấu hình và mọi file được privileged path đọc/thực thi; hiện
-   wrapper phải từ chối. Không cấp sudoers khi runtime vẫn writable bởi user không tin cậy.
-3. Xác minh package visibility và grant Actions access cho đủ 17 packages; kiểm chứng
-   token workflow ngắn hạn pull runtime/migrator. Chưa có credential hợp lệ để chứng minh.
+1. Repo đã private; tiếp tục review branch/environment protections và mọi workflow.
+2. Quyền runtime và sudoers đã xử lý theo phê duyệt; giữ root ownership, ACL và
+   container secret access khi thay cấu hình về sau.
+3. Theo dõi preflight manifest bằng token packages:read cho đủ 17 variants; Docker pull
+   trên VM và package visibility chính xác cần kiểm chứng trong đợt activation được duyệt.
 4. Review migration theo SHA; rehearsal restore và recovery, nhất là Payment hai DB.
    Full shared DB backup không đồng bộ với Kafka/MinIO; retention/dung lượng quản lý thủ công.
 5. Migrate frontend/reset/seed/manual writers sang lock hoặc cấm chạy đồng thời;
