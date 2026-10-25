@@ -1,0 +1,2 @@
+Defaults:gha-deploy env_reset, !setenv
+gha-deploy ALL=(root) NOPASSWD: NOSETENV: /usr/local/sbin/dprental-deploy
