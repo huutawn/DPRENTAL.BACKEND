@@ -25,15 +25,6 @@ require_file() {
   [ -f "$1" ] || fail "không tìm thấy file bắt buộc: $1"
 }
 
-image_repository() {
-  local image="$1"
-  local last_component="${image##*/}"
-
-  [[ "$image" != *@* ]] || fail "image trong release.env phải dùng tag, không dùng digest."
-  [[ "$last_component" == *:* ]] || fail "image trong release.env phải có tag: $image"
-  printf '%s\n' "${image%:*}"
-}
-
 read_release_value() {
   local variable_name="$1"
   local line
@@ -56,42 +47,6 @@ read_environment_value() {
   value="${value%\'}"
   value="${value#\'}"
   printf '%s\n' "$value"
-}
-
-update_release_images() {
-  local runtime_image="$1"
-  local migrator_image="$2"
-  local temporary_file
-
-  temporary_file="$(mktemp "$DEPLOY_DIRECTORY/.release.env.XXXXXX")" || \
-    fail 'không thể tạo file release tạm thời.'
-  trap 'rm -f "$temporary_file"' RETURN
-
-  awk \
-    -v runtime_image="$runtime_image" \
-    -v migrator_image="$migrator_image" \
-    '
-      /^INVENTORY_SERVICE_IMAGE=/ {
-        print "INVENTORY_SERVICE_IMAGE=" runtime_image
-        runtime_found = 1
-        next
-      }
-      /^INVENTORY_MIGRATOR_IMAGE=/ {
-        print "INVENTORY_MIGRATOR_IMAGE=" migrator_image
-        migrator_found = 1
-        next
-      }
-      { print }
-      END {
-        if (!runtime_found || !migrator_found) {
-          exit 42
-        }
-      }
-    ' "$RELEASE_FILE" > "$temporary_file" || fail 'release.env thiếu image InventoryService hoặc migrator.'
-
-  chmod 0600 "$temporary_file"
-  mv "$temporary_file" "$RELEASE_FILE"
-  trap - RETURN
 }
 
 backup_inventory_schema_if_exists() {
@@ -128,6 +83,7 @@ backup_inventory_schema_if_exists() {
       fail 'file backup schema inventory rỗng; dừng triển khai.'
     fi
 
+    "${compose_command[@]}" exec -T postgres pg_restore --list < "$backup_file" >/dev/null || fail 'backup archive không hợp lệ.'
     chmod 0600 "$backup_file" || fail 'không thể giới hạn quyền truy cập cho file backup.'
     printf 'Đã sao lưu schema inventory thành công: %s\n' "$backup_file"
   elif [ -z "$schema_exists" ]; then
@@ -172,8 +128,8 @@ smoke_test_gateway_health() {
   local attempt
 
   for ((attempt = 1; attempt <= HEALTH_ATTEMPTS; attempt++)); do
-    if curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
-      "https://${domain}/health/ready" >/dev/null 2>&1; then
+    if public_curl --fail --silent --show-error --max-time "$HTTP_TIMEOUT_SECONDS" \
+      "https://${domain}/health/ready" >/dev/null; then
       return 0
     fi
     printf 'Đang chờ Gateway health sẵn sàng (%s/%s)...\n' "$attempt" "$HEALTH_ATTEMPTS"
@@ -183,6 +139,9 @@ smoke_test_gateway_health() {
   fail 'health endpoint công khai qua Gateway thất bại sau nhiều lần thử; không tự rollback schema hoặc image.'
 }
 
+# shellcheck source=scripts/deploy-common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/deploy-common.sh"
+
 [ "$#" -le 1 ] || usage
 release_sha="${1:-${GITHUB_SHA:-}}"
 [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || fail 'release SHA phải là commit SHA gồm đúng 40 ký tự hex thường.'
@@ -190,40 +149,36 @@ release_sha="${1:-${GITHUB_SHA:-}}"
 require_file "$ENVIRONMENT_FILE"
 require_file "$RELEASE_FILE"
 require_file "$COMPOSE_FILE"
-[ -n "${GHCR_USERNAME:-}" ] || fail 'thiếu GitHub username để pull image private.'
-[ -n "${GHCR_TOKEN:-}" ] || fail 'thiếu GitHub token để pull image private.'
-docker_config_dir="$(mktemp -d)" || fail 'không thể tạo Docker config tạm thời.'
-trap 'rm -rf "$docker_config_dir"' EXIT
-export DOCKER_CONFIG="$docker_config_dir"
-docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin <<< "$GHCR_TOKEN" >/dev/null
-unset GHCR_TOKEN
+begin_deployment inventory
 
-readonly -a compose_command=(docker compose --project-directory "$DEPLOY_DIRECTORY" --file "$COMPOSE_FILE" --env-file "$ENVIRONMENT_FILE" --env-file "$RELEASE_FILE")
-
-current_runtime_image="$(read_release_value INVENTORY_SERVICE_IMAGE)"
-current_migrator_image="$(read_release_value INVENTORY_MIGRATOR_IMAGE)"
-runtime_image="$(image_repository "$current_runtime_image"):$release_sha"
-migrator_image="$(image_repository "$current_migrator_image"):$release_sha"
 dev_domain="$(read_environment_value DEV_DOMAIN)"
 
 printf 'Đang phát hành InventoryService revision %s...\n' "$release_sha"
-update_release_images "$runtime_image" "$migrator_image"
+prepare_release INVENTORY_SERVICE_IMAGE=dprental-inventory INVENTORY_MIGRATOR_IMAGE=dprental-inventory-migrator
 
-"${compose_command[@]}" config --quiet || fail 'cấu hình Compose không hợp lệ.'
 "${compose_command[@]}" --profile migration pull inventory-service inventory-migrate
-"${compose_command[@]}" up -d --wait --wait-timeout 180 postgres kafka auth-service media-service
+require_dependencies postgres kafka auth-service media-service meilisearch
+
+deployment_phase mutation
 
 "${compose_command[@]}" stop inventory-service
 backup_inventory_schema_if_exists
 
-"${compose_command[@]}" --profile migration run --rm inventory-migrate </dev/null || \
+deployment_phase migration
+"${compose_command[@]}" --profile migration run --rm --no-deps --pull never inventory-migrate </dev/null || \
   fail 'migration Inventory thất bại; không tự rollback schema hoặc image.'
 
-"${compose_command[@]}" up -d --no-deps --force-recreate inventory-service
+deployment_phase runtime
+"${compose_command[@]}" up -d --no-deps --force-recreate --pull never --no-build inventory-service
 
+deployment_phase health
 wait_for_inventory_health
 smoke_test_inventory_internal_ready
+"${compose_command[@]}" exec -T gateway wget --quiet --tries=1 --spider http://127.0.0.1:8080/health/ready </dev/null
+deployment_phase public-smoke
 smoke_test_gateway_health "$dev_domain"
 
-# Inventory endpoints require a token. An anonymous 401 alone cannot prove downstream connectivity.
+# Internal readiness proves connectivity; an anonymous 401 alone does not.
+commit_release
+
 printf 'InventoryService revision %s đã healthy; internal readiness và Gateway health đã pass.\n' "$release_sha"

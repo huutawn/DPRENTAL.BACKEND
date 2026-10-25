@@ -286,3 +286,21 @@ public/mine, Bearer/cookie, ưu tiên header, owner/Admin, service token, valida
 Inventory outage. Smoke test cũng đi qua Gateway thực. Process, database và khóa RSA tạm được thu hồi khi kết thúc.
 Không trỏ harness vào PostgreSQL production. Meilisearch/Kafka không bị mock; các
 request discovery này không dùng search keyword và không cần search index sẵn sàng.
+
+## CI/CD dev với self-hosted runner
+
+Workflow chỉ nhận push vào `inventory/develop-ci-cd`. Build/publish vẫn chạy trên
+`ubuntu-24.04`, giữ nguyên Dockerfile, build context và toàn bộ targets/tag full SHA.
+CI kiểm thử script deployment trên runner hosted; job deploy chỉ được gửi tới
+`self-hosted, linux, x64, dprental-deploy` sau khi GitHub API xác nhận repository private.
+
+Deployment gọi entrypoint do root quản lý; không checkout shell để chạy bằng sudo,
+không dùng SSH trong pipeline. Shared release state được khóa bằng `flock`, sử dụng
+candidate, backup và phê duyệt có hạn theo SHA; chỉ ghi `release.env` sau health/smoke.
+
+Xem [hướng dẫn vận hành và recovery](docs/SELF_HOSTED_DEPLOYMENT.md) và
+[audit/validation](docs/CICD_AUDIT.md). Không cấp runner quyền Docker trực tiếp.
+
+```bash
+python3 -m unittest discover -s scripts/tests -p 'test_deploy*.py' -v
+```

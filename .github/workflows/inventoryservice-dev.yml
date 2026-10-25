@@ -10,7 +10,22 @@ permissions:
   contents: read
 
 jobs:
+  validate-deployment:
+    name: Validate deployment scripts without infrastructure access
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell syntax and deployment regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in scripts/deploy-*.sh; do bash -n "$script"; done
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deploy*.py' -v
+
   publish:
+    needs: validate-deployment
     name: Publish ${{ matrix.name }} image to GHCR
     runs-on: ubuntu-24.04
     environment: dev
@@ -67,53 +82,53 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-  deploy-dev:
-    name: Deploy InventoryService to dev VPS
+  deployment-policy:
+    name: Verify private repository before scheduling local runner
     needs: publish
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      private: ${{ steps.visibility.outputs.private }}
+    steps:
+      - name: Check actual repository visibility through GitHub API
+        id: visibility
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          visibility="$(gh api repos/huutawn/DPRENTAL.BACKEND --jq '.private')"
+          test "$visibility" = true
+          printf 'private=true\n' >> "$GITHUB_OUTPUT"
+
+  deploy-dev:
+    name: Deploy inventoryservice locally on Ubuntu VM
+    needs: [publish, deployment-policy]
+    if: ${{ github.event_name == 'push' && github.repository == 'huutawn/DPRENTAL.BACKEND' && github.ref == 'refs/heads/inventory/develop-ci-cd' && needs.deployment-policy.outputs.private == 'true' }}
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - dprental-deploy
     environment: dev
+    timeout-minutes: 45
     concurrency:
       group: dprental-dev
       cancel-in-progress: false
     permissions:
       contents: read
       packages: read
-
     steps:
-      - name: Checkout deployment script
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            scripts/deploy-inventoryservice.sh
-          sparse-checkout-cone-mode: false
-      - name: Deploy the published revision
+      - name: Deploy approved revision using administrator-owned entrypoint
         env:
-          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEV_VPS_SSH_PRIVATE_KEY }}
-          DEPLOY_VPS_KNOWN_HOSTS: ${{ secrets.DEV_VPS_KNOWN_HOSTS }}
-          DEPLOY_VPS_HOST: ${{ secrets.DEV_VPS_HOST }}
-          DEPLOY_VPS_USER: ${{ secrets.DEV_VPS_USER }}
-          DEPLOY_VPS_PORT: ${{ secrets.DEV_VPS_PORT || '22' }}
           RELEASE_SHA: ${{ github.sha }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$DEPLOY_SSH_PRIVATE_KEY"
-          test -n "$DEPLOY_VPS_KNOWN_HOSTS"
-          test -n "$DEPLOY_VPS_HOST"
-          test -n "$DEPLOY_VPS_USER"
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test -n "$GHCR_USERNAME"
           test -n "$GHCR_TOKEN"
-          install -d -m 0700 "$HOME/.ssh"
-          printf '%s\n' "$DEPLOY_VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          chmod 0600 "$HOME/.ssh/known_hosts"
-          eval "$(ssh-agent -s)" >/dev/null
-          trap 'ssh-agent -k >/dev/null' EXIT
-          ssh-add - <<< "$DEPLOY_SSH_PRIVATE_KEY" >/dev/null
-          { printf '%s\n' "$GHCR_USERNAME" "$GHCR_TOKEN"; cat scripts/deploy-inventoryservice.sh; } | ssh \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            -p "$DEPLOY_VPS_PORT" \
-            "$DEPLOY_VPS_USER@$DEPLOY_VPS_HOST" \
-            "bash -c 'IFS= read -r GHCR_USERNAME; IFS= read -r GHCR_TOKEN; export GHCR_USERNAME GHCR_TOKEN; exec bash -s -- \"\$1\"' -- $RELEASE_SHA"
+          printf '%s\n' "$GHCR_USERNAME" "$GHCR_TOKEN" | sudo -n /usr/local/sbin/dprental-deploy inventory "$RELEASE_SHA"
