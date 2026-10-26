@@ -393,4 +393,106 @@ public sealed class RentalPostgreSqlIntegrationTests
             await DropTestDatabaseAsync(connString);
         }
     }
+
+    [Fact]
+    public async Task PostgreSql_OrderProjections_ProjectParentVersion_ForRenterAndSupplier()
+    {
+        if (!await IsPostgreSqlAvailableAsync())
+        {
+            throw new InvalidOperationException("PostgreSQL integration environment is not available at 127.0.0.1:5433.");
+        }
+
+        string connString = await CreateTestDatabaseAsync();
+        try
+        {
+            var options = new DbContextOptionsBuilder<RentalServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            Guid orderId = Guid.NewGuid();
+            Guid renterId = Guid.NewGuid();
+            Guid supplierId = Guid.NewGuid();
+            Guid itemId = Guid.NewGuid();
+            Guid unitId = Guid.NewGuid();
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+
+            InitialRentalUnitAssignmentDto assignmentDto = new(unitId, Guid.NewGuid(), Guid.NewGuid());
+            InitialRentalItemDto itemDto = new(
+                itemId,
+                Guid.NewGuid(),
+                supplierId,
+                1,
+                new(2026, 10, 10),
+                new(2026, 10, 15),
+                "Sony FX3 Camera Kit",
+                "Professional Camera Kit",
+                "District 1, HCMC",
+                200_000m,
+                500_000m,
+                "group-01",
+                [assignmentDto],
+                TestListingSnapshots.Default);
+
+            RentalOrder order = RentalOrder.Create(
+                orderId,
+                "ORD-PG-PROJ-001",
+                renterId,
+                "VND",
+                "Pickup",
+                "Customer A",
+                "0909123456",
+                "123 Nguyen Hue",
+                "Call before delivery",
+                "bank-ref-001",
+                "v1.0",
+                "terms-doc-001",
+                "sha256-hash-001",
+                "op-create-pg-proj",
+                now,
+                [itemDto]).Value;
+
+            // Mutate aggregate to increment version to 2
+            order.IncrementVersion();
+            order.MarkAsPaid("INV-PG-001", "PAY-PG-001", now, now);
+
+            await using (var context = new RentalServiceDbContext(options))
+            {
+                await context.Database.EnsureCreatedAsync();
+                context.RentalOrders.Add(order);
+                await context.SaveChangesAsync();
+            }
+
+            await using (var queryCtx = new RentalServiceDbContext(options))
+            {
+                var repo = new RentalOrderRepository(queryCtx);
+
+                // Renter query on PostgreSQL
+                var renterPage = await repo.GetRenterOrderPageAsync(renterId, null, 0, 10);
+                Assert.Equal(1, renterPage.TotalCount);
+                var renterItem = Assert.Single(renterPage.Items);
+                Assert.Equal(order.Version, renterItem.Version);
+                Assert.Equal(order.OrderCode, renterItem.OrderCode);
+
+                // Supplier query on PostgreSQL
+                var supplierPage = await repo.GetPaidSubOrderPageForSupplierAsync(supplierId, null, 0, 10);
+                Assert.Equal(1, supplierPage.TotalCount);
+                var supplierItem = Assert.Single(supplierPage.Items);
+                Assert.Equal(order.Version, supplierItem.OrderVersion);
+                Assert.Equal(order.OrderCode, supplierItem.OrderCode);
+
+                // Empty page checks
+                var emptyRenter = await repo.GetRenterOrderPageAsync(Guid.NewGuid(), null, 0, 10);
+                Assert.Equal(0, emptyRenter.TotalCount);
+                Assert.Empty(emptyRenter.Items);
+
+                var emptySupplier = await repo.GetPaidSubOrderPageForSupplierAsync(Guid.NewGuid(), null, 0, 10);
+                Assert.Equal(0, emptySupplier.TotalCount);
+                Assert.Empty(emptySupplier.Items);
+            }
+        }
+        finally
+        {
+            await DropTestDatabaseAsync(connString);
+        }
+    }
 }

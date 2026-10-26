@@ -22,7 +22,7 @@ Không cam kết client luôn cập nhật khi socket vẫn mở nhưng một l�
 | Hub `/api/v1/rental/hubs/orders` | Hợp lý. Chưa thấy Hub Rental trong khảo sát. Map explicit từ composition root; không phụ thuộc MVC convention. |
 | Hai detail chưa expose version | Không đúng với baseline: renter detail đã có `version`, supplier detail đã có `orderVersion`. Giữ nguyên hai field này. |
 | Bổ sung version ở list | Cần làm: renter summary thêm `version`, supplier summary thêm `orderVersion`; lấy từ parent `RentalOrder.Version`, không thêm counter SubOrder. |
-| Query token cho browser | JWT Rental chưa đọc query. Thêm `OnMessageReceived` có phạm vi chính xác Hub và endpoint negotiate; không mở cho REST hoặc path cùng prefix giả. |
+| Cookie accessToken cho browser | Không dùng query token. Đồng bộ Payment: browser dùng cookie HttpOnly accessToken tại Hub/negotiate; Authorization header có ưu tiên; header không hợp lệ không fallback sang cookie; không mở cookie cho REST. |
 | Human user và service token | Tái sử dụng `RentalCallerContext`; policy Hub phải loại `u=svc` và yêu cầu UserId GUID khác empty. Không tái sử dụng policy `Renter` hiện tại mà chưa kiểm tra semantics. |
 | Nhóm theo UserId | Giữ `renter:{UserId:D}` và `supplier:{UserId:D}`, chỉ server join. Một user có thể đồng thời đóng hai vai trò. |
 | Supplier chỉ nhận phần của mình | Recipient lấy từ SubOrder lưu trong aggregate. Không broadcast cho mọi supplier cùng Order khi chỉ một SubOrder thay đổi. |
@@ -62,7 +62,7 @@ Các đường dẫn dưới đây là path trong Git tree Payment ở revision 
 | WebSockets-only và `CloseOnAuthenticationExpiration = true` | Dùng cho foundation Rental để thống nhất cách vận hành; chưa hỗ trợ SSE/LongPolling. Client vẫn negotiate bình thường trừ khi có cấu hình thống nhất khác. |
 | `Security/PaymentUserIdProvider.cs` | Chuẩn hóa GUID qua caller context hiện hữu; không xây parser claims thứ hai. Chỉ thêm IUserIdProvider nếu thực sự dùng UserIdentifier/user routing. |
 | `Security/PaymentHubOriginGuardMiddleware.cs` | Giữ kiểm soát Origin cho WebSocket; CORS chỉ được thêm nếu frontend khác origin. Test allowlist, missing Origin và malformed/multiple Origin rõ ràng. |
-| Payment JWT đọc cookie `accessToken` tại Hub/invoice reads | Không copy cookie fallback sang REST Rental. Task Rental dùng bearer header và query token giới hạn Hub. |
+| Payment JWT đọc cookie `accessToken` tại Hub/invoice reads | Đồng bộ cách đọc cookie `accessToken` tại Hub/negotiate của Payment, giữ header precedence; bỏ hỗ trợ query token; không mở cookie authentication cho REST endpoints Rental. |
 | `PaymentHubEnvelope<T>.Version = 1`, payload có `Revision` | Đây là schema version, khác aggregate version. Rental giữ flat payload đã đề xuất; `version`/`orderVersion` luôn là `RentalOrder.Version`. |
 | `PaymentHubGroups` giữ registry connection/group trong memory và generic quản trị membership | Rental chỉ cần hai group cố định theo user. Dùng SignalR group manager, không copy registry/quản trị dynamic group. |
 | `InvoicePaymentProcessor`, `InvoiceLifecycleService`, `InvoiceCreationService`, `TransactionResolutionService` gọi notifier sau commit | Áp dụng thời điểm sau commit. Rental còn có staged consumer nên phải gửi tại owner của transaction ngoài cùng. |
@@ -117,18 +117,20 @@ Application mutation / staged handler
 
 ### Authentication, routing và hosting
 
-- Policy áp dụng tại endpoint để anonymous bị 401, JWT hợp lệ nhưng service/không có human identity bị 403 trước upgrade.
+- Map explicit `/api/v1/rental/hubs/orders`.
+- Chỉ WebSocket, vẫn hỗ trợ negotiate; bật `CloseOnAuthenticationExpiration = true`.
+- JWT được lấy từ Authorization header; nếu không có header thì đọc cookie `accessToken` chỉ tại Hub và endpoint negotiate.
+- Header có ưu tiên; header không hợp lệ không được fallback sang cookie.
+- Không nhận query token; không mở cookie authentication trực tiếp cho các REST endpoint Rental.
+- JWT hợp lệ nhưng `u=svc` bị 403; anonymous hoặc JWT không hợp lệ bị 401 trước upgrade.
 - JWT sai chữ ký, expired, issuer/audience sai phải 401. Service token sai audience cũng có thể 401 tại authentication; AC 403 áp dụng token đã authenticate hợp lệ nhưng bị cấm bởi Hub policy.
-- Query token chỉ được đọc khi không có bearer header và path đúng Hub hoặc `/negotiate`. Không dùng raw `StartsWith` nhận cả `/orders-evil` hoặc wildcard descendant.
-- Có bearer header và query đồng thời: header ưu tiên, header sai không được fallback sang query hợp lệ.
+- Browser Origin phải thuộc allowlist. Non-browser không có Origin vẫn phải qua JWT policy.
+- Gateway cấp internal API key phía server cho cả negotiate và WebSocket upgrade. Frontend không giữ key.
 - Token hết hạn đóng connection; client refresh token và reconnect. Không sao chép API authentication refresh chỉ có ở .NET mới hơn target `net10.0`.
-- Không tạo public Subscribe/Join/Send method. Group name chuẩn hóa GUID một nơi, không phân biệt uppercase/lowercase của chuỗi JWT.
+- Không tạo public Subscribe/Join/Send method. Group name chuẩn hóa GUID một nơi, không phân biệt uppercase/lowercase của chuỗi JWT (`renter:{UserId:D}` và `supplier:{UserId:D}`).
 - Join group lỗi phải làm connection thất bại/abort và được ghi nhận; không để client tưởng đã subscribe thành công.
-- Gateway giữ nguyên path, forward query cần thiết, hỗ trợ WebSocket upgrade, không log access_token.
-- Không đưa `X-Api-Key` vào query/cookie/frontend. Giữ middleware Rental; Gateway phải cấp key cho cả hai request types hoặc có thiết kế trusted proxy được review và test riêng.
 - Foundation nghiệm thu một Rental process. Chưa có bằng chứng local deployment hỗ trợ SignalR nhiều replica; không xem Valkey hiện diện là đã có backplane.
 - Nếu môi trường bắt buộc nhiều replica, phải bổ sung backplane và kiểm thử cross-instance trước rollout. Sticky sessions đơn thuần không giải quyết fan-out.
-
 ### Quy tắc client cần bàn giao
 
 - Đăng ký handlers trước khi start; connect thành công rồi GET lại page hiện tại. Cần test khoảng trống lúc kết nối/join để không bỏ mutation.
@@ -160,40 +162,38 @@ Mỗi phase cập nhật checklist tiến độ/test evidence trong tài liệu 
 
 **DoD:** list/detail phản ánh cùng parent version cho cùng snapshot; không tạo persisted version mới, không thêm migration.
 
-**Commit:** `feat(rental): expose aggregate versions in order list responses`
+**Commit:** `feat(rental): expose aggregate versions in order lists`
+### P2 — Hub và cookie authentication
 
-### P2 — Hub endpoint, identity và security foundation
+**Mục tiêu:** Hub connect an toàn qua service test host bằng cookie hoặc header, chưa cần nối toàn lifecycle.
 
-**Mục tiêu:** Hub connect an toàn qua service test host, chưa cần nối toàn lifecycle.
-
-- Tạo module transport nhỏ trong `Api` cho Hub, endpoint/DI và group naming; DTO/policy hỗ trợ nằm Application theo trách nhiệm.
-- Cấu hình SignalR riêng; MVC JSON options không tự áp dụng cho Hub. Test payload camelCase và changeType đúng contract.
-- Thêm human-only policy qua identity logic hiện hữu; mở query bearer token đúng path, kiểm tra header precedence.
-- WebSockets-only và close khi authentication hết hạn như Payment; options cần thiết được validate lúc startup.
-- Auto-join hai group của đúng user, abort khi join lỗi; không có arbitrary join method hoặc application send method công khai.
-- Origin allowlist cho browser WebSocket; cấu hình phải phản ánh origin thật. Không dùng wildcard credentials hoặc thêm hàng loạt knobs từ Payment.
-- Test JWT thật qua JWKS fixture: valid human, anonymous, service hợp lệ, invalid/expired token, malformed sub, query token không có tác dụng trên REST/path giả, group identity normalization.
+- Thêm Hub mỏng, DI registration, endpoint mapping và human-only policy; DTO/policy hỗ trợ nằm Application theo trách nhiệm.
+- Đọc cookie `accessToken` đúng Hub/negotiate, giữ header precedence, không nhận query token.
+- Cấu hình SignalR riêng; WebSockets-only, bật `CloseOnAuthenticationExpiration` và validate options startup.
+- Auto-join hai group từ identity hiện hữu (`renter:{UserId:D}`, `supplier:{UserId:D}`), chuẩn hóa GUID.
+- Nếu join group lỗi, abort connection và ghi nhận lỗi. Không có arbitrary join method hoặc application send method công khai.
+- Cấu hình Origin allowlist cho browser WebSocket theo môi trường. Non-browser không có Origin vẫn qua JWT policy.
+- Test JWT thật qua JWKS fixture: cookie/header hợp lệ, anonymous, service token, expired, malformed subject.
+- Query token đơn độc không authenticate được Hub. Cookie không mở quyền truy cập trực tiếp REST Rental. Client không thể điều khiển membership bằng userId/orderId/supplierId.
 
 **DoD:** negotiate authorization và WebSocket connection đều có test; test fixture mô phỏng trusted Gateway cấp internal key, không yêu cầu browser giữ key.
 
-**Commit:** `feat(rental): add authenticated order invalidation hub`
-
-### P3 — Gateway transport cho Rental Hub
+**Commit:** `feat(rental): add cookie-authenticated order hub`
+### P3 — Gateway negotiate và WebSocket
 
 **Mục tiêu:** public URL hoạt động qua Gateway thật, thống nhất cách expose Hub với Payment.
 
-- Re-check Gateway revision/config đang dùng trước khi sửa vì config local đã có dấu hiệu lệch prefix Rental hiện tại.
-- Thêm route negotiate POST và WebSocket GET exact cho `/api/v1/rental/hubs/orders`, ưu tiên trước catch-all, giữ nguyên downstream path.
-- Kiểm tra Ocelot WebSocket path thực sự chạy injection `X-Api-Key`; không suy ra từ HTTP DelegatingHandler.
-- Nếu WebSocket bypass handler, sửa đúng proxy/header forwarding owner trong Gateway và có integration test. Không bỏ middleware Rental để lách lỗi.
-- Bảo đảm JWT query tới Rental nhưng không được áp dụng cho REST Gateway; nếu Hub route cho qua Gateway auth thì Rental vẫn bắt buộc validate JWT.
-- Chứng minh proxy upgrade, Origin, token hết hạn, query/header forwarding và redaction access token qua integration tests.
-- Không sửa chung routing REST ngoài lỗi bắt buộc phục vụ Hub; nếu phải sửa, ghi rõ compatibility impact và regression coverage.
+- Thêm exact routes cho negotiate POST và WebSocket GET cho `/api/v1/rental/hubs/orders`, ưu tiên trước catch-all, giữ nguyên downstream path.
+- Tránh catch-all Rental đang rewrite sang `/rental/...`.
+- Forward cookie cần thiết cho Hub; không forward refresh token.
+- Cấp `X-Api-Key` trong đường proxy thực sự xử lý WebSocket, không chỉ trong HTTP DelegatingHandler.
+- Giữ JWT authorization tại Rental như Payment Hub; Gateway không mở thêm query-token authentication.
+- Chứng minh kết nối WebSocket qua Gateway bằng cookie; anonymous 401, authenticated service token 403; browser không cần internal key.
+- Test path, cookie forwarding, Origin và upgrade; Payment Hub và REST routing không regression.
 
-**DoD:** human connect và nhận test notification qua Gateway, anonymous 401, service 403 khi JWT hợp lệ; không có secret phía browser.
+**DoD:** human connect và nhận test notification qua Gateway bằng cookie, anonymous 401, service 403 khi JWT hợp lệ; không có secret phía browser.
 
-**Commit tại Gateway:** `feat(gateway): proxy authenticated rental order hub connections`
-
+**Commit tại Gateway:** `feat(gateway): proxy rental order hub connections`
 ### P4 — Notifier và luồng checkout/payment/delivery note
 
 **Mục tiêu:** có luồng mutation → commit → notification đầu tiên, áp dụng cách Payment đang làm.
@@ -224,8 +224,7 @@ Mỗi phase cập nhật checklist tiến độ/test evidence trong tài liệu 
 
 **DoD:** HTTP/Kafka tests chứng minh đúng recipient, completion timing, rollback/replay và payload whitelist.
 
-**Commit:** `feat(rental): notify supplier decisions and confirmed handovers`
-
+**Commit:** `feat(rental): notify supplier decisions and handovers`
 ### P6 — Cancellation, expiry và handover overdue
 
 **Mục tiêu:** thay đổi từ renter, scheduler và operation executor đều invalidation đúng.
@@ -253,8 +252,7 @@ Mỗi phase cập nhật checklist tiến độ/test evidence trong tài liệu 
 
 **DoD:** có mutation coverage matrix với nguồn thay đổi, transaction owner, recipient, changeType và test chứng minh; không còn hai nơi cùng phát cho một commit do lồng service/dispatcher.
 
-**Commit:** `feat(rental): notify return refund and settlement updates`
-
+**Commit:** `feat(rental): notify return refund and settlement changes`
 ### P8 — Nghiệm thu end-to-end và bàn giao client
 
 **Mục tiêu:** chứng minh foundation dùng được qua browser/Gateway và ghi rõ giới hạn.
@@ -263,19 +261,18 @@ Mỗi phase cập nhật checklist tiến độ/test evidence trong tài liệu 
 - Test gọi arbitrary join/subscribe không tồn tại, client-supplied orderId/userId/supplierId không đổi group; assert cả người được nhận và người không được nhận với timeout hữu hạn.
 - Chạy flow payment → supplier confirm → handover → return/settlement; nhận event xong gọi lại bốn GET để kiểm tra version và data isolation.
 - Test disconnect/reconnect, token refresh/expiry, socket cleanup, mất notification rồi REST resync; handshake readiness không dựa vào sleep may rủi.
-- Smoke test qua Gateway: route path, negotiate và upgrade, internal key, origin, query log redaction. Nếu không có môi trường Gateway, báo rõ chưa nghiệm thu phần này.
+- Smoke test qua Gateway: route path, negotiate và upgrade, internal key, origin, cookie forwarding và log redaction. Nếu không có môi trường Gateway, báo rõ chưa nghiệm thu phần này.
 - Ghi hướng dẫn frontend debounce, filter/pagination, version theo resource, concurrent GET và reconnect/resume; không viết UI mới trong Rental.
 - Ghi topology một instance và điều kiện cần backplane; log push fail/timeout đủ đo vận hành nhưng không thêm monitoring stack riêng.
 - Review full diff, references, DI/options/dependency changes và docs; không thêm SignalR package server nếu shared framework hiện tại đã đủ. Client test package chỉ thêm khi cần.
 
 **DoD:** mọi AC bên dưới có test evidence hoặc ghi rõ giới hạn chưa đáp ứng; không tuyên bố UI đã ngừng polling nếu chưa có task/frontend evidence.
 
-**Commit:** `test(rental): validate realtime isolation and document client resync`
-
+**Commit:** `test(rental): validate realtime isolation and document resync`
 ## 5. Acceptance Criteria sau điều chỉnh
 
-1. Human JWT hợp lệ connect Hub qua public URL; anonymous 401; authenticated service JWT bị 403.
-2. JWT invalid/expired sai issuer/audience bị 401; chỉ Hub được dùng query token, bearer header có precedence.
+1. Human JWT hợp lệ connect Hub qua public URL bằng cookie hoặc header; anonymous 401; authenticated service JWT bị 403.
+2. JWT invalid/expired sai issuer/audience bị 401; không nhận query token; Authorization header có ưu tiên trước cookie accessToken, header không hợp lệ không fallback sang cookie; cookie không mở quyền truy cập REST Rental.
 3. User A không thể join/nhận group B; nhiều tab cùng user nhận được; không có admin global broadcast.
 4. Supplier chỉ nhận notification đúng SubOrder được phép đọc, không biết order PendingPayment qua realtime.
 5. Event không có PII/physical/internal payload; renter REST tiếp tục không có AssetId/AllocationId.
@@ -284,8 +281,7 @@ Mỗi phase cập nhật checklist tiến độ/test evidence trong tài liệu 
 8. Thay đổi dữ liệu hiển thị được invalidation dù Order.Status không đổi; giữ nguyên REST contract ngoài additive list version fields.
 9. Push timeout/failure không rollback mutation đã commit, không trả về lỗi làm client retry mutation đã thành công; lỗi được ghi nhận.
 10. Initial connect/reconnect/resume/network recovered có hướng dẫn và kiểm thử REST resync; không yêu cầu event replay/ACK/durable SignalR.
-11. Public Hub qua Gateway hoạt động mà frontend không biết internal key; route rewrite, query token và Origin có coverage.
-12. Giới hạn một process được công bố. Nếu chạy nhiều replica, backplane/cross-instance delivery phải được bổ sung trước rollout.
+11. Public Hub qua Gateway hoạt động bằng cookie mà frontend không biết internal key; route negotiate/WebSocket exact, forward cookie cần thiết và Origin có coverage.
 
 ## 6. Kiểm tra và quy tắc commit
 

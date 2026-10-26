@@ -391,7 +391,8 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                         i.ExpectedStartDate,
                         i.ExpectedEndDate,
                         i.Status))
-                    .ToList()))
+                    .ToList(),
+                o.Version))
             .ToListAsync(cancellationToken);
 
         return new RecordPage<RenterOrderSummaryRecord>(items, totalCount);
@@ -450,7 +451,8 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 s.Items.Sum(i => i.DepositAmount),
                 s.Items.Select(i => i.Status).ToList(),
                 s.RentalOrder.PaymentConfirmedAt,
-                s.CreatedAt))
+                s.CreatedAt,
+                s.RentalOrder.Version))
             .ToListAsync(cancellationToken);
 
         return new RecordPage<SupplierSubOrderSummaryRecord>(items, totalCount);
