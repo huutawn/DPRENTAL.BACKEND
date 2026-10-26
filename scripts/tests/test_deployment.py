@@ -196,7 +196,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual([], self.calls())
         for key in ['GHCR_TOKEN', 'GHCR_USERNAME', 'GHCR_IMAGE_NAMESPACE']:
             saved = self.env.pop(key)
-            self.assertEqual(0, self.run_deploy().returncode)
+            self.assertNotEqual(0, self.run_deploy().returncode)
             self.env[key] = saved
         self.assertEqual([], self.calls())
 
@@ -207,7 +207,7 @@ class DeploymentTests(unittest.TestCase):
         for name in ['.env', 'compose.yaml', 'release.env']:
             self.tearDown_fixture()
             (self.root / name).unlink()
-            self.assertEqual(0, self.run_deploy().returncode)
+            self.assertNotEqual(0, self.run_deploy().returncode)
             self.assertEqual([], self.calls())
 
     def test_absent_schema_skips_schema_backup(self):
