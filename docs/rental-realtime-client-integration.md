@@ -70,21 +70,41 @@ Phát khi đơn con của nhà cung cấp có thay đổi dữ liệu hiển th�
 - `ORDER_CREATED`: Đơn hàng mới được tạo sau checkout.
 - `INVOICE_ATTACHED`: Hóa đơn thanh toán được khởi tạo và gắn vào đơn.
 - `PAYMENT_CONFIRMED`: Thanh toán thành công (phát cho renter và từng suborder supplier).
+- `PAYMENT_RECOVERY_PENDING`: Thanh toán trễ trong hạn đang chạy quy trình recovery giữ chỗ lại (chỉ renter nhận).
+- `PAYMENT_REFUND_REQUIRED`: Thanh toán ngoài hạn hoặc recovery thất bại, chuyển hoàn tiền toàn phần (chỉ renter nhận).
 - `DELIVERY_NOTE_UPDATED`: Người thuê cập nhật ghi chú giao nhận.
 - `SUPPLIER_CONFIRMED`: Nhà cung cấp chấp nhận và Inventory xác nhận phân bổ thiết bị.
 - `SUPPLIER_REJECTED`: Nhà cung cấp từ chối đơn con hoặc mục thuê.
 - `HANDOVER_CONFIRMED`: Bàn giao thiết bị hoàn tất và bằng chứng được lưu trữ.
+- `HANDOVER_ACKNOWLEDGED`: Người thuê xác nhận đã nhận thiết bị ngoài công trường.
+- `ALLOCATION_CHANGED`: Phân bổ thiết bị thay đổi (giải phóng giữ chỗ, điều chỉnh allocation).
 - `ORDER_CANCELLED`: Đơn hàng bị hủy (do người thuê hoặc hệ thống).
 - `ITEM_CANCELLED`: Mục thuê chưa bàn giao bị hủy.
 - `PAYMENT_EXPIRED`: Hết hạn thanh toán (chỉ báo renter, không báo supplier).
 - `SUPPLIER_CONFIRMATION_EXPIRED`: Quá hạn 24h xác nhận của nhà cung cấp.
 - `HANDOVER_OVERDUE`: Cảnh báo quá hạn ngày bàn giao.
 - `HANDOVER_EXPIRED`: Hết hạn bàn giao thiết bị sau grace period.
-- `RETURN_RECORDED`: Thiết bị hoàn trả được Inventory xác nhận.
+- `RETURN_SUBMITTED`: Nhà cung cấp ghi nhận biên bản trả máy (phát ngay sau khi commit biên bản tại Rental).
+- `RETURN_RECORDED`: Thiết bị hoàn trả được Inventory xác nhận đóng allocation.
 - `SETTLEMENT_CHANGED`: Thay đổi đề xuất khấu trừ, khiếu nại hoặc tất toán hoàn tất.
 - `REFUND_CHANGED`: Khoản hoàn tiền được PaymentService xác nhận.
 
----
+### 2.4. Mutation Coverage Matrix
+| Mutation / Nghiệp vụ | Completion Boundary | ChangeType | Người nhận Renter | Người nhận Supplier | Version tăng? |
+| :--- | :--- | :--- | :---: | :---: | :---: |
+| Checkout Submit | Commit RentalOrder | `ORDER_CREATED` | Có | Không | Có (1) |
+| Gắn hóa đơn | Commit InvoiceRef | `INVOICE_ATTACHED` | Có | Không | Có (2) |
+| Thanh toán 0 đồng | Commit MarkAsPaid | `PAYMENT_CONFIRMED` | Có | Đúng các SubOrder | Có (3) |
+| Thanh toán đúng hạn | Commit MarkAsPaid | `PAYMENT_CONFIRMED` | Có | Đúng các SubOrder | Có |
+| Thanh toán late/recovery | Commit RecordPayment | `PAYMENT_RECOVERY_PENDING` | Có | Không | Có |
+| Recovery hoàn tất | Commit MarkAsPaid | `PAYMENT_CONFIRMED` | Có | Đúng các SubOrder | Có |
+| Recovery thất bại/quá hạn | Commit LateRefund | `PAYMENT_REFUND_REQUIRED` | Có | Không | Có |
+| Cập nhật DeliveryNote | Commit note | `DELIVERY_NOTE_UPDATED` | Có | Có (nếu đơn Paid) | Có |
+| Xác nhận bàn giao ngoài công trường | Commit Acknowledge | `HANDOVER_ACKNOWLEDGED` | Có | Đúng SubOrder sở hữu | Có |
+| Biên bản trả máy gửi | Commit ReturnRecord | `RETURN_SUBMITTED` | Có | Đúng SubOrder sở hữu | Có |
+| Inventory đóng hoàn trả | Commit Return closure | `RETURN_RECORDED` | Có | Đúng SubOrder sở hữu | Có |
+| Inventory giải phóng allocation | Commit Release closure | `ALLOCATION_CHANGED` | Có | Đúng SubOrder sở hữu | Có |
+| Khấu trừ / Hoàn tiền | Commit settlement | `SETTLEMENT_CHANGED` / `REFUND_CHANGED` | Có | Đúng SubOrder liên quan | Có |
 
 ## 3. Chiến lược Resync & Cache Invalidation
 
