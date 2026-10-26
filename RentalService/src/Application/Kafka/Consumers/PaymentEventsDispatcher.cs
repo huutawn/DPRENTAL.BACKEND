@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.Hubs;
 #pragma warning disable CA1848, CA1873
 using System.Security.Cryptography;
@@ -832,9 +833,14 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                     return Error.Failure("DLQ_TRANSACTION_FAILED", tex.Message);
                 }
             }
-
-            var applyResult = await ApplyStagedEventAsync(msg, order!,
-                () => _paymentWorkflowService.ApplyInvoicePaidStagedAsync(order!, envelope!, msg, cancellationToken), cancellationToken);
+            PaymentApplyResult? paymentResult = null;
+            var applyResult = await ApplyStagedPaymentEventAsync(msg, order!,
+                async () =>
+                {
+                    var res = await _paymentWorkflowService.ApplyInvoicePaidStagedAsync(order!, envelope!, msg, cancellationToken);
+                    if (res.IsSuccess) paymentResult = res.Value;
+                    return res;
+                }, cancellationToken);
             if (applyResult.IsSuccess) return applyResult;
             result = applyResult.Error;
         }
@@ -1111,6 +1117,54 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         catch
         {
             await tx.RollbackAsync(ct);
+            _unitOfWork.DiscardChanges();
+            throw;
+        }
+    }
+    private async Task<Result> ApplyStagedPaymentEventAsync(
+        RentalInboxMessage message,
+        RentalOrder order,
+        Func<Task<Result<PaymentApplyResult>>> apply,
+        CancellationToken cancellationToken)
+    {
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            Result<PaymentApplyResult> result = await apply();
+            if (result.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return result.Error;
+            }
+
+            DateTimeOffset now = _timeProvider.GetUtcNow();
+            message.MarkProcessed(now);
+            _inboxRepository.Update(message);
+            if (result.Value.Changed)
+            {
+                await _orderRepository.UpdateAsync(order, cancellationToken);
+            }
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+
+            if (_notifier != null && result.Value.Metadata is { } meta)
+            {
+                if (meta.RenterNotification is { } renterNote)
+                {
+                    await _notifier.NotifyRenterOrderChangedAsync(order.RenterId, renterNote, cancellationToken);
+                }
+
+                foreach (var (supplierId, supplierNote) in meta.SupplierNotifications)
+                {
+                    await _notifier.NotifySupplierSubOrderChangedAsync(supplierId, supplierNote, cancellationToken);
+                }
+            }
+            return Result.Success();
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
             _unitOfWork.DiscardChanges();
             throw;
         }

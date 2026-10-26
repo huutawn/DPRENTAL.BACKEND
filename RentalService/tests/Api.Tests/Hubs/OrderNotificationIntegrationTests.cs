@@ -381,4 +381,183 @@ public sealed class OrderNotificationIntegrationTests
         Assert.True(res2.Value.IsReplay);
         Assert.DoesNotContain(notifier.RenterNotifications, n => n.Notification.ChangeType == OrderChangeTypes.OrderCreated);
     }
+
+    [Fact]
+    public async Task Payment_WhenRecoveryPending_EmitsPaymentRecoveryPending_ToRenterOnly_AndNotToSuppliers()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        var orders = new RentalOrderRepository(db);
+        var inboxes = new InboxRepository(db);
+        var outboxes = new OutboxRepository(db);
+        var receipts = new OperationReceiptRepository(db);
+        var lockManager = new FakeOrderLockManager();
+        var notifier = new FakeOrderHubNotifier();
+        var timeProvider = new FixedTimeProvider(FixedNow);
+
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        Guid supplierA = Guid.NewGuid();
+        var order = CreateTestOrder(orderId, renterId, supplierA, Guid.NewGuid());
+        order.AttachInvoice("INV-REC-1", FixedNow);
+        await orders.CreateAsync(order);
+        await db.SaveChangesAsync();
+
+        // Payment arriving AFTER payment deadline triggers recovery branch (when within recovery cutoff)
+        DateTimeOffset latePaidAt = order.PaymentDeadline.AddMinutes(5);
+        var invoicePaidPayload = new InvoicePaidPayload(
+            orderId, renterId, "INV-REC-1", "PAY-REC-1",
+            order.TotalPayableAmount, order.Currency, latePaidAt);
+
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
+            Guid.NewGuid(), "InvoicePaid", 1, "payment-service",
+            orderId.ToString("D"), latePaidAt, "corr-rec", null, invoicePaidPayload);
+
+        string rawJson = JsonSerializer.Serialize(envelope, JsonOptions);
+        var inboxMsg = new RentalInboxMessage(
+            Guid.NewGuid(), envelope.MessageId, "InvoicePaid",
+            "payment-service", orderId.ToString("D"), "corr-rec", null,
+            rawJson, latePaidAt, "fp-rec");
+        inboxMsg.AssignPublicationProof(
+            PaymentPublicationProofTestFixture.Create(rawJson),
+            orderId.ToString("D"));
+
+        await inboxes.AddAsync(inboxMsg);
+        await db.SaveChangesAsync();
+
+        var kafkaOptions = Options.Create(PaymentPublicationProofTestFixture.Configure(new KafkaOptions
+        {
+            PaymentEventsTopic = "payment.events.v1",
+            RentalEventsTopic = "rental.events.v1"
+        }));
+        var eventProducer = new RentalEventProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
+        var cmdProducer = new InventoryCommandProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
+        var mockExecutor = new Mock<IRentalOperationExecutor>();
+
+        var workflowConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Kafka:RentalEventsTopic"] = "rental.events.v1"
+        }).Build();
+
+        var paymentWorkflow = new PaymentWorkflowService(
+            orders, inboxes, outboxes, receipts, lockManager,
+            mockExecutor.Object, db, cmdProducer, workflowConfig,
+            NullLogger<PaymentWorkflowService>.Instance, eventProducer, timeProvider, notifier);
+
+        var dispatcher = new PaymentEventsDispatcher(
+            inboxes, orders, lockManager, paymentWorkflow,
+            new Mock<IRefundCompletedConsumer>().Object,
+            new KafkaOutboxWriter(outboxes), db,
+            new Mock<IInventoryAllocationResultHandler>().Object,
+            kafkaOptions,
+            null,
+            NullLogger<PaymentEventsDispatcher>.Instance,
+            timeProvider,
+            null,
+            null,
+            notifier);
+
+        var res = await dispatcher.ProcessInboxMessageAsync(inboxMsg.Id);
+        Assert.True(res.IsSuccess);
+
+        // Renter receives PAYMENT_RECOVERY_PENDING
+        Assert.Single(notifier.RenterNotifications);
+        var renterNote = notifier.RenterNotifications.Single();
+        Assert.Equal(renterId, renterNote.RenterId);
+        Assert.Equal(orderId, renterNote.Notification.OrderId);
+        Assert.Equal(OrderChangeTypes.PaymentRecoveryPending, renterNote.Notification.ChangeType);
+
+        // Suppliers receive NOTHING because visibility is not granted during recovery pending
+        Assert.Empty(notifier.SupplierNotifications);
+    }
+
+    [Fact]
+    public async Task Payment_WhenPastCutoffOrCancelled_EmitsPaymentRefundRequired_ToRenterOnly_AndNotToSuppliers()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        var orders = new RentalOrderRepository(db);
+        var inboxes = new InboxRepository(db);
+        var outboxes = new OutboxRepository(db);
+        var receipts = new OperationReceiptRepository(db);
+        var lockManager = new FakeOrderLockManager();
+        var notifier = new FakeOrderHubNotifier();
+
+        // Time is way past cutoff (2 hours after deadline)
+        DateTimeOffset lateTime = FixedNow.AddHours(2);
+        var timeProvider = new FixedTimeProvider(lateTime);
+
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        Guid supplierA = Guid.NewGuid();
+        var order = CreateTestOrder(orderId, renterId, supplierA, Guid.NewGuid());
+        order.AttachInvoice("INV-REFUND-1", FixedNow);
+        await orders.CreateAsync(order);
+        await db.SaveChangesAsync();
+
+        var invoicePaidPayload = new InvoicePaidPayload(
+            orderId, renterId, "INV-REFUND-1", "PAY-REFUND-1",
+            order.TotalPayableAmount, order.Currency, lateTime);
+
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
+            Guid.NewGuid(), "InvoicePaid", 1, "payment-service",
+            orderId.ToString("D"), lateTime, "corr-ref", null, invoicePaidPayload);
+
+        string rawJson = JsonSerializer.Serialize(envelope, JsonOptions);
+        var inboxMsg = new RentalInboxMessage(
+            Guid.NewGuid(), envelope.MessageId, "InvoicePaid",
+            "payment-service", orderId.ToString("D"), "corr-ref", null,
+            rawJson, lateTime, "fp-ref");
+        inboxMsg.AssignPublicationProof(
+            PaymentPublicationProofTestFixture.Create(rawJson),
+            orderId.ToString("D"));
+
+        await inboxes.AddAsync(inboxMsg);
+        await db.SaveChangesAsync();
+
+        var kafkaOptions = Options.Create(PaymentPublicationProofTestFixture.Configure(new KafkaOptions
+        {
+            PaymentEventsTopic = "payment.events.v1",
+            RentalEventsTopic = "rental.events.v1"
+        }));
+        var eventProducer = new RentalEventProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
+        var cmdProducer = new InventoryCommandProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
+        var mockExecutor = new Mock<IRentalOperationExecutor>();
+
+        var workflowConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Kafka:RentalEventsTopic"] = "rental.events.v1"
+        }).Build();
+
+        var paymentWorkflow = new PaymentWorkflowService(
+            orders, inboxes, outboxes, receipts, lockManager,
+            mockExecutor.Object, db, cmdProducer, workflowConfig,
+            NullLogger<PaymentWorkflowService>.Instance, eventProducer, timeProvider, notifier);
+
+        var dispatcher = new PaymentEventsDispatcher(
+            inboxes, orders, lockManager, paymentWorkflow,
+            new Mock<IRefundCompletedConsumer>().Object,
+            new KafkaOutboxWriter(outboxes), db,
+            new Mock<IInventoryAllocationResultHandler>().Object,
+            kafkaOptions,
+            null,
+            NullLogger<PaymentEventsDispatcher>.Instance,
+            timeProvider,
+            null,
+            null,
+            notifier);
+
+        var res = await dispatcher.ProcessInboxMessageAsync(inboxMsg.Id);
+        Assert.True(res.IsSuccess);
+
+        // Renter receives PAYMENT_REFUND_REQUIRED
+        Assert.Single(notifier.RenterNotifications);
+        var renterNote = notifier.RenterNotifications.Single();
+        Assert.Equal(renterId, renterNote.RenterId);
+        Assert.Equal(orderId, renterNote.Notification.OrderId);
+        Assert.Equal(OrderChangeTypes.PaymentRefundRequired, renterNote.Notification.ChangeType);
+
+        // Suppliers receive NOTHING
+        Assert.Empty(notifier.SupplierNotifications);
+    }
 }

@@ -46,6 +46,8 @@ public static class OrderChangeTypes
     public const string OrderCreated = "ORDER_CREATED";
     public const string InvoiceAttached = "INVOICE_ATTACHED";
     public const string PaymentConfirmed = "PAYMENT_CONFIRMED";
+    public const string PaymentRecoveryPending = "PAYMENT_RECOVERY_PENDING";
+    public const string PaymentRefundRequired = "PAYMENT_REFUND_REQUIRED";
     public const string DeliveryNoteUpdated = "DELIVERY_NOTE_UPDATED";
     public const string SupplierConfirmed = "SUPPLIER_CONFIRMED";
     public const string SupplierRejected = "SUPPLIER_REJECTED";
