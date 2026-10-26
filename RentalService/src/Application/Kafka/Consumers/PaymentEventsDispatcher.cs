@@ -689,6 +689,50 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                         _logger.LogError(nex, "Error dispatching realtime notification for allocation event {MessageId}", msg.Id);
                     }
                 }
+
+                if (_notifier != null && order != null && string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.ReturnedUnitsApplied, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(msg.Payload);
+                        if (doc.RootElement.TryGetProperty("payload", out var payloadElem))
+                        {
+                            Guid rentalItemId = payloadElem.TryGetProperty("rentalItemId", out var riProp) && riProp.TryGetGuid(out var ri) ? ri : Guid.Empty;
+                            var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
+                            if (item != null)
+                            {
+                                await _notifier.NotifyRenterOrderChangedAsync(
+                                    order.RenterId,
+                                    new RenterOrderChangedNotification(
+                                        Guid.NewGuid(),
+                                        order.Id,
+                                        order.Version,
+                                        OrderChangeTypes.ReturnRecorded,
+                                        utcNow),
+                                    cancellationToken);
+
+                                var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+                                if (subOrder != null)
+                                {
+                                    await _notifier.NotifySupplierSubOrderChangedAsync(
+                                        item.SupplierId,
+                                        new SupplierSubOrderChangedNotification(
+                                            Guid.NewGuid(),
+                                            order.Id,
+                                            subOrder.Id,
+                                            order.Version,
+                                            OrderChangeTypes.ReturnRecorded,
+                                            utcNow),
+                                        cancellationToken);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to emit ReturnRecorded notification for message {MessageId}", msg.Id);
+                    }
+                }
                 return Result.Success();
             }
             catch
@@ -1126,6 +1170,61 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                                 OrderChangeTypes.PaymentConfirmed,
                                 occurredAt),
                             cancellationToken);
+                    }
+                }
+                else if (string.Equals(message.MessageType, KafkaContractSpec.EventTypes.RefundCompleted, StringComparison.OrdinalIgnoreCase))
+                {
+                    await _notifier.NotifyRenterOrderChangedAsync(
+                        order.RenterId,
+                        new RenterOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            order.Version,
+                            OrderChangeTypes.RefundChanged,
+                            now),
+                        cancellationToken);
+                }
+                else if (string.Equals(message.MessageType, KafkaContractSpec.EventTypes.RentalSettled, StringComparison.OrdinalIgnoreCase))
+                {
+                    await _notifier.NotifyRenterOrderChangedAsync(
+                        order.RenterId,
+                        new RenterOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            order.Version,
+                            OrderChangeTypes.SettlementChanged,
+                            now),
+                        cancellationToken);
+
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(message.Payload);
+                        if (doc.RootElement.TryGetProperty("payload", out var payloadElem))
+                        {
+                            Guid rentalItemId = payloadElem.TryGetProperty("rentalItemId", out var riProp) && riProp.TryGetGuid(out var ri) ? ri : Guid.Empty;
+                            var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
+                            if (item != null)
+                            {
+                                var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+                                if (subOrder != null)
+                                {
+                                    await _notifier.NotifySupplierSubOrderChangedAsync(
+                                        item.SupplierId,
+                                        new SupplierSubOrderChangedNotification(
+                                            Guid.NewGuid(),
+                                            order.Id,
+                                            subOrder.Id,
+                                            order.Version,
+                                            OrderChangeTypes.SettlementChanged,
+                                            now),
+                                        cancellationToken);
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Safely ignored if parsing payload fails
                     }
                 }
             }
