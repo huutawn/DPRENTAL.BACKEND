@@ -164,22 +164,62 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
             }
             else if (!string.IsNullOrWhiteSpace(criteria.SearchKeyword))
             {
-                var escaped = EscapeLikePattern(criteria.SearchKeyword);
-                var pattern = $"%{escaped}%";
-                baseQuery = baseQuery.Where(l =>
-                    EF.Functions.ILike(l.Name, pattern, @"\") ||
-                    EF.Functions.ILike(l.Model, pattern, @"\"));
+                var words = criteria.SearchKeyword.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                foreach (var word in words)
+                {
+                    var pattern = $"%{EscapeLikePattern(word)}%";
+                    baseQuery = baseQuery.Where(l =>
+                        EF.Functions.ILike(l.Name, pattern, @"\") ||
+                        EF.Functions.ILike(l.Model, pattern, @"\"));
+                }
             }
 
             if (criteria.Sort == AssetSortOption.Relevance && criteria.CandidateIds != null)
             {
-                var matchingIds = (await baseQuery.Select(l => l.Id).ToListAsync(cancellationToken)).ToHashSet();
-                var orderedMatchingIds = criteria.CandidateIds.Where(id => matchingIds.Contains(id)).ToList();
-                int totalCount = orderedMatchingIds.Count;
+                var matchingListings = await baseQuery.Select(l => new { l.Id, l.Name, l.Model }).ToListAsync(cancellationToken);
+                var candIndexMap = new Dictionary<Guid, int>(criteria.CandidateIds.Count);
+                for (int i = 0; i < criteria.CandidateIds.Count; i++)
+                {
+                    candIndexMap.TryAdd(criteria.CandidateIds[i], i);
+                }
+
+                var validMatches = matchingListings.Where(l => candIndexMap.ContainsKey(l.Id)).ToList();
+                int totalCount = validMatches.Count;
                 if (totalCount == 0)
                 {
                     await transaction.CommitAsync(cancellationToken);
                     return new OwnerEquipmentListingSearchResult(Array.Empty<OwnerEquipmentListingItem>(), 0);
+                }
+
+                string? kw = criteria.SearchKeyword?.Trim();
+                List<Guid> orderedMatchingIds;
+                if (!string.IsNullOrWhiteSpace(kw))
+                {
+                    orderedMatchingIds = validMatches
+                        .Select(l =>
+                        {
+                            int tier = (string.Equals(l.Name, kw, StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(l.Model, kw, StringComparison.OrdinalIgnoreCase))
+                                ? 1
+                                : ((l.Name != null && l.Name.Contains(kw, StringComparison.OrdinalIgnoreCase)) ||
+                                   (l.Model != null && l.Model.Contains(kw, StringComparison.OrdinalIgnoreCase)))
+                                    ? 2
+                                    : 3;
+                            return new { l.Id, Tier = tier, Ord = candIndexMap[l.Id] };
+                        })
+                        .OrderBy(x => x.Tier)
+                        .ThenBy(x => x.Ord)
+                        .ThenBy(x => x.Id)
+                        .Select(x => x.Id)
+                        .ToList();
+                }
+                else
+                {
+                    orderedMatchingIds = validMatches
+                        .OrderBy(l => candIndexMap[l.Id])
+                        .ThenBy(l => l.Id)
+                        .Select(l => l.Id)
+                        .ToList();
                 }
 
                 var pagedIds = orderedMatchingIds.Skip(criteria.Skip).Take(criteria.Take).ToList();
@@ -212,11 +252,25 @@ public sealed partial class EquipmentListingRepository : IEquipmentListingReposi
                     return new OwnerEquipmentListingSearchResult(Array.Empty<OwnerEquipmentListingItem>(), 0);
                 }
 
+                string exactPattern = !string.IsNullOrWhiteSpace(criteria.SearchKeyword)
+                    ? EscapeLikePattern(criteria.SearchKeyword)
+                    : string.Empty;
+                string phrasePattern = !string.IsNullOrWhiteSpace(criteria.SearchKeyword)
+                    ? $"%{exactPattern}%"
+                    : string.Empty;
+
                 var orderedQuery = criteria.Sort switch
                 {
                     AssetSortOption.CreatedAsc => baseQuery.OrderBy(l => l.CreatedAt).ThenBy(l => l.Id),
                     AssetSortOption.ModelDesc => baseQuery.OrderByDescending(l => l.Model).ThenByDescending(l => l.Id),
                     AssetSortOption.ModelAsc => baseQuery.OrderBy(l => l.Model).ThenBy(l => l.Id),
+                    AssetSortOption.Relevance when !string.IsNullOrWhiteSpace(criteria.SearchKeyword) =>
+                        baseQuery
+                            .OrderBy(l =>
+                                (EF.Functions.ILike(l.Name, exactPattern, @"\") || EF.Functions.ILike(l.Model, exactPattern, @"\")) ? 1 :
+                                (EF.Functions.ILike(l.Name, phrasePattern, @"\") || EF.Functions.ILike(l.Model, phrasePattern, @"\")) ? 2 : 3)
+                            .ThenByDescending(l => l.CreatedAt)
+                            .ThenByDescending(l => l.Id),
                     _ => baseQuery.OrderByDescending(l => l.CreatedAt).ThenByDescending(l => l.Id)
                 };
 

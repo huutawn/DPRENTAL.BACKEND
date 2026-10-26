@@ -46,9 +46,14 @@ public sealed partial class InventoryAssetRepository
         }
         else if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
         {
-            var escaped = EscapeLikePattern(filters.SearchKeyword);
-            clauses.Add("(l.model ILIKE @pSearch ESCAPE '\\' OR (a.serial_number IS NOT NULL AND a.serial_number ILIKE @pSearch ESCAPE '\\'))");
-            parameters.Add(new NpgsqlParameter("pSearch", $"%{escaped}%"));
+            var words = filters.SearchKeyword.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            for (int i = 0; i < words.Length; i++)
+            {
+                string pName = $"pWord_{i}";
+                var escaped = EscapeLikePattern(words[i]);
+                clauses.Add($"(l.name ILIKE @{pName} ESCAPE '\\' OR l.model ILIKE @{pName} ESCAPE '\\' OR (a.serial_number IS NOT NULL AND a.serial_number ILIKE @{pName} ESCAPE '\\'))");
+                parameters.Add(new NpgsqlParameter(pName, $"%{escaped}%"));
+            }
         }
 
         AppendCommonMetadataFilters(clauses, parameters, filters);

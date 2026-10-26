@@ -13,8 +13,20 @@ namespace Dprental.InventoryService.Application.Caching;
 /// </summary>
 public static class CacheKeyHelper
 {
+    public const int SearchCacheVersion = 2;
     private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
 
+    private static string? NormalizeSearchQuery(string? q)
+    {
+        if (string.IsNullOrWhiteSpace(q))
+        {
+            return null;
+        }
+
+        var normalized = q.Normalize(NormalizationForm.FormC);
+        var collapsed = System.Text.RegularExpressions.Regex.Replace(normalized.Trim(), @"\s+", " ");
+        return collapsed.Length > 0 ? collapsed : null;
+    }
     /// <summary>
     /// Băm chuỗi input đã chuẩn hóa thành chuỗi hex SHA256 ngắn gọn.
     /// </summary>
@@ -51,9 +63,10 @@ public static class CacheKeyHelper
     {
         var descriptor = new
         {
+            version = SearchCacheVersion,
             page,
             pageSize,
-            q = q?.Trim(),
+            q = NormalizeSearchQuery(q),
             equipmentTypeId,
             brandId,
             categoryId,
@@ -84,9 +97,10 @@ public static class CacheKeyHelper
     {
         var descriptor = new
         {
+            version = SearchCacheVersion,
             page,
             pageSize,
-            q = q?.Trim(),
+            q = NormalizeSearchQuery(q),
             equipmentTypeId,
             brandId,
             status = status?.ToString(),
@@ -113,9 +127,10 @@ public static class CacheKeyHelper
     {
         var descriptor = new
         {
+            version = SearchCacheVersion,
             page,
             pageSize,
-            q = q?.Trim(),
+            q = NormalizeSearchQuery(q),
             equipmentTypeId,
             brandId,
             manufactureYearFrom,

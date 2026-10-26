@@ -33,17 +33,64 @@ public sealed partial class InventoryAssetRepository
             parameters.Add(new NpgsqlParameter("pCandidateIds", criteria.Filters.CandidateIds!.ToArray()));
         }
 
-        string orderSql = criteria.Filters.Sort switch
+        string orderSql;
+        if (criteria.Filters.Sort == AssetSortOption.Relevance)
         {
-            AssetSortOption.Relevance when hasCandidates => "ORDER BY cand.ord ASC",
-            AssetSortOption.Relevance => "ORDER BY a.created_at DESC, a.id DESC",
-            AssetSortOption.CreatedAsc => "ORDER BY a.created_at ASC, a.id ASC",
-            AssetSortOption.ModelDesc => "ORDER BY l.model DESC, a.id DESC",
-            AssetSortOption.ModelAsc => "ORDER BY l.model ASC, a.id ASC",
-            AssetSortOption.ManufactureYearDesc => "ORDER BY a.manufacture_year DESC NULLS LAST, a.id DESC",
-            AssetSortOption.ManufactureYearAsc => "ORDER BY a.manufacture_year ASC NULLS LAST, a.id ASC",
-            _ => "ORDER BY a.created_at DESC, a.id DESC"
-        };
+            bool hasKeyword = !string.IsNullOrWhiteSpace(criteria.Filters.SearchKeyword);
+            if (hasKeyword)
+            {
+                string kw = criteria.Filters.SearchKeyword!.Trim();
+                string exact = kw.ToLowerInvariant();
+                string phrase = $"%{EscapeLikePattern(kw)}%";
+                parameters.Add(new NpgsqlParameter("pExact", exact));
+                parameters.Add(new NpgsqlParameter("pPhrase", phrase));
+
+                if (hasCandidates)
+                {
+                    orderSql = """
+                        ORDER BY
+                            CASE
+                                WHEN LOWER(l.name) = @pExact OR LOWER(l.model) = @pExact OR (a.serial_number IS NOT NULL AND LOWER(a.serial_number) = @pExact) THEN 1
+                                WHEN l.name ILIKE @pPhrase ESCAPE '\' OR l.model ILIKE @pPhrase ESCAPE '\' OR (a.serial_number IS NOT NULL AND a.serial_number ILIKE @pPhrase ESCAPE '\') THEN 2
+                                ELSE 3
+                            END ASC,
+                            cand.ord ASC,
+                            a.id ASC
+                        """;
+                }
+                else
+                {
+                    orderSql = """
+                        ORDER BY
+                            CASE
+                                WHEN LOWER(l.name) = @pExact OR LOWER(l.model) = @pExact OR (a.serial_number IS NOT NULL AND LOWER(a.serial_number) = @pExact) THEN 1
+                                WHEN l.name ILIKE @pPhrase ESCAPE '\' OR l.model ILIKE @pPhrase ESCAPE '\' OR (a.serial_number IS NOT NULL AND a.serial_number ILIKE @pPhrase ESCAPE '\') THEN 2
+                                ELSE 3
+                            END ASC,
+                            a.created_at DESC,
+                            a.id DESC
+                        """;
+                }
+            }
+            else
+            {
+                orderSql = hasCandidates
+                    ? "ORDER BY cand.ord ASC, a.id ASC"
+                    : "ORDER BY a.created_at DESC, a.id DESC";
+            }
+        }
+        else
+        {
+            orderSql = criteria.Filters.Sort switch
+            {
+                AssetSortOption.CreatedAsc => "ORDER BY a.created_at ASC, a.id ASC",
+                AssetSortOption.ModelDesc => "ORDER BY l.model DESC, a.id DESC",
+                AssetSortOption.ModelAsc => "ORDER BY l.model ASC, a.id ASC",
+                AssetSortOption.ManufactureYearDesc => "ORDER BY a.manufacture_year DESC NULLS LAST, a.id DESC",
+                AssetSortOption.ManufactureYearAsc => "ORDER BY a.manufacture_year ASC NULLS LAST, a.id ASC",
+                _ => "ORDER BY a.created_at DESC, a.id DESC"
+            };
+        }
 
         parameters.Add(new NpgsqlParameter("pTake", criteria.Take));
         parameters.Add(new NpgsqlParameter("pSkip", criteria.Skip));

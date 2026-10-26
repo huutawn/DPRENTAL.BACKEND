@@ -9,6 +9,7 @@ public sealed class OwnerAssetIndexDocument
     public string Id { get; set; } = string.Empty;
     public string OwnerUserId { get; set; } = string.Empty;
     public string EquipmentListingId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
     public string? SerialNumber { get; set; }
     public string Model { get; set; } = string.Empty;
     public string EquipmentTypeId { get; set; } = string.Empty;
