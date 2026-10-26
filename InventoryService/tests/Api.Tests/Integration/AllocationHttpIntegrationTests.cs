@@ -730,4 +730,145 @@ public sealed class AllocationHttpIntegrationTests : IClassFixture<PostgresFixtu
         Assert.NotNull(problem);
         Assert.Equal("ALLOCATION_IN_TERMINAL_STATE", problem.Title);
     }
+
+    [Fact]
+    public async Task ConfirmAllocationGroup_Success_Returns200OK_AndReplayReturnsSameResult()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var ownerId = Guid.NewGuid();
+        var asset1 = await SeedAssetAsync(ownerId);
+
+        var serviceToken = factory.CreateServiceToken(Guid.NewGuid(), scopes: [InventoryAccessEvaluator.ScopeAllocationWrite]);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
+
+        string groupRef = $"rental-item:{Guid.NewGuid():D}";
+
+        // 1. Tạo 2 hold allocations thuộc cùng groupRef
+        var holdPayload1 = new
+        {
+            sourceSystem = "rental",
+            externalReference = $"TEST-HOLD-{Guid.NewGuid():N}",
+            startDate = FixedToday.AddDays(5).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            endDate = FixedToday.AddDays(8).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            holdExpiresAt = FixedNow.AddHours(2).ToString("O")
+        };
+        var holdResp1 = await client.PostAsync($"/api/v1/inventory/assets/{asset1.Id}/holds",
+            new StringContent(JsonSerializer.Serialize(holdPayload1), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Created, holdResp1.StatusCode);
+        var hold1 = await holdResp1.Content.ReadFromJsonAsync<AllocationResponse>();
+        Assert.NotNull(hold1);
+
+        // Cập nhật groupReference trong DB cho test
+        await using (var db = CreateDbContext())
+        {
+            var a1 = await db.AssetAllocations.SingleAsync(a => a.Id == hold1.Id);
+            typeof(AssetAllocation).GetProperty(nameof(AssetAllocation.GroupReference))?.SetValue(a1, groupRef);
+            await db.SaveChangesAsync();
+        }
+
+        // 2. Gọi confirm nhóm qua HTTP
+        const string opKey = "OP-CONFIRM-GROUP-1";
+        var confirmReq = new { operationKey = opKey };
+        var confirmResp1 = await client.PostAsync($"/api/v1/inventory/allocation-groups/{groupRef}/confirm",
+            new StringContent(JsonSerializer.Serialize(confirmReq), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, confirmResp1.StatusCode);
+
+        var confirmed1 = await confirmResp1.Content.ReadFromJsonAsync<ConfirmAllocationResponse>();
+        Assert.NotNull(confirmed1);
+        Assert.False(confirmed1.IsReplay);
+        Assert.Equal(groupRef, confirmed1.AllocationGroupId);
+        Assert.Single(confirmed1.Units);
+        Assert.Equal(hold1.Id, confirmed1.Units[0].AllocationId);
+        Assert.Equal("Confirmed", confirmed1.Units[0].Status);
+
+        // 3. Replay cùng key -> 200 OK, IsReplay = true
+        var confirmResp2 = await client.PostAsync($"/api/v1/inventory/allocation-groups/{groupRef}/confirm",
+            new StringContent(JsonSerializer.Serialize(confirmReq), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, confirmResp2.StatusCode);
+        var confirmed2 = await confirmResp2.Content.ReadFromJsonAsync<ConfirmAllocationResponse>();
+        Assert.NotNull(confirmed2);
+        Assert.True(confirmed2.IsReplay);
+        Assert.Equal(confirmed1.ReceiptRef, confirmed2.ReceiptRef);
+        Assert.Equal(confirmed1.Units.Count, confirmed2.Units.Count);
+
+        // 4. Khác key trên nhóm đã Allocated -> 409 Conflict (HOLD_EXPIRED)
+        var diffKeyReq = new { operationKey = "OP-CONFIRM-DIFF-KEY" };
+        var confirmRespDiffKey = await client.PostAsync($"/api/v1/inventory/allocation-groups/{groupRef}/confirm",
+            new StringContent(JsonSerializer.Serialize(diffKeyReq), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Conflict, confirmRespDiffKey.StatusCode);
+    }
+
+    [Fact]
+    public async Task ConfirmAllocationGroup_ExpiredHold_Returns409Conflict()
+    {
+        var clock = new TestTimeProvider(FixedNow);
+        await using var factory = CreateFactory(clock);
+        using var client = factory.CreateClient();
+        var ownerId = Guid.NewGuid();
+        var asset = await SeedAssetAsync(ownerId);
+
+        var serviceToken = factory.CreateServiceToken(Guid.NewGuid(), scopes: [InventoryAccessEvaluator.ScopeAllocationWrite]);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
+
+        string groupRef = $"rental-item:{Guid.NewGuid():D}";
+        var holdPayload = new
+        {
+            sourceSystem = "rental",
+            externalReference = $"TEST-HOLD-EXP-{Guid.NewGuid():N}",
+            startDate = FixedToday.AddDays(5).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            endDate = FixedToday.AddDays(8).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            holdExpiresAt = FixedNow.AddMinutes(30).ToString("O")
+        };
+        var holdResp = await client.PostAsync($"/api/v1/inventory/assets/{asset.Id}/holds",
+            new StringContent(JsonSerializer.Serialize(holdPayload), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Created, holdResp.StatusCode);
+        var hold = await holdResp.Content.ReadFromJsonAsync<AllocationResponse>();
+        Assert.NotNull(hold);
+
+        await using (var db = CreateDbContext())
+        {
+            var a = await db.AssetAllocations.SingleAsync(a => a.Id == hold.Id);
+            typeof(AssetAllocation).GetProperty(nameof(AssetAllocation.GroupReference))?.SetValue(a, groupRef);
+            await db.SaveChangesAsync();
+        }
+
+        // Tua đồng hồ quá hạn hold
+        clock.UtcNow = FixedNow.AddMinutes(31);
+
+        var confirmReq = new { operationKey = "OP-CONFIRM-EXP" };
+        var resp = await client.PostAsync($"/api/v1/inventory/allocation-groups/{groupRef}/confirm",
+            new StringContent(JsonSerializer.Serialize(confirmReq), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task ConfirmAllocationGroup_NotFound_Returns404()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        var serviceToken = factory.CreateServiceToken(Guid.NewGuid(), scopes: [InventoryAccessEvaluator.ScopeAllocationWrite]);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
+
+        var confirmReq = new { operationKey = "OP-CONFIRM-MISSING" };
+        var resp = await client.PostAsync($"/api/v1/inventory/allocation-groups/non-existent-group/confirm",
+            new StringContent(JsonSerializer.Serialize(confirmReq), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task ConfirmAllocationGroup_Forbidden_WhenLacksScopeOrHuman()
+    {
+        await using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        var humanToken = factory.CreateToken(Guid.NewGuid().ToString("D"), [], InventorySecurityTestFactory.HumanAudience);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", humanToken);
+
+        var confirmReq = new { operationKey = "OP-CONFIRM-NO-AUTH" };
+        var resp = await client.PostAsync($"/api/v1/inventory/allocation-groups/some-group/confirm",
+            new StringContent(JsonSerializer.Serialize(confirmReq), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
 }
