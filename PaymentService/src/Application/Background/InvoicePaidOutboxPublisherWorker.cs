@@ -127,8 +127,15 @@ public sealed class InvoicePaidOutboxPublisherWorker : BackgroundService
             var backlogAge = utcNow - message.CreatedAt;
             _logger.LogInformation("Claimed outbox message {MessageId} for order {AggregateId} (backlog age: {Age}s, retries: {Retries})",
                 message.MessageId, message.AggregateId, Math.Round(backlogAge.TotalSeconds, 1), message.RetryCount);
-            string topic = !string.IsNullOrWhiteSpace(config.Topic) ? config.Topic : "payment.events.v1";
+            string topic = message.Topic;
             string key = message.AggregateId;
+
+            if (OutboxTopics.ResolveAudience(topic) is null)
+            {
+                _logger.LogError("Outbox message {MessageId} has unsupported topic '{Topic}'; quarantining.", message.MessageId, topic);
+                await outboxRepo.QuarantineMessageAsync(message.Id, _workerId, "UNSUPPORTED_TOPIC", utcNow, cancellationToken);
+                continue;
+            }
 
             TransactionJournalEntry? journalEntry = null;
             string digest = CanonicalJournalHasher.ComputeOutboxDigest(message.Payload);

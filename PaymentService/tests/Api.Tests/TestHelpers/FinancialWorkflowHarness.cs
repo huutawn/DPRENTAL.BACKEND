@@ -15,6 +15,7 @@ using Dprental.PaymentService.Domain.Repositories.Integrity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 namespace Dprental.PaymentService.Api.Tests.TestHelpers;
 
@@ -114,7 +115,8 @@ public sealed class FinancialWorkflowHarness : IAsyncDisposable
         await using var i = new IntegrityDbContext(IntegrityOptions);
         var confirmer = new IntegrityConfirmationService(new EfIntegrityEvidenceRepository(i), new EfTransactionJournalRepository(p), _keys, Encryptor);
         for (int n = 0; n < 10 && await confirmer.ProcessConfirmationBatchAsync() > 0; n++) { }
-        Assert.False(await i.Incidents.AnyAsync());
+        var incidents = await i.Incidents.AsNoTracking().Select(x => x.IncidentType + ": " + x.Details).ToListAsync();
+        Assert.True(incidents.Count == 0, string.Join("; ", incidents));
     }
 
     public async Task<Invoice> SeedAsync(bool paid = true, int count = 1, bool late = false)
@@ -136,12 +138,13 @@ public sealed class FinancialWorkflowHarness : IAsyncDisposable
         }
         if (paid)
         {
+            var paymentTime = late ? invoice.PaymentDeadline.AddMinutes(1) : DateTimeOffset.UtcNow;
             var processor = new InvoicePaymentProcessor(repo,
                 new Monitor<PaymentMerchantOptions>(new PaymentMerchantOptions { Bank = "MBBank", Account = "123456789" }),
                 new Monitor<SePayOptions>(new SePayOptions { AccountNumber = "123456789", GatewayMapping = new() { ["MBBank"] = "MBBank" } }),
-                null, Encryptor);
+                null, Encryptor, new FakeTimeProvider(paymentTime));
             var payment = await processor.ProcessAsync(new SePayWebhookPayload(RandomNumberGenerator.GetInt32(1, int.MaxValue), "MBBank",
-                DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                paymentTime.ToOffset(TimeSpan.FromHours(7)).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                 "123456789", null, invoice.PaymentCode, invoice.PaymentCode, "in", null, invoice.TotalAmount, null, "BANK-IN"));
             Assert.True(payment.IsSuccess, payment.Error.Message);
         }

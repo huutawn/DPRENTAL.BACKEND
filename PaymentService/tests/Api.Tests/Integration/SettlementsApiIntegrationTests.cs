@@ -62,6 +62,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         _factory = new PaymentWebApplicationFactory().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ConnectionStrings:Postgres", _connectionString);
+            builder.UseSetting("PaymentEncryption:ActiveKeyId", "dpr-enc-2026-v1");
             builder.UseSetting("Payment:Merchant:Bank", "MBBank");
             builder.UseSetting("Payment:Merchant:Account", "0383799632");
             builder.UseSetting("PayoutDestination:FingerprintKey", "integration-test-payout-fingerprint-key-32-bytes");
@@ -370,7 +371,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         await using var verify = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
         Assert.Equal(InvoiceStatus.Paid, (await verify.Invoices.SingleAsync(i => i.Id == invoice.Id)).Status);
         Assert.Single(await verify.PaymentTransactionResolutions.ToListAsync());
-        Assert.Single(await verify.OutboxMessages.ToListAsync());
+        Assert.Equal(2, await verify.OutboxMessages.CountAsync());
         var queue = await client.GetAsync("/api/v1/admin/payments/review?kind=UnmatchedTransaction");
         Assert.Equal(HttpStatusCode.OK, queue.StatusCode);
         using var queueBody = await queue.Content.ReadFromJsonAsync<JsonDocument>();
@@ -455,7 +456,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
 
         await using var verify = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
         Assert.Single(await verify.PaymentTransactionResolutions.ToListAsync());
-        Assert.Single(await verify.OutboxMessages.ToListAsync());
+        Assert.Equal(2, await verify.OutboxMessages.CountAsync());
     }
 
     [Fact]
@@ -533,6 +534,27 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         Assert.Equal(SupplierPayout.StatusCompleted, payout.Status);
         Assert.Equal(2, await verify.FinancialOperationAudits.CountAsync());
         Assert.Equal(3, await verify.SupplierPayoutDestinations.CountAsync());
+        var payoutEvent = await verify.OutboxMessages.SingleAsync(x => x.MessageType == OutboxTopics.SupplierPayoutCompletedMessageType);
+        Assert.Equal(OutboxTopics.PaymentAnalyticsV1, payoutEvent.Topic);
+        using (var json = JsonDocument.Parse(payoutEvent.Payload))
+        {
+            var payload = json.RootElement.GetProperty("payload");
+            Assert.Equal(payout.Id, payload.GetProperty("payoutId").GetGuid());
+            Assert.Equal(payout.Amount, payload.GetProperty("amount").GetDecimal());
+            Assert.False(payload.TryGetProperty("destinationRef", out _));
+            Assert.False(payload.TryGetProperty("externalTransferReference", out _));
+        }
+        var payoutJournal = await verify.TransactionJournals.SingleAsync(x => x.OutboxMessageId == payoutEvent.MessageId);
+        Assert.Equal(JournalEventTypes.SupplierPayoutCompleted, payoutJournal.EventType);
+        await harness.ConfirmAsync();
+        var proof = await harness.Checker().VerifyAsync(new TransactionVerificationRequest(
+            payoutEvent.MessageId.ToString("D"), VerificationPurposes.OutboxPublication, "payout-proof",
+            ExpectedOutboxDigest: Dprental.PaymentService.Common.Cryptography.CanonicalJournalHasher.ComputeOutboxDigest(payoutEvent.Payload),
+            Topic: payoutEvent.Topic, MessageKey: payoutEvent.AggregateId, OutboxMessageId: payoutEvent.MessageId));
+        Assert.True(proof.IsSuccess, proof.Error.Message);
+        Assert.NotNull(proof.Value.PublicationProof);
+        using var proofJson = JsonDocument.Parse(proof.Value.PublicationProof.Payload);
+        Assert.Equal(OutboxTopics.AnalyticsAudience, proofJson.RootElement.GetProperty("audience").GetString());
     }
 
     private string Token(string scope)

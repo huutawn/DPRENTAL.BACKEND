@@ -265,30 +265,47 @@ public sealed class PaymentVerificationsApiTests : IAsyncLifetime
                 "op-verify-200"));
             invoiceRef = createRes.Value.InvoiceRef;
 
-            // Confirm entry with valid signature
-            var entry = await ctx.TransactionJournals.SingleAsync(j => j.StreamId == invoiceRef);
-            string message = EcdsaAttestation.BuildAttestationMessage(_ecdsaKeyId, entry.StreamId, entry.Version, entry.EventId, entry.EntryHash, now);
-            string sig = EcdsaAttestation.Sign(_signingKey, message);
-            entry.Confirm(sig, _ecdsaKeyId, now);
+            // A paid zero-value invoice has a Rental and an Analytics journal entry.
+            var entries = await ctx.TransactionJournals.Where(j => j.StreamId == invoiceRef)
+                .OrderBy(j => j.Version).ToListAsync();
+            Assert.Equal(2, entries.Count);
             await ctx.SaveChangesAsync();
 
             var iOptions = new DbContextOptionsBuilder<IntegrityDbContext>().UseNpgsql(_integrityConn).Options;
             await using (var iCtx = new IntegrityDbContext(iOptions))
             {
-                var att = AttestationRecord.Create(
-                    entry.StreamId, entry.Version, entry.EventId, entry.EntryHash, entry.PayloadHash, entry.PreviousHash, sig, _ecdsaKeyId, now);
-                iCtx.Attestations.Add(att);
-                var manifest = StreamManifest.Create(entry.StreamId, entry.Version, entry.EntryHash, entry.EventId, now);
-                iCtx.Manifests.Add(manifest);
+                StreamManifest? manifest = null;
+                AttestationRecord? latestAttestation = null;
+                foreach (var entry in entries)
+                {
+                    string message = EcdsaAttestation.BuildAttestationMessage(_ecdsaKeyId, entry.StreamId,
+                        entry.Version, entry.EventId, entry.EntryHash, now);
+                    string sig = EcdsaAttestation.Sign(_signingKey, message);
+                    entry.Confirm(sig, _ecdsaKeyId, now);
+                    latestAttestation = AttestationRecord.Create(entry.StreamId, entry.Version, entry.EventId,
+                        entry.EntryHash, entry.PayloadHash, entry.PreviousHash, sig, _ecdsaKeyId, now);
+                    iCtx.Attestations.Add(latestAttestation);
+                    if (manifest is null)
+                    {
+                        manifest = StreamManifest.Create(entry.StreamId, entry.Version, entry.EntryHash, entry.EventId, now);
+                        iCtx.Manifests.Add(manifest);
+                    }
+                    else
+                    {
+                        manifest.Advance(entry.Version, entry.EntryHash, entry.EventId, now);
+                    }
+                }
+                await ctx.SaveChangesAsync();
+                var latestEntry = entries[^1];
                 var invoice = await ctx.Invoices.Include(x => x.Items).SingleAsync(x => x.InvoiceRef == invoiceRef);
                 var invoiceClaim = OperationalSnapshotEngine.CreateInvoiceClaim(invoice);
                 iCtx.EntityHeads.Add(EntityHeadRecord.Create(invoiceClaim.EntityType, invoiceClaim.EntityId,
-                    att.Id, entry.Version, invoiceClaim.Revision, entry.EntryHash, invoiceClaim.Digest, now));
+                    latestAttestation!.Id, latestEntry.Version, invoiceClaim.Revision, latestEntry.EntryHash, invoiceClaim.Digest, now));
                 foreach (var item in invoice.Items)
                 {
                     var itemClaim = OperationalSnapshotEngine.CreateInvoiceItemClaim(item);
                     iCtx.EntityHeads.Add(EntityHeadRecord.Create(itemClaim.EntityType, itemClaim.EntityId,
-                        att.Id, entry.Version, itemClaim.Revision, entry.EntryHash, itemClaim.Digest, now));
+                        latestAttestation.Id, latestEntry.Version, itemClaim.Revision, latestEntry.EntryHash, itemClaim.Digest, now));
                 }
                 await iCtx.SaveChangesAsync();
             }

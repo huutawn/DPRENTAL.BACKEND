@@ -21,6 +21,7 @@ public sealed partial class ManualRefundService
             InvoiceRef = request.InvoiceRef.Trim(),
             PaymentRef = request.PaymentRef.Trim(),
             Reason = request.Reason.Trim(),
+            RefundKind = request.RefundKind.Trim(),
             Items = request.Items.OrderBy(x => x.RentalItemId).ToArray()
         };
         string fingerprint = CanonicalJournalHasher.ComputeOutboxDigest(JsonSerializer.Serialize(request));
@@ -41,6 +42,9 @@ public sealed partial class ManualRefundService
         if (invoice.RentalOrderId != request.RentalOrderId || invoice.PaymentRef != request.PaymentRef ||
             invoice.Status is not (InvoiceStatus.Paid or InvoiceStatus.Expired or InvoiceStatus.Cancelled))
             return Error.Conflict("Payment.RefundInvoiceMismatch", "Refund does not match the received payment.");
+        if (request.RefundKind == FinancialRefundKinds.LatePaymentRefund &&
+            (invoice.PaidAt is null || invoice.PaidAt < invoice.PaymentDeadline))
+            return Error.Conflict("Payment.RefundKindMismatch", "LatePaymentRefund requires a bank payment at or after the invoice deadline.");
         var required = new List<VerifiedWriteClaim> { SettlementService.ToWriteClaim(OperationalSnapshotEngine.CreateInvoiceClaim(invoice)) };
         var existing = await refunds.GetForInvoiceAsync(invoice.Id, ct);
         var lines = new List<ManualRefundItem>();
@@ -63,7 +67,7 @@ public sealed partial class ManualRefundService
         if (guard.IsFailure) return guard.Error;
         var now = clock.GetUtcNow();
         var refund = ManualRefundRequirement.Create(invoice.Id, invoice.RenterId, request.PaymentRef, request.OperationKey,
-            request.Reason, ManualRefundKind.RentalRefund, null, lines, now);
+            request.Reason, ManualRefundKind.RentalRefund, null, lines, now, request.RefundKind);
         await refunds.AddAsync(refund, ct);
         var response = new RequestRefundResponse(refund.RequirementRef, request.OperationKey, "Accepted", refund.Amount, invoice.Currency, false);
         var receipt = OperationReceipt.Create(request.OperationKey, "RequestRefund", fingerprint,

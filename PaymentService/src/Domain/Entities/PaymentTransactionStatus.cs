@@ -20,4 +20,5 @@ public static class PaymentTransactionReason
     public const string InvoiceAlreadyPaid = "INVOICE_ALREADY_PAID";
     public const string LatePayment = "LATE_PAYMENT";
     public const string LatePaymentAccepted = "LATE_PAYMENT_ACCEPTED";
+    public const string OnTimePaymentInvoiceClosed = "ON_TIME_PAYMENT_INVOICE_CLOSED";
 }

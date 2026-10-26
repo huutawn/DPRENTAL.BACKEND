@@ -391,6 +391,7 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
             }
 
             pt.AcceptLatePayment(PaymentTransactionReason.LatePaymentAccepted);
+            var analyticsOutbox = PaymentOutboxFactory.CreateInvoicePaidFinancialOutboxMessage(invoice, utcNow);
 
             var response = new AcceptLatePaymentResponse(
                 invoice.InvoiceRef,
@@ -411,6 +412,8 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
                 utcNow);
 
             Guid sharedOperationId = Guid.NewGuid();
+            Guid acceptInvoiceEventId = Guid.NewGuid();
+            analyticsOutbox.LinkAttestation(acceptInvoiceEventId, sharedOperationId);
 
             var prevInvoiceJournal = await _repository.GetLatestJournalEntryAsync(invoice.InvoiceRef, ct);
             long nextInvoiceVersion = (prevInvoiceJournal?.Version ?? 0) + 1;
@@ -423,14 +426,18 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
             var invoiceClaim = OperationalSnapshotEngine.CreateInvoiceClaim(invoice, invoice.IntegritySnapshotVersion);
             var ptClaim = OperationalSnapshotEngine.CreatePaymentTransactionClaim(pt);
             var receiptClaim = OperationalSnapshotEngine.CreateOperationReceiptClaim(receipt);
-            var claims = new List<CanonicalEntityClaim> { invoiceClaim, ptClaim, receiptClaim };
+            var claims = new List<CanonicalEntityClaim>
+            {
+                invoiceClaim, ptClaim, receiptClaim,
+                OperationalSnapshotEngine.CreateOutboxClaim(analyticsOutbox)
+            };
 
             var acceptInvoiceJournal = JournalEntryFactory.CreateEntry(
                 operationId: sharedOperationId,
                 streamId: invoice.InvoiceRef,
                 streamType: JournalStreamTypes.Invoice,
                 version: nextInvoiceVersion,
-                eventId: Guid.NewGuid(),
+                eventId: acceptInvoiceEventId,
                 eventType: JournalEventTypes.PaymentMatched,
                 amount: invoice.TotalAmount,
                 currency: invoice.Currency,
@@ -447,6 +454,8 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
                 },
                 snapshot: OperationalSnapshotEngine.CreateInvoiceSnapshot(invoice, invoice.Revision, invoice.IntegritySnapshotVersion),
                 entityClaims: claims,
+                outboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(analyticsOutbox.Payload),
+                outboxMessageId: analyticsOutbox.MessageId,
                 paymentRef: invoice.PaymentRef,
                 invoiceRef: invoice.InvoiceRef,
                 rentalOrderId: invoice.RentalOrderId,
@@ -479,7 +488,8 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
                 rentalOrderId: invoice.RentalOrderId,
                 encryptor: _encryptor);
 
-            await _repository.SaveLatePaymentAcceptanceAsync(invoice, pt, receipt, acceptInvoiceJournal, acceptPtJournal, ct);
+            await _repository.SaveLatePaymentAcceptanceAsync(invoice, pt, receipt, analyticsOutbox,
+                acceptInvoiceJournal, acceptPtJournal, ct);
             // Pre-commit check: ensure evidence and cutoff have not expired during processing
             var commitNow = _timeProvider.GetUtcNow();
             if (commitNow >= verifiedEvidence.ExpiresAt)

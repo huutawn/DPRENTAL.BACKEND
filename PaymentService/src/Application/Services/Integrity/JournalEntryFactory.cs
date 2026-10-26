@@ -125,4 +125,82 @@ public static class JournalEntryFactory
             invoiceRef: invoice.InvoiceRef, rentalOrderId: invoice.RentalOrderId);
     }
 
+    public static TransactionJournalEntry CreateLinkedFinancialEvent(
+        TransactionJournalEntry preceding, string eventType, Invoice invoice, decimal amount,
+        string status, string actor, DateTimeOffset now, IReadOnlyList<CanonicalEntityClaim> claims,
+        IPaymentDataEncryptor encryptor, OutboxMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(preceding);
+        ArgumentNullException.ThrowIfNull(invoice);
+        ArgumentNullException.ThrowIfNull(message);
+        Guid eventId = Guid.NewGuid();
+        message.LinkAttestation(eventId, preceding.OperationId);
+        return CreateEntry(preceding.OperationId, preceding.StreamId, preceding.StreamType,
+            preceding.Version + 1, eventId, eventType, amount, invoice.Currency, status,
+            JournalConfirmationSources.System, actor, now, preceding.EntryHash, encryptor,
+            relatedEntities: new Dictionary<string, string?>
+            {
+                ["invoiceRef"] = invoice.InvoiceRef,
+                ["paymentRef"] = invoice.PaymentRef,
+                ["rentalOrderId"] = invoice.RentalOrderId.ToString("D")
+            }, entityClaims: claims,
+            outboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(message.Payload),
+            outboxMessageId: message.MessageId, paymentRef: invoice.PaymentRef,
+            invoiceRef: invoice.InvoiceRef, rentalOrderId: invoice.RentalOrderId);
+    }
+
+    /// <summary>
+    /// Journal thứ hai trên stream invoice, chỉ để liên kết Analytics outbox.
+    /// Dùng operationId riêng và nối tiếp version/hash của journal invoice vừa tạo.
+    /// </summary>
+    public static TransactionJournalEntry CreateAnalyticsLinkEntry(
+        TransactionJournalEntry precedingInvoiceJournal,
+        Invoice invoice,
+        OutboxMessage analyticsOutbox,
+        IReadOnlyList<CanonicalEntityClaim> claims,
+        string confirmationSource,
+        string actor,
+        DateTimeOffset timestampUtc,
+        IPaymentDataEncryptor encryptor)
+    {
+        ArgumentNullException.ThrowIfNull(precedingInvoiceJournal);
+        ArgumentNullException.ThrowIfNull(invoice);
+        ArgumentNullException.ThrowIfNull(analyticsOutbox);
+        ArgumentNullException.ThrowIfNull(claims);
+        ArgumentNullException.ThrowIfNull(encryptor);
+
+        Guid operationId = precedingInvoiceJournal.OperationId;
+        Guid eventId = Guid.NewGuid();
+        analyticsOutbox.LinkAttestation(eventId, operationId);
+
+        return CreateEntry(
+            operationId: operationId,
+            streamId: invoice.InvoiceRef,
+            streamType: JournalStreamTypes.Invoice,
+            version: precedingInvoiceJournal.Version + 1,
+            eventId: eventId,
+            eventType: JournalEventTypes.InvoicePaidFinancialLinked,
+            amount: invoice.TotalAmount,
+            currency: invoice.Currency,
+            status: invoice.Status,
+            confirmationSource: confirmationSource,
+            actor: actor,
+            timestampUtc: timestampUtc,
+            previousHash: precedingInvoiceJournal.EntryHash,
+            encryptor: encryptor,
+            relatedEntities: new Dictionary<string, string?>
+            {
+                ["invoiceRef"] = invoice.InvoiceRef,
+                ["paymentRef"] = invoice.PaymentRef,
+                ["rentalOrderId"] = invoice.RentalOrderId.ToString("D")
+            },
+            snapshot: OperationalSnapshotEngine.CreateInvoiceSnapshot(invoice, invoice.Revision),
+            entityClaims: claims,
+            outboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(analyticsOutbox.Payload),
+            outboxMessageId: analyticsOutbox.MessageId,
+            paymentRef: invoice.PaymentRef,
+            invoiceRef: invoice.InvoiceRef,
+            rentalOrderId: invoice.RentalOrderId);
+    }
+
 }

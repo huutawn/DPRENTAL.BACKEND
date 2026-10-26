@@ -20,6 +20,7 @@ public sealed class OutboxMessage
     public long Revision { get; private set; } = 1;
     public DateTimeOffset? QuarantinedAt { get; private set; }
     public string? QuarantineReason { get; private set; }
+    public string Topic { get; private set; } = OutboxTopics.PaymentEventsV1;
 
     private OutboxMessage()
     {
@@ -33,12 +34,19 @@ public sealed class OutboxMessage
         string payload,
         DateTimeOffset createdAt,
         Guid? eventId = null,
-        Guid? operationId = null)
+        Guid? operationId = null,
+        string? topic = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(messageType);
         ArgumentException.ThrowIfNullOrWhiteSpace(aggregateType);
         ArgumentException.ThrowIfNullOrWhiteSpace(aggregateId);
         ArgumentException.ThrowIfNullOrWhiteSpace(payload);
+
+        string resolvedTopic = topic is null ? OutboxTopics.PaymentEventsV1 : topic.Trim();
+        if (!OutboxTopics.IsValidRoute(messageType, resolvedTopic))
+        {
+            throw new ArgumentException($"Message type '{messageType}' không được gửi tới topic '{resolvedTopic}'.", nameof(topic));
+        }
 
         return new OutboxMessage
         {
@@ -56,7 +64,8 @@ public sealed class OutboxMessage
             NextRetryAt = null,
             LastErrorMessage = null,
             EventId = eventId,
-            OperationId = operationId
+            OperationId = operationId,
+            Topic = resolvedTopic
         };
     }
 

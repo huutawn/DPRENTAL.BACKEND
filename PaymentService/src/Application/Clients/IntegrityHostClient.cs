@@ -188,6 +188,10 @@ public sealed class IntegrityHostClient : ITransactionIntegrityChecker
 
             if (request.Purpose == VerificationPurposes.OutboxPublication && body.IsUsable)
             {
+                string? expectedPublicationAudience =
+                    Dprental.PaymentService.Domain.Entities.OutboxTopics.ResolveAudience(request.Topic);
+                if (expectedPublicationAudience is null)
+                    return Error.Conflict("IntegrityHost.InvalidPublicationProof", "Topic is not mapped to a publication audience.");
                 var proof = verificationResponse.PublicationProof;
                 if (proof is null || !EcdsaAttestation.Verify(publicKey, proof.SigningMessage, proof.Signature))
                     return Error.Conflict("IntegrityHost.InvalidPublicationProof", "Missing or invalid publication signature.");
@@ -195,7 +199,8 @@ public sealed class IntegrityHostClient : ITransactionIntegrityChecker
                 try { proofBody = System.Text.Json.JsonSerializer.Deserialize<PublicationProofBody>(proof.Payload, System.Text.Json.JsonSerializerOptions.Web); }
                 catch (System.Text.Json.JsonException) { return Error.Conflict("IntegrityHost.InvalidPublicationProof", "Malformed publication proof."); }
                 if (proofBody is null || proofBody.Schema != 1 || proofBody.KeyId != body.KeyId ||
-                    proofBody.Issuer != config.Issuer || proofBody.Environment != config.Environment || proofBody.Audience != "rental-service" ||
+                    proofBody.Issuer != config.Issuer || proofBody.Environment != config.Environment ||
+                    proofBody.Audience != expectedPublicationAudience ||
                     proofBody.MessageId != request.OutboxMessageId || proofBody.Topic != request.Topic ||
                     proofBody.MessageKey != request.MessageKey || proofBody.PayloadDigest != request.ExpectedOutboxDigest)
                     return Error.Conflict("IntegrityHost.InvalidPublicationProof", "Publication evidence does not match the requested message.");

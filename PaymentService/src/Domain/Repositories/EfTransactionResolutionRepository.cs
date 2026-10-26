@@ -40,11 +40,15 @@ public sealed class EfTransactionResolutionRepository(PaymentServiceDbContext db
         PaymentTransactionResolution resolution,
         TransactionJournalEntry journal,
         OutboxMessage outbox,
+        TransactionJournalEntry analyticsJournal,
+        OutboxMessage analyticsOutbox,
         CancellationToken cancellationToken = default)
     {
         db.PaymentTransactionResolutions.Add(resolution);
         db.TransactionJournals.Add(journal);
+        db.TransactionJournals.Add(analyticsJournal);
         db.OutboxMessages.Add(outbox);
+        db.OutboxMessages.Add(analyticsOutbox);
         await db.SaveChangesAsync(cancellationToken);
     }
 }

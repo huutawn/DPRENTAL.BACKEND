@@ -73,18 +73,37 @@ public sealed partial class ManualRefundService(
         if (settlement is not null) claims.Add(OperationalSnapshotEngine.CreateSettlementClaim(settlement));
         var message = settlement is null ? PaymentOutboxFactory.CreateRefundCompleted(refund, invoice, now)
             : PaymentOutboxFactory.CreateRentalSettled(settlement, invoice, transferRef, now);
+        var messages = new List<OutboxMessage> { message };
+        OutboxMessage? refundFinancial = refund.FinancialRefundKind is not null ||
+            refund.Kind == ManualRefundKind.SettlementDeposit
+            ? PaymentOutboxFactory.CreateRefundCompletedFinancial(refund, invoice) : null;
+        if (refundFinancial is not null) messages.Add(refundFinancial);
+        OutboxMessage? settlementFinancial = settlement is null ? null :
+            PaymentOutboxFactory.CreateRentalItemFinancialSettled(settlement, invoice);
+        if (settlementFinancial is not null) messages.Add(settlementFinancial);
+        claims.AddRange(messages.Select(OperationalSnapshotEngine.CreateOutboxClaim));
         Guid operationId = Guid.NewGuid();
-        var journals = new List<TransactionJournalEntry>
-        {
-            await JournalEntryFactory.CreateNextAsync(invoices, operationId, refund.RequirementRef, JournalStreamTypes.ManualRefund,
-                JournalEventTypes.RefundConfirmed, invoice, refund.Amount, "COMPLETED", $"ADMIN:{adminId:D}", now, claims, encryptor, message, ct)
-        };
+        var refundJournal = await JournalEntryFactory.CreateNextAsync(invoices, operationId,
+            refund.RequirementRef, JournalStreamTypes.ManualRefund, JournalEventTypes.RefundConfirmed,
+            invoice, refund.Amount, "COMPLETED", $"ADMIN:{adminId:D}", now, claims, encryptor, message, ct);
+        var journals = new List<TransactionJournalEntry> { refundJournal };
+        if (refundFinancial is not null)
+            journals.Add(JournalEntryFactory.CreateLinkedFinancialEvent(refundJournal,
+                JournalEventTypes.RefundCompletedFinancialLinked, invoice, refund.Amount,
+                "COMPLETED", $"ADMIN:{adminId:D}", now, claims, encryptor, refundFinancial));
         if (settlement is not null)
-            journals.Add(await JournalEntryFactory.CreateNextAsync(invoices, operationId, settlement.SettlementRef,
+        {
+            var settlementJournal = await JournalEntryFactory.CreateNextAsync(invoices, operationId, settlement.SettlementRef,
                 JournalStreamTypes.RentalSettlement, JournalEventTypes.RentalSettled, invoice,
-                settlement.RentalAmount + settlement.DepositAmount, "COMPLETED", $"ADMIN:{adminId:D}", now, claims, encryptor, null, ct));
+                settlement.RentalAmount + settlement.DepositAmount, "COMPLETED", $"ADMIN:{adminId:D}", now, claims, encryptor, null, ct);
+            journals.Add(settlementJournal);
+            journals.Add(JournalEntryFactory.CreateLinkedFinancialEvent(settlementJournal,
+                JournalEventTypes.RentalItemFinancialSettledLinked, invoice,
+                settlement.RentalAmount + settlement.DepositAmount, "COMPLETED",
+                $"ADMIN:{adminId:D}", now, claims, encryptor, settlementFinancial!));
+        }
         if (clock.GetUtcNow() >= evidence.Value.ExpiresAt) return Error.Conflict("Payment.ReceiptExpired", "Receipt expired before commit.");
-        await invoices.SaveFinancialOperationAsync(receipt, journals, [message], ct);
+        await invoices.SaveFinancialOperationAsync(receipt, journals, messages, ct);
         await tx.CommitAsync(ct);
         return response;
     }

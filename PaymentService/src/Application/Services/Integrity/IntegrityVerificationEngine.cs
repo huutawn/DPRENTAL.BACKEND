@@ -604,16 +604,19 @@ public sealed class IntegrityVerificationEngine : Dprental.PaymentService.Applic
             {
                 using var envelope = System.Text.Json.JsonDocument.Parse(publicationMessage.Payload);
                 var body = envelope.RootElement;
-                if (!body.TryGetProperty("aggregateId", out var aggregate) || aggregate.GetString() != publicationMessage.AggregateId ||
+                string? publicationAudience = OutboxTopics.ResolveAudience(publicationMessage.Topic);
+                if (publicationAudience is null ||
+                    !OutboxTopics.IsValidRoute(publicationMessage.MessageType, publicationMessage.Topic) ||
+                    !string.Equals(request.Topic, publicationMessage.Topic, StringComparison.Ordinal) ||
+                    !body.TryGetProperty("aggregateId", out var aggregate) || aggregate.GetString() != publicationMessage.AggregateId ||
                     !body.TryGetProperty("messageType", out var type) || type.GetString() != publicationMessage.MessageType ||
-                    !body.TryGetProperty("messageId", out var id) || id.GetGuid() != publicationMessage.MessageId ||
-                    request.Topic != (_kafkaOptions?.CurrentValue.Topic ?? "payment.events.v1"))
+                    !body.TryGetProperty("messageId", out var id) || id.GetGuid() != publicationMessage.MessageId)
                     return CreateResponse(request, IntegrityStatuses.Tampered, entry.Version,
                         entry.ConfirmationSource, false, "OUTBOX_ROUTING_MISMATCH", entry.Amount,
                         entry.Currency, entry.Status, now);
-                var proofBody = new PublicationProofBody(1, _keyManager.Issuer, "rental-service",
+                var proofBody = new PublicationProofBody(1, _keyManager.Issuer, publicationAudience,
                     _keyManager.Environment, _keyManager.KeyId, publicationMessage.MessageId,
-                    entry.EventId, entry.OperationId, request.Topic, request.MessageKey!,
+                    entry.EventId, entry.OperationId, publicationMessage.Topic, request.MessageKey!,
                     publicationMessage.MessageType, entry.OutboxDigest!, now);
                 string proofPayload = proofBody.Serialize();
                 publicationProof = new PublicationProof(proofPayload,

@@ -1,7 +1,9 @@
 using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Application.DTOs.Settlement;
+using Dprental.PaymentService.Application.DTOs.Verification;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.Repositories;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 namespace Dprental.PaymentService.Api.Tests.Integration;
@@ -47,7 +49,32 @@ public sealed class SettlementLedgerPersistenceTests
         var journal = await db.TransactionJournals.SingleAsync(x => x.EventId == message.EventId);
         Assert.Equal(message.MessageId, journal.OutboxMessageId);
         Assert.Equal(CanonicalJournalHasher.ComputeOutboxDigest(message.Payload), journal.OutboxDigest);
+        var financial = await db.OutboxMessages.SingleAsync(x => x.MessageType == OutboxTopics.RentalItemFinancialSettledMessageType);
+        Assert.Equal(OutboxTopics.PaymentAnalyticsV1, financial.Topic);
+        using (var json = JsonDocument.Parse(financial.Payload))
+        {
+            var payload = json.RootElement.GetProperty("payload");
+            Assert.Equal(90_000m, payload.GetProperty("finalDeductionAmount").GetDecimal());
+            Assert.Equal(0m, payload.GetProperty("depositRefundDue").GetDecimal());
+            Assert.Equal(10_000m, payload.GetProperty("platformFeeAmount").GetDecimal());
+            Assert.Equal(180_000m, payload.GetProperty("supplierPayable").GetDecimal());
+            Assert.False(payload.TryGetProperty("accountNumber", out _));
+        }
+        var unpublished = await h.Checker().VerifyAsync(new TransactionVerificationRequest(
+            financial.MessageId.ToString("D"), VerificationPurposes.OutboxPublication, "before-confirmation",
+            ExpectedOutboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(financial.Payload),
+            Topic: financial.Topic, MessageKey: financial.AggregateId, OutboxMessageId: financial.MessageId));
+        Assert.True(unpublished.IsSuccess);
+        Assert.Null(unpublished.Value.PublicationProof);
         await h.ConfirmAsync();
+        var proof = await h.Checker().VerifyAsync(new TransactionVerificationRequest(
+            financial.MessageId.ToString("D"), VerificationPurposes.OutboxPublication, "after-confirmation",
+            ExpectedOutboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(financial.Payload),
+            Topic: financial.Topic, MessageKey: financial.AggregateId, OutboxMessageId: financial.MessageId));
+        Assert.True(proof.IsSuccess, proof.Error.Message);
+        Assert.NotNull(proof.Value.PublicationProof);
+        using var proofJson = JsonDocument.Parse(proof.Value.PublicationProof.Payload);
+        Assert.Equal(OutboxTopics.AnalyticsAudience, proofJson.RootElement.GetProperty("audience").GetString());
     }
 
     [Fact]
@@ -77,7 +104,69 @@ public sealed class SettlementLedgerPersistenceTests
         Assert.Equal(ManualRefundStatus.Completed, (await verify.ManualRefundRequirements.SingleAsync()).Status);
         Assert.Equal(SettlementState.Completed, (await verify.RentalItemSettlements.SingleAsync()).Status);
         Assert.Single(await verify.OutboxMessages.Where(x => x.MessageType == "RentalSettled").ToListAsync());
+        var refundFinancial = await verify.OutboxMessages.SingleAsync(x => x.MessageType == OutboxTopics.RefundCompletedFinancialMessageType);
+        var settlementFinancial = await verify.OutboxMessages.SingleAsync(x => x.MessageType == OutboxTopics.RentalItemFinancialSettledMessageType);
+        using (var json = JsonDocument.Parse(refundFinancial.Payload))
+        {
+            var payload = json.RootElement.GetProperty("payload");
+            Assert.Equal(FinancialRefundKinds.SettlementDepositRefund, payload.GetProperty("refundKind").GetString());
+            Assert.Equal(70_000m, payload.GetProperty("amount").GetDecimal());
+        }
+        Assert.NotEqual(refundFinancial.MessageId, settlementFinancial.MessageId);
         await h.ConfirmAsync();
+    }
+
+    [Theory]
+    [InlineData(FinancialRefundKinds.CancellationRefund, false)]
+    [InlineData(FinancialRefundKinds.LatePaymentRefund, true)]
+    public async Task Rental_refund_emits_classified_financial_event_only_after_manual_transfer(
+        string refundKind, bool late)
+    {
+        await using var h = await FinancialWorkflowHarness.CreateAsync();
+        var invoice = await h.SeedAsync(late: late);
+        var item = Assert.Single(invoice.Items);
+        var request = new RequestRefundRequest(invoice.RentalOrderId, invoice.InvoiceRef,
+            invoice.PaymentRef!, [new RefundItemRequest(item.RentalItemId, item.RentalAmount, item.DepositAmount)],
+            "Refund after rental decision", Guid.NewGuid().ToString("N"), refundKind);
+        Guid requirementId;
+        await using (var db = new PaymentServiceDbContext(h.PaymentOptions))
+        {
+            var requested = await h.Refund(db).RequestAsync(request, default);
+            Assert.True(requested.IsSuccess, requested.Error.Message);
+            var replay = await h.Refund(db).RequestAsync(request, default);
+            Assert.True(replay.IsSuccess, replay.Error.Message);
+            Assert.True(replay.Value.IsReplay);
+            requirementId = await db.ManualRefundRequirements.Select(x => x.Id).SingleAsync();
+            Assert.Empty(await db.OutboxMessages.Where(x => x.MessageType == OutboxTopics.RefundCompletedFinancialMessageType).ToListAsync());
+        }
+        await h.ConfirmAsync();
+        var completion = new CompleteManualRefundRequest("BANK-REFUND-123", Guid.NewGuid().ToString("N"), "Transfer confirmed");
+        await using (var db = new PaymentServiceDbContext(h.PaymentOptions))
+        {
+            var result = await h.Refund(db).CompleteAsync(requirementId, completion, Guid.NewGuid(), default);
+            Assert.True(result.IsSuccess, result.Error.Message);
+        }
+        await using var verify = new PaymentServiceDbContext(h.PaymentOptions);
+        var eventMessage = await verify.OutboxMessages.SingleAsync(x => x.MessageType == OutboxTopics.RefundCompletedFinancialMessageType);
+        Assert.Equal(OutboxTopics.PaymentAnalyticsV1, eventMessage.Topic);
+        using (var json = JsonDocument.Parse(eventMessage.Payload))
+        {
+            var payload = json.RootElement.GetProperty("payload");
+            Assert.Equal(refundKind, payload.GetProperty("refundKind").GetString());
+            Assert.Equal(invoice.RentalOrderId, payload.GetProperty("rentalOrderId").GetGuid());
+            Assert.Equal(invoice.TotalAmount, payload.GetProperty("amount").GetDecimal());
+            Assert.False(payload.TryGetProperty("externalTransferReference", out _));
+            Assert.False(payload.TryGetProperty("accountNumber", out _));
+        }
+        await h.ConfirmAsync();
+        var proof = await h.Checker().VerifyAsync(new TransactionVerificationRequest(
+            eventMessage.MessageId.ToString("D"), VerificationPurposes.OutboxPublication, "refund-proof",
+            ExpectedOutboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(eventMessage.Payload),
+            Topic: eventMessage.Topic, MessageKey: eventMessage.AggregateId, OutboxMessageId: eventMessage.MessageId));
+        Assert.True(proof.IsSuccess, proof.Error.Message);
+        Assert.NotNull(proof.Value.PublicationProof);
+        using var proofJson = JsonDocument.Parse(proof.Value.PublicationProof.Payload);
+        Assert.Equal(OutboxTopics.AnalyticsAudience, proofJson.RootElement.GetProperty("audience").GetString());
     }
 
     [Fact]
