@@ -12,6 +12,7 @@ namespace Dprental.RentalService.Application.Services.BankAccounts;
 /// <summary>
 /// Sổ tài khoản ngân hàng của người thuê: tối đa <see cref="MaxBankAccounts"/> tài khoản, không trùng ngân hàng và số tài khoản,
 /// luôn có đúng một tài khoản mặc định khi sổ không rỗng.
+/// Sửa tài khoản giữ nguyên trạng thái mặc định.
 /// Mọi thao tác sửa đổi khóa theo người thuê để hai yêu cầu cùng lúc không làm sổ có hai tài khoản mặc định hay hai tài khoản trùng.
 /// </summary>
 public sealed class RenterBankAccountService(
@@ -38,7 +39,7 @@ public sealed class RenterBankAccountService(
 
     public async Task<Result<RenterBankAccountResponse>> CreateAsync(
         Guid renterId,
-        CreateRenterBankAccountRequest request,
+        SaveRenterBankAccountRequest request,
         CancellationToken cancellationToken = default)
     {
         if (Validate(request) is { } invalid) return invalid;
@@ -66,6 +67,35 @@ public sealed class RenterBankAccountService(
                 isDefault: existing.Count == 0,
                 timeProvider.GetUtcNow());
             bankAccounts.Add(bankAccount);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            return ToResponse(bankAccount);
+        }, cancellationToken);
+    }
+
+    public async Task<Result<RenterBankAccountResponse>> UpdateAsync(
+        Guid renterId,
+        Guid bankAccountId,
+        SaveRenterBankAccountRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (Validate(request) is { } invalid) return invalid;
+
+        string bankCode = request.BankCode!.Trim();
+        string accountNumber = request.AccountNumber!.Trim();
+
+        return await WithRenterLockAsync<RenterBankAccountResponse>(renterId, async () =>
+        {
+            IReadOnlyList<RenterBankAccount> existing = await bankAccounts.ListForUpdateAsync(renterId, cancellationToken);
+            RenterBankAccount? bankAccount = existing.FirstOrDefault(a => a.Id == bankAccountId);
+            if (bankAccount is null) return RenterBankAccountErrors.NotFound;
+
+            // Trùng với chính nó thì không tính: sửa mỗi tên chủ tài khoản vẫn được.
+            if (existing.Any(a => a.Id != bankAccountId && a.BankCode == bankCode && a.AccountNumber == accountNumber))
+            {
+                return RenterBankAccountErrors.Duplicate;
+            }
+
+            bankAccount.Update(bankCode, accountNumber, request.AccountHolderName!.Trim(), timeProvider.GetUtcNow());
             await unitOfWork.SaveChangesAsync(cancellationToken);
             return ToResponse(bankAccount);
         }, cancellationToken);
@@ -115,7 +145,7 @@ public sealed class RenterBankAccountService(
         }, cancellationToken);
     }
 
-    private static Error? Validate(CreateRenterBankAccountRequest request)
+    private static Error? Validate(SaveRenterBankAccountRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 

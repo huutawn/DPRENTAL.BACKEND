@@ -79,7 +79,7 @@ public sealed class RenterBankAccountsController(
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create(
-        [FromBody] CreateRenterBankAccountRequest request,
+        [FromBody] SaveRenterBankAccountRequest request,
         CancellationToken cancellationToken)
     {
         Result<RenterBankAccountResponse> result = await bankAccountService.CreateAsync(
@@ -88,6 +88,39 @@ public sealed class RenterBankAccountsController(
         return result.IsFailure
             ? this.ToProblem(result.Error)
             : StatusCode(StatusCodes.Status201Created, result.Value);
+    }
+
+    /// <summary>
+    /// Sửa một tài khoản trong sổ tài khoản, ví dụ khi nhập nhầm. Tài khoản giữ nguyên trạng thái mặc định;
+    /// các đơn đã đặt vẫn giữ tài khoản đã chép lúc đặt.
+    /// </summary>
+    /// <param name="bankAccountId">Mã tài khoản cần sửa.</param>
+    /// <param name="request">Thông tin tài khoản mới, gửi đủ cả ba trường.</param>
+    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
+    /// <response code="200">Đã sửa tài khoản.</response>
+    /// <response code="400">Dữ liệu tài khoản không hợp lệ (BankAccount.InvalidRequest).</response>
+    /// <response code="401">Người dùng chưa được xác thực.</response>
+    /// <response code="403">Người dùng không có quyền Renter.</response>
+    /// <response code="404">Không tìm thấy tài khoản trong sổ của người thuê (BankAccount.NotFound).</response>
+    /// <response code="409">Trùng ngân hàng và số tài khoản với tài khoản khác trong sổ, hoặc sổ đang được cập nhật bởi yêu cầu khác.</response>
+    /// <returns>Tài khoản sau khi sửa.</returns>
+    [HttpPatch("{bankAccountId:guid}")]
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(RenterBankAccountResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Update(
+        [FromRoute] Guid bankAccountId,
+        [FromBody] SaveRenterBankAccountRequest request,
+        CancellationToken cancellationToken)
+    {
+        Result<RenterBankAccountResponse> result = await bankAccountService.UpdateAsync(
+            currentRenter.RenterId, bankAccountId, request, cancellationToken);
+
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
     /// <summary>

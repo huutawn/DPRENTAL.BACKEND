@@ -18,7 +18,7 @@ public sealed class RenterBankAccountServiceTests
     private readonly Guid _renterId = Guid.NewGuid();
     private readonly MutableTimeProvider _clock = new(Now);
 
-    private static CreateRenterBankAccountRequest Account(string accountNumber = "0123456789", string bankCode = " VCB ") =>
+    private static SaveRenterBankAccountRequest Account(string accountNumber = "0123456789", string bankCode = " VCB ") =>
         new(bankCode, accountNumber, " Nguyễn Văn A ");
 
     private RentalServiceDbContext NewContext() => new(
@@ -27,7 +27,7 @@ public sealed class RenterBankAccountServiceTests
     private RenterBankAccountService CreateService(RentalServiceDbContext context, IOrderLockManager? locks = null) =>
         new(new RenterBankAccountRepository(context), locks ?? new NoOpLockManager(), context, _clock);
 
-    private async Task<RenterBankAccountResponse> AddAsync(CreateRenterBankAccountRequest request, Guid? renterId = null)
+    private async Task<RenterBankAccountResponse> AddAsync(SaveRenterBankAccountRequest request, Guid? renterId = null)
     {
         await using RentalServiceDbContext context = NewContext();
         Result<RenterBankAccountResponse> result = await CreateService(context).CreateAsync(renterId ?? _renterId, request);
@@ -126,7 +126,63 @@ public sealed class RenterBankAccountServiceTests
     }
 
     [Fact]
-    public async Task AnotherRenter_CannotDeleteOrSetDefault()
+    public async Task Update_FixesTypo_AndKeepsDefault()
+    {
+        RenterBankAccountResponse account = await AddAsync(Account("0123456780"));
+        await AddAsync(Account("9876543210"));
+
+        await using RentalServiceDbContext context = NewContext();
+        Result<RenterBankAccountResponse> result = await CreateService(context)
+            .UpdateAsync(_renterId, account.Id, new(" TCB ", " 0123456789 ", " Nguyễn Văn B "));
+
+        Assert.Equal(new RenterBankAccountResponse(account.Id, "TCB", "0123456789", "Nguyễn Văn B", IsDefault: true), result.Value);
+        IReadOnlyList<RenterBankAccountResponse> list = await ListAsync();
+        Assert.Equal(result.Value, list[0]);
+        Assert.Single(list, a => a.IsDefault);
+    }
+
+    [Fact]
+    public async Task Update_OnlyHolderName_IsNotADuplicateOfItself()
+    {
+        RenterBankAccountResponse account = await AddAsync(Account());
+
+        await using RentalServiceDbContext context = NewContext();
+        Result<RenterBankAccountResponse> result = await CreateService(context)
+            .UpdateAsync(_renterId, account.Id, Account() with { AccountHolderName = "NGUYEN VAN A" });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("NGUYEN VAN A", Assert.Single(await ListAsync()).AccountHolderName);
+    }
+
+    [Fact]
+    public async Task Update_RejectsSameBankAndAccountNumberAsAnotherAccount()
+    {
+        RenterBankAccountResponse first = await AddAsync(Account());
+        RenterBankAccountResponse second = await AddAsync(Account("9876543210"));
+
+        await using RentalServiceDbContext context = NewContext();
+        Result<RenterBankAccountResponse> result = await CreateService(context)
+            .UpdateAsync(_renterId, second.Id, Account(first.AccountNumber, first.BankCode));
+
+        Assert.Equal(RenterBankAccountErrors.Duplicate, result.Error);
+        Assert.Contains(await ListAsync(), a => a.Id == second.Id && a.AccountNumber == "9876543210");
+    }
+
+    [Fact]
+    public async Task Update_RejectsInvalidAccountNumber_WithoutChanging()
+    {
+        RenterBankAccountResponse account = await AddAsync(Account());
+
+        await using RentalServiceDbContext context = NewContext();
+        Result<RenterBankAccountResponse> result = await CreateService(context)
+            .UpdateAsync(_renterId, account.Id, Account("12345"));
+
+        Assert.Equal("BankAccount.InvalidRequest", result.Error.Code);
+        Assert.Equal(account, Assert.Single(await ListAsync()));
+    }
+
+    [Fact]
+    public async Task AnotherRenter_CannotUpdateDeleteOrSetDefault()
     {
         RenterBankAccountResponse account = await AddAsync(Account());
         Guid stranger = Guid.NewGuid();
@@ -134,6 +190,7 @@ public sealed class RenterBankAccountServiceTests
         await using RentalServiceDbContext context = NewContext();
         RenterBankAccountService service = CreateService(context);
 
+        Assert.Equal(RenterBankAccountErrors.NotFound, (await service.UpdateAsync(stranger, account.Id, Account("9876543210"))).Error);
         Assert.Equal(RenterBankAccountErrors.NotFound, (await service.DeleteAsync(stranger, account.Id)).Error);
         Assert.Equal(RenterBankAccountErrors.NotFound, (await service.SetDefaultAsync(stranger, account.Id)).Error);
         Assert.Equal(account, Assert.Single(await ListAsync()));
