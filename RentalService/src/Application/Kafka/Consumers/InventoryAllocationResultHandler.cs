@@ -258,11 +258,11 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                         item.Id,
                         item.SupplierId,
                         utcNow,
-                        operationKey);
+                        operationKey,
+                        order.Version);
 
-                    var published = await _rentalEvents!.EnqueueDomainEventAsync(
-                        KafkaContractSpec.EventTypes.RentalItemConfirmed, item.Id.ToString("D"),
-                        order.Id.ToString("D"), utcNow, outboxPayload,
+                    var published = await _rentalEvents!.EnqueueRentalItemConfirmedAsync(
+                        outboxPayload,
                         order.Id.ToString("D"), causationId: receipt.Id, cancellationToken: cancellationToken);
                     if (published.IsFailure) return published.Error;
                 }
@@ -510,37 +510,41 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         order.ClearLatePaymentFlag();
         var markResult = order.MarkAsPaid(order.InvoiceRef ?? string.Empty, order.PaymentRef ?? string.Empty, order.PaymentConfirmedAt ?? utcNow, utcNow);
         if (markResult.IsFailure) return markResult.Error;
+        order.RecordReadModelUpdate(utcNow);
 
         if (_rentalEvents != null)
         {
-            await _rentalEvents.EnqueueRentalOrderPaidAsync(
+            var orderPaidRes = await _rentalEvents.EnqueueRentalOrderPaidAsync(
                 new RentalOrderPaidPayload(order.Id, order.RenterId, order.InvoiceRef ?? string.Empty,
-                    order.PaymentRef ?? string.Empty, order.TotalPayableAmount, order.PaymentConfirmedAt ?? utcNow),
+                    order.PaymentRef ?? string.Empty, order.TotalPayableAmount, order.PaymentConfirmedAt ?? utcNow,
+                    order.Version),
                 correlationId: order.Id.ToString("D"),
                 cancellationToken: cancellationToken);
+            if (orderPaidRes.IsFailure) return orderPaidRes.Error;
 
             foreach (var item in order.Items)
             {
                 if (item.EquipmentTypeId.HasValue && item.EquipmentTypeId.Value != Guid.Empty)
                 {
-                    await _rentalEvents.EnqueueRentalItemPaidAsync(
+                    var itemPaidRes = await _rentalEvents.EnqueueRentalItemPaidAsync(
                         new RentalItemPaidPayload(order.RenterId, item.EquipmentListingId,
-                            item.EquipmentTypeId, order.Id, item.Id),
+                            item.EquipmentTypeId, order.Id, item.Id, order.Version),
                         correlationId: order.Id.ToString("D"),
                         cancellationToken: cancellationToken);
+                    if (itemPaidRes.IsFailure) return itemPaidRes.Error;
                 }
 
-                await _rentalEvents.EnqueueDomainEventAsync(
-                    KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested,
-                    item.Id.ToString("D"), order.Id.ToString("D"), utcNow,
+                var confirmRes = await _rentalEvents.EnqueueRentalSupplierConfirmationRequestedAsync(
                     new RentalSupplierConfirmationRequestedPayload(
                         order.Id,
                         item.Id,
                         item.SupplierId,
                         item.EquipmentListingId,
                         item.Quantity,
-                        item.SupplierConfirmationDeadline ?? utcNow.AddHours(24)),
+                        item.SupplierConfirmationDeadline ?? utcNow.AddHours(24),
+                        order.Version),
                     order.Id.ToString("D"), null, cancellationToken);
+                if (confirmRes.IsFailure) return confirmRes.Error;
             }
         }
 
@@ -739,10 +743,9 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             var handoverPayload = new RentalItemHandoverCompletedPayload(
                 order.Id, handedOverItem.Id, order.RenterId, handedOverItem.SupplierId,
                 handedOverItem.EquipmentListingId, handedOverItem.Quantity, handover.Id,
-                handover.ActualHandoverAt, utcNow);
-            var published = await _rentalEvents!.EnqueueDomainEventAsync(
-                KafkaContractSpec.EventTypes.RentalItemHandoverCompleted, handover.Id.ToString("D"),
-                order.Id.ToString("D"), utcNow, handoverPayload,
+                handover.ActualHandoverAt, utcNow, order.Version);
+            var published = await _rentalEvents!.EnqueueRentalItemHandoverCompletedAsync(
+                handoverPayload,
                 order.Id.ToString("D"), receipt.Id, cancellationToken);
             if (published.IsFailure) return published.Error;
         }

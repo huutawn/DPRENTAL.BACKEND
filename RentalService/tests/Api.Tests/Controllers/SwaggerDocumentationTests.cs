@@ -38,11 +38,15 @@ public sealed class SwaggerDocumentationTests
                 Assert.True(operation.Value.GetProperty("responses").TryGetProperty("500", out _), $"{where} thiếu response 500");
             }
         }
-        Assert.Equal(33, operationCount);
+        Assert.Equal(38, operationCount);
         Assert.True(paths.GetProperty("/api/v1/rental/orders/{orderId}/delivery-note").TryGetProperty("patch", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/me/addresses", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/me/addresses/{addressId}/default", out _));
         Assert.True(paths.GetProperty("/api/v1/rental/me/addresses/{addressId}").TryGetProperty("get", out _));
+        Assert.True(paths.GetProperty("/api/v1/rental/me/bank-accounts").TryGetProperty("post", out _));
+        Assert.True(paths.TryGetProperty("/api/v1/rental/me/bank-accounts/{bankAccountId}/default", out _));
+        Assert.True(paths.GetProperty("/api/v1/rental/me/bank-accounts/{bankAccountId}").TryGetProperty("delete", out _));
+        Assert.False(paths.GetProperty("/api/v1/rental/me/bank-accounts/{bankAccountId}").TryGetProperty("patch", out _));
         Assert.True(paths.GetProperty("/api/v1/rental/orders/{orderId}/cancel")
             .GetProperty("post").GetProperty("responses").TryGetProperty("409", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/returns", out _));

@@ -214,6 +214,7 @@ public sealed class RefundCompletedConsumer : IRefundCompletedConsumer
         receipt.MarkSucceeded(utcNow);
 
         RentalOrderStatusPolicy.Apply(order, utcNow, payload.OperationKey);
+        order.RecordReadModelUpdate(utcNow);
 
         return Result.Success(true);
     }
@@ -300,7 +301,6 @@ public sealed class RefundCompletedConsumer : IRefundCompletedConsumer
 
             if (result.Value)
             {
-                order.RecordReadModelUpdate(utcNow);
                 await _orderRepository.UpdateAsync(order, cancellationToken);
             }
 

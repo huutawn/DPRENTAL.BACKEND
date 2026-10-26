@@ -44,7 +44,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RentalOperationExecutor> _logger;
     private readonly string _rentalEventsTopic;
-
+    private readonly IRentalEventProducer _rentalEvents;
     public RentalOperationExecutor(
         IRentalOrderRepository orderRepository,
         IOperationReceiptRepository receiptRepository,
@@ -58,7 +58,8 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         ILogger<RentalOperationExecutor> logger,
         ICheckoutInvoiceIssuer? invoiceIssuer = null,
         IRentalCheckoutOperationRepository? checkoutOperationRepo = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IRentalEventProducer? rentalEvents = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _receiptRepository = receiptRepository ?? throw new ArgumentNullException(nameof(receiptRepository));
@@ -73,6 +74,10 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         _rentalEventsTopic = configuration["Kafka:RentalEventsTopic"] ?? "rental.events.v1";
         _invoiceIssuer = invoiceIssuer;
         _checkoutOperationRepo = checkoutOperationRepo;
+        _rentalEvents = rentalEvents ?? new Dprental.RentalService.Application.Kafka.Producers.RentalEventProducer(
+            outboxRepository,
+            Microsoft.Extensions.Options.Options.Create(new Dprental.RentalService.Application.Kafka.Configuration.KafkaOptions { RentalEventsTopic = _rentalEventsTopic }),
+            _timeProvider);
     }
 
     public RentalOperationExecutor(

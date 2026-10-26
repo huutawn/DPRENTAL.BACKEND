@@ -60,12 +60,21 @@ public sealed class RentalSettledConsumer(
             return Error.Validation("AMOUNT_MISMATCH",
                 "Số tiền quyết toán không khớp với yêu cầu đã gửi.");
         bool wasCompleted = item.Status == RentalItemStatus.Completed;
+        RentalOrderStatus previousOrderStatus = order.Status;
 
         var applied = item.RecordPaymentSettlementConfirmed(payload.SettlementRef, payload.CompletedAt, payload.OperationKey);
         if (applied.IsFailure) return applied.Error;
         receipt.MarkSucceeded(now);   // chốt receipt nếu ACK chưa kịp ghi; gọi lại vô hại
 
         bool isNowCompleted = item.Status == RentalItemStatus.Completed;
+
+        if (wasCompleted)
+        {
+            return Result.Success(false);
+        }
+
+        RentalOrderStatusPolicy.Apply(order, now, payload.OperationKey);
+        order.RecordReadModelUpdate(now);
 
         if (!wasCompleted && isNowCompleted)
         {
@@ -80,7 +89,8 @@ public sealed class RentalSettledConsumer(
                     item.EquipmentListingId,
                     item.EquipmentTypeId,
                     order.Id,
-                    item.Id),
+                    item.Id,
+                    order.Version),
                 correlationId: envelope.CorrelationId,
                 causationId: envelope.MessageId,
                 cancellationToken: cancellationToken);
@@ -91,16 +101,10 @@ public sealed class RentalSettledConsumer(
             }
         }
 
-        if (wasCompleted)
-        {
-            return Result.Success(false);
-        }
-
-        bool orderStatusChanged = RentalOrderStatusPolicy.Apply(order, now, payload.OperationKey);
-        if (orderStatusChanged && order.Status == RentalOrderStatus.Completed)
+        if (previousOrderStatus != RentalOrderStatus.Completed && order.Status == RentalOrderStatus.Completed)
         {
             var orderCompletedResult = await eventProducer.EnqueueRentalOrderCompletedAsync(
-                new RentalOrderCompletedPayload(order.Id, order.RenterId, payload.CompletedAt),
+                new RentalOrderCompletedPayload(order.Id, order.RenterId, payload.CompletedAt, order.Version),
                 envelope.CorrelationId, envelope.MessageId, cancellationToken);
             if (orderCompletedResult.IsFailure) return orderCompletedResult.Error;
         }

@@ -27,6 +27,7 @@ public sealed class CheckoutPreparationServiceTests
 
     private readonly FakeCartRepository _carts = new();
     private readonly FakeRenterAddressRepository _addresses = new();
+    private readonly FakeRenterBankAccountRepository _bankAccounts = new();
     private readonly FakeAuthRentalClient _auth = new();
     private readonly FakeInventoryListingClient _inventory = new();
     private readonly RentalCart _cart;
@@ -71,6 +72,7 @@ public sealed class CheckoutPreparationServiceTests
     private CheckoutPreparationService CreateService(DateTimeOffset? utcNow = null, IInventoryRentalClient? inventory = null, IAuthRentalClient? auth = null) => new(
         _carts,
         _addresses,
+        _bankAccounts,
         inventory ?? _inventory,
         auth ?? _auth,
         Microsoft.Extensions.Options.Options.Create(new RentalTermsOptions
@@ -608,6 +610,32 @@ public sealed class CheckoutPreparationServiceTests
             Request() with { Delivery = null, AddressId = strangers.Id });
 
         Assert.Equal(RenterAddressErrors.NotFound, result.Error);
+        Assert.Equal(0, _inventory.ListingReadCount);
+    }
+
+    [Fact]
+    public async Task Prepare_WithRefundAccountId_UsesTheSavedBankAccount()
+    {
+        RenterBankAccount account = new(Guid.NewGuid(), _renterId, "TCB", "1903456789012", "Trần Văn Bình", isDefault: true, Now);
+        _bankAccounts.BankAccounts.Add(account);
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(),
+            Request() with { RefundAccount = null, RefundAccountId = account.Id });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(new CheckoutRefundAccountDto("TCB", "1903456789012", "Trần Văn Bình"), result.Plan.RefundAccount);
+    }
+
+    [Fact]
+    public async Task Prepare_WithAnotherRentersRefundAccountId_IsBankAccountNotFound()
+    {
+        RenterBankAccount strangers = new(Guid.NewGuid(), Guid.NewGuid(), "VCB", "0987654321", "Lê Văn C", isDefault: true, Now);
+        _bankAccounts.BankAccounts.Add(strangers);
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(),
+            Request() with { RefundAccount = null, RefundAccountId = strangers.Id });
+
+        Assert.Equal(RenterBankAccountErrors.NotFound, result.Error);
         Assert.Equal(0, _inventory.ListingReadCount);
     }
 

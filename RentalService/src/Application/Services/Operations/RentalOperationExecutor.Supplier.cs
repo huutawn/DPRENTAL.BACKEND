@@ -254,11 +254,48 @@ public sealed partial class RentalOperationExecutor
             return Error.Expired("SUPPLIER_DEADLINE_EXPIRED", "Đã quá thời hạn xác nhận của supplier.");
         }
 
-        var response = await ApplySupplierRejectAsync(order, item, supplierId, reason, note, normalizedKey, fingerprint, utcNow, cancellationToken, rollup: true);
-        order.RecordReadModelUpdate(utcNow);
-        await CommitLocalChangesAsync(order, cancellationToken);
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            RentalOrderStatus previousOrderStatus = order.Status;
+            var response = await ApplySupplierRejectAsync(order, item, supplierId, reason, note, normalizedKey, fingerprint, utcNow, cancellationToken, rollup: true, enqueueEvent: false);
+            order.RecordReadModelUpdate(utcNow);
 
-        return response;
+            var rejectEventRes = await _rentalEvents.EnqueueRentalItemRejectedAsync(
+                new RentalItemRejectedPayload(order.Id, item.Id, supplierId, utcNow, KafkaContractSpec.ReasonCodes.SupplierRejected, null, order.Version),
+                correlationId: normalizedKey,
+                cancellationToken: cancellationToken);
+            if (rejectEventRes.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return rejectEventRes.Error;
+            }
+
+            if (previousOrderStatus != RentalOrderStatus.Completed && order.Status == RentalOrderStatus.Completed)
+            {
+                var orderCompletedRes = await _rentalEvents.EnqueueRentalOrderCompletedAsync(
+                    new RentalOrderCompletedPayload(order.Id, order.RenterId, utcNow, order.Version),
+                    correlationId: normalizedKey,
+                    cancellationToken: cancellationToken);
+                if (orderCompletedRes.IsFailure)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    return orderCompletedRes.Error;
+                }
+            }
+
+            await CommitLocalChangesAsync(order, cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            return response;
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
+            throw;
+        }
     }
 
     /// <summary>
@@ -274,7 +311,8 @@ public sealed partial class RentalOperationExecutor
         string fingerprint,
         DateTimeOffset utcNow,
         CancellationToken cancellationToken,
-        bool rollup = true)
+        bool rollup = true,
+        bool enqueueEvent = true)
     {
         item.ApplySupplierReject(supplierId, utcNow, reason, note, normalizedKey);
         if (rollup)
@@ -303,29 +341,17 @@ public sealed partial class RentalOperationExecutor
 
         await ScheduleReleaseAndRefundAsync(order, item, supplierId, reason, utcNow, cancellationToken);
 
-        var notifyEnvelope = new KafkaMessageEnvelope<RentalItemRejectedPayload>(
-            OutboxMessageIdGenerator.ComputeDeterministicId(
-                KafkaContractSpec.Producers.RentalService,
-                KafkaContractSpec.EventTypes.RentalItemRejected,
-                normalizedKey),
-            KafkaContractSpec.EventTypes.RentalItemRejected,
-            1,
-            KafkaContractSpec.Producers.RentalService,
-            order.Id.ToString("D"),
-            utcNow,
-            normalizedKey,
-            null,
-            new RentalItemRejectedPayload(order.Id, item.Id, supplierId, utcNow, reason, note));
-
-        var outbox = new RentalOutboxMessage(
-            notifyEnvelope.MessageId,
-            _rentalEventsTopic,
-            order.Id.ToString("D"),
-            KafkaContractSpec.EventTypes.RentalItemRejected,
-            JsonSerializer.Serialize(notifyEnvelope, JsonOptions),
-            utcNow);
-
-        await _outboxRepository.AddAsync(outbox, cancellationToken);
+        if (enqueueEvent)
+        {
+            var rejectEventRes = await _rentalEvents.EnqueueRentalItemRejectedAsync(
+                new RentalItemRejectedPayload(order.Id, item.Id, supplierId, utcNow, KafkaContractSpec.ReasonCodes.SupplierRejected, null, order.Version),
+                correlationId: normalizedKey,
+                cancellationToken: cancellationToken);
+            if (rejectEventRes.IsFailure)
+            {
+                throw new InvalidOperationException($"Failed to enqueue RentalItemRejected event: {rejectEventRes.Error.Message}");
+            }
+        }
 
         return response;
     }

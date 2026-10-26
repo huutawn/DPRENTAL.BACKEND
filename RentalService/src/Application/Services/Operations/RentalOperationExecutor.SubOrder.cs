@@ -6,6 +6,8 @@ using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Domain.Errors;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 
 namespace Dprental.RentalService.Application.Services.Operations;
 
@@ -141,16 +143,57 @@ public sealed partial class RentalOperationExecutor
             }
         }
 
-        List<SupplierDecisionResponse> responses = [];
-        foreach (var (item, key, fingerprint) in decisions)
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
         {
-            responses.Add(await ApplySupplierRejectAsync(order, item, supplierId, reason, note, key, fingerprint, utcNow, cancellationToken, rollup: false));
-        }
+            RentalOrderStatus previousOrderStatus = order.Status;
+            List<SupplierDecisionResponse> responses = [];
+            foreach (var (item, key, fingerprint) in decisions)
+            {
+                responses.Add(await ApplySupplierRejectAsync(order, item, supplierId, reason, note, key, fingerprint, utcNow, cancellationToken, rollup: false, enqueueEvent: false));
+            }
 
-        RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
-        order.RecordReadModelUpdate(utcNow);
-        await CommitLocalChangesAsync(order, cancellationToken);
-        return Result.Success<IReadOnlyList<SupplierDecisionResponse>>(responses);
+            RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
+            order.RecordReadModelUpdate(utcNow);
+
+            foreach (var (item, key, _) in decisions)
+            {
+                var rejectRes = await _rentalEvents.EnqueueRentalItemRejectedAsync(
+                    new RentalItemRejectedPayload(order.Id, item.Id, supplierId, utcNow, KafkaContractSpec.ReasonCodes.SupplierRejected, null, order.Version),
+                    correlationId: key,
+                    cancellationToken: cancellationToken);
+                if (rejectRes.IsFailure)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    return rejectRes.Error;
+                }
+            }
+
+            if (previousOrderStatus != RentalOrderStatus.Completed && order.Status == RentalOrderStatus.Completed)
+            {
+                var orderCompletedRes = await _rentalEvents.EnqueueRentalOrderCompletedAsync(
+                    new RentalOrderCompletedPayload(order.Id, order.RenterId, utcNow, order.Version),
+                    correlationId: normalizedKey,
+                    cancellationToken: cancellationToken);
+                if (orderCompletedRes.IsFailure)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    return orderCompletedRes.Error;
+                }
+            }
+
+            await CommitLocalChangesAsync(order, cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            return Result.Success<IReadOnlyList<SupplierDecisionResponse>>(responses);
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
+            throw;
+        }
     }
 
     private static List<RentalItem> SubOrderItems(RentalOrder order, Guid subOrderId, Guid supplierId)

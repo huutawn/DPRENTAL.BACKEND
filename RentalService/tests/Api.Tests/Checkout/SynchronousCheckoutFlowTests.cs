@@ -50,6 +50,7 @@ public sealed class SynchronousCheckoutFlowTests
             new CheckoutPreparationService(
                 carts,
                 new RenterAddressRepository(context),
+                new RenterBankAccountRepository(context),
                 _harness.Listings,
                 _harness.Auth,
                 Options.Create(new RentalTermsOptions

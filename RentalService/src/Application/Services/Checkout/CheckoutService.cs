@@ -492,7 +492,13 @@ public sealed class CheckoutService : ICheckoutService
                         item.ExpectedStartDate,
                         item.ExpectedEndDate,
                         item.RentalAmount,
-                        item.DepositAmount)).ToArray()),
+                        item.DepositAmount,
+                        item.EquipmentTypeId,
+                        item.EquipmentTypeNameSnapshot,
+                        item.BrandId,
+                        item.BrandNameSnapshot,
+                        item.ModelSnapshot)).ToArray(),
+                    order.Version),
                 correlationId: order.Id.ToString("D"),
                 cancellationToken: cancellationToken);
 

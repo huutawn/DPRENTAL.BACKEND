@@ -806,8 +806,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
 
                 if (result.Value)
                 {
-                    order!.RecordReadModelUpdate(utcNow);
-                    await _orderRepository.UpdateAsync(order, cancellationToken);
+                    await _orderRepository.UpdateAsync(order!, cancellationToken);
                 }
 
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -976,7 +975,6 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             _inboxRepository.Update(message);
             if (result.Value)
             {
-                order.RecordReadModelUpdate(now);
                 await _orderRepository.UpdateAsync(order, cancellationToken);
             }
             await _unitOfWork.SaveChangesAsync(cancellationToken);
