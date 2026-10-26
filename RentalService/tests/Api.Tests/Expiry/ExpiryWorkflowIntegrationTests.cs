@@ -280,26 +280,26 @@ public sealed class ExpiryWorkflowIntegrationTests
 
         db.RentalOrders.Add(order);
         await db.SaveChangesAsync();
+        var stubInventory = new StubInventoryClient
+        {
+            ConfirmHandler = (g, req) =>
+            {
+                var units = item.UnitAssignments.Select(u => new ConfirmedAllocationUnitDto(u.AllocationId, u.AssetId, "Confirmed")).ToList();
+                return Task.FromResult(Result.Success(new ConfirmAllocationResponse("REC-CONF", g, FixedNow, false, units)));
+            }
+        };
 
-        var service = CreateExpiryService(db, new StubInventoryClient(), new StubPaymentClient());
+        var service = CreateExpiryService(db, stubInventory, new StubPaymentClient());
 
         var result = await service.ExpireSingleItemSupplierTimeoutAsync(item.Id);
 
         Assert.True(result.IsSuccess);
 
-        // Phiếu nhận ghi trước hạn: không hết hạn, gửi lại ConfirmAllocation cùng khóa để Inventory chốt nốt.
-        Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, (await db.RentalItems.FirstAsync(i => i.Id == item.Id)).Status);
-        var replies = new InventoryReplySimulator(() => CreateDbContext(dbName), new FakeTimeProvider(FixedNow));
-        var confirm = Assert.Single(await replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation));
-        Assert.Equal(inFlightKey, confirm.OperationKey);
-
-        Assert.True((await replies.SucceedAsync(confirm)).IsSuccess);
-
-        // Reconciled as Accepted!
+        // Phiếu nhận ghi trước hạn được Reconcile đồng bộ qua HTTP sang AwaitingHandover
         await using var verify = CreateDbContext(dbName);
         var reloaded = await verify.RentalItems.FirstAsync(i => i.Id == item.Id);
         Assert.Equal(RentalItemStatus.AwaitingHandover, reloaded.Status);
-        Assert.Equal(inFlightKey, reloaded.InventoryConfirmationRef);
+        Assert.Equal("REC-CONF", reloaded.InventoryConfirmationRef);
 
         var reloadedOrder = await verify.RentalOrders.FirstAsync(o => o.Id == orderId);
         Assert.Equal(RentalOrderStatus.AwaitingHandover, reloadedOrder.Status);

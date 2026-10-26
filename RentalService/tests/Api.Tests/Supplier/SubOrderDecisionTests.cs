@@ -8,6 +8,7 @@ using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Services.Expiry;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Services.SupplierDecision;
+using Dprental.RentalService.Application.Kafka.Consumers;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.DependencyInjection;
@@ -36,23 +37,36 @@ public sealed class SubOrderDecisionTests
     public SubOrderDecisionTests()
     {
         _replies = new InventoryReplySimulator(NewContext, _clock);
+        _inventory.ConfirmAllocationHandler = (groupId, req) =>
+        {
+            var item = _order?.Items.FirstOrDefault(i => i.AllocationGroupId == groupId);
+            var units = item?.UnitAssignments.Select(u => new ConfirmedAllocationUnitDto(u.AllocationId, u.AssetId, "Confirmed")).ToList()
+                ?? new List<ConfirmedAllocationUnitDto>();
+            return Task.FromResult(Result.Success(new ConfirmAllocationResponse(
+                $"REC-{groupId}",
+                groupId,
+                DateTimeOffset.UtcNow,
+                false,
+                units)));
+        };
     }
 
     [Fact]
-    public async Task Accept_SendsAConfirmForEveryLine_AndInventoryRepliesMoveOnlyThatSubOrderToAwaitingHandover()
+    public async Task Accept_ConfirmsEveryLineSynchronously_AndMovesSubOrderToAwaitingHandover()
     {
         await SeedAsync();
 
         Result<SubOrderDecisionResponse> result = await Service().AcceptSubOrderAsync(BinhsSubOrderId, "accept-1", OrderTestData.User(_binh));
 
-        // Inventory xác nhận bất đồng bộ: lúc trả lời API, các dòng vẫn chờ xác nhận.
+        // Inventory xác nhận đồng bộ: lúc trả lời API, các dòng của Bình đã sang AwaitingHandover.
         Assert.True(result.IsSuccess, result.Error.Code);
-        Assert.Equal("PendingSupplierConfirmation", result.Value.Status);
+        Assert.Equal("AwaitingHandover", result.Value.Status);
         Assert.Equal(2, result.Value.Items.Count);
-        IReadOnlyList<InventoryCommand> confirms = await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
-        Assert.Equal(BinhsItemIds, confirms.Select(c => c.RentalItemId).Order());
+        Assert.All(result.Value.Items, i => Assert.Equal("AwaitingHandover", i.Status));
 
-        await _replies.SucceedAllAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
+        // Không còn phát lệnh ConfirmAllocation qua Kafka
+        IReadOnlyList<InventoryCommand> confirms = await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
+        Assert.Empty(confirms);
 
         List<RentalItem> items = await LoadItemsAsync();
         Assert.All(items.Where(i => i.SupplierId == _binh), i => Assert.Equal(RentalItemStatus.AwaitingHandover, i.Status));
@@ -72,7 +86,7 @@ public sealed class SubOrderDecisionTests
     }
 
     [Fact]
-    public async Task Accept_ReplayWithTheSameKey_DoesNotResendConfirms_AndARejectedLineStaysPending()
+    public async Task Accept_ReplayWithTheSameKey_ReturnsSameSuccessfulResult()
     {
         await SeedAsync();
 
@@ -81,57 +95,43 @@ public sealed class SubOrderDecisionTests
 
         Assert.True(first.IsSuccess, first.Error.Code);
         Assert.True(replay.IsSuccess, replay.Error.Code);
-        IReadOnlyList<InventoryCommand> confirms = await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
-        Assert.Equal(2, confirms.Count);
-
-        // Inventory chốt máy đầu, từ chối máy sau: chỉ máy đầu sang chờ bàn giao, phiếu của máy sau thất bại.
-        Assert.True((await _replies.SucceedAsync(confirms[0])).IsSuccess);
-        Assert.True((await _replies.RejectAsync(confirms[1], "ALLOCATION_NOT_HELD", "Hold đã bị nhả.")).IsSuccess);
+        Assert.Equal("AwaitingHandover", first.Value.Status);
+        Assert.Equal("AwaitingHandover", replay.Value.Status);
 
         List<RentalItem> items = await LoadItemsAsync();
-        Assert.Equal(RentalItemStatus.AwaitingHandover, items.Single(i => i.Id == confirms[0].RentalItemId).Status);
-        Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, items.Single(i => i.Id == confirms[1].RentalItemId).Status);
-        await using RentalServiceDbContext context = NewContext();
-        RentalOperationReceipt rejected = await context.RentalOperationReceipts.SingleAsync(r => r.OperationId == confirms[1].OperationKey || r.InventoryOperationKey == confirms[1].OperationKey);
-        Assert.Equal(RentalOperationReceipt.StatusFailed, rejected.Status);
-        Assert.Equal("ALLOCATION_NOT_HELD", rejected.ErrorCode);
+        Assert.All(items.Where(i => i.SupplierId == _binh), i => Assert.Equal(RentalItemStatus.AwaitingHandover, i.Status));
     }
 
     [Fact]
-    public async Task Accept_OneSecondBeforeDeadline_IsNotExpiredWhileInventoryIsStillConfirming()
+    public async Task Accept_OneSecondBeforeDeadline_SucceedsBeforeExpiryWorkerRuns()
     {
         await SeedAsync();
         DateTimeOffset deadline = _order.Items.First().SupplierConfirmationDeadline!.Value;
 
-        // Bình bấm nhận lúc 23:59:59; Inventory chưa kịp trả lời trước hạn.
+        // Bình bấm nhận lúc 23:59:59; xác nhận đồng bộ hoàn tất trước hạn.
         _clock.UtcNow = deadline.AddSeconds(-1);
         Result<SubOrderDecisionResponse> accept = await Service().AcceptSubOrderAsync(BinhsSubOrderId, "accept-1", OrderTestData.User(_binh));
         Assert.True(accept.IsSuccess, accept.Error.Code);
+        Assert.Equal("AwaitingHandover", accept.Value.Status);
 
-        // Phiếu "đang nhận" của cả hai máy đã được ghi trước hạn.
+        // Phiếu đã thành công trước hạn.
         await using (RentalServiceDbContext context = NewContext())
         {
             List<RentalOperationReceipt> intents = await context.RentalOperationReceipts
                 .Where(r => r.Action == "SupplierAccept")
                 .ToListAsync();
             Assert.Equal(2, intents.Count);
-            Assert.All(intents, r => Assert.True(r.CreatedAt < deadline));
+            Assert.All(intents, r => Assert.True(r.IsSuccess));
         }
 
-        // Hai phút sau hạn, worker hết hạn chạy: máy của Bình đang được xác nhận nên không bị hủy,
+        // Hai phút sau hạn, worker hết hạn chạy: máy của Bình đã AwaitingHandover nên không bị hủy,
         // máy của Cường (chưa ai nhận) hết hạn.
         _clock.UtcNow = deadline.AddMinutes(2);
         await ExpiryService().ProcessSupplierTimeoutsAsync();
 
         List<RentalItem> items = await LoadItemsAsync();
-        Assert.All(items.Where(i => i.SupplierId == _binh), i => Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, i.Status));
+        Assert.All(items.Where(i => i.SupplierId == _binh), i => Assert.Equal(RentalItemStatus.AwaitingHandover, i.Status));
         Assert.Equal(RentalItemStatus.Expired, items.Single(i => i.SupplierId == _cuong).Status);
-
-        // Inventory trả lời muộn: các máy đã được nhận trước hạn được chốt.
-        await _replies.SucceedAllAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
-
-        Assert.All((await LoadItemsAsync()).Where(i => i.SupplierId == _binh),
-            i => Assert.Equal(RentalItemStatus.AwaitingHandover, i.Status));
     }
 
     [Fact]
@@ -139,22 +139,44 @@ public sealed class SubOrderDecisionTests
     {
         await SeedAsync();
         Assert.True((await Service().AcceptSubOrderAsync(BinhsSubOrderId, "accept-1", OrderTestData.User(_binh))).IsSuccess);
-        IReadOnlyList<InventoryCommand> confirms = await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
-        await _replies.SucceedAllAsync(KafkaContractSpec.CommandTypes.ConfirmAllocation);
+
+        List<RentalItem> binhItems = (await LoadItemsAsync()).Where(i => i.SupplierId == _binh).ToList();
+        var itemToHandover = binhItems[0];
 
         // Máy đã được bàn giao cho renter.
         await using (RentalServiceDbContext context = NewContext())
         {
-            RentalItem handedOver = await context.RentalItems.SingleAsync(i => i.Id == confirms[0].RentalItemId);
+            RentalItem handedOver = await context.RentalItems.SingleAsync(i => i.Id == itemToHandover.Id);
             typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(handedOver, RentalItemStatus.InRental);
             await context.SaveChangesAsync();
         }
 
-        // Inventory phát lại câu trả lời cũ với messageId mới.
-        Result redelivered = await _replies.RedeliverSuccessAsync(confirms[0]);
+        // Event cũ từ Inventory gửi lại late qua handler
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            var handler = new InventoryAllocationResultHandler(
+                new RentalOrderRepository(context),
+                context,
+                new FakeOrderLockManager(),
+                _clock);
 
-        Assert.True(redelivered.IsSuccess, redelivered.Error.Code);
-        Assert.Equal(RentalItemStatus.InRental, (await LoadItemsAsync()).Single(i => i.Id == confirms[0].RentalItemId).Status);
+            var itemKey = RentalOperationExecutor.ComputeOperationKey("SubOrderAccept", $"{BinhsSubOrderId}:accept-1:{itemToHandover.Id}");
+            var receipt = await context.RentalOperationReceipts.SingleAsync(r => r.OperationId == itemKey);
+            var order = await context.RentalOrders.Include(o => o.Items).SingleAsync(o => o.Id == _order.Id);
+
+            var inbox = new RentalInboxMessage(
+                Guid.NewGuid(), Guid.NewGuid(), KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded,
+                KafkaContractSpec.Producers.InventoryService, _order.Id.ToString("D"), null, null,
+                System.Text.Json.JsonSerializer.Serialize(new { payload = new { commandType = "ConfirmAllocation", operationKey = itemKey, rentalOrderId = _order.Id, rentalItemId = itemToHandover.Id } }),
+                _clock.GetUtcNow());
+
+            await handler.HandleAllocationEventAsync(
+                _order.Id,
+                inbox,
+                order,
+                CancellationToken.None);
+        }
+        Assert.Equal(RentalItemStatus.InRental, (await LoadItemsAsync()).Single(i => i.Id == itemToHandover.Id).Status);
     }
 
     [Fact]

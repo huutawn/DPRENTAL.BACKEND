@@ -108,8 +108,33 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
     public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException();
 
-    public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(string allocationGroupId, ConfirmAllocationRequest request, CancellationToken ct = default) =>
-        throw new NotSupportedException();
+    public Func<string, ConfirmAllocationRequest, Task<Result<ConfirmAllocationResponse>>>? ConfirmAllocationHandler { get; set; }
+
+    public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(string allocationGroupId, ConfirmAllocationRequest request, CancellationToken ct = default)
+    {
+        if (ConfirmAllocationHandler != null)
+        {
+            return ConfirmAllocationHandler(allocationGroupId, request);
+        }
+
+        if (_groupsByReference.TryGetValue(allocationGroupId, out var holdResp))
+        {
+            var units = holdResp.Allocations.Select(a => new ConfirmedAllocationUnitDto(a.Id, a.AssetId, "Confirmed")).ToList();
+            return Task.FromResult(Result.Success(new ConfirmAllocationResponse(
+                $"REC-{allocationGroupId}",
+                allocationGroupId,
+                DateTimeOffset.UtcNow,
+                false,
+                units)));
+        }
+
+        return Task.FromResult(Result.Success(new ConfirmAllocationResponse(
+            $"REC-{allocationGroupId}",
+            allocationGroupId,
+            DateTimeOffset.UtcNow,
+            false,
+            new List<ConfirmedAllocationUnitDto>())));
+    }
 
     public Task<Result<CancelAllocationResponse>> CancelAllocationAsync(string allocationGroupId, CancelAllocationRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException();
