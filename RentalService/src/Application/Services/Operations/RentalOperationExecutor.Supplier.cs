@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 #pragma warning disable CA1848, CA1873
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
@@ -288,6 +289,34 @@ public sealed partial class RentalOperationExecutor
 
             await CommitLocalChangesAsync(order, cancellationToken);
             await tx.CommitAsync(cancellationToken);
+
+            if (_notifier != null)
+            {
+                await _notifier.NotifyRenterOrderChangedAsync(
+                    order.RenterId,
+                    new RenterOrderChangedNotification(
+                        Guid.NewGuid(),
+                        order.Id,
+                        order.Version,
+                        OrderChangeTypes.SupplierRejected,
+                        utcNow),
+                    cancellationToken);
+
+                var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == supplierId);
+                if (subOrder != null)
+                {
+                    await _notifier.NotifySupplierSubOrderChangedAsync(
+                        supplierId,
+                        new SupplierSubOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            subOrder.Id,
+                            order.Version,
+                            OrderChangeTypes.SupplierRejected,
+                            utcNow),
+                        cancellationToken);
+                }
+            }
             return response;
         }
         catch

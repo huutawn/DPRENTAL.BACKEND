@@ -605,6 +605,90 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                 await tx.CommitAsync(cancellationToken);
                 _logger.LogInformation("Successfully processed allocation inbox message {Id} ({Type}) for Order {OrderId}",
                     msg.Id, msg.MessageType, orderId);
+
+                bool isAllocationSuccess = string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded, StringComparison.OrdinalIgnoreCase);
+                if (_notifier != null && order != null && isAllocationSuccess)
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(msg.Payload);
+                        if (doc.RootElement.TryGetProperty("payload", out var payloadElem))
+                        {
+                            string commandType = payloadElem.TryGetProperty("commandType", out var ctProp) ? ctProp.GetString() ?? string.Empty : string.Empty;
+                            Guid rentalItemId = payloadElem.TryGetProperty("rentalItemId", out var riProp) && riProp.TryGetGuid(out var ri) ? ri : Guid.Empty;
+
+                            var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
+                            if (item != null)
+                            {
+                                var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+                                Guid subOrderId = subOrder?.Id ?? Guid.Empty;
+
+                                if (string.Equals(commandType, KafkaContractSpec.CommandTypes.ConfirmAllocation, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    if (item.Status == RentalItemStatus.AwaitingHandover)
+                                    {
+                                        await _notifier.NotifyRenterOrderChangedAsync(
+                                            order.RenterId,
+                                            new RenterOrderChangedNotification(
+                                                Guid.NewGuid(),
+                                                order.Id,
+                                                order.Version,
+                                                OrderChangeTypes.SupplierConfirmed,
+                                                utcNow),
+                                            cancellationToken);
+
+                                        if (subOrderId != Guid.Empty)
+                                        {
+                                            await _notifier.NotifySupplierSubOrderChangedAsync(
+                                                item.SupplierId,
+                                                new SupplierSubOrderChangedNotification(
+                                                    Guid.NewGuid(),
+                                                    order.Id,
+                                                    subOrderId,
+                                                    order.Version,
+                                                    OrderChangeTypes.SupplierConfirmed,
+                                                    utcNow),
+                                                cancellationToken);
+                                        }
+                                    }
+                                }
+                                else if (string.Equals(commandType, KafkaContractSpec.CommandTypes.MarkAssetsHandedOver, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    if (item.Status == RentalItemStatus.InRental || item.HandoverRecord != null)
+                                    {
+                                        await _notifier.NotifyRenterOrderChangedAsync(
+                                            order.RenterId,
+                                            new RenterOrderChangedNotification(
+                                                Guid.NewGuid(),
+                                                order.Id,
+                                                order.Version,
+                                                OrderChangeTypes.HandoverConfirmed,
+                                                utcNow),
+                                            cancellationToken);
+
+                                        if (subOrderId != Guid.Empty)
+                                        {
+                                            await _notifier.NotifySupplierSubOrderChangedAsync(
+                                                item.SupplierId,
+                                                new SupplierSubOrderChangedNotification(
+                                                    Guid.NewGuid(),
+                                                    order.Id,
+                                                    subOrderId,
+                                                    order.Version,
+                                                    OrderChangeTypes.HandoverConfirmed,
+                                                    utcNow),
+                                                cancellationToken);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception nex)
+                    {
+                        _logger.LogError(nex, "Error dispatching realtime notification for allocation event {MessageId}", msg.Id);
+                    }
+                }
                 return Result.Success();
             }
             catch
