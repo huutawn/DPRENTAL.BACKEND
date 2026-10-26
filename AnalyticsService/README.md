@@ -6,6 +6,8 @@ Nguồn dữ liệu: `rental.events.v1` cho vòng đời đơn, item, thiết b�
 
 Cấu hình cần có khi chạy: `ConnectionStrings:Postgres`, `Authentication:Jwt:{Issuer,Audience,JwksUri}`, và `Kafka:{Enabled,BootstrapServers,GroupId,ProofIssuer,ProofEnvironment,ProofPublicKeys}`. `Kafka:Enabled` mặc định `false`; chỉ bật khi broker và proof keys đã sẵn sàng. Có thể cấu hình SASL/TLS qua `Kafka:SecurityProtocol`, `Kafka:SaslMechanism`, `Kafka:SaslUsername`, `Kafka:SaslPassword` và `Kafka:SslCaLocation`.
 
+Khi chạy local, đặt `ConnectionStrings:Postgres` trong .NET User Secrets của `AnalyticsService/src/Api/AnalyticsService.Api.csproj`, giống các service khác. `.env` chỉ được Docker Compose dùng để tạo PostgreSQL; API không tự nạp `.env`. Nếu AuthService chạy local, đặt thêm `Authentication:Jwt:JwksUri` trong User Secrets trỏ đến JWKS local của AuthService.
+
 Sau khi cấu hình PostgreSQL, áp dụng migration bằng `dotnet ef database update --project AnalyticsService/src/Domain/AnalyticsService.Domain.csproj --startup-project AnalyticsService/src/Api/AnalyticsService.Api.csproj`. Việc replay cùng event được chống trùng theo `messageId` (Rental) hoặc khóa nghiệp vụ (Payment).
 
 Một số KPI trong `docs/contracts/analytics-kpi-v1.md` vẫn chờ producer bổ sung: trạng thái order `Rejected` và một số đường `Expired` từ Rental; `PendingRefundAmount` và phần tiền thuê riêng trong `GrossRentalValueRefunded` từ Payment. Dashboard không suy diễn các KPI đó từ dữ liệu khác.
