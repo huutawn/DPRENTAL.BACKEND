@@ -4,9 +4,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.AnalyticsService.Domain.Repositories;
 
-/// <summary>
-/// Cài đặt <see cref="IDeadLetterRepository"/> bằng EF Core. Không gọi SaveChanges.
-/// </summary>
 public sealed class DeadLetterRepository : IDeadLetterRepository
 {
     private readonly AnalyticsServiceDbContext _context;
@@ -18,9 +15,8 @@ public sealed class DeadLetterRepository : IDeadLetterRepository
 
     // Dùng index duy nhất (Topic, Partition, Offset)
     public Task<bool> ExistsAsync(string topic, int partition, long offset, CancellationToken cancellationToken = default) =>
-        _context.AnalyticsDeadLetters.AnyAsync(
-            deadLetter => deadLetter.Topic == topic && deadLetter.Partition == partition && deadLetter.Offset == offset,
-            cancellationToken);
+        _context.DeadLetters.AnyAsync(
+            x => x.Topic == topic && x.Partition == partition && x.Offset == offset, cancellationToken);
 
-    public void Add(AnalyticsDeadLetter deadLetter) => _context.AnalyticsDeadLetters.Add(deadLetter);
+    public void Add(AnalyticsDeadLetter deadLetter) => _context.DeadLetters.Add(deadLetter);
 }

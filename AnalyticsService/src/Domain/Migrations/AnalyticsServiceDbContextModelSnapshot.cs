@@ -39,8 +39,8 @@ namespace AnalyticsService.Domain.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("MessageType")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<long>("Offset")
                         .HasColumnType("bigint");
@@ -61,121 +61,155 @@ namespace AnalyticsService.Domain.Migrations
                     b.ToTable("analytics_dead_letters", (string)null);
                 });
 
-            modelBuilder.Entity("Dprental.AnalyticsService.Domain.Entities.AnalyticsInboxMessage", b =>
+            modelBuilder.Entity("Dprental.AnalyticsService.Domain.Entities.PaymentFinancialEvent", b =>
                 {
                     b.Property<Guid>("MessageId")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<string>("AggregateId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal?>("Amount")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<decimal?>("DepositAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<decimal?>("DepositRefundDue")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<decimal?>("FinalDeductionAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<Guid?>("InvoiceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("InvoiceRef")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("LogicalEventId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<string>("MessageType")
                         .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
-                    b.Property<long>("Offset")
-                        .HasColumnType("bigint");
-
-                    b.Property<int>("Partition")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset>("ProcessedAt")
+                    b.Property<DateTimeOffset>("OccurredAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("Topic")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
+                    b.Property<DateTimeOffset?>("PaidAt")
+                        .HasColumnType("timestamp with time zone");
 
-                    b.HasKey("MessageId");
+                    b.Property<Guid?>("PayoutId")
+                        .HasColumnType("uuid");
 
-                    b.ToTable("analytics_inbox_messages", (string)null);
-                });
+                    b.Property<string>("PayoutRef")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
-            modelBuilder.Entity("Dprental.AnalyticsService.Domain.Entities.FinancialSettlementFact", b =>
-                {
+                    b.Property<decimal?>("PlatformFeeAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<decimal?>("PlatformFeeRate")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
+
+                    b.Property<Guid?>("RefundId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RefundKind")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("RefundRef")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal?>("RentalAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<Guid?>("RentalItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RentalOrderId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RenterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SettlementId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("SettlementRef")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTimeOffset>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long?>("DepositAmount")
-                        .HasColumnType("bigint");
-
-                    b.Property<long>("DepositRefundDue")
-                        .HasColumnType("bigint");
-
-                    b.Property<long>("FinalDeductionAmount")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("PlatformFeeAmount")
-                        .HasColumnType("bigint");
-
-                    b.Property<long?>("RentalAmount")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("RentalItemId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("RentalOrderId")
-                        .HasColumnType("uuid");
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<Guid?>("SupplierId")
                         .HasColumnType("uuid");
 
-                    b.Property<long?>("SupplierPayable")
-                        .HasColumnType("bigint");
+                    b.Property<decimal?>("SupplierPayable")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
 
-                    b.HasKey("SettlementRef");
+                    b.Property<decimal?>("TotalAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
 
-                    b.HasIndex("CompletedAt");
+                    b.HasKey("MessageId");
 
-                    b.HasIndex("RentalItemId");
+                    b.HasIndex("LogicalEventId")
+                        .IsUnique();
 
-                    b.HasIndex("SupplierId", "CompletedAt");
+                    b.HasIndex("MessageType", "OccurredAt");
 
-                    b.ToTable("financial_settlement_facts", (string)null);
+                    b.HasIndex("RentalOrderId", "MessageType");
+
+                    b.HasIndex("MessageType", "CompletedAt", "Currency");
+
+                    b.HasIndex("SupplierId", "MessageType", "CompletedAt");
+
+                    b.ToTable("payment_financial_events", (string)null);
                 });
 
-            modelBuilder.Entity("Dprental.AnalyticsService.Domain.Entities.RefundFact", b =>
+            modelBuilder.Entity("Dprental.AnalyticsService.Domain.Entities.ProcessedRentalEvent", b =>
                 {
-                    b.Property<string>("RefundRef")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<Guid>("RentalItemId")
+                    b.Property<Guid>("MessageId")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<DateTimeOffset>("CompletedAt")
+                    b.Property<DateTimeOffset>("ProcessedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("Kind")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                    b.HasKey("MessageId");
 
-                    b.Property<Guid>("OrderId")
-                        .HasColumnType("uuid");
-
-                    b.Property<long>("RefundedDepositAmount")
-                        .HasColumnType("bigint");
-
-                    b.Property<long>("RefundedRentalAmount")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("RefundRef", "RentalItemId");
-
-                    b.HasIndex("CompletedAt");
-
-                    b.HasIndex("OrderId");
-
-                    b.HasIndex("RentalItemId");
-
-                    b.ToTable("refund_facts", (string)null);
+                    b.ToTable("analytics_processed_rental_events", (string)null);
                 });
 
             modelBuilder.Entity("Dprental.AnalyticsService.Domain.Entities.RentalItemFact", b =>
                 {
                     b.Property<Guid>("RentalItemId")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<Guid?>("BrandId")
@@ -194,13 +228,11 @@ namespace AnalyticsService.Domain.Migrations
                     b.Property<DateTimeOffset?>("ConfirmedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<long?>("DepositAmount")
-                        .HasColumnType("bigint");
+                    b.Property<decimal>("DepositAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
 
-                    b.Property<DateOnly?>("EndDate")
-                        .HasColumnType("date");
-
-                    b.Property<Guid?>("EquipmentListingId")
+                    b.Property<Guid>("EquipmentListingId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid?>("EquipmentTypeId")
@@ -214,78 +246,76 @@ namespace AnalyticsService.Domain.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("ExpiryReason")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<DateTimeOffset?>("HandoverAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<long?>("LastOrderVersion")
-                        .HasColumnType("bigint");
 
                     b.Property<string>("Model")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<Guid>("OrderId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("PaidAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("Quantity")
+                    b.Property<int>("Quantity")
                         .HasColumnType("integer");
 
                     b.Property<DateTimeOffset?>("RejectedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<long?>("RentalAmount")
-                        .HasColumnType("bigint");
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("RentalAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<Guid>("RentalOrderId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset?>("ReturnedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<uint>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
-                    b.Property<DateOnly?>("StartDate")
-                        .HasColumnType("date");
-
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasDefaultValue("UNKNOWN");
 
-                    b.Property<Guid?>("SupplierId")
+                    b.Property<long>("StatusVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("SupplierId")
                         .HasColumnType("uuid");
 
                     b.HasKey("RentalItemId");
 
-                    b.HasIndex("CompletedAt");
+                    b.HasIndex("BrandId");
 
-                    b.HasIndex("HandoverAt");
+                    b.HasIndex("EquipmentListingId");
 
-                    b.HasIndex("OrderId");
+                    b.HasIndex("EquipmentTypeId");
+
+                    b.HasIndex("RentalOrderId");
 
                     b.HasIndex("Status");
 
-                    b.HasIndex("BrandId", "PaidAt");
+                    b.HasIndex("SupplierId", "CompletedAt");
 
-                    b.HasIndex("EquipmentListingId", "PaidAt");
+                    b.HasIndex("SupplierId", "ConfirmedAt");
 
-                    b.HasIndex("EquipmentTypeId", "PaidAt");
+                    b.HasIndex("SupplierId", "ExpiredAt");
 
-                    b.HasIndex("SupplierId", "PaidAt");
+                    b.HasIndex("SupplierId", "RejectedAt");
 
-                    b.ToTable("rental_item_facts", (string)null);
+                    b.ToTable("analytics_rental_items", (string)null);
                 });
 
             modelBuilder.Entity("Dprental.AnalyticsService.Domain.Entities.RentalOrderFact", b =>
                 {
-                    b.Property<Guid>("OrderId")
+                    b.Property<Guid>("RentalOrderId")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset?>("CancelledAt")
@@ -297,96 +327,35 @@ namespace AnalyticsService.Domain.Migrations
                     b.Property<DateTimeOffset?>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<long?>("DepositAmount")
-                        .HasColumnType("bigint");
-
                     b.Property<DateTimeOffset?>("ExpiredAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("ItemCount")
-                        .HasColumnType("integer");
-
-                    b.Property<long?>("LastVersion")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("OrderCode")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTimeOffset?>("PaidAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTimeOffset?>("RejectedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long?>("RentalAmount")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid?>("RenterId")
-                        .HasColumnType("uuid");
-
-                    b.Property<uint>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
-                    b.Property<int?>("SupplierCount")
-                        .HasColumnType("integer");
+                    b.Property<long>("StatusVersion")
+                        .HasColumnType("bigint");
 
-                    b.HasKey("OrderId");
+                    b.HasKey("RentalOrderId");
+
+                    b.HasIndex("CancelledAt");
 
                     b.HasIndex("CompletedAt");
 
                     b.HasIndex("CreatedAt");
 
+                    b.HasIndex("ExpiredAt");
+
                     b.HasIndex("PaidAt");
 
-                    b.HasIndex("Status");
+                    b.HasIndex("Status", "PaidAt");
 
-                    b.ToTable("rental_order_facts", (string)null);
-                });
-
-            modelBuilder.Entity("Dprental.AnalyticsService.Domain.Entities.SupplierPayoutFact", b =>
-                {
-                    b.Property<string>("PayoutRef")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<long>("Amount")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("RentalItemId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<Guid>("SupplierId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("PayoutRef");
-
-                    b.HasIndex("CompletedAt");
-
-                    b.HasIndex("Status");
-
-                    b.HasIndex("SupplierId", "CompletedAt");
-
-                    b.ToTable("supplier_payout_facts", (string)null);
+                    b.ToTable("analytics_rental_orders", (string)null);
                 });
 #pragma warning restore 612, 618
         }

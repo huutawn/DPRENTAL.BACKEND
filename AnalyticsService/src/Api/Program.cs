@@ -5,7 +5,6 @@ using Dprental.AnalyticsService.Api.Security;
 using Dprental.AnalyticsService.Application.DependencyInjection;
 using Dprental.AnalyticsService.Application.Hub.Extensions;
 using Dprental.AnalyticsService.Application.Kafka.Configuration;
-using Dprental.AnalyticsService.Application.Kafka.DependencyInjection;
 using Dprental.AnalyticsService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -14,12 +13,12 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAnalyticsServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddAnalyticsApplication();
-builder.Services.AddAnalyticsJwtAuthentication(builder.Configuration);
-builder.Services.AddAnalyticsHub(builder.Configuration);
 builder.Services.AddAnalyticsKafka(builder.Configuration);
+builder.Services.AddAnalyticsSecurity(builder.Configuration);
+builder.Services.AddAnalyticsHub(builder.Configuration);
 
-// Worker chỉ chạy khi bật Kafka tường minh; cấu hình sai đã bị chặn lúc khởi động bởi KafkaOptionsValidator
-if (builder.Configuration.GetValue<bool>($"{KafkaOptions.SectionName}:{nameof(KafkaOptions.Enabled)}"))
+// Worker chỉ chạy khi bật Kafka tường minh; cấu hình sai đã bị chặn lúc khởi động bởi AnalyticsKafkaOptionsValidator
+if (builder.Configuration.GetValue<bool>($"{AnalyticsKafkaOptions.SectionName}:{nameof(AnalyticsKafkaOptions.Enabled)}"))
 {
     builder.Services.AddHostedService<AnalyticsKafkaConsumerWorker>();
 }
@@ -36,6 +35,7 @@ builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
+    options.InferSecuritySchemes();
     var apiXml = Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml");
     if (File.Exists(apiXml))
     {
@@ -53,7 +53,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();
-app.UseAnalyticsHubOriginGuard();
+app.UseAnalyticsHubOriginGuard(); // Chặn Origin lạ trước khi tốn công xác thực
 app.UseAuthentication();
 app.UseAuthorization();
 

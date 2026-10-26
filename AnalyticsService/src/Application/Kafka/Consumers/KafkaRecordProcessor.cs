@@ -1,8 +1,8 @@
+using Dprental.AnalyticsService.Application.Events;
 using Dprental.AnalyticsService.Application.Hub;
 using Dprental.AnalyticsService.Application.Hub.Contracts;
 using Dprental.AnalyticsService.Application.Kafka.Configuration;
-using Dprental.AnalyticsService.Application.Kafka.Contracts;
-using Dprental.AnalyticsService.Application.Services.Projections;
+using Dprental.AnalyticsService.Application.Projections;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -10,23 +10,22 @@ using Microsoft.Extensions.Options;
 namespace Dprental.AnalyticsService.Application.Kafka.Consumers;
 
 /// <summary>
-/// Xử lý một message cho đến khi được phép commit offset. Mỗi lần thử dùng một DI scope mới
-/// (DbContext mới). Lỗi tạm thời thì chờ tăng dần rồi thử lại CHÍNH message này, không bỏ qua,
-/// để không bao giờ mất dữ liệu. Lưu thành công thì báo SignalR (sau khi DB đã commit).
-/// Tách khỏi worker để test được mà không cần Kafka.
+/// Xử lý một message cho đến khi được phép commit offset. Mỗi lần thử một DI scope mới (DbContext mới).
+/// Lỗi tạm thời thì chờ tăng dần rồi thử lại CHÍNH message này, không bỏ qua để không mất dữ liệu.
+/// Lưu thành công thì báo SignalR (sau khi DB đã commit). Tách khỏi worker để test không cần Kafka.
 /// </summary>
 public sealed partial class KafkaRecordProcessor
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IAnalyticsHubNotifier _notifier;
-    private readonly KafkaOptions _options;
+    private readonly AnalyticsKafkaOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<KafkaRecordProcessor> _logger;
 
     public KafkaRecordProcessor(
         IServiceScopeFactory scopeFactory,
         IAnalyticsHubNotifier notifier,
-        IOptions<KafkaOptions> options,
+        IOptions<AnalyticsKafkaOptions> options,
         TimeProvider timeProvider,
         ILogger<KafkaRecordProcessor> logger)
     {
@@ -37,10 +36,7 @@ public sealed partial class KafkaRecordProcessor
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    /// <summary>
-    /// Trả về khi kết quả cho phép commit offset (mọi kết quả trừ RetryLater).
-    /// Chỉ dừng sớm khi ứng dụng tắt (cancellationToken bị hủy).
-    /// </summary>
+    /// <summary>Trả về khi được phép commit offset (mọi kết quả trừ RetryLater). Chỉ dừng sớm khi ứng dụng tắt.</summary>
     public async Task<DispatchResult> ProcessAsync(KafkaRecord record, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -57,6 +53,7 @@ public sealed partial class KafkaRecordProcessor
                 IAnalyticsEventDispatcher dispatcher = scope.ServiceProvider.GetRequiredService<IAnalyticsEventDispatcher>();
                 result = await dispatcher.DispatchAsync(record, cancellationToken);
 
+                // Lấy danh sách NCC trước khi đóng scope (ChangeSet thuộc scope)
                 if (result.Outcome == DispatchOutcome.Processed)
                 {
                     touchedSuppliers = scope.ServiceProvider.GetRequiredService<ReadModelChangeSet>().SupplierIds;
@@ -68,7 +65,10 @@ public sealed partial class KafkaRecordProcessor
                 if (result.Outcome == DispatchOutcome.Processed)
                 {
                     // DB đã commit. Gửi lỗi chỉ được log trong notifier, không ảnh hưởng việc đọc Kafka.
-                    await _notifier.NotifyDataChangedAsync(ScopeOf(result.MessageType), touchedSuppliers, cancellationToken);
+                    string scope = PaymentAnalyticsEventTypes.IsFinancial(result.MessageType)
+                        ? AnalyticsDataScopes.Finance
+                        : AnalyticsDataScopes.Rental;
+                    await _notifier.NotifyDataChangedAsync(scope, touchedSuppliers, cancellationToken);
                 }
 
                 return result;
@@ -80,13 +80,6 @@ public sealed partial class KafkaRecordProcessor
         }
     }
 
-    private static string ScopeOf(string? messageType) => messageType switch
-    {
-        AnalyticsMessageTypes.RentalSettled or AnalyticsMessageTypes.RefundCompleted => AnalyticsDataScopes.Finance,
-        _ => AnalyticsDataScopes.Rental
-    };
-
-    [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Retrying {Topic}[{Partition}]@{Offset} in {DelayMs} ms")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Retrying {Topic}[{Partition}]@{Offset} in {DelayMs} ms")]
     private static partial void LogRetryScheduled(ILogger logger, string topic, int partition, long offset, double delayMs);
 }

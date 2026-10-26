@@ -1,13 +1,12 @@
 using Dprental.AnalyticsService.Application.Hub.Security;
 using Dprental.AnalyticsService.Application.Security;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.SignalR;
 
 namespace Dprental.AnalyticsService.Application.Hub;
 
 /// <summary>
 /// Cửa kết nối SignalR cho dashboard. Client chỉ NHẬN tin, không gọi hàm nào lên server.
-/// Admin được đưa vào nhóm admins; NCC nhận tin theo user (sub) của chính mình.
+/// Admin vào nhóm admins; NCC nhận tin theo user (sub) của chính mình.
 /// </summary>
 [Authorize(Policy = AnalyticsHubSecurityConstants.PolicyName)]
 public sealed class AnalyticsHub : Microsoft.AspNetCore.SignalR.Hub

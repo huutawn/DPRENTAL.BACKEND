@@ -5,14 +5,10 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.AnalyticsService.Application.Hub.Security;
 
-/// <summary>
-/// Chỉ cho người dùng thật (không phải token service), đúng audience client, có sub hợp lệ kết nối Hub.
-/// </summary>
+/// <summary>Chỉ người dùng thật (không phải service), đúng audience, có sub hợp lệ mới vào được Hub.</summary>
 public sealed class AnalyticsHubClientRequirement : IAuthorizationRequirement;
 
-/// <summary>
-/// Đọc ClientAudience từ cấu hình qua DI (không đọc lại IConfiguration trong lambda như PaymentHub).
-/// </summary>
+/// <summary>Đọc Audience qua DI (không đọc lại IConfiguration trong lambda mỗi request).</summary>
 public sealed class AnalyticsHubClientHandler : AuthorizationHandler<AnalyticsHubClientRequirement>
 {
     private readonly AnalyticsJwtOptions _jwtOptions;
@@ -26,7 +22,7 @@ public sealed class AnalyticsHubClientHandler : AuthorizationHandler<AnalyticsHu
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (context.User.IsHubClient(_jwtOptions.ClientAudience))
+        if (context.User.IsHubClient(_jwtOptions.Audience))
         {
             context.Succeed(requirement);
         }

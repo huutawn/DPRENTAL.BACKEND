@@ -6,8 +6,8 @@ using Microsoft.Extensions.Options;
 namespace Dprental.AnalyticsService.Application.Hub.Security;
 
 /// <summary>
-/// Xác định "user" của một kết nối SignalR = claim sub (Guid). Token service hoặc sai audience → null,
-/// kết nối đó không nhận được tin gửi theo user. Cùng quy tắc với PaymentUserIdProvider.
+/// "User" của một kết nối SignalR = claim sub. Token service hoặc sai audience → null: kết nối đó không
+/// nhận tin gửi theo user và bị Hub ngắt. Cùng quy tắc với PaymentUserIdProvider.
 /// </summary>
 public sealed class AnalyticsUserIdProvider : IUserIdProvider
 {
@@ -22,9 +22,8 @@ public sealed class AnalyticsUserIdProvider : IUserIdProvider
     {
         ArgumentNullException.ThrowIfNull(connection);
 
-        return connection.User.IsHubClient(_jwtOptions.ClientAudience)
-            && connection.User.TryGetSubjectUserId(out Guid userId)
-                ? userId.ToString("D")
-                : null;
+        return connection.User.IsHubClient(_jwtOptions.Audience) && connection.User.TryGetSubjectUserId(out Guid userId)
+            ? userId.ToString("D")
+            : null;
     }
 }

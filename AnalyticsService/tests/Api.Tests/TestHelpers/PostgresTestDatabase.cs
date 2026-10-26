@@ -5,10 +5,10 @@ using Npgsql;
 namespace Dprental.AnalyticsService.Api.Tests.TestHelpers;
 
 /// <summary>
-/// Tạo một database PostgreSQL tạm (analytics_tests_xxx), chạy migration thật, xóa khi dispose.
+/// Tạo database PostgreSQL tạm (analytics_tests_xxx), chạy migration thật, xóa khi dispose.
 /// Kết nối tới server lấy từ biến môi trường ANALYTICS_TEST_POSTGRES (user cần quyền CREATEDB).
 /// Không cấu hình biến này thì <see cref="CreateAsync"/> trả null và test tự bỏ qua (giống RentalService);
-/// đã cấu hình mà không kết nối được thì báo lỗi.
+/// đã cấu hình mà không kết nối được thì báo lỗi, không âm thầm pass.
 /// </summary>
 internal sealed class PostgresTestDatabase : IAsyncDisposable
 {
@@ -17,10 +17,11 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
     private readonly string _serverConnectionString;
     private readonly string _databaseName;
 
-    private PostgresTestDatabase(string serverConnectionString, string databaseName, string connectionString)
+    private PostgresTestDatabase(string serverConnectionString, string databaseName)
     {
         _serverConnectionString = serverConnectionString;
         _databaseName = databaseName;
+        string connectionString = new NpgsqlConnectionStringBuilder(serverConnectionString) { Database = databaseName }.ConnectionString;
         Options = new DbContextOptionsBuilder<AnalyticsServiceDbContext>().UseNpgsql(connectionString).Options;
     }
 
@@ -28,13 +29,12 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
 
     public static async Task<PostgresTestDatabase?> CreateAsync()
     {
-        string? serverConnectionString = Environment.GetEnvironmentVariable(ConnectionStringVariable);
+        string? serverConnectionString = System.Environment.GetEnvironmentVariable(ConnectionStringVariable);
         if (string.IsNullOrWhiteSpace(serverConnectionString))
         {
             return null;
         }
 
-        // Đã cấu hình mà không kết nối được thì để lỗi nổ ra (test đỏ), không âm thầm bỏ qua
         string databaseName = $"analytics_tests_{Guid.NewGuid():N}";
         await using (NpgsqlConnection connection = new(serverConnectionString))
         {
@@ -43,11 +43,9 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
             await create.ExecuteNonQueryAsync();
         }
 
-        string connectionString = new NpgsqlConnectionStringBuilder(serverConnectionString) { Database = databaseName }.ConnectionString;
-        PostgresTestDatabase database = new(serverConnectionString, databaseName, connectionString);
-
-        await using AnalyticsServiceDbContext context = new(database.Options);
-        await context.Database.MigrateAsync(); // chạy đúng migration sẽ chạy trên môi trường thật
+        PostgresTestDatabase database = new(serverConnectionString, databaseName);
+        await using AnalyticsServiceDbContext context = database.CreateContext();
+        await context.Database.MigrateAsync(); // Chạy đúng các migration sẽ chạy trên môi trường thật
         return database;
     }
 

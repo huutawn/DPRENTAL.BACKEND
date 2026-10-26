@@ -2,9 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Dprental.AnalyticsService.Application.Hub.Options;
 
-/// <summary>
-/// Cấu hình SignalR Hub của Analytics, cùng bộ thông số với PaymentHubOptions.
-/// </summary>
+/// <summary>Cấu hình SignalR Hub (section "AnalyticsHub"), cùng bộ thông số với PaymentHubOptions.</summary>
 public sealed class AnalyticsHubOptions
 {
     public const string SectionName = "AnalyticsHub";
@@ -32,6 +30,6 @@ public sealed class AnalyticsHubOptions
 
     public bool EnableDetailedErrors { get; set; }
 
-    /// <summary>Domain FE được phép kết nối. Rỗng = không kiểm tra Origin.</summary>
+    /// <summary>Domain FE được phép kết nối. Rỗng = không kiểm tra Origin (môi trường thật PHẢI điền).</summary>
     public string[] AllowedOrigins { get; set; } = [];
 }

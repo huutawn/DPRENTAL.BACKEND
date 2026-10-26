@@ -6,8 +6,9 @@ using Microsoft.Extensions.Options;
 namespace Dprental.AnalyticsService.Application.Hub.Security;
 
 /// <summary>
-/// Chặn kết nối Hub từ domain không nằm trong AllowedOrigins (giống PaymentHubOriginGuardMiddleware).
-/// Request không có header Origin (không phải trình duyệt) được cho qua; xác thực JWT vẫn áp dụng.
+/// Chặn kết nối Hub từ domain ngoài AllowedOrigins (giống PaymentHubOriginGuardMiddleware): trang web lạ
+/// không lợi dụng được cookie accessToken của người dùng. Request không có Origin (không phải trình duyệt)
+/// được cho qua; xác thực JWT vẫn áp dụng.
 /// </summary>
 public sealed partial class AnalyticsHubOriginGuardMiddleware
 {

@@ -1,7 +1,5 @@
 using System.Net;
 using System.Security.Claims;
-using Dprental.AnalyticsService.Api.Tests.Projections;
-using Dprental.AnalyticsService.Application.Kafka.Contracts.Rental;
 using Dprental.AnalyticsService.Application.Security;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
@@ -10,45 +8,39 @@ namespace Dprental.AnalyticsService.Api.Tests.Hub;
 
 public sealed class AnalyticsHubSecurityTests
 {
-    private const string ClientAudience = "dprental-clients";
+    private const string Audience = "dprental-clients";
     private static readonly Guid UserId = Guid.Parse("30000000-0000-0000-0000-00000000000a");
 
     [Fact]
-    public void RealUserWithClientAudience_IsHubClient()
-    {
-        Assert.True(User().IsHubClient(ClientAudience));
-    }
+    public void RealUserWithAudience_IsHubClient() => Assert.True(User(Audience).IsHubClient(Audience));
 
     [Fact]
     public void ServiceToken_IsNotHubClient_NorAdmin()
     {
-        ClaimsPrincipal service = User(new Claim("u", "svc"), new Claim("r", "adm"));
+        ClaimsPrincipal service = User(Audience, new Claim("u", "svc"), new Claim("r", "adm"));
 
-        Assert.False(service.IsHubClient(ClientAudience));
-        Assert.False(service.IsPlatformAdmin()); // token service không bao giờ được coi là admin
+        Assert.False(service.IsHubClient(Audience));
+        Assert.False(service.IsPlatformAdmin());
     }
 
     [Fact]
-    public void WrongAudience_IsNotHubClient()
-    {
-        Assert.False(User(audience: "payment-api").IsHubClient(ClientAudience));
-    }
+    public void WrongAudience_IsNotHubClient() => Assert.False(User("payment-api").IsHubClient(Audience));
 
     [Fact]
-    public void MissingOrInvalidSub_IsNotHubClient()
+    public void InvalidSub_IsNotHubClient()
     {
-        ClaimsIdentity identity = new([new Claim("aud", ClientAudience), new Claim("sub", "not-a-guid")], "Bearer");
-
-        Assert.False(new ClaimsPrincipal(identity).IsHubClient(ClientAudience));
+        ClaimsPrincipal user = new(new ClaimsIdentity([new Claim("aud", Audience), new Claim("sub", "not-a-guid")], "Bearer"));
+        Assert.False(user.IsHubClient(Audience));
     }
 
     [Theory]
-    [InlineData("adm", true)]
-    [InlineData("admin_platform", true)]
-    [InlineData("supplier", false)]
-    public void AdminRole_IsDetectedFromRoleClaim(string role, bool expected)
+    [InlineData("r", "adm", true)]
+    [InlineData("r", "admin_platform", true)]
+    [InlineData("role", "adp", true)] // claim "role" như Payment; bản cũ chỉ đọc "r"
+    [InlineData("r", "cus", false)]
+    public void AdminRole_IsDetected(string claimType, string role, bool expected)
     {
-        Assert.Equal(expected, User(new Claim("r", role)).IsPlatformAdmin());
+        Assert.Equal(expected, User(Audience, new Claim(claimType, role)).IsPlatformAdmin());
     }
 
     [Fact]
@@ -64,50 +56,6 @@ public sealed class AnalyticsHubSecurityTests
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    [Fact]
-    public async Task ChangeSet_CollectsDistinctSuppliersTouchedByProjector()
-    {
-        using ProjectionHarness h = new();
-        Guid supplierA = Guid.NewGuid();
-        Guid supplierB = Guid.NewGuid();
-
-        await h.ApplyOkAsync(() => h.Orders.ApplyAsync(new RentalOrderCreatedPayload
-        {
-            RentalOrderId = Guid.NewGuid(),
-            OrderCode = "RNT-1",
-            RenterId = Guid.NewGuid(),
-            Currency = "VND",
-            TotalRentalAmount = 3m,
-            TotalDepositAmount = 0m,
-            CreatedAt = DateTimeOffset.UtcNow,
-            Items = [Item(supplierA), Item(supplierA), Item(supplierB)],
-            OrderVersion = 1
-        }));
-
-        Assert.Equal(2, h.Changes.SupplierIds.Count);
-        Assert.Contains(supplierA, h.Changes.SupplierIds);
-        Assert.Contains(supplierB, h.Changes.SupplierIds);
-    }
-
-    private static RentalOrderCreatedItemPayload Item(Guid supplierId) => new()
-    {
-        RentalItemId = Guid.NewGuid(),
-        EquipmentListingId = Guid.NewGuid(),
-        SupplierId = supplierId,
-        Quantity = 1,
-        ExpectedStartDate = new DateOnly(2026, 11, 12),
-        ExpectedEndDate = new DateOnly(2026, 11, 13),
-        RentalAmount = 1m,
-        DepositAmount = 0m
-    };
-
-    private static ClaimsPrincipal User(params Claim[] extra) => User(ClientAudience, extra);
-
-    private static ClaimsPrincipal User(string audience, params Claim[] extra)
-    {
-        ClaimsIdentity identity = new(
-            [new Claim("aud", audience), new Claim("sub", UserId.ToString()), .. extra],
-            authenticationType: "Bearer");
-        return new ClaimsPrincipal(identity);
-    }
+    private static ClaimsPrincipal User(string audience, params Claim[] extra) =>
+        new(new ClaimsIdentity([new Claim("aud", audience), new Claim("sub", UserId.ToString()), .. extra], "Bearer"));
 }

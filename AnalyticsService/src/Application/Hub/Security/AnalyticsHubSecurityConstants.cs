@@ -4,7 +4,7 @@ public static class AnalyticsHubSecurityConstants
 {
     public const string PolicyName = "AnalyticsHubClientPolicy";
 
-    // Cùng tên cookie với PaymentService để FE dùng chung một cách gắn token
+    // Cùng tên cookie với PaymentHub để FE dùng chung một cách gắn token
     public const string AccessTokenCookieName = "accessToken";
 
     // Admin vào nhóm này lúc kết nối; nhận mọi thông báo thay đổi số liệu

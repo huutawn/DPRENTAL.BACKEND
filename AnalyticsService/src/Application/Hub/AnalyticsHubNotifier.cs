@@ -39,6 +39,7 @@ public sealed partial class AnalyticsHubNotifier : IAnalyticsHubNotifier
         AnalyticsHubEnvelope<AnalyticsDataChangedPayload> envelope =
             new(Guid.NewGuid(), 1, _timeProvider.GetUtcNow(), new AnalyticsDataChangedPayload(scope));
 
+        // Dừng khi ứng dụng tắt HOẶC quá SendTimeoutSeconds: gửi chậm không làm treo việc đọc Kafka
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(_options.SendTimeoutSeconds));
 
@@ -47,7 +48,7 @@ public sealed partial class AnalyticsHubNotifier : IAnalyticsHubNotifier
             await _hubContext.Clients.Group(AnalyticsHubSecurityConstants.AdminGroup)
                 .SendAsync(AnalyticsHubEventNames.DataChanged, envelope, timeout.Token);
 
-            // NCC chỉ nhận tin về dòng thuê của chính mình (ownership MVP: SupplierId = JWT.sub)
+            // NCC chỉ nhận tin về dữ liệu của chính mình (ownership MVP: SupplierId = JWT.sub)
             string[] suppliers = supplierUserIds.Where(id => id != Guid.Empty).Distinct().Select(id => id.ToString("D")).ToArray();
             if (suppliers.Length > 0)
             {

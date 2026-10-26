@@ -3,8 +3,9 @@ using System.Security.Claims;
 namespace Dprental.AnalyticsService.Application.Security;
 
 /// <summary>
-/// Đọc claim từ JWT của AuthService, theo đúng quy ước PaymentClaimsPrincipalExtensions:
-/// "u" = "svc" là token service; vai trò admin nằm ở claim "r"/"role"; danh tính là "sub" (Guid).
+/// Một chỗ duy nhất đọc claim JWT của AuthService (theo quy ước PaymentClaimsPrincipalExtensions):
+/// "u" = "svc" là token service; vai trò ở "r"/"role"; danh tính là "sub" (Guid).
+/// Dùng chung cho AdminPolicy của dashboard và cho SignalR Hub, để hai nơi hiểu "admin" giống nhau.
 /// </summary>
 public static class AnalyticsClaims
 {
@@ -19,13 +20,9 @@ public static class AnalyticsClaims
     public static bool IsPlatformAdmin(this ClaimsPrincipal user)
     {
         ArgumentNullException.ThrowIfNull(user);
-        if (user.IsServiceToken())
-        {
-            return false;
-        }
-
-        return user.FindAll("r").Concat(user.FindAll("role"))
-            .Any(claim => AdminRoles.Contains(claim.Value, StringComparer.Ordinal));
+        return !user.IsServiceToken()
+            && user.FindAll("r").Concat(user.FindAll("role"))
+                .Any(claim => AdminRoles.Contains(claim.Value, StringComparer.Ordinal));
     }
 
     public static bool HasAudience(this ClaimsPrincipal user, string audience)
@@ -41,13 +38,10 @@ public static class AnalyticsClaims
         return Guid.TryParse(sub, out userId) && userId != Guid.Empty;
     }
 
-    /// <summary>
-    /// Người dùng thật (không phải service), có audience client và có sub hợp lệ.
-    /// Dùng chung cho policy của Hub và UserIdProvider để hai nơi không lệch nhau.
-    /// </summary>
-    public static bool IsHubClient(this ClaimsPrincipal user, string clientAudience) =>
+    /// <summary>Người dùng thật (không phải service), đúng audience, có sub hợp lệ: được kết nối Hub.</summary>
+    public static bool IsHubClient(this ClaimsPrincipal user, string audience) =>
         user.Identity is { IsAuthenticated: true }
         && !user.IsServiceToken()
-        && user.HasAudience(clientAudience)
+        && user.HasAudience(audience)
         && user.TryGetSubjectUserId(out _);
 }

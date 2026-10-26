@@ -1,8 +1,8 @@
 namespace Dprental.AnalyticsService.Common.Utils;
 
 /// <summary>
-/// Chuyển số tiền VND nhận từ event (kiểu decimal) sang số nguyên để lưu DB.
-/// VND không có đơn vị nhỏ hơn đồng, nên số có phần lẻ là dữ liệu lỗi: báo lỗi, không làm tròn.
+/// Kiểm tra số tiền VND nhận từ event. VND không có đơn vị nhỏ hơn đồng, nên số có phần lẻ,
+/// số âm hay vượt giới hạn là dữ liệu lỗi: báo lỗi, không làm tròn.
 /// </summary>
 public static class VndAmount
 {
