@@ -13,7 +13,7 @@ public sealed class RentalEventIngestor(AnalyticsServiceDbContext db)
     private static readonly HashSet<string> SupportedTypes = new(StringComparer.Ordinal)
     {
         "RentalOrderCreated", "RentalOrderPaid", "RentalOrderCompleted", "RentalOrderCancelled",
-        "RentalOrderExpired", "RentalItemConfirmed", "RentalItemRejected", "RentalItemExpired",
+        "RentalOrderExpired", "RentalOrderRejected", "RentalItemConfirmed", "RentalItemRejected", "RentalItemExpired",
         "RentalItemHandoverCompleted", "RentalItemReturned", "RentalItemCompleted"
     };
 
@@ -83,6 +83,10 @@ public sealed class RentalEventIngestor(AnalyticsServiceDbContext db)
             case "RentalOrderExpired":
                 order.ExpiredAt ??= DateField(payload, "expiredAt");
                 UpdateStatus(order, version, "EXPIRED");
+                break;
+            case "RentalOrderRejected":
+                order.RejectedAt ??= DateField(payload, "rejectedAt");
+                UpdateStatus(order, version, "REJECTED");
                 break;
             case "RentalItemConfirmed":
                 (await ItemAsync(payload, orderId, cancellationToken)).ConfirmedAt ??= DateField(payload, "decisionAt");

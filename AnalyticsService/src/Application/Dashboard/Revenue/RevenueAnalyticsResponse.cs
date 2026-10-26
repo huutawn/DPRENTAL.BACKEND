@@ -10,6 +10,10 @@ public sealed record RevenueAnalyticsResponse(
     string Granularity,
     string Currency,
     decimal TotalPlatformRevenue,
+    decimal TotalGrossRentalValue,
+    decimal TotalRefundAmount,
+    decimal TotalSupplierPayout,
     IReadOnlyList<RevenueAnalyticsBucket> Buckets);
 
-public sealed record RevenueAnalyticsBucket(DateOnly PeriodStart, decimal PlatformRevenue);
+public sealed record RevenueAnalyticsBucket(DateOnly PeriodStart, decimal GrossRentalValue,
+    decimal PlatformRevenue, decimal RefundAmount, decimal SupplierPayout);

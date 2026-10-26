@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.AnalyticsService.Application.Dashboard.Revenue;
 
-/// <summary>Reads settled platform-fee facts for the Admin revenue chart.</summary>
+/// <summary>Reads period revenue and cash-flow facts without treating deposits as revenue.</summary>
 public sealed class RevenueAnalyticsQueryService(AnalyticsServiceDbContext dbContext)
 {
     public async Task<RevenueAnalyticsResponse> GetAsync(
@@ -25,9 +25,9 @@ public sealed class RevenueAnalyticsQueryService(AnalyticsServiceDbContext dbCon
         // Only enum-selected SQL fragments are interpolated. User input is always a DB parameter.
         string bucketExpression = granularity switch
         {
-            RevenueGranularity.Day => "(\"CompletedAt\" AT TIME ZONE 'Asia/Ho_Chi_Minh')::date",
-            RevenueGranularity.Week => "date_trunc('week', \"CompletedAt\" AT TIME ZONE 'Asia/Ho_Chi_Minh')::date",
-            RevenueGranularity.Month => "date_trunc('month', \"CompletedAt\" AT TIME ZONE 'Asia/Ho_Chi_Minh')::date",
+            RevenueGranularity.Day => "(moment AT TIME ZONE 'Asia/Ho_Chi_Minh')::date",
+            RevenueGranularity.Week => "date_trunc('week', moment AT TIME ZONE 'Asia/Ho_Chi_Minh')::date",
+            RevenueGranularity.Month => "date_trunc('month', moment AT TIME ZONE 'Asia/Ho_Chi_Minh')::date",
             _ => throw new ArgumentOutOfRangeException(nameof(granularity))
         };
 
@@ -38,23 +38,40 @@ public sealed class RevenueAnalyticsQueryService(AnalyticsServiceDbContext dbCon
             await dbContext.Database.OpenConnectionAsync(cancellationToken);
         }
 
-        var totals = new Dictionary<DateOnly, decimal>();
+        var totals = new Dictionary<DateOnly, decimal[]>();
         try
         {
             await using var command = connection.CreateCommand();
             command.CommandText = $"""
-                SELECT {bucketExpression} AS period_start,
-                       COALESCE(SUM("PlatformFeeAmount"), 0) AS platform_revenue
-                FROM payment_financial_events
-                WHERE "MessageType" = @message_type
-                  AND "Currency" = 'VND'
-                  AND "CompletedAt" >= @range_start
-                  AND "CompletedAt" < @range_end
-                GROUP BY period_start
-                ORDER BY period_start;
+                SELECT {bucketExpression} AS period_start, category, SUM(amount) AS amount
+                FROM (
+                  SELECT 0 AS category, o."PaidAt" AS moment, i."RentalAmount" AS amount
+                  FROM analytics_rental_orders o
+                  JOIN analytics_rental_items i ON i."RentalOrderId" = o."RentalOrderId"
+                  WHERE o."PaidAt" >= @range_start AND o."PaidAt" < @range_end
+                  UNION ALL
+                  SELECT 1, "CompletedAt", "PlatformFeeAmount"
+                  FROM payment_financial_events
+                  WHERE "MessageType" = @settled_type AND "Currency" = 'VND'
+                    AND "CompletedAt" >= @range_start AND "CompletedAt" < @range_end
+                  UNION ALL
+                  SELECT 2, "CompletedAt", "Amount"
+                  FROM payment_financial_events
+                  WHERE "MessageType" = @refund_type AND "Currency" = 'VND'
+                    AND "CompletedAt" >= @range_start AND "CompletedAt" < @range_end
+                  UNION ALL
+                  SELECT 3, "CompletedAt", "Amount"
+                  FROM payment_financial_events
+                  WHERE "MessageType" = @payout_type AND "Currency" = 'VND'
+                    AND "CompletedAt" >= @range_start AND "CompletedAt" < @range_end
+                ) facts
+                GROUP BY period_start, category
+                ORDER BY period_start, category;
                 """;
 
-            AddParameter(command, "message_type", PaymentAnalyticsEventTypes.RentalItemFinancialSettled);
+            AddParameter(command, "settled_type", PaymentAnalyticsEventTypes.RentalItemFinancialSettled);
+            AddParameter(command, "refund_type", PaymentAnalyticsEventTypes.RefundCompletedFinancial);
+            AddParameter(command, "payout_type", PaymentAnalyticsEventTypes.SupplierPayoutCompleted);
             AddParameter(command, "range_start", range.StartUtc);
             AddParameter(command, "range_end", range.EndUtc);
 
@@ -62,7 +79,12 @@ public sealed class RevenueAnalyticsQueryService(AnalyticsServiceDbContext dbCon
             while (await reader.ReadAsync(cancellationToken))
             {
                 DateOnly periodStart = reader.GetFieldValue<DateOnly>(0);
-                totals[periodStart] = reader.GetDecimal(1);
+                if (!totals.TryGetValue(periodStart, out var values))
+                {
+                    values = new decimal[4];
+                    totals[periodStart] = values;
+                }
+                values[reader.GetInt32(1)] = reader.GetDecimal(2);
             }
         }
         finally
@@ -74,7 +96,11 @@ public sealed class RevenueAnalyticsQueryService(AnalyticsServiceDbContext dbCon
         }
 
         List<RevenueAnalyticsBucket> buckets = CreateBuckets(from, to, granularity)
-            .Select(period => new RevenueAnalyticsBucket(period, totals.GetValueOrDefault(period)))
+            .Select(period =>
+            {
+                decimal[] values = totals.GetValueOrDefault(period) ?? new decimal[4];
+                return new RevenueAnalyticsBucket(period, values[0], values[1], values[2], values[3]);
+            })
             .ToList();
 
         return new RevenueAnalyticsResponse(
@@ -83,6 +109,9 @@ public sealed class RevenueAnalyticsQueryService(AnalyticsServiceDbContext dbCon
             granularity.ToString().ToLowerInvariant(),
             "VND",
             buckets.Sum(x => x.PlatformRevenue),
+            buckets.Sum(x => x.GrossRentalValue),
+            buckets.Sum(x => x.RefundAmount),
+            buckets.Sum(x => x.SupplierPayout),
             buckets);
     }
 

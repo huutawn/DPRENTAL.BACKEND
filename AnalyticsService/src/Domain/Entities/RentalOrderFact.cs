@@ -8,6 +8,7 @@ public sealed class RentalOrderFact
     public DateTimeOffset? CompletedAt { get; set; }
     public DateTimeOffset? CancelledAt { get; set; }
     public DateTimeOffset? ExpiredAt { get; set; }
+    public DateTimeOffset? RejectedAt { get; set; }
     public string Status { get; set; } = "UNKNOWN";
     public long StatusVersion { get; set; }
 }

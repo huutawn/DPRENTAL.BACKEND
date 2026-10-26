@@ -15,10 +15,11 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
         var orderMetrics = new OrderMetrics(
             await orders.CountAsync(x => x.CreatedAt >= range.StartUtc && x.CreatedAt < range.EndUtc, ct),
             await orders.CountAsync(x => x.PaidAt >= range.StartUtc && x.PaidAt < range.EndUtc, ct),
-            await ActiveCountAsync(ct),
+            await ActiveCountAsync(range, ct),
             await orders.CountAsync(x => x.CompletedAt >= range.StartUtc && x.CompletedAt < range.EndUtc, ct),
             await orders.CountAsync(x => x.CancelledAt >= range.StartUtc && x.CancelledAt < range.EndUtc, ct),
-            await orders.CountAsync(x => x.ExpiredAt >= range.StartUtc && x.ExpiredAt < range.EndUtc, ct));
+            await orders.CountAsync(x => x.ExpiredAt >= range.StartUtc && x.ExpiredAt < range.EndUtc, ct),
+            await items.CountAsync(x => x.RejectedAt >= range.StartUtc && x.RejectedAt < range.EndUtc, ct));
 
         var paidItems = from item in items
                         join order in orders on item.RentalOrderId equals order.RentalOrderId
@@ -40,7 +41,8 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
             await settled.SumAsync(x => x.FinalDeductionAmount, ct) ?? 0,
             await refunds.SumAsync(x => x.Amount, ct) ?? 0,
             await settled.SumAsync(x => x.SupplierPayable, ct) ?? 0,
-            await payouts.SumAsync(x => x.Amount, ct) ?? 0);
+            await payouts.SumAsync(x => x.Amount, ct) ?? 0,
+            await PendingRefundAsync(ct));
 
         var rental = new RentalMetrics(
             await paidItems.CountAsync(ct),
@@ -51,9 +53,30 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
         return new OverviewResponse(range.From, range.To, "VND", orderMetrics, money, rental);
     }
 
-    public Task<int> ActiveCountAsync(CancellationToken ct) => db.RentalOrders.AsNoTracking()
-        .CountAsync(x => x.PaidAt != null && x.Status != "COMPLETED" &&
-            x.Status != "CANCELLED" && x.Status != "EXPIRED" && x.Status != "REJECTED", ct);
+    public Task<int> ActiveCountAsync(DashboardDateRange range, CancellationToken ct) =>
+        db.RentalOrders.AsNoTracking().CountAsync(x =>
+            x.PaidAt != null && x.PaidAt < range.EndUtc &&
+            (x.CompletedAt == null || x.CompletedAt >= range.EndUtc) &&
+            (x.CancelledAt == null || x.CancelledAt >= range.EndUtc) &&
+            (x.ExpiredAt == null || x.ExpiredAt >= range.EndUtc) &&
+            ((x.RejectedAt == null && x.Status != "REJECTED") || x.RejectedAt >= range.EndUtc), ct);
+
+    private async Task<decimal> PendingRefundAsync(CancellationToken ct)
+    {
+        var requested = await db.PaymentFinancialEvents.AsNoTracking()
+            .Where(x => x.MessageType == PaymentAnalyticsEventTypes.RefundRequestedFinancial && x.RefundRef != null)
+            .GroupBy(x => x.RefundRef!)
+            .Select(g => new { RefundRef = g.Key, Amount = g.Sum(x => x.Amount ?? 0m) })
+            .ToDictionaryAsync(x => x.RefundRef, x => x.Amount, ct);
+        var completed = await db.PaymentFinancialEvents.AsNoTracking()
+            .Where(x => x.MessageType == PaymentAnalyticsEventTypes.RefundCompletedFinancial && x.RefundRef != null)
+            .GroupBy(x => x.RefundRef!)
+            .Select(g => new { RefundRef = g.Key, Amount = g.Sum(x => x.Amount ?? 0m) })
+            .ToDictionaryAsync(x => x.RefundRef, x => x.Amount, ct);
+
+        return requested.Sum(request => Math.Max(
+            request.Value - completed.GetValueOrDefault(request.Key), 0m));
+    }
 
     public async Task<EquipmentResponse> EquipmentAsync(DashboardDateRange range, int limit, CancellationToken ct)
     {
@@ -62,22 +85,35 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
                    where order.PaidAt >= range.StartUtc && order.PaidAt < range.EndUtc
                    select item;
 
-        var types = await paid.GroupBy(x => x.EquipmentTypeId)
-            .Select(g => new EquipmentRank(g.Key, g.Max(x => x.EquipmentTypeName) ?? "Không xác định",
-                g.Count(), g.Sum(x => x.HandoverAt != null ? x.Quantity : 0), g.Sum(x => x.RentalAmount)))
-            .OrderByDescending(x => x.RentalItemCount).ThenByDescending(x => x.RentedQuantity)
+        var typeRows = await paid.GroupBy(x => x.EquipmentTypeId)
+            .Select(g => new { Id = g.Key, Name = g.Max(x => x.EquipmentTypeName),
+                Count = g.Count(), Quantity = g.Sum(x => x.HandoverAt != null &&
+                    x.HandoverAt < range.EndUtc ? x.Quantity : 0),
+                Value = g.Sum(x => x.RentalAmount), Completed = g.Sum(x => x.CompletedAt != null &&
+                    x.CompletedAt < range.EndUtc ? 1 : 0) })
+            .OrderByDescending(x => x.Count).ThenByDescending(x => x.Quantity)
             .ThenBy(x => x.Id).Take(limit).ToListAsync(ct);
-        var listings = await paid.GroupBy(x => x.EquipmentListingId)
-            .Select(g => new EquipmentRank(g.Key, string.Empty, g.Count(),
-                g.Sum(x => x.HandoverAt != null ? x.Quantity : 0), g.Sum(x => x.RentalAmount)))
-            .OrderByDescending(x => x.RentalItemCount).ThenByDescending(x => x.RentedQuantity)
+        var types = typeRows.Select(x => new EquipmentRank(x.Id, x.Name ?? "Không xác định",
+            x.Count, x.Quantity, x.Value, x.Completed)).ToList();
+        var listingRows = await paid.GroupBy(x => x.EquipmentListingId)
+            .Select(g => new { Id = g.Key, Count = g.Count(),
+                Quantity = g.Sum(x => x.HandoverAt != null && x.HandoverAt < range.EndUtc ? x.Quantity : 0),
+                Value = g.Sum(x => x.RentalAmount), Completed = g.Sum(x => x.CompletedAt != null &&
+                    x.CompletedAt < range.EndUtc ? 1 : 0) })
+            .OrderByDescending(x => x.Count).ThenByDescending(x => x.Quantity)
             .ThenBy(x => x.Id).Take(limit).ToListAsync(ct);
-        listings = listings.Select(x => x with { Name = x.Id?.ToString("D") ?? "Không xác định" }).ToList();
-        var brands = await paid.GroupBy(x => x.BrandId)
-            .Select(g => new EquipmentRank(g.Key, g.Max(x => x.BrandName) ?? "Không xác định",
-                g.Count(), g.Sum(x => x.HandoverAt != null ? x.Quantity : 0), g.Sum(x => x.RentalAmount)))
-            .OrderByDescending(x => x.RentalItemCount).ThenByDescending(x => x.RentedQuantity)
+        var listings = listingRows.Select(x => new EquipmentRank(x.Id, x.Id.ToString("D"),
+            x.Count, x.Quantity, x.Value, x.Completed)).ToList();
+        var brandRows = await paid.GroupBy(x => x.BrandId)
+            .Select(g => new { Id = g.Key, Name = g.Max(x => x.BrandName),
+                Count = g.Count(), Quantity = g.Sum(x => x.HandoverAt != null &&
+                    x.HandoverAt < range.EndUtc ? x.Quantity : 0),
+                Value = g.Sum(x => x.RentalAmount), Completed = g.Sum(x => x.CompletedAt != null &&
+                    x.CompletedAt < range.EndUtc ? 1 : 0) })
+            .OrderByDescending(x => x.Count).ThenByDescending(x => x.Quantity)
             .ThenBy(x => x.Id).Take(limit).ToListAsync(ct);
+        var brands = brandRows.Select(x => new EquipmentRank(x.Id, x.Name ?? "Không xác định",
+            x.Count, x.Quantity, x.Value, x.Completed)).ToList();
         return new EquipmentResponse(range.From, range.To, types, listings, brands);
     }
 
@@ -92,7 +128,8 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
         var rentalCandidates = from item in db.RentalItems.AsNoTracking()
                                join order in db.RentalOrders.AsNoTracking()
                                    on item.RentalOrderId equals order.RentalOrderId
-                               where order.PaidAt >= range.StartUtc && order.PaidAt < range.EndUtc ||
+                               where order.CreatedAt >= range.StartUtc && order.CreatedAt < range.EndUtc ||
+                                   order.PaidAt >= range.StartUtc && order.PaidAt < range.EndUtc ||
                                    item.ConfirmedAt >= range.StartUtc && item.ConfirmedAt < range.EndUtc ||
                                    item.RejectedAt >= range.StartUtc && item.RejectedAt < range.EndUtc ||
                                    item.ExpiredAt >= range.StartUtc && item.ExpiredAt < range.EndUtc ||
@@ -109,9 +146,23 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
             return new SuppliersResponse(range.From, range.To, page, pageSize, total, []);
         }
 
+        var requestCounts = await (from item in db.RentalItems.AsNoTracking()
+            join order in db.RentalOrders.AsNoTracking() on item.RentalOrderId equals order.RentalOrderId
+            where ids.Contains(item.SupplierId) && order.CreatedAt >= range.StartUtc && order.CreatedAt < range.EndUtc
+            select new { item.SupplierId, item.RentalOrderId })
+            .Distinct()
+            .GroupBy(x => x.SupplierId)
+            .Select(g => new { SupplierId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.SupplierId, x => x.Count, ct);
+
         var rentalStats = await (from item in db.RentalItems.AsNoTracking()
             join order in db.RentalOrders.AsNoTracking() on item.RentalOrderId equals order.RentalOrderId
-            where ids.Contains(item.SupplierId)
+            where ids.Contains(item.SupplierId) &&
+                (order.PaidAt >= range.StartUtc && order.PaidAt < range.EndUtc ||
+                 item.ConfirmedAt >= range.StartUtc && item.ConfirmedAt < range.EndUtc ||
+                 item.RejectedAt >= range.StartUtc && item.RejectedAt < range.EndUtc ||
+                 item.ExpiredAt >= range.StartUtc && item.ExpiredAt < range.EndUtc ||
+                 item.CompletedAt >= range.StartUtc && item.CompletedAt < range.EndUtc)
             group new { item, order } by item.SupplierId into g
             select new
             {
@@ -143,7 +194,8 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
         {
             rentalStats.TryGetValue(id, out var rental);
             financialStats.TryGetValue(id, out var money);
-            return new SupplierMetrics(id, rental?.Accepted ?? 0, rental?.Rejected ?? 0,
+            requestCounts.TryGetValue(id, out int requests);
+            return new SupplierMetrics(id, requests, rental?.Accepted ?? 0, rental?.Rejected ?? 0,
                 rental?.Timeout ?? 0, rental?.Completed ?? 0, rental?.RentalValue ?? 0,
                 money?.Payable ?? 0, money?.Paid ?? 0);
         }).ToList();

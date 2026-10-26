@@ -38,6 +38,30 @@ public sealed class DashboardProjectionTests
     }
 
     [Fact]
+    public async Task RefundRequestedFinancial_ReplayedWithNewMessageId_IsCountedOnce()
+    {
+        await using var db = CreateDb();
+        var ingestor = new PaymentAnalyticsEventIngestor(db);
+        Guid orderId = Guid.NewGuid();
+        object Payload() => new
+        {
+            refundRef = "REF-REQUEST-1",
+            rentalOrderId = orderId,
+            rentalItemId = (Guid?)null,
+            refundKind = "CancellationRefund",
+            amount = 1000m,
+            currency = "VND",
+            requestedAt = DateTimeOffset.UtcNow
+        };
+
+        Assert.Equal(PaymentAnalyticsIngestResult.Recorded,
+            await ingestor.IngestAsync(Envelope(Guid.NewGuid(), "RefundRequestedFinancial", orderId, Payload())));
+        Assert.Equal(PaymentAnalyticsIngestResult.Duplicate,
+            await ingestor.IngestAsync(Envelope(Guid.NewGuid(), "RefundRequestedFinancial", orderId, Payload())));
+        Assert.Single(await db.PaymentFinancialEvents.ToListAsync());
+    }
+
+    [Fact]
     public async Task OlderOrderCreatedEvent_PopulatesSnapshotWithoutRevertingPaidStatus()
     {
         await using var db = CreateDb();

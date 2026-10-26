@@ -41,6 +41,8 @@ public sealed class PaymentAnalyticsEventIngestor(AnalyticsServiceDbContext dbCo
                 Map(envelope, Deserialize<InvoicePaidFinancialPayload>(envelope.Payload)),
             PaymentAnalyticsEventTypes.RentalItemFinancialSettled =>
                 Map(envelope, Deserialize<RentalItemFinancialSettledPayload>(envelope.Payload)),
+            PaymentAnalyticsEventTypes.RefundRequestedFinancial =>
+                Map(envelope, Deserialize<RefundRequestedFinancialPayload>(envelope.Payload)),
             PaymentAnalyticsEventTypes.RefundCompletedFinancial =>
                 Map(envelope, Deserialize<RefundCompletedFinancialPayload>(envelope.Payload)),
             PaymentAnalyticsEventTypes.SupplierPayoutCompleted =>
@@ -136,6 +138,16 @@ public sealed class PaymentAnalyticsEventIngestor(AnalyticsServiceDbContext dbCo
                 row.RefundKind = refund.RefundKind;
                 row.Amount = refund.Amount;
                 row.CompletedAt = refund.CompletedAt.ToUniversalTime();
+                break;
+            case RefundRequestedFinancialPayload refund:
+                RequireVnd(refund.Currency);
+                row.LogicalEventId = $"{envelope.MessageType}:{refund.RefundRef}";
+                row.RefundRef = refund.RefundRef;
+                row.RentalOrderId = refund.RentalOrderId;
+                row.RentalItemId = refund.RentalItemId;
+                row.RefundKind = refund.RefundKind;
+                row.Amount = refund.Amount;
+                row.RequestedAt = refund.RequestedAt.ToUniversalTime();
                 break;
             case SupplierPayoutCompletedPayload payout:
                 RequireVnd(payout.Currency);

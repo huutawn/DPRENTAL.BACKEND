@@ -119,6 +119,9 @@ namespace AnalyticsService.Domain.Migrations
                     b.Property<Guid?>("RenterId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("RequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("SettlementId")
                         .HasColumnType("uuid");
 
@@ -143,6 +146,8 @@ namespace AnalyticsService.Domain.Migrations
                         .IsUnique();
 
                     b.HasIndex("MessageType", "OccurredAt");
+
+                    b.HasIndex("MessageType", "RefundRef");
 
                     b.HasIndex("RentalOrderId", "MessageType");
 
@@ -255,6 +260,8 @@ namespace AnalyticsService.Domain.Migrations
 
                     b.HasIndex("SupplierId", "RejectedAt");
 
+                    b.HasIndex("SupplierId", "RentalOrderId");
+
                     b.ToTable("analytics_rental_items", (string)null);
                 });
 
@@ -279,6 +286,9 @@ namespace AnalyticsService.Domain.Migrations
                     b.Property<DateTimeOffset?>("PaidAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("RejectedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -298,6 +308,8 @@ namespace AnalyticsService.Domain.Migrations
                     b.HasIndex("ExpiredAt");
 
                     b.HasIndex("PaidAt");
+
+                    b.HasIndex("RejectedAt");
 
                     b.HasIndex("Status", "PaidAt");
 

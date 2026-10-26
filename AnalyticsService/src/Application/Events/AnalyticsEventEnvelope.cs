@@ -25,5 +25,6 @@ public static class PaymentAnalyticsEventTypes
     public const string InvoicePaidFinancial = "InvoicePaidFinancial";
     public const string RentalItemFinancialSettled = "RentalItemFinancialSettled";
     public const string RefundCompletedFinancial = "RefundCompletedFinancial";
+    public const string RefundRequestedFinancial = "RefundRequestedFinancial";
     public const string SupplierPayoutCompleted = "SupplierPayoutCompleted";
 }
