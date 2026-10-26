@@ -1,0 +1,4 @@
+# Thư mục này chỉ chứa migration do EF Core tự sinh.
+# Đánh dấu là code tự sinh để các quy tắc phân tích code (CA...) không áp dụng.
+[*.cs]
+generated_code = true

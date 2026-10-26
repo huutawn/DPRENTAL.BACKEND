@@ -1,4 +1,6 @@
+using Dprental.AnalyticsService.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+
 
 namespace Dprental.AnalyticsService.Domain.Repositories;
 
@@ -8,8 +10,18 @@ public sealed class AnalyticsServiceDbContext : DbContext
     {
     }
 
+    public DbSet<RentalOrderFact> RentalOrderFacts => Set<RentalOrderFact>();
+    public DbSet<RentalItemFact> RentalItemFacts => Set<RentalItemFact>();
+    public DbSet<FinancialSettlementFact> FinancialSettlementFacts => Set<FinancialSettlementFact>();
+    public DbSet<RefundFact> RefundFacts => Set<RefundFact>();
+    public DbSet<SupplierPayoutFact> SupplierPayoutFacts => Set<SupplierPayoutFact>();
+    public DbSet<AnalyticsInboxMessage> AnalyticsInboxMessages => Set<AnalyticsInboxMessage>();
+    public DbSet<AnalyticsDeadLetter> AnalyticsDeadLetters => Set<AnalyticsDeadLetter>();
+
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(AnalyticsServiceDbContext).Assembly);
     }
 }

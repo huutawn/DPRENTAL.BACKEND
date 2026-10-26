@@ -2,33 +2,35 @@ using Dprental.AnalyticsService.Common.Enums;
 
 namespace Dprental.AnalyticsService.Domain.Entities;
 
-/// <sumary>
-///  Một dòng read model cho một đơn thuê. Chỉ chứa dữ liệu, không chứa quy tắc nghiệp vụ.
-/// </sumary>
-/// 
-
+/// <summary>
+/// Một dòng read model cho một đơn thuê. Chỉ chứa dữ liệu, không chứa quy tắc nghiệp vụ.
+/// </summary>
 public sealed class RentalOrderFact
 {
-	public Guid OrderId { get; set; }
+    public Guid OrderId { get; set; } // Khóa chính; mọi event của đơn đều có rentalOrderId
 
-	// Các cột chỉ có trong RentalOrderCreated → nullable (dòng tạm khi event đến sai thứ tự)
-	public string? OrderCode { get; set; } //mã đơn hàng
-	public Guid? RenterId { get; set; } //mã người thuê
-	public long? RentalAmount { get; set; } // Số tiền thuê
-	public long? DepositAmount { get; set; } // Tiền cọc
-	public int? ItemCount { get; set; } // số dòng thuê
-	public int? SupplierCount { get; set; } // Số lượng nhà cung cấp khác nhau
+    // Các cột chỉ có trong RentalOrderCreated → nullable (dòng tạm khi event đến sai thứ tự)
+    public string? OrderCode { get; set; }   // Mã đơn dễ đọc, ví dụ RNT-20261023-0001
+    public Guid? RenterId { get; set; }      // Người thuê
+    public long? RentalAmount { get; set; }  // Tổng tiền thuê của đơn (VND); tham khảo, đối soát
+    public long? DepositAmount { get; set; } // Tổng tiền cọc (VND); không phải doanh thu
+    public int? ItemCount { get; set; }      // Số dòng thuê trong đơn
+    public int? SupplierCount { get; set; }  // Số nhà cung cấp khác nhau trong đơn
 
-	public DateTimeOffset? CreatedAt { get; set; } //thời gian tạo
-	public DateTimeOffset? PaidAt { get; set; } //thời gian thanh toán
-	public DateTimeOffset? CompletedAt { get; set; } // thời điểm đơn thuê hoàn tất toàn bộ vòng đời
-	public DateTimeOffset? CancelledAt { get; set; } // thời điểm đơn hàng bị hủy vĩnh viễn
-	public DateTimeOffset? ExpiredAt { get; set; }// thời điểm đơn bị chuyển sang trạng thái Hết hạn
-	public DateTimeOffset? RejectedAt { get; set; } // tất cả các item trong đơn đều bị NCC từ chối
+    // Mỗi mốc do một event cấp đơn điền; null khi mốc đó chưa xảy ra
+    public DateTimeOffset? CreatedAt { get; set; }   // RentalOrderCreated → TotalOrders
+    public DateTimeOffset? PaidAt { get; set; }      // RentalOrderPaid → PaidOrders
+    public DateTimeOffset? CompletedAt { get; set; } // RentalOrderCompleted → CompletedOrders
+    public DateTimeOffset? CancelledAt { get; set; } // RentalOrderCancelled → CancelledOrders
+    public DateTimeOffset? ExpiredAt { get; set; }   // RentalOrderExpired → ExpiredOrders
+    public DateTimeOffset? RejectedAt { get; set; }  // RentalOrderRejected (chờ R1) → RejectedOrders
 
-	public OrderFactStatus Status { get; set; } //trạng thái thực tế của đơn hàng
-	public long? LastVersion { get; set; } // Phiên bản nghiệp vụ từ Kafka
+    public OrderFactStatus Status { get; set; } // Trạng thái hiện tại; dòng tạm mặc định PendingPayment
 
-	// Ánh xạ tới cột hệ thống xmin của PostgreSQL để chống ghi đè đồng thời
-	public uint RowVersion { get; set; } //Phiên bản dòng vật lý trong PostgreSQL
+    // orderVersion của event cuối đã đổi Status; dùng để chặn event cũ kéo trạng thái lùi.
+    // Null khi chỉ mới nhận event lịch sử không có version.
+    public long? LastVersion { get; set; }
+
+    // Ánh xạ tới cột hệ thống xmin của PostgreSQL để chống ghi đè đồng thời
+    public uint RowVersion { get; set; }
 }
