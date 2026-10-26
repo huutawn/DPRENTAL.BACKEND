@@ -1,0 +1,143 @@
+# Maintained on inventory/develop-ci-cd; inventory/develop intentionally omits this workflow.
+name: InventoryService CI/CD (dev)
+
+on:
+  push:
+    branches:
+      - inventory/develop-ci-cd
+
+permissions:
+  contents: read
+
+jobs:
+  validate-deployment:
+    name: Validate deployment scripts without infrastructure access
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell syntax and deployment regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in scripts/deploy-*.sh; do bash -n "$script"; done
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deploy*.py' -v
+
+  publish:
+    needs: validate-deployment
+    name: Publish ${{ matrix.name }} image to GHCR
+    runs-on: ubuntu-24.04
+    environment: dev
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: runtime
+            target: runtime
+            image_name: dprental-inventory
+          - name: migrator
+            target: migrator
+            image_name: dprental-inventory-migrator
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate GHCR namespace
+        id: image-name
+        env:
+          IMAGE_NAMESPACE: ${{ vars.GHCR_IMAGE_NAMESPACE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE_NAMESPACE"
+          case "$IMAGE_NAMESPACE" in
+            *[!a-z0-9._-]* | *[A-Z]*)
+              echo 'GHCR_IMAGE_NAMESPACE must be lowercase and contain only a-z, 0-9, dot, underscore, or hyphen.' >&2
+              exit 1
+              ;;
+          esac
+          printf 'namespace=%s\n' "$IMAGE_NAMESPACE" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish InventoryService ${{ matrix.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: true
+          tags: ghcr.io/${{ steps.image-name.outputs.namespace }}/${{ matrix.image_name }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+  deployment-policy:
+    name: Verify published images are readable from GHCR
+    needs: publish
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Login to GHCR with read-only package permission
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify every published image is readable without pulling layers
+        env:
+          IMAGE_NAMESPACE: ${{ vars.GHCR_IMAGE_NAMESPACE }}
+          RELEASE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_NAMESPACE" =~ ^[a-z0-9][a-z0-9._-]*$ ]]
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for image in dprental-inventory dprental-inventory-migrator; do
+            timeout 60s docker manifest inspect "ghcr.io/$IMAGE_NAMESPACE/$image:$RELEASE_SHA" >/dev/null
+            printf 'Readable image: %s\n' "$image"
+          done
+
+  deploy-dev:
+    name: Deploy inventoryservice locally on Ubuntu VM
+    needs: [publish, deployment-policy]
+    if: ${{ github.event_name == 'push' && github.repository == 'huutawn/DPRENTAL.BACKEND' && github.ref == 'refs/heads/inventory/develop-ci-cd' && vars.DEV_DEPLOY_ENABLED == 'true' }}
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - dprental-deploy
+    environment: dev
+    timeout-minutes: 45
+    concurrency:
+      group: dprental-dev
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Deploy approved revision using administrator-owned entrypoint
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test -n "$GHCR_USERNAME"
+          test -n "$GHCR_TOKEN"
+          printf '%s\n' "$GHCR_USERNAME" "$GHCR_TOKEN" | sudo -n /usr/local/sbin/dprental-deploy inventory "$RELEASE_SHA"

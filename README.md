@@ -287,17 +287,21 @@ Inventory outage. Smoke test cũng đi qua Gateway thực. Process, database và
 Không trỏ harness vào PostgreSQL production. Meilisearch/Kafka không bị mock; các
 request discovery này không dùng search keyword và không cần search index sẵn sàng.
 
-## Recommendation: contract tests và chu kỳ
+## CI/CD dev với self-hosted runner
 
-`sort=recommended` dùng snapshot điểm cố định theo chu kỳ 5 phút và lựa chọn có trọng số tại PostgreSQL. Điểm cao tăng xác suất, không luôn đứng đầu. Các sort khác và keyword relevance giữ nguyên. Snapshot hết hạn tuyệt đối tại cuối chu kỳ; thay đổi availability hoặc qua chu kỳ có thể dịch chuyển OFFSET pagination. Cache FE có thể trì hoãn việc thấy kết quả mới.
+Workflow chỉ nhận push vào `inventory/develop-ci-cd`. Build/publish vẫn chạy trên
+`ubuntu-24.04`, giữ nguyên Dockerfile, build context và toàn bộ targets/tag full SHA.
+CI kiểm thử script deployment trên runner hosted; job deploy chỉ được gửi tới
+`self-hosted, linux, x64, dprental-deploy` khi repository variable
+`DEV_DEPLOY_ENABLED=true` được bật theo phê duyệt Phase 3. Mặc định job deploy được skip.
 
-Canonical contract thuộc RecommendationService. Hai schema behavior được nhúng vào test assembly từ `Contracts/Recommendation`, kèm commit và SHA-256 trong manifest. Đây là fixture versioned, không chỉnh tay. Checkout Inventory độc lập có thể build/test mà không cần RecommendationService hoặc đường dẫn home của tác giả.
+Deployment gọi entrypoint do root quản lý; không checkout shell để chạy bằng sudo,
+không dùng SSH trong pipeline. Shared release state được khóa bằng `flock`, sử dụng
+candidate, backup và phê duyệt có hạn theo SHA; chỉ ghi `release.env` sau health/smoke.
+
+Xem [hướng dẫn vận hành và recovery](docs/SELF_HOSTED_DEPLOYMENT.md) và
+[audit/validation](docs/CICD_AUDIT.md). Không cấp runner quyền Docker trực tiếp.
 
 ```bash
-python3 scripts/sync-recommendation-contracts.py --check
-python3 scripts/sync-recommendation-contracts.py --check --source /path/to/RecommendationService
+python3 -m unittest discover -s scripts/tests -p 'test_deploy*.py' -v
 ```
-
-Để cập nhật contract có chủ đích, dùng `--update --source /path/to/RecommendationService --revision <commit>` rồi review diff fixtures/manifest và chạy cả hai test suites. Test bình thường không truy cập mạng để tải schemas.
-
-View/search ghi nhận cả cache hit và miss qua outbox. GET thành công là tín hiệu request; không thể phân biệt SSR/prefetch nếu client/proxy không chuyển header nhận diện. Personal snapshot có 0–20 types, global có 0–300 listings, ít nhất một danh sách không rỗng. Lỗi ghi outbox không làm hỏng kết quả đọc; client cancellation vẫn truyền ra ngoài.

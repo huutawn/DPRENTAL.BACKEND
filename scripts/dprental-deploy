@@ -1,0 +1,142 @@
+#!/usr/bin/python3 -I
+"""Root-owned deployment entrypoint. Install manually only after VM review."""
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+
+SERVICES = {
+    'auth': 'authservice', 'catalog': 'catalogservice', 'gateway': 'gateway',
+    'inventory': 'inventoryservice', 'media': 'mediaservice',
+    'payment': 'paymentservice', 'recommendation': 'recommendationservice',
+    'rental': 'rentalservice',
+}
+DEPLOY = Path('/opt/dprental/dev')
+LIBEXEC = Path('/usr/local/libexec/dprental')
+CONFIG = Path('/etc/dprental-deploy')
+
+
+def trusted_path(path):
+    """Reject symlinks, non-root owners, write bits and extended POSIX ACLs."""
+    for item in (path, *path.parents):
+        info = item.lstat()
+        if (info.st_uid != 0 or info.st_mode & 0o022
+                or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))
+                or 'system.posix_acl_access' in os.listxattr(item)
+                or 'system.posix_acl_default' in os.listxattr(item)):
+            raise ValueError(f'Untrusted deployment path: {item}')
+
+
+def trusted_tree(root):
+    trusted_path(root)
+    for directory, children, files in os.walk(root, followlinks=False):
+        for name in children + files:
+            trusted_path(Path(directory) / name)
+
+
+def validate_arguments(args):
+    if len(args) != 2 or args[0] not in SERVICES or not re.fullmatch('[0-9a-f]{40}', args[1]):
+        raise ValueError('Usage: dprental-deploy <allowed-service> <40-lowercase-hex-SHA>')
+    return args
+
+
+def compose_preflight(environment):
+    """Read-only validation. Keep rendered secrets out of stdout and diagnostics."""
+    with tempfile.TemporaryDirectory() as config:
+        environment = dict(environment, DOCKER_CONFIG=config)
+        result = subprocess.run([
+            '/usr/bin/docker', 'compose', '--project-name', 'dprental-dev',
+            '--project-directory', str(DEPLOY), '--file', str(DEPLOY / 'compose.yaml'),
+            '--env-file', str(DEPLOY / '.env'), '--env-file', str(DEPLOY / 'release.env'),
+            '--profile', 'migration', 'config', '--format', 'json'],
+            env=environment, capture_output=True, timeout=60)
+        if result.returncode:
+            raise ValueError('Compose configuration invalid; inspect locally as administrator.')
+        validate_compose(json.loads(result.stdout))
+
+
+def validate_compose(model):
+    for service in model.get('services', {}).values():
+        if (service.get('privileged') or service.get('cap_add') or service.get('devices')
+                or service.get('device_cgroup_rules') or service.get('volumes_from')
+                or service.get('use_api_socket')
+                or service.get('pid') == 'host' or service.get('ipc') == 'host'
+                or service.get('network_mode') == 'host'):
+            raise ValueError('Compose requests forbidden host privileges.')
+        for mount in service.get('volumes', []):
+            if mount.get('type') == 'bind':
+                source = Path(mount['source'])
+                if not mount.get('read_only') or not source.is_absolute():
+                    raise ValueError('Only trusted, read-only bind mounts are permitted.')
+                trusted_tree(source) if source.is_dir() else trusted_path(source)
+            elif mount.get('type') not in ('volume', 'tmpfs'):
+                raise ValueError('Unsupported mount type.')
+    for kind in ('secrets', 'configs'):
+        for entry in model.get(kind, {}).values():
+            if 'file' in entry:
+                trusted_path(Path(entry['file']))
+    for volume in model.get('volumes', {}).values():
+        if volume.get('driver_opts') or volume.get('driver', 'local') != 'local':
+            raise ValueError('Volume driver/options require separate security design.')
+        # Existing volumes can hide local-driver host bind options even when YAML does not.
+        inspected = subprocess.run(['/usr/bin/docker', 'volume', 'inspect', volume['name']],
+                                   capture_output=True, timeout=20,
+                                   env={'PATH': '/usr/bin:/bin', 'HOME': '/root'})
+        if inspected.returncode:
+            raise ValueError('Expected runtime volume is missing or cannot be inspected.')
+        for actual in json.loads(inspected.stdout):
+            if actual.get('Options') or actual.get('Driver') != 'local':
+                raise ValueError('Existing volume has unsafe driver/options.')
+
+
+def main():
+    service, sha = validate_arguments(sys.argv[1:])
+    if os.geteuid() != 0:
+        raise ValueError('Entrypoint requires administrator installation and sudo.')
+    # Clear overrides before TLS/API or Docker preflight, not only before exec.
+    os.environ.clear()
+    os.environ.update({'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/root', 'LANG': 'C.UTF-8'})
+    os.umask(0o077)
+    os.chdir('/')
+    trusted_path(Path('/usr/local/sbin/dprental-deploy'))
+    # The runner cannot traverse this boundary, including release state/backups.
+    for root in (DEPLOY, CONFIG):
+        trusted_tree(root)
+        if root.stat().st_mode & 0o077:
+            raise ValueError(f'Directory must be root-only (0700): {root}')
+    trusted_tree(LIBEXEC)
+    for name in ('.env', 'release.env', 'compose.yaml'):
+        trusted_path(DEPLOY / name)
+    namespace = (CONFIG / 'namespace').read_text().strip()
+    if not re.fullmatch('[a-z0-9][a-z0-9._-]*', namespace):
+        raise ValueError('Invalid administrator-configured GHCR namespace.')
+    username = sys.stdin.readline(102).rstrip('\r\n')
+    token = sys.stdin.readline(8194).rstrip('\r\n')
+    if not re.fullmatch('[A-Za-z0-9_-]{1,100}', username):
+        raise ValueError('Invalid GitHub username on stdin.')
+    # Tokens are opaque: do not assume an alphanumeric-only GitHub token format.
+    # Controls/whitespace are rejected before constructing an HTTP header.
+    if not 1 <= len(token) <= 8192 or any(not 33 <= ord(char) <= 126 for char in token):
+        raise ValueError('Invalid token length or control/whitespace characters on stdin.')
+    environment = {
+        'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/root', 'LANG': 'C.UTF-8',
+        'DPR_DEPLOY_DIRECTORY': str(DEPLOY), 'GHCR_IMAGE_NAMESPACE': namespace,
+        'GHCR_USERNAME': username, 'GHCR_TOKEN': token,
+    }
+    compose_preflight({key: value for key, value in environment.items() if key != 'GHCR_TOKEN'})
+    script = LIBEXEC / f'deploy-{SERVICES[service]}.sh'
+    # Do not execute anything in the Actions checkout or preserve caller environment.
+    os.execve('/bin/bash', ['bash', str(script), sha], environment)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        # HTTP exceptions do not contain the Authorization header. Never dump payloads.
+        print(f'Deployment denied: {type(error).__name__}: {error}', file=sys.stderr)
+        sys.exit(1)
