@@ -33,7 +33,7 @@ public sealed class RentalCheckoutController(
     /// <response code="400">Thiếu hoặc sai header Idempotency-Key, dữ liệu gửi lên không hợp lệ (Checkout.InvalidRequest) hoặc ngày thuê không còn hợp lệ (Checkout.InvalidRentalDates).</response>
     /// <response code="401">Người dùng chưa được xác thực.</response>
     /// <response code="403">Người dùng không có quyền Renter hoặc chưa hoàn thiện hồ sơ (Checkout.ProfileIncomplete).</response>
-    /// <response code="404">Không tìm thấy giỏ hàng, dòng giỏ đã chọn, hoặc địa chỉ trong sổ của người thuê (Address.NotFound).</response>
+    /// <response code="404">Không tìm thấy giỏ hàng, dòng giỏ đã chọn, địa chỉ trong sổ của người thuê (Address.NotFound), hoặc tài khoản trong sổ tài khoản của người thuê (BankAccount.NotFound).</response>
     /// <response code="409">Điều khoản đã đổi phiên bản, đang có lần gửi đơn đang xử lý hoặc đơn chưa thanh toán, thiết bị không còn cho thuê hoặc không đủ số lượng, giá thay đổi, hoặc Idempotency-Key đã dùng cho yêu cầu khác.</response>
     /// <response code="503">InventoryService tạm thời không trả được thông tin thiết bị (Checkout.DependencyUnavailable).</response>
     /// <returns>Mã thao tác gửi đơn và đường dẫn xem trạng thái.</returns>

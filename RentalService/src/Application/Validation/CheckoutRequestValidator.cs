@@ -31,7 +31,7 @@ public static partial class CheckoutRequestValidator
 
         ValidateSelection(request, errors);
         ValidateDeliverySource(request, errors);
-        ValidateRefundAccount(request.RefundAccount, errors);
+        ValidateRefundSource(request, errors);
 
 
         if (!request.TermsAccepted)
@@ -176,24 +176,58 @@ public static partial class CheckoutRequestValidator
         }
     }
 
-    private static void ValidateRefundAccount(CheckoutRefundAccountDto? refundAccount, List<CheckoutFieldError> errors)
+    private static void ValidateRefundSource(CheckoutRequest request, List<CheckoutFieldError> errors)
     {
-        if (refundAccount is null)
+        if (request.RefundAccountId is not { } refundAccountId)
         {
-            errors.Add(new("refundAccount", Required, "Thiếu tài khoản nhận hoàn tiền."));
+            if (request.RefundAccount is null)
+            {
+                errors.Add(new("refundAccount", Required, "Thiếu tài khoản nhận hoàn tiền."));
+                return;
+            }
+
+            ValidateBankAccount(
+                request.RefundAccount.BankCode,
+                request.RefundAccount.AccountNumber,
+                request.RefundAccount.AccountHolderName,
+                "refundAccount.",
+                errors);
             return;
         }
 
-        CheckLength(refundAccount.BankCode, 1, 50, "refundAccount.bankCode", "Ngân hàng nhận hoàn tiền", errors);
-        CheckLength(refundAccount.AccountHolderName, 2, 100, "refundAccount.accountHolderName", "Tên chủ tài khoản", errors);
-
-        if (string.IsNullOrWhiteSpace(refundAccount.AccountNumber))
+        if (request.RefundAccount is not null)
         {
-            errors.Add(new("refundAccount.accountNumber", Required, "Thiếu số tài khoản nhận hoàn tiền."));
+            errors.Add(new("refundAccountId", Conflicting, "Chỉ gửi một trong hai: refundAccountId hoặc refundAccount."));
+            return;
         }
-        else if (!AccountNumberRegex().IsMatch(refundAccount.AccountNumber.Trim()))
+
+        if (refundAccountId == Guid.Empty)
         {
-            errors.Add(new("refundAccount.accountNumber", InvalidFormat, "Số tài khoản gồm từ 6 đến 20 chữ số."));
+            errors.Add(new("refundAccountId", InvalidFormat, "Mã tài khoản nhận hoàn tiền không hợp lệ."));
+        }
+    }
+
+    /// <summary>
+    /// Luật chung cho một tài khoản ngân hàng nhận hoàn tiền: dùng cho tài khoản nhập tay lúc checkout và sổ tài khoản của người thuê.
+    /// Tên ô trong lỗi có thêm tiền tố <c>fieldPrefix</c>, ví dụ <c>refundAccount.</c>; sổ tài khoản dùng chuỗi rỗng.
+    /// </summary>
+    internal static void ValidateBankAccount(
+        string? bankCode,
+        string? accountNumber,
+        string? accountHolderName,
+        string fieldPrefix,
+        List<CheckoutFieldError> errors)
+    {
+        CheckLength(bankCode, 1, 50, $"{fieldPrefix}bankCode", "Ngân hàng nhận hoàn tiền", errors);
+        CheckLength(accountHolderName, 2, 100, $"{fieldPrefix}accountHolderName", "Tên chủ tài khoản", errors);
+
+        if (string.IsNullOrWhiteSpace(accountNumber))
+        {
+            errors.Add(new($"{fieldPrefix}accountNumber", Required, "Thiếu số tài khoản nhận hoàn tiền."));
+        }
+        else if (!AccountNumberRegex().IsMatch(accountNumber.Trim()))
+        {
+            errors.Add(new($"{fieldPrefix}accountNumber", InvalidFormat, "Số tài khoản gồm từ 6 đến 20 chữ số."));
         }
     }
 

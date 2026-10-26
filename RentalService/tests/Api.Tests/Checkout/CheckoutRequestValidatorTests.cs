@@ -181,4 +181,28 @@ public sealed class CheckoutRequestValidatorTests
 
         Assert.Contains(CheckoutRequestValidator.Validate(request), e => e.Field == "delivery");
     }
+
+    [Fact]
+    public void Validate_AcceptsRefundAccountIdInsteadOfRefundAccount()
+    {
+        CheckoutRequest request = ValidRequest() with { RefundAccount = null, RefundAccountId = Guid.NewGuid() };
+
+        Assert.Empty(CheckoutRequestValidator.Validate(request));
+    }
+
+    [Fact]
+    public void Validate_RejectsRefundAccountIdAndRefundAccountTogether()
+    {
+        CheckoutRequest request = ValidRequest() with { RefundAccountId = Guid.NewGuid() };
+
+        Assert.Contains(CheckoutRequestValidator.Validate(request), e => e.Field == "refundAccountId" && e.Code == "CONFLICTING");
+    }
+
+    [Fact]
+    public void Validate_RejectsEmptyRefundAccountId()
+    {
+        CheckoutRequest request = ValidRequest() with { RefundAccount = null, RefundAccountId = Guid.Empty };
+
+        Assert.Contains(CheckoutRequestValidator.Validate(request), e => e.Field == "refundAccountId" && e.Code == "INVALID_FORMAT");
+    }
 }
