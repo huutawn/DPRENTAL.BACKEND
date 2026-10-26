@@ -162,7 +162,6 @@ public sealed class OrderHubUnitTests
     {
         var options = Options.Create(new OrderHubOptions
         {
-            HubPath = "/api/v1/rental/hubs/orders",
             AllowedOrigins = ["http://localhost:3000", "https://dprental.com"]
         });
 
@@ -185,7 +184,6 @@ public sealed class OrderHubUnitTests
     {
         var options = Options.Create(new OrderHubOptions
         {
-            HubPath = "/api/v1/rental/hubs/orders",
             AllowedOrigins = ["http://localhost:3000", "https://dprental.com"]
         });
 
@@ -210,7 +208,6 @@ public sealed class OrderHubUnitTests
     {
         var options = Options.Create(new OrderHubOptions
         {
-            HubPath = "/api/v1/rental/hubs/orders",
             AllowedOrigins = ["http://localhost:3000", "https://dprental.com"]
         });
 

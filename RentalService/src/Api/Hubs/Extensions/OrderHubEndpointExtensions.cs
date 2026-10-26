@@ -21,14 +21,7 @@ public static class OrderHubEndpointExtensions
 
     public static HubEndpointConventionBuilder MapOrderHub(this IEndpointRouteBuilder endpoints)
     {
-        var options = endpoints.ServiceProvider.GetService<IOptions<OrderHubOptions>>()?.Value
-            ?? new OrderHubOptions();
-
-        string hubPath = string.IsNullOrWhiteSpace(options.HubPath)
-            ? OrderHubOptions.DefaultHubPath
-            : options.HubPath;
-
-        return endpoints.MapHub<OrderHub>(hubPath, hubOptions =>
+        return endpoints.MapHub<OrderHub>(OrderHubSecurityConstants.HubEndpoint, hubOptions =>
         {
             hubOptions.Transports = HttpTransportType.WebSockets;
             hubOptions.CloseOnAuthenticationExpiration = true;

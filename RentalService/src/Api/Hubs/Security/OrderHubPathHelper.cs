@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Security;
 using Microsoft.AspNetCore.Http;
 
 namespace Dprental.RentalService.Api.Hubs.Security;
@@ -7,15 +8,11 @@ namespace Dprental.RentalService.Api.Hubs.Security;
 /// </summary>
 public static class OrderHubPathHelper
 {
-    public static readonly PathString DefaultHubPath = new("/api/v1/rental/hubs/orders");
+    public static readonly PathString CanonicalHubPath = new(OrderHubSecurityConstants.HubEndpoint);
 
-    public static bool IsOrderHubPath(PathString path, PathString? configuredPath = null)
+    public static bool IsOrderHubPath(PathString path)
     {
-        PathString baseHubPath = configuredPath.HasValue && configuredPath.Value.HasValue
-            ? configuredPath.Value
-            : DefaultHubPath;
-
-        if (!path.StartsWithSegments(baseHubPath, StringComparison.OrdinalIgnoreCase, out PathString remaining))
+        if (!path.StartsWithSegments(CanonicalHubPath, StringComparison.OrdinalIgnoreCase, out PathString remaining))
         {
             return false;
         }

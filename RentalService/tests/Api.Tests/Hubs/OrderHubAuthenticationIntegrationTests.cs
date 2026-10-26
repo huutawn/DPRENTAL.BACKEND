@@ -227,6 +227,32 @@ public sealed class OrderHubAuthenticationIntegrationTests : IClassFixture<Order
         Assert.Equal(HttpStatusCode.OK, nonBrowserResp.StatusCode);
     }
 
+    [Fact]
+    public async Task FakePrefix_OrInvalidDescendant_DoesNotReceiveCookieAuth()
+    {
+        Guid userId = Guid.NewGuid();
+        string token = _factory.CreateToken(userId);
+
+        using HttpClient client = _factory.CreateClient();
+        // 1. Fake prefix: /api/v1/rental/hubs/orders_fake/negotiate -> not OrderHub route, not matched by hub or negotiate, not authenticated via cookie
+        using var fakePrefixReq = new HttpRequestMessage(HttpMethod.Post, "/api/v1/rental/hubs/orders_fake/negotiate");
+        fakePrefixReq.Headers.Add("Cookie", $"accessToken={token}");
+        using var fakePrefixResp = await client.SendAsync(fakePrefixReq);
+        Assert.True(fakePrefixResp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized);
+
+        // 2. Invalid descendant: /api/v1/rental/hubs/orders/extra/child -> not negotiate, not matched
+        using var descendantReq = new HttpRequestMessage(HttpMethod.Post, "/api/v1/rental/hubs/orders/extra/child");
+        descendantReq.Headers.Add("Cookie", $"accessToken={token}");
+        using var descendantResp = await client.SendAsync(descendantReq);
+        Assert.True(descendantResp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized);
+
+        // 3. Helper unit check: OrderHubPathHelper returns false
+        Assert.False(Api.Hubs.Security.OrderHubPathHelper.IsOrderHubPath(new Microsoft.AspNetCore.Http.PathString("/api/v1/rental/hubs/orders_fake/negotiate")));
+        Assert.False(Api.Hubs.Security.OrderHubPathHelper.IsOrderHubPath(new Microsoft.AspNetCore.Http.PathString("/api/v1/rental/hubs/orders/extra/child")));
+        Assert.False(Api.Hubs.Security.OrderHubPathHelper.IsOrderHubPath(new Microsoft.AspNetCore.Http.PathString("/api/v1/rental/orders")));
+        Assert.True(Api.Hubs.Security.OrderHubPathHelper.IsOrderHubPath(new Microsoft.AspNetCore.Http.PathString("/api/v1/rental/hubs/orders")));
+        Assert.True(Api.Hubs.Security.OrderHubPathHelper.IsOrderHubPath(new Microsoft.AspNetCore.Http.PathString("/api/v1/rental/hubs/orders/negotiate")));
+    }
     public sealed class HubApiFactory : WebApplicationFactory<Program>
     {
         private const string Issuer = "dprental-authservice-dev";
@@ -247,7 +273,6 @@ public sealed class OrderHubAuthenticationIntegrationTests : IClassFixture<Order
                     ["Authentication:Jwt:Audience"] = Audience,
                     ["Authentication:Jwt:JwksUri"] = "http://localhost/test-jwks",
                     ["InternalAuthentication:ApiKey"] = "dev-internal-api-key-dprental-2026",
-                    ["OrderHub:HubPath"] = "/api/v1/rental/hubs/orders",
                     ["OrderHub:AllowedOrigins:0"] = "http://localhost:3000",
                     ["OrderHub:AllowedOrigins:1"] = "https://dprental.com"
                 }));

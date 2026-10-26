@@ -21,7 +21,7 @@ public sealed partial class OrderHubOriginGuardMiddleware(
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (OrderHubPathHelper.IsOrderHubPath(context.Request.Path, _options.HubPath))
+        if (OrderHubPathHelper.IsOrderHubPath(context.Request.Path))
         {
             if (context.Request.Headers.TryGetValue("Origin", out var originValues))
             {

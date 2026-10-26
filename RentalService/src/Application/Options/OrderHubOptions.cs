@@ -6,9 +6,7 @@ namespace Dprental.RentalService.Application.Options;
 public sealed class OrderHubOptions
 {
     public const string SectionName = "OrderHub";
-    public const string DefaultHubPath = "/api/v1/rental/hubs/orders";
 
-    public string HubPath { get; set; } = DefaultHubPath;
     public string[] AllowedOrigins { get; set; } = [];
     public bool EnableDetailedErrors { get; set; }
     public int HandshakeTimeoutSeconds { get; set; } = 15;
