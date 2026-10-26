@@ -12,7 +12,9 @@ public interface IRenterBankAccountService
 
     Task<Result<RenterBankAccountResponse>> GetAsync(Guid renterId, Guid bankAccountId, CancellationToken cancellationToken = default);
 
-    Task<Result<RenterBankAccountResponse>> CreateAsync(Guid renterId, CreateRenterBankAccountRequest request, CancellationToken cancellationToken = default);
+    Task<Result<RenterBankAccountResponse>> CreateAsync(Guid renterId, SaveRenterBankAccountRequest request, CancellationToken cancellationToken = default);
+
+    Task<Result<RenterBankAccountResponse>> UpdateAsync(Guid renterId, Guid bankAccountId, SaveRenterBankAccountRequest request, CancellationToken cancellationToken = default);
 
     Task<Result> DeleteAsync(Guid renterId, Guid bankAccountId, CancellationToken cancellationToken = default);
 

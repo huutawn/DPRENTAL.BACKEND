@@ -6,7 +6,7 @@ namespace Dprental.RentalService.Domain.Entities;
 
 /// <summary>
 /// Một tài khoản ngân hàng nhận hoàn tiền trong sổ tài khoản của người thuê. Checkout chép tài khoản vào đơn,
-/// nên xóa tài khoản ở đây không làm đổi các đơn đã đặt. Không sửa tại chỗ: đổi tài khoản thì xóa rồi thêm mới.
+/// nên sửa hoặc xóa tài khoản ở đây không làm đổi các đơn đã đặt.
 /// </summary>
 [Table("renter_bank_accounts", Schema = "rental")]
 [Index(nameof(RenterId), nameof(BankCode), nameof(AccountNumber), IsUnique = true)]
@@ -55,6 +55,14 @@ public class RenterBankAccount
         AccountHolderName = accountHolderName;
         IsDefault = isDefault;
         CreatedAt = utcNow;
+        UpdatedAt = utcNow;
+    }
+
+    public void Update(string bankCode, string accountNumber, string accountHolderName, DateTimeOffset utcNow)
+    {
+        BankCode = bankCode;
+        AccountNumber = accountNumber;
+        AccountHolderName = accountHolderName;
         UpdatedAt = utcNow;
     }
 
