@@ -1,5 +1,6 @@
 using System.IO;
 using Dprental.AnalyticsService.Api.Exceptions;
+using Dprental.AnalyticsService.Application.Kafka.DependencyInjection;
 using Dprental.AnalyticsService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAnalyticsServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddAnalyticsKafka(builder.Configuration);
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AnalyticsServiceDbContext>(
