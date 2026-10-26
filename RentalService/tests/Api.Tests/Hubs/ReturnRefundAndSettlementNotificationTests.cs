@@ -1,3 +1,6 @@
+using Dprental.RentalService.Application.DTOs.Returns;
+using Dprental.RentalService.Application.Services.Returns;
+using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.DTOs.Media;
 using Dprental.RentalService.Application.IServices.Payments;
 using System.Text.Json;
@@ -501,6 +504,85 @@ public sealed class ReturnRefundAndSettlementNotificationTests
         // 2. Replay same message -> no duplicate notification
         notifier.Reset();
         var res2 = await dispatcher.ProcessInboxMessageAsync(inboxMsg.Id);
+        Assert.True(res2.IsSuccess);
+        Assert.Empty(notifier.RenterNotifications);
+        Assert.Empty(notifier.SupplierNotifications);
+    }
+
+    [Fact]
+    public async Task Return_Submitted_EmitsReturnSubmitted_ToRenterAndOwningSupplierOnly_EvenWhenInventoryPending()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        var lockManager = new FakeOrderLockManager();
+        var notifier = new FakeOrderHubNotifier();
+        var timeProvider = new FixedTimeProvider(FixedNow);
+
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        Guid supplierA = Guid.NewGuid();
+        Guid supplierB = Guid.NewGuid();
+        var order = CreateMultiSupplierPaidOrder(orderId, renterId, supplierA, supplierB, out RentalItem itemA, out _);
+
+        OrderTestData.HandOver(itemA, FixedNow.AddDays(-1));
+        await using (var seedCtx = CreateDbContext(dbName))
+        {
+            var seedOrders = new RentalOrderRepository(seedCtx);
+            await seedOrders.CreateAsync(order);
+            await seedCtx.SaveChangesAsync();
+        }
+
+        await using var db = CreateDbContext(dbName);
+        var orders = new RentalOrderRepository(db);
+        var eventProducer = new FakeRentalEventProducer();
+        var mockCmdProducer = new Mock<IInventoryCommandProducer>();
+        mockCmdProducer.Setup(p => p.EnqueueApplyReturnedUnitsAsync(It.IsAny<ApplyReturnedUnitsCommandPayload>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "ApplyReturnedUnits", "topic", "key")));
+
+        var mediaClient = Mock.Of<IRentalMediaClient>();
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Kafka:Enabled"] = "true"
+        }).Build();
+
+        var returnService = new ReturnService(
+            orders, lockManager, db, mediaClient, timeProvider, eventProducer, config, mockCmdProducer.Object, notifier);
+        var caller = OrderTestData.User(supplierA);
+        var unit = itemA.UnitAssignments.First();
+        var request = new RecordReturnRequest(
+            FixedNow, "Trả máy tại kho",
+            [new ReturnUnitRequest(unit.Id, UnitCondition.Normal, "Tốt", [])]);
+
+        long versionBefore = order.Version;
+
+        // 1. Submit return -> committed, emitted RETURN_SUBMITTED before any inventory reply
+        var res = await returnService.RecordReturnAsync(itemA.Id, caller, request, "idemp-return-1");
+        Assert.True(res.IsSuccess);
+
+        // Renter received RETURN_SUBMITTED
+        Assert.Single(notifier.RenterNotifications);
+        var renterNote = notifier.RenterNotifications.Single();
+        Assert.Equal(renterId, renterNote.RenterId);
+        Assert.Equal(orderId, renterNote.Notification.OrderId);
+        Assert.Equal(OrderChangeTypes.ReturnSubmitted, renterNote.Notification.ChangeType);
+        Assert.Equal(versionBefore + 1, renterNote.Notification.Version);
+
+        // Supplier A received RETURN_SUBMITTED
+        Assert.Single(notifier.SupplierNotifications);
+        var supplierNote = notifier.SupplierNotifications.Single();
+        Assert.Equal(supplierA, supplierNote.SupplierId);
+        Assert.Equal(orderId, supplierNote.Notification.OrderId);
+        Guid subOrderAId = order.SubOrders.Single(s => s.SupplierId == supplierA).Id;
+        Assert.Equal(subOrderAId, supplierNote.Notification.SubOrderId);
+        Assert.Equal(OrderChangeTypes.ReturnSubmitted, supplierNote.Notification.ChangeType);
+        Assert.Equal(versionBefore + 1, supplierNote.Notification.OrderVersion);
+
+        // Supplier B received NOTHING
+        Assert.DoesNotContain(notifier.SupplierNotifications, n => n.SupplierId == supplierB);
+
+        // Replay HTTP with same idempotency key -> no duplicate notification
+        notifier.Reset();
+        var res2 = await returnService.RecordReturnAsync(itemA.Id, caller, request, "idemp-return-1");
         Assert.True(res2.IsSuccess);
         Assert.Empty(notifier.RenterNotifications);
         Assert.Empty(notifier.SupplierNotifications);
