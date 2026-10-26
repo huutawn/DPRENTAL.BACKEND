@@ -87,18 +87,31 @@ public sealed class RentalGatewayIntegrationTests
         using RSA signingKey = RSA.Create(2048);
         await using LoopbackTestService upstream = new(CreateJwks(signingKey, "key-1"));
         using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
-        using HttpClient client = factory.CreateClient();
 
         string token = CreateToken(signingKey, "key-1", Issuer, HumanAudience, Guid.NewGuid().ToString("D"));
-        using HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/rental/hubs/orders");
-        request.Headers.Add("Cookie", $"accessToken={token}");
 
-        using HttpResponseMessage response = await client.SendAsync(request);
+        var wsClient = factory.Server.CreateWebSocketClient();
+        wsClient.ConfigureRequest = request =>
+        {
+            request.Headers["Cookie"] = $"accessToken={token}; refreshToken=secret-refresh; other=value";
+        };
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("/api/v1/rental/hubs/orders", upstream.LastRequest?.Path);
-        Assert.True(upstream.LastRequest?.Headers.ContainsKey("X-Api-Key"));
-        Assert.Equal("dev-internal-api-key-dprental-2026", upstream.LastRequest?.Headers["X-Api-Key"]);
+        Uri wsUri = new(factory.Server.BaseAddress, "/api/v1/rental/hubs/orders");
+        using var clientWebSocket = await wsClient.ConnectAsync(wsUri, CancellationToken.None);
+
+        Assert.Equal(System.Net.WebSockets.WebSocketState.Open, clientWebSocket.State);
+        Assert.True(upstream.WebSocketConnected);
+        Assert.NotNull(upstream.LastWebSocketHeaders);
+        Assert.True(upstream.LastWebSocketHeaders.ContainsKey("X-Api-Key"));
+        Assert.Equal("dev-internal-api-key-dprental-2026", upstream.LastWebSocketHeaders["X-Api-Key"]);
+
+        // Cookie is sanitized: refreshToken stripped
+        Assert.True(upstream.LastWebSocketHeaders.ContainsKey("Cookie"));
+        string cookie = upstream.LastWebSocketHeaders["Cookie"];
+        Assert.Contains($"accessToken={token}", cookie);
+        Assert.DoesNotContain("refreshToken", cookie, StringComparison.OrdinalIgnoreCase);
+
+        await clientWebSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
     }
 
     [Fact]

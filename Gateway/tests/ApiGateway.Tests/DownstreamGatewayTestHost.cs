@@ -32,7 +32,10 @@ internal static class DownstreamGatewayTestHost
                 };
                 foreach (var route in configuration.GetSection("Routes").GetChildren())
                 {
-                    overrides[$"{route.Path}:DownstreamScheme"] = upstreamAddress.Scheme;
+                    string existingScheme = route["DownstreamScheme"] ?? "http";
+                    overrides[$"{route.Path}:DownstreamScheme"] = string.Equals(existingScheme, "ws", StringComparison.OrdinalIgnoreCase)
+                        ? "ws"
+                        : upstreamAddress.Scheme;
                     overrides[$"{route.Path}:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
                     overrides[$"{route.Path}:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(CultureInfo.InvariantCulture);
                 }
@@ -105,6 +108,8 @@ internal static class DownstreamGatewayTestHost
         public string ResponseBody { get; set; } = "{\"proxied\":true}";
         public string ResponseContentType { get; set; } = "application/json";
         public ReceivedTestRequest? LastRequest { get; private set; }
+        public IReadOnlyDictionary<string, string>? LastWebSocketHeaders { get; private set; }
+        public bool WebSocketConnected { get; private set; }
 
         public async ValueTask DisposeAsync()
         {
@@ -140,6 +145,38 @@ internal static class DownstreamGatewayTestHost
         private async Task HandleRequestAsync(HttpListenerContext context)
         {
             var req = context.Request;
+            if (req.IsWebSocketRequest)
+            {
+                var wsHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (req.Headers.AllKeys != null)
+                {
+                    foreach (string? name in req.Headers.AllKeys)
+                    {
+                        if (!string.IsNullOrEmpty(name))
+                        {
+                            wsHeaders[name] = req.Headers[name] ?? string.Empty;
+                        }
+                    }
+                }
+                LastWebSocketHeaders = wsHeaders;
+                WebSocketConnected = true;
+                try
+                {
+                    var wsContext = await context.AcceptWebSocketAsync(subProtocol: null);
+                    using var webSocket = wsContext.WebSocket;
+                    var buffer = new byte[1024];
+                    await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationTokenSource.Token);
+                    if (webSocket.State == System.Net.WebSockets.WebSocketState.Open)
+                    {
+                        await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "closed", cancellationTokenSource.Token);
+                    }
+                }
+                catch
+                {
+                }
+                return;
+            }
+
             if (string.Equals(req.Url?.AbsolutePath, "/.well-known/jwks.json", StringComparison.Ordinal))
             {
                 await WriteResponseAsync(context.Response, Jwks, "application/json");
