@@ -19,4 +19,9 @@ public interface IInventoryRentalClient
     Task<Result<CreateHoldResponse>> CreateHoldAsync(
         CreateHoldRequest request,
         CancellationToken ct = default);
+
+    Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(
+        string allocationGroupId,
+        ConfirmAllocationRequest request,
+        CancellationToken ct = default);
 }

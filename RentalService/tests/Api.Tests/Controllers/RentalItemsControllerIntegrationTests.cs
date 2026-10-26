@@ -69,7 +69,7 @@ public sealed class RentalItemsControllerIntegrationTests
         public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(string allocationGroupId, ConfirmAllocationRequest request, CancellationToken ct = default) =>
             ConfirmHandler != null
                 ? ConfirmHandler(allocationGroupId, request)
-                : Task.FromResult(Result.Success(new ConfirmAllocationResponse("REC-CONF", allocationGroupId, FixedNow, false, [])));
+                : Task.FromResult(Result.Success(new ConfirmAllocationResponse("REC-CONF", allocationGroupId, FixedNow, false, [new(Guid.NewGuid(), Guid.NewGuid(), "Confirmed")])));
 
         public static Task<Result<ReleaseAllocationResponse>> ReleaseAllocationAsync(string allocationGroupId, ReleaseAllocationRequest request, CancellationToken ct = default) =>
             Task.FromResult(Result.Success(new ReleaseAllocationResponse("REC-REL", request.OperationKey, allocationGroupId, FixedNow, false)));
@@ -218,11 +218,19 @@ public sealed class RentalItemsControllerIntegrationTests
     }
 
     [Fact]
-    public async Task Accept_WithValidTokenAndKey_Returns202Accepted()
+    public async Task Accept_WithValidTokenAndKey_Returns200OK()
     {
         Guid supplierId = Guid.NewGuid();
         string dbName = Guid.NewGuid().ToString("N");
         var (order, item) = CreatePaidOrderWithItem(supplierId);
+        var stubInventory = new StubInventoryClient
+        {
+            ConfirmHandler = (g, req) =>
+            {
+                var units = item.UnitAssignments.Select(u => new ConfirmedAllocationUnitDto(u.AllocationId, u.AssetId, "Confirmed")).ToList();
+                return Task.FromResult(Result.Success(new ConfirmAllocationResponse("REC-CONF", g, FixedNow, false, units)));
+            }
+        };
 
         using var factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
@@ -235,8 +243,7 @@ public sealed class RentalItemsControllerIntegrationTests
                     services.AddDbContext<RentalServiceDbContext>(options => options.UseInMemoryDatabase(dbName));
                     services.RemoveAll<Dprental.RentalService.Domain.IRepositories.IOrderLockManager>();
                     services.AddSingleton<Dprental.RentalService.Domain.IRepositories.IOrderLockManager, FakeOrderLockManager>();
-                    services.AddSingleton<IInventoryRentalClient>(new StubInventoryClient());
-
+                    services.AddSingleton<IInventoryRentalClient>(stubInventory);
                     services.RemoveAll<IPaymentRentalClient>();
                     services.AddSingleton<IPaymentRentalClient>(new StubPaymentClient());
 
@@ -267,16 +274,17 @@ public sealed class RentalItemsControllerIntegrationTests
 
         var response = await client.PostAsync($"/api/v1/rental/supplier/sub-orders/{item.RentalSubOrderId}/accept", null);
 
-        // Nhận yêu cầu và gửi lệnh ConfirmAllocation cho Inventory; mục thuê chờ Inventory trả lời.
+        // Xác nhận HTTP đồng bộ thành công, mục thuê chuyển sang AwaitingHandover và không enqueue ConfirmAllocation qua Kafka
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<SubOrderDecisionResponse>();
         Assert.NotNull(body);
-        Assert.Equal("PendingSupplierConfirmation", body.Status);
+        Assert.Equal("AwaitingHandover", body.Status);
 
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
-            Assert.Equal(1, await db.RentalOutboxMessages.CountAsync(m => m.MessageType == "ConfirmAllocation"));
+            Assert.Equal(0, await db.RentalOutboxMessages.CountAsync(m => m.MessageType == "ConfirmAllocation"));
+            Assert.Equal(1, await db.RentalOutboxMessages.CountAsync(m => m.MessageType == "RentalItemConfirmed"));
         }
     }
 

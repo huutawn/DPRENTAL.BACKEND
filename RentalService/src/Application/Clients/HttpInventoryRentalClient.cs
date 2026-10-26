@@ -90,6 +90,20 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
             ct);
     }
 
+    public async Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(
+        string allocationGroupId,
+        ConfirmAllocationRequest request,
+        CancellationToken ct = default)
+    {
+        string route = InventoryContractSpec.Routes.ConfirmAllocation(allocationGroupId);
+        return await SendAsync<ConfirmAllocationRequest, ConfirmAllocationResponse>(
+            HttpMethod.Post,
+            route,
+            request,
+            InventoryContractSpec.Scopes.WriteAllocation,
+            ct);
+    }
+
     private async Task<Result<TResponse>> SendAsync<TRequest, TResponse>(
         HttpMethod method,
         string relativeRoute,

@@ -1,4 +1,5 @@
 using Dprental.RentalService.Application.DTOs.Operations;
+using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Orders;
 using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Common;
@@ -82,6 +83,18 @@ public interface IRentalOperationExecutor
         Guid orderId,
         Guid itemId,
         string acceptOperationKey,
+        CancellationToken cancellationToken = default);
+
+    Task<Result> ApplyConfirmAllocationResultAsync(
+        RentalOrder order,
+        RentalOperationReceipt receipt,
+        Guid rentalItemId,
+        string operationKey,
+        bool isSuccess,
+        ConfirmAllocationResponse? confirmData,
+        string? errorCode,
+        string? errorMessage,
+        DateTimeOffset utcNow,
         CancellationToken cancellationToken = default);
 
     Task<Result> ExecutePaymentExpiryAsync(
