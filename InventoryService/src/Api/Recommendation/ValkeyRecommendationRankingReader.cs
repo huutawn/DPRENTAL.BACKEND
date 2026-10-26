@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Dprental.InventoryService.Application.Recommendation;
 using Dprental.InventoryService.Domain.IRepositories;
 using Microsoft.Extensions.Configuration;
@@ -8,7 +7,7 @@ using StackExchange.Redis;
 
 namespace Dprental.InventoryService.Api.Recommendation;
 
-public sealed class ValkeyRecommendationRankingReader : IRecommendationRankingReader, IAsyncDisposable, IDisposable
+public sealed partial class ValkeyRecommendationRankingReader : IRecommendationRankingReader, IAsyncDisposable, IDisposable
 {
     private const string GlobalPopularityKey = "rec:v1:global:popular-listings";
     private const int MaxInterestsCount = 20;
@@ -78,136 +77,26 @@ public sealed class ValkeyRecommendationRankingReader : IRecommendationRankingRe
         _ownsMultiplexer = false;
     }
 
+    public static string GetSnapshotKey(Guid? userId, long cycle) =>
+        userId.HasValue && userId.Value != Guid.Empty
+            ? $"inv:rec:snapshot:{cycle}:user:{userId.Value:D}"
+            : $"inv:rec:snapshot:{cycle}:anon";
+
     public async Task<RecommendationSnapshot> ReadAsync(Guid? userId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
-        if (!_isConfigured)
-        {
-            return RecommendationSnapshot.Unavailable(RecommendationReasons.Unconfigured);
-        }
-
-        long startTimestamp = _timeProvider.GetTimestamp();
-
-        using var timeoutCts = new CancellationTokenSource(DefaultTimeout);
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-
+        userId = userId == Guid.Empty ? null : userId;
+        long cycle = _timeProvider.GetUtcNow().ToUnixTimeSeconds() / 300;
+        string seed = userId.HasValue ? $"{userId.Value:D}:{cycle}" : $"anon:{cycle}";
+        long startedAt = _timeProvider.GetTimestamp();
+        var result = RecommendationSnapshot.Unavailable(RecommendationReasons.Unavailable, cycle, seed);
+        using var timeout = new CancellationTokenSource(DefaultTimeout);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         try
         {
-            var multiplexer = await GetMultiplexerAsync(linkedCts.Token);
-            if (multiplexer == null || !multiplexer.IsConnected)
-            {
-                RecordLatency(startTimestamp, RecommendationOutcome.Unavailable);
-                return RecommendationSnapshot.Unavailable(RecommendationReasons.Unavailable);
-            }
-
-            var db = multiplexer.GetDatabase();
-
-            if (userId.HasValue && userId.Value != Guid.Empty)
-            {
-                string userKey = $"rec:v1:user:{userId.Value:D}:equipment-types";
-                var personalTask = db.SortedSetRangeByRankWithScoresAsync(userKey, 0, MaxInterestsCount - 1, Order.Descending);
-                var globalTask = db.SortedSetRangeByRankWithScoresAsync(GlobalPopularityKey, 0, MaxPopularListingsCount - 1, Order.Descending);
-
-                // Wait with single shared deadline
-                try
-                {
-                    await Task.WhenAll(personalTask, globalTask).WaitAsync(linkedCts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Observe tasks to prevent unobserved task exceptions
-                    ObserveBackgroundTask(personalTask);
-                    ObserveBackgroundTask(globalTask);
-
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-
-                    RecordLatency(startTimestamp, RecommendationOutcome.Unavailable);
-                    return RecommendationSnapshot.Unavailable(RecommendationReasons.Timeout);
-                }
-                catch (Exception ex)
-                {
-                    ObserveBackgroundTask(personalTask);
-                    ObserveBackgroundTask(globalTask);
-
-                    RecordLatency(startTimestamp, RecommendationOutcome.Unavailable);
-                    if (IsCorruptOrWrongTypeException(ex))
-                    {
-                        return RecommendationSnapshot.Unavailable(RecommendationReasons.Invalid);
-                    }
-                    return RecommendationSnapshot.Unavailable(RecommendationReasons.Unavailable);
-                }
-
-                var personalRaw = await personalTask;
-                var globalRaw = await globalTask;
-
-                if (!TryParsePersonalEntries(personalRaw, out var personalScores) ||
-                    !TryParseGlobalEntries(globalRaw, out var globalScores))
-                {
-                    RecordLatency(startTimestamp, RecommendationOutcome.Unavailable);
-                    return RecommendationSnapshot.Unavailable(RecommendationReasons.Invalid);
-                }
-
-                if (personalScores.Count == 0 && globalScores.Count == 0)
-                {
-                    RecordLatency(startTimestamp, RecommendationOutcome.Miss);
-                    return RecommendationSnapshot.Miss(RecommendationReasons.Miss);
-                }
-
-                RecordLatency(startTimestamp, RecommendationOutcome.Available);
-                return RecommendationSnapshot.Available(personalScores, globalScores);
-            }
-            else
-            {
-                var globalTask = db.SortedSetRangeByRankWithScoresAsync(GlobalPopularityKey, 0, MaxPopularListingsCount - 1, Order.Descending);
-
-                try
-                {
-                    await globalTask.WaitAsync(linkedCts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    ObserveBackgroundTask(globalTask);
-
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-
-                    RecordLatency(startTimestamp, RecommendationOutcome.Unavailable);
-                    return RecommendationSnapshot.Unavailable(RecommendationReasons.Timeout);
-                }
-                catch (Exception ex)
-                {
-                    ObserveBackgroundTask(globalTask);
-
-                    RecordLatency(startTimestamp, RecommendationOutcome.Unavailable);
-                    if (IsCorruptOrWrongTypeException(ex))
-                    {
-                        return RecommendationSnapshot.Unavailable(RecommendationReasons.Invalid);
-                    }
-                    return RecommendationSnapshot.Unavailable(RecommendationReasons.Unavailable);
-                }
-
-                var globalRaw = await globalTask;
-                if (!TryParseGlobalEntries(globalRaw, out var globalScores))
-                {
-                    RecordLatency(startTimestamp, RecommendationOutcome.Unavailable);
-                    return RecommendationSnapshot.Unavailable(RecommendationReasons.Invalid);
-                }
-
-                if (globalScores.Count == 0)
-                {
-                    RecordLatency(startTimestamp, RecommendationOutcome.Miss);
-                    return RecommendationSnapshot.Miss(RecommendationReasons.Miss);
-                }
-
-                RecordLatency(startTimestamp, RecommendationOutcome.Available);
-                return RecommendationSnapshot.Available([], globalScores);
-            }
+            result = _isConfigured
+                ? await ReadCycleAsync(userId, cycle, seed, deadline.Token)
+                : RecommendationSnapshot.Unavailable(RecommendationReasons.Unconfigured, cycle, seed);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -215,27 +104,98 @@ public sealed class ValkeyRecommendationRankingReader : IRecommendationRankingRe
         }
         catch (OperationCanceledException)
         {
-            RecordLatency(startTimestamp, RecommendationOutcome.Unavailable);
-            return RecommendationSnapshot.Unavailable(RecommendationReasons.Timeout);
+            result = RecommendationSnapshot.Unavailable(RecommendationReasons.Timeout, cycle, seed);
         }
         catch (Exception ex)
         {
-            RecordLatency(startTimestamp, RecommendationOutcome.Unavailable);
-            if (IsCorruptOrWrongTypeException(ex))
-            {
-                return RecommendationSnapshot.Unavailable(RecommendationReasons.Invalid);
-            }
-            return RecommendationSnapshot.Unavailable(RecommendationReasons.Unavailable);
+            string reason = ex is RedisTimeoutException ? RecommendationReasons.Timeout
+                : IsCorruptOrWrongTypeException(ex) ? RecommendationReasons.Invalid : RecommendationReasons.Unavailable;
+            result = RecommendationSnapshot.Unavailable(reason, cycle, seed);
         }
+        finally
+        {
+            RecordLatency(startedAt, result.Outcome);
+        }
+        return result;
     }
 
-    private static void ObserveBackgroundTask<T>(Task<T> task)
+    private async Task<RecommendationSnapshot> ReadCycleAsync(Guid? userId, long cycle, string seed, CancellationToken ct)
     {
-        if (task.IsCompleted) return;
-        _ = task.ContinueWith(t =>
+        var multiplexer = await GetMultiplexerAsync(ct);
+        if (multiplexer?.IsConnected != true)
+            return RecommendationSnapshot.Unavailable(RecommendationReasons.Unavailable, cycle, seed);
+
+        var db = multiplexer.GetDatabase();
+        string key = GetSnapshotKey(userId, cycle);
+        long cycleEndMs = checked((cycle + 1) * 300000L);
+        var cached = await AwaitObservedAsync(db.StringGetAsync(key), ct);
+        if (!cached.IsNull)
+            return DecodeCycle(cached, userId, cycle, seed, cycleEndMs);
+
+        var source = await ReadSourceAsync(db, userId, cycle, seed, ct);
+        if (source.Outcome != RecommendationOutcome.Available) return source;
+        if (CycleHasEnded(cycleEndMs))
+            return RecommendationSnapshot.Unavailable(RecommendationReasons.Timeout, cycle, seed);
+
+        byte[] payload = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new CachedRankingSnapshotDto
         {
-            _ = t.Exception;
-        }, TaskContinuationOptions.OnlyOnFaulted);
+            Version = 1,
+            Cycle = cycle,
+            Seed = seed,
+            Personal = source.PersonalInterests.Select(p => new PersonalScoreDto(p.EquipmentTypeId, p.Score)).ToList(),
+            Global = source.GlobalPopularity.Select(g => new GlobalScoreDto(g.ListingId, g.Score)).ToList()
+        });
+        var written = await AwaitObservedAsync(db.ExecuteAsync("SET", key, payload, "NX", "PXAT", cycleEndMs), ct);
+        if (CycleHasEnded(cycleEndMs))
+            return RecommendationSnapshot.Unavailable(RecommendationReasons.Timeout, cycle, seed);
+        if (!written.IsNull)
+        {
+            if (written.ToString() != "OK") throw new InvalidOperationException("Unexpected snapshot SET reply.");
+            return source;
+        }
+
+        var winner = await AwaitObservedAsync(db.StringGetAsync(key), ct);
+        return winner.IsNull
+            ? RecommendationSnapshot.Miss(RecommendationReasons.Miss, cycle, seed)
+            : DecodeCycle(winner, userId, cycle, seed, cycleEndMs);
+    }
+
+    private RecommendationSnapshot DecodeCycle(RedisValue value, Guid? userId, long cycle, string seed, long cycleEndMs)
+    {
+        if (CycleHasEnded(cycleEndMs))
+            return RecommendationSnapshot.Unavailable(RecommendationReasons.Timeout, cycle, seed);
+        byte[] bytes = (byte[])value!;
+        return bytes.Length <= 64 * 1024 &&
+            TryParseSnapshotJson(bytes, cycle, seed, isAnonymous: !userId.HasValue, out var personal, out var global)
+            ? RecommendationSnapshot.Available(personal, global, cycle, seed)
+            : RecommendationSnapshot.Unavailable(RecommendationReasons.Invalid, cycle, seed);
+    }
+
+    private bool CycleHasEnded(long cycleEndMs) => _timeProvider.GetUtcNow().ToUnixTimeMilliseconds() >= cycleEndMs;
+
+    private static async Task<RecommendationSnapshot> ReadSourceAsync(IDatabase db, Guid? userId, long cycle, string seed, CancellationToken ct)
+    {
+        var globalTask = db.SortedSetRangeByRankWithScoresAsync(GlobalPopularityKey, 0, MaxPopularListingsCount - 1, Order.Descending);
+        var personalTask = userId.HasValue
+            ? db.SortedSetRangeByRankWithScoresAsync($"rec:v1:user:{userId.Value:D}:equipment-types", 0, MaxInterestsCount - 1, Order.Descending)
+            : Task.FromResult(Array.Empty<SortedSetEntry>());
+        await AwaitObservedAsync(Task.WhenAll(personalTask, globalTask), ct);
+        if (!TryParsePersonalEntries(await personalTask, out var personal) || !TryParseGlobalEntries(await globalTask, out var global))
+            return RecommendationSnapshot.Unavailable(RecommendationReasons.Invalid, cycle, seed);
+        return personal.Count == 0 && global.Count == 0
+            ? RecommendationSnapshot.Miss(RecommendationReasons.Miss, cycle, seed)
+            : RecommendationSnapshot.Available(personal, global, cycle, seed);
+    }
+
+    private static async Task<T> AwaitObservedAsync<T>(Task<T> task, CancellationToken ct)
+    {
+        try { return await task.WaitAsync(ct); }
+        catch
+        {
+            _ = task.ContinueWith(t => { _ = t.Exception; }, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            throw;
+        }
     }
 
     private void RecordLatency(long startTimestamp, RecommendationOutcome outcome)
@@ -265,162 +225,4 @@ public sealed class ValkeyRecommendationRankingReader : IRecommendationRankingRe
         return false;
     }
 
-    private static bool TryParsePersonalEntries(
-        SortedSetEntry[] entries,
-        out IReadOnlyList<EquipmentTypeInterestScore> scores)
-    {
-        scores = [];
-        if (entries.Length == 0) return true;
-        if (entries.Length > MaxInterestsCount) return false;
-
-        var list = new List<EquipmentTypeInterestScore>(entries.Length);
-        var seen = new HashSet<Guid>();
-
-        foreach (var entry in entries)
-        {
-            if (!TryParseCanonicalGuid(entry.Element, out var id) || id == Guid.Empty)
-                return false;
-
-            if (!seen.Add(id))
-                return false;
-
-            if (!IsValidScore(entry.Score, out long longScore))
-                return false;
-
-            list.Add(new EquipmentTypeInterestScore(id, longScore));
-        }
-
-        scores = list;
-        return true;
-    }
-
-    private static bool TryParseGlobalEntries(
-        SortedSetEntry[] entries,
-        out IReadOnlyList<ListingPopularityScore> scores)
-    {
-        scores = [];
-        if (entries.Length == 0) return true;
-        if (entries.Length > MaxPopularListingsCount) return false;
-
-        var list = new List<ListingPopularityScore>(entries.Length);
-        var seen = new HashSet<Guid>();
-
-        foreach (var entry in entries)
-        {
-            if (!TryParseCanonicalGuid(entry.Element, out var id) || id == Guid.Empty)
-                return false;
-
-            if (!seen.Add(id))
-                return false;
-
-            if (!IsValidScore(entry.Score, out long longScore))
-                return false;
-
-            list.Add(new ListingPopularityScore(id, longScore));
-        }
-
-        scores = list;
-        return true;
-    }
-
-    private static bool TryParseCanonicalGuid(RedisValue value, out Guid id)
-    {
-        id = Guid.Empty;
-        if (value.IsNull) return false;
-        string? str = value;
-        if (string.IsNullOrEmpty(str) || str.Length != 36) return false;
-
-        if (!Guid.TryParseExact(str, "D", out id)) return false;
-
-        // Strictly verify lowercase hex chars and hyphens (canonical "D" format)
-        for (int i = 0; i < str.Length; i++)
-        {
-            char c = str[i];
-            if (i == 8 || i == 13 || i == 18 || i == 23)
-            {
-                if (c != '-') return false;
-            }
-            else
-            {
-                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
-                    return false;
-            }
-        }
-
-        return id != Guid.Empty;
-    }
-
-    private static bool IsValidScore(double score, out long longScore)
-    {
-        longScore = 0;
-        if (double.IsNaN(score) || double.IsInfinity(score)) return false;
-        if (score < 1.0 || score > MaxValidScore) return false;
-        if (Math.Floor(score) != score) return false;
-
-        longScore = (long)score;
-        return true;
-    }
-
-    private async Task<IConnectionMultiplexer?> GetMultiplexerAsync(CancellationToken cancellationToken)
-    {
-        if (!_isConfigured) return null;
-        if (_multiplexer != null && _multiplexer.IsConnected) return _multiplexer;
-        if (!_ownsMultiplexer) return _multiplexer;
-
-        await _connectLock.WaitAsync(cancellationToken);
-        try
-        {
-            if (_multiplexer != null && _multiplexer.IsConnected) return _multiplexer;
-
-            if (_multiplexer != null)
-            {
-                try { await _multiplexer.DisposeAsync(); } catch { }
-                _multiplexer = null;
-            }
-
-            _multiplexer = await ConnectionMultiplexer.ConnectAsync(_configurationOptions!);
-            return _multiplexer;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to connect to Recommendation Valkey.");
-            return null;
-        }
-        finally
-        {
-            _connectLock.Release();
-        }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed) return;
-        _disposed = true;
-
-        if (_ownsMultiplexer && _multiplexer != null)
-        {
-            await _multiplexer.DisposeAsync();
-            _multiplexer = null;
-        }
-
-        _connectLock.Dispose();
-    }
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-
-        if (_ownsMultiplexer && _multiplexer != null)
-        {
-            _multiplexer.Dispose();
-            _multiplexer = null;
-        }
-
-        _connectLock.Dispose();
-    }
 }

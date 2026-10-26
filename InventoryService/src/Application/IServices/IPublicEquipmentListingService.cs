@@ -17,6 +17,7 @@ public interface IPublicEquipmentListingService
     /// </summary>
     Task<Result<PublicEquipmentListingResponse>> GetPublicListingByIdAsync(
         Guid id,
+        IInventoryCallerContext callerContext,
         CancellationToken cancellationToken = default);
 
     /// <summary>

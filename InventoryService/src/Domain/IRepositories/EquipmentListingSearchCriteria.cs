@@ -18,6 +18,7 @@ public sealed record EquipmentListingSearchCriteria
     public IReadOnlyList<EquipmentTypeInterestScore>? PersonalScores { get; init; }
     public IReadOnlyList<ListingPopularityScore>? GlobalScores { get; init; }
     public Guid? ExcludedOwnerUserId { get; init; }
+    public string? Seed { get; init; }
 
     public EquipmentListingSearchCriteria(
         AssetSearchFilters? filters = null,
@@ -29,7 +30,8 @@ public sealed record EquipmentListingSearchCriteria
         int take = 20,
         IReadOnlyList<EquipmentTypeInterestScore>? personalScores = null,
         IReadOnlyList<ListingPopularityScore>? globalScores = null,
-        Guid? excludedOwnerUserId = null)
+        Guid? excludedOwnerUserId = null,
+        string? seed = null)
     {
         bool hasFrom = availabilityFrom.HasValue;
         bool hasTo = availabilityTo.HasValue;
@@ -52,6 +54,7 @@ public sealed record EquipmentListingSearchCriteria
         Take = take;
         PersonalScores = personalScores;
         GlobalScores = globalScores;
+        Seed = seed;
         ExcludedOwnerUserId = excludedOwnerUserId;
     }
 

@@ -17,8 +17,15 @@ public interface IOutboxStore
     /// <summary>
     /// Lưu các thay đổi của outbox messages xuống persistence storage.
     /// </summary>
-    Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        Task.CompletedTask;
+    Task SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Dọn dẹp định kỳ các behavior messages đã publish thành công quá thời hạn lưu trữ.
+    /// </summary>
+    Task<int> CleanupPublishedBehaviorMessagesAsync(
+        DateTimeOffset publishedBefore,
+        int maxBatchSize,
+        CancellationToken cancellationToken = default);
     /// <summary>
     /// Tìm thông điệp Outbox theo Id.
     /// </summary>

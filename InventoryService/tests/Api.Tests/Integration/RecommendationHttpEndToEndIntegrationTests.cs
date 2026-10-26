@@ -20,7 +20,7 @@ using Xunit;
 namespace Dprental.InventoryService.Api.Tests.Integration;
 
 [Collection("ValkeyIntegrationCollection")]
-public sealed class RecommendationHttpEndToEndIntegrationTests : IClassFixture<PostgresFixture>
+public sealed partial class RecommendationHttpEndToEndIntegrationTests : IClassFixture<PostgresFixture>
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 20, 10, 0, 0, TimeSpan.Zero);
     private readonly PostgresFixture _postgres;
@@ -51,9 +51,9 @@ public sealed class RecommendationHttpEndToEndIntegrationTests : IClassFixture<P
         }
     }
 
-    private (WebApplicationFactory<Program> App, InventorySecurityTestFactory SecFactory) CreateTestApp(string? valkeyConn = null)
+    private (WebApplicationFactory<Program> App, InventorySecurityTestFactory SecFactory) CreateTestApp(string? valkeyConn = null, DateTimeOffset? now = null)
     {
-        var testClock = new TestTimeProvider(FixedNow);
+        var testClock = new TestTimeProvider(now ?? FixedNow);
         var secFactory = new InventorySecurityTestFactory(_postgres.ConnectionString, testClock);
 
         string recommendationConn = valkeyConn ?? _valkey.ConnectionString;
@@ -71,9 +71,23 @@ public sealed class RecommendationHttpEndToEndIntegrationTests : IClassFixture<P
         return (app, secFactory);
     }
 
+    private async Task ResetValkeyAsync()
+    {
+        var endpoints = _valkey.Multiplexer.GetEndPoints();
+        foreach (var ep in endpoints)
+        {
+            var server = _valkey.Multiplexer.GetServer(ep);
+            if (server.IsConnected)
+            {
+                await server.FlushDatabaseAsync();
+            }
+        }
+    }
+
     [Fact]
     public async Task Anonymous_PublicListing_Recommended_UsesGlobalRanking()
     {
+        await ResetValkeyAsync();
         await using var db = CreateDbContext();
         var (app, _) = CreateTestApp();
         using var client = app.CreateClient();
@@ -83,89 +97,163 @@ public sealed class RecommendationHttpEndToEndIntegrationTests : IClassFixture<P
         var brandId = Guid.NewGuid();
         var typeId = Guid.NewGuid();
 
-        var listing1 = EquipmentListing.Create(
-            Guid.NewGuid(), owner, typeId, brandId, "Anon Listing 1", null, "Model Anon 1", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
-        listing1.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+        // 5 listings with fixed IDs
+        var idA = Guid.Parse("a0000000-0000-0000-0000-000000000001");
+        var idB = Guid.Parse("b0000000-0000-0000-0000-000000000002");
+        var idC = Guid.Parse("c0000000-0000-0000-0000-000000000003");
+        var idD = Guid.Parse("d0000000-0000-0000-0000-000000000004");
+        var idE = Guid.Parse("e0000000-0000-0000-0000-000000000005");
+        var idInactive = Guid.Parse("f0000000-0000-0000-0000-000000000006");
 
-        var listing2 = EquipmentListing.Create(
-            Guid.NewGuid(), owner, typeId, brandId, "Anon Listing 2", null, "Model Anon 2", 1, "{}", 100_000m, null, null, "VND", FixedNow.AddSeconds(-5), 2024).Value;
-        listing2.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow.AddSeconds(-5));
+        var lA = EquipmentListing.Create(idA, owner, typeId, brandId, "Listing A", null, "Model A", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        lA.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
 
-        db.EquipmentListings.AddRange(listing1, listing2);
+        var lB = EquipmentListing.Create(idB, owner, typeId, brandId, "Listing B", null, "Model B", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        lB.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+
+        var lC = EquipmentListing.Create(idC, owner, typeId, brandId, "Listing C", null, "Model C", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        lC.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+
+        var lD = EquipmentListing.Create(idD, owner, typeId, brandId, "Listing D", null, "Model D", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        lD.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+
+        var lE = EquipmentListing.Create(idE, owner, typeId, brandId, "Listing E", null, "Model E", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        lE.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+
+        var lInactive = EquipmentListing.Create(idInactive, owner, typeId, brandId, "Inactive", null, "Model Inactive", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+
+        db.EquipmentListings.AddRange(lA, lB, lC, lD, lE, lInactive);
         await db.SaveChangesAsync();
 
-        // Populate global popularity: listing2 is more popular than listing1
         var valkeyDb = _valkey.Multiplexer.GetDatabase();
         string globalKey = "rec:v1:global:popular-listings";
-        await valkeyDb.SortedSetAddAsync(globalKey, listing1.Id.ToString("D"), 10);
-        await valkeyDb.SortedSetAddAsync(globalKey, listing2.Id.ToString("D"), 100);
+        await valkeyDb.SortedSetAddAsync(globalKey, idA.ToString("D"), 100);
+        await valkeyDb.SortedSetAddAsync(globalKey, idB.ToString("D"), 50);
+        await valkeyDb.SortedSetAddAsync(globalKey, idC.ToString("D"), 20);
+        await valkeyDb.SortedSetAddAsync(globalKey, idD.ToString("D"), 5);
 
-        var response = await client.GetAsync($"api/v1/inventory/public/equipment-listings?brandId={brandId:D}&sort=recommended");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("postgres", Assert.Single(response.Headers.GetValues("X-Search-Backend")));
+        // Request page 1 with pageSize 2 (cycle 5974968)
+        var responseP1 = await client.GetAsync($"api/v1/inventory/public/equipment-listings?brandId={brandId:D}&sort=recommended&page=1&pageSize=2");
+        Assert.Equal(HttpStatusCode.OK, responseP1.StatusCode);
+        var paged1 = await responseP1.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
+        Assert.NotNull(paged1);
+        Assert.Equal(5, paged1.TotalCount);
+        Assert.DoesNotContain(idInactive, paged1.Items.Select(x => x.Id));
 
-        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
-        Assert.NotNull(paged);
-        Assert.Equal(2, paged.TotalCount);
-        // Global popularity puts listing2 before listing1
-        Assert.Equal(listing2.Id, paged.Items[0].Id);
-        Assert.Equal(listing1.Id, paged.Items[1].Id);
+        // Expected vector for page 1: [idB, idA]
+        Assert.Equal([idB, idA], paged1.Items.Select(x => x.Id));
+
+        // Request page 2 with pageSize 2
+        var responseP2 = await client.GetAsync($"api/v1/inventory/public/equipment-listings?brandId={brandId:D}&sort=recommended&page=2&pageSize=2");
+        var paged2 = await responseP2.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
+        Assert.NotNull(paged2);
+        Assert.Equal([idE, idD], paged2.Items.Select(x => x.Id));
+
+        // Request page 3 with pageSize 2
+        var responseP3 = await client.GetAsync($"api/v1/inventory/public/equipment-listings?brandId={brandId:D}&sort=recommended&page=3&pageSize=2");
+        var paged3 = await responseP3.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
+        Assert.NotNull(paged3);
+        Assert.Equal([idC], paged3.Items.Select(x => x.Id));
+
+        // Combining all pages: exactly full set without duplicate or missing
+        var combined = paged1.Items.Concat(paged2.Items).Concat(paged3.Items).Select(x => x.Id).ToList();
+        Assert.Equal([idB, idA, idE, idD, idC], combined);
+
+        // Same cycle/snapshot returns identical order on repeated call
+        var repeatRes = await client.GetAsync($"api/v1/inventory/public/equipment-listings?brandId={brandId:D}&sort=recommended&page=1&pageSize=2");
+        var repeatPaged = await repeatRes.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
+        Assert.Equal([idB, idA], repeatPaged!.Items.Select(x => x.Id));
+
+        // Cycle 5974970 (10 minutes later): page 1 composition changes to [idC, idA]
+        var (appLater, _) = CreateTestApp(now: FixedNow.AddMinutes(10));
+        using var clientLater = appLater.CreateClient();
+        var responseLater = await clientLater.GetAsync($"api/v1/inventory/public/equipment-listings?brandId={brandId:D}&sort=recommended&page=1&pageSize=2");
+        var pagedLater = await responseLater.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
+        Assert.NotNull(pagedLater);
+        Assert.Equal([idC, idA], pagedLater.Items.Select(x => x.Id));
     }
 
     [Fact]
     public async Task AuthenticatedHuman_PublicListing_Recommended_UsesPersonalizedAndExcludesOwn()
     {
+        await ResetValkeyAsync();
         await using var db = CreateDbContext();
         var (app, secFactory) = CreateTestApp();
         using var client = app.CreateClient();
 
-        var myUserId = Guid.NewGuid();
-        var otherUserId = Guid.NewGuid();
+        var myUserId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        var otherUserId = Guid.Parse("99999999-8888-7777-6666-555555555555");
         await SeedWarehouseAsync(db, myUserId);
         await SeedWarehouseAsync(db, otherUserId);
 
         var brandId = Guid.NewGuid();
-        var typeFav = Guid.NewGuid();
-        var typeOther = Guid.NewGuid();
+        var typeFav = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var typeOther = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+
+        var idFav1 = Guid.Parse("f1000000-0000-0000-0000-000000000001");
+        var idFav2 = Guid.Parse("f2000000-0000-0000-0000-000000000002");
+        var idNorm1 = Guid.Parse("c1000000-0000-0000-0000-000000000001");
+        var idNorm2 = Guid.Parse("c2000000-0000-0000-0000-000000000002");
 
         // 1. My listing (should be excluded)
         var myListing = EquipmentListing.Create(
             Guid.NewGuid(), myUserId, typeFav, brandId, "My Listing", null, "My Model", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
         myListing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
 
-        // 2. Other user's favorite type listing
-        var favListing = EquipmentListing.Create(
-            Guid.NewGuid(), otherUserId, typeFav, brandId, "Fav Listing", null, "Fav Model", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
-        favListing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+        // 2. Other user's listings
+        var fav1 = EquipmentListing.Create(idFav1, otherUserId, typeFav, brandId, "Fav 1", null, "M1", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        fav1.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
 
-        // 3. Other user's normal listing
-        var normalListing = EquipmentListing.Create(
-            Guid.NewGuid(), otherUserId, typeOther, brandId, "Normal Listing", null, "Normal Model", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
-        normalListing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+        var fav2 = EquipmentListing.Create(idFav2, otherUserId, typeFav, brandId, "Fav 2", null, "M2", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        fav2.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
 
-        db.EquipmentListings.AddRange(myListing, favListing, normalListing);
+        var norm1 = EquipmentListing.Create(idNorm1, otherUserId, typeOther, brandId, "Norm 1", null, "M3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        norm1.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+
+        var norm2 = EquipmentListing.Create(idNorm2, otherUserId, typeOther, brandId, "Norm 2", null, "M4", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        norm2.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+
+        db.EquipmentListings.AddRange(myListing, fav1, fav2, norm1, norm2);
         await db.SaveChangesAsync();
 
-        // Set personal interests in Valkey
         var valkeyDb = _valkey.Multiplexer.GetDatabase();
         string userKey = $"rec:v1:user:{myUserId:D}:equipment-types";
         await valkeyDb.SortedSetAddAsync(userKey, typeFav.ToString("D"), 50);
 
+        string globalKey = "rec:v1:global:popular-listings";
+        await valkeyDb.SortedSetAddAsync(globalKey, idFav1.ToString("D"), 100);
+        await valkeyDb.SortedSetAddAsync(globalKey, idNorm1.ToString("D"), 100);
+
         string token = secFactory.CreateHumanToken(myUserId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        var response = await client.GetAsync($"api/v1/inventory/public/equipment-listings?brandId={brandId:D}&sort=recommended");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        // Cycle 5974968: page 1 (size 2) expected: [idFav2, idFav1]
+        var responseP1 = await client.GetAsync($"api/v1/inventory/public/equipment-listings?brandId={brandId:D}&sort=recommended&page=1&pageSize=2");
+        Assert.Equal(HttpStatusCode.OK, responseP1.StatusCode);
+        var paged1 = await responseP1.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
+        Assert.NotNull(paged1);
+        Assert.Equal(4, paged1.TotalCount);
+        Assert.DoesNotContain(myListing.Id, paged1.Items.Select(x => x.Id)); // Owner exclusion verified
+        Assert.Equal([idFav2, idFav1], paged1.Items.Select(x => x.Id));
 
-        var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
-        Assert.NotNull(paged);
-        var ids = paged.Items.Select(x => x.Id).ToList();
+        // Page 2 (size 2) expected: [idNorm1, idNorm2]
+        var responseP2 = await client.GetAsync($"api/v1/inventory/public/equipment-listings?brandId={brandId:D}&sort=recommended&page=2&pageSize=2");
+        var paged2 = await responseP2.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
+        Assert.NotNull(paged2);
+        Assert.Equal([idNorm1, idNorm2], paged2.Items.Select(x => x.Id));
 
-        // My listing must be excluded
-        Assert.DoesNotContain(myListing.Id, ids);
-        // Favorite listing comes before normal listing
-        Assert.Equal(favListing.Id, ids[0]);
-        Assert.Equal(normalListing.Id, ids[1]);
+        // Combined: disjoint, complete
+        var combined = paged1.Items.Concat(paged2.Items).Select(x => x.Id).ToList();
+        Assert.Equal([idFav2, idFav1, idNorm1, idNorm2], combined);
+
+        // Cycle 5974970 (10 minutes later): page 1 composition changes to [idNorm1, idFav1]
+        var (appLater, secLater) = CreateTestApp(now: FixedNow.AddMinutes(10));
+        using var clientLater = appLater.CreateClient();
+        clientLater.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", secLater.CreateHumanToken(myUserId));
+        var responseLater = await clientLater.GetAsync($"api/v1/inventory/public/equipment-listings?brandId={brandId:D}&sort=recommended&page=1&pageSize=2");
+        var pagedLater = await responseLater.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
+        Assert.NotNull(pagedLater);
+        Assert.Equal([idFav1, idNorm1], pagedLater.Items.Select(x => x.Id));
     }
 
     [Fact]

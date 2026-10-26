@@ -180,7 +180,7 @@ public sealed class PublicEquipmentListingServiceTests
     public async Task GetById_EmptyId_Returns404()
     {
         var service = CreateService();
-        var result = await service.GetPublicListingByIdAsync(Guid.Empty);
+        var result = await service.GetPublicListingByIdAsync(Guid.Empty, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsFailure);
         Assert.Equal("LISTING_NOT_FOUND", result.Error.Code);
@@ -190,7 +190,7 @@ public sealed class PublicEquipmentListingServiceTests
     public async Task GetById_NotFound_Returns404()
     {
         var service = CreateService();
-        var result = await service.GetPublicListingByIdAsync(Guid.NewGuid());
+        var result = await service.GetPublicListingByIdAsync(Guid.NewGuid(), AnonymousCallerContext.Instance);
 
         Assert.True(result.IsFailure);
         Assert.Equal("LISTING_NOT_FOUND", result.Error.Code);
@@ -206,7 +206,7 @@ public sealed class PublicEquipmentListingServiceTests
             "Model Draft", null, "Model Draft", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
         _repo.Add(listing);
 
-        var result = await service.GetPublicListingByIdAsync(id);
+        var result = await service.GetPublicListingByIdAsync(id, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsFailure);
         Assert.Equal("LISTING_NOT_FOUND", result.Error.Code);
@@ -226,7 +226,7 @@ public sealed class PublicEquipmentListingServiceTests
         listing.Assets.Add(asset1);
         _repo.Add(listing);
 
-        var result = await service.GetPublicListingByIdAsync(id);
+        var result = await service.GetPublicListingByIdAsync(id, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsSuccess);
         var response = result.Value;
@@ -466,7 +466,7 @@ public sealed class PublicEquipmentListingServiceTests
         typeof(EquipmentListing).GetProperty(nameof(EquipmentListing.Status))!.SetValue(listing, EquipmentListingStatus.Active);
         _repo.Store[listingId] = listing;
 
-        var result = await service.GetPublicListingByIdAsync(listingId);
+        var result = await service.GetPublicListingByIdAsync(listingId, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsSuccess);
         var response = result.Value;

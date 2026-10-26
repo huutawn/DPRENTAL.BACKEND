@@ -18,13 +18,68 @@ public sealed class InventoryCallerContext : IInventoryCallerContext
         var context = httpContextAccessor.HttpContext;
         _user = context?.User;
         _hasValidApiKey = context?.Items.ContainsKey("InternalApiKeyVerified") == true;
+
+        if (context != null)
+        {
+            var headers = context.Request.Headers;
+            string? corrId = headers["X-Correlation-Id"].FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(corrId))
+            {
+                corrId = context.TraceIdentifier;
+            }
+            CorrelationId = corrId;
+
+            IsPrefetch = CheckPrefetch(headers);
+        }
     }
 
     // Constructor phục vụ testing trực tiếp với ClaimsPrincipal
-    public InventoryCallerContext(ClaimsPrincipal? user, bool hasValidApiKey = false)
+    public InventoryCallerContext(
+        ClaimsPrincipal? user,
+        bool hasValidApiKey = false,
+        string? correlationId = null,
+        bool isPrefetch = false)
     {
         _user = user;
         _hasValidApiKey = hasValidApiKey || user?.FindFirst("u")?.Value == "svc";
+        CorrelationId = correlationId;
+        IsPrefetch = isPrefetch;
+    }
+
+    /// <inheritdoc />
+    public bool HasServiceTokenClaim => _user?.Identity?.IsAuthenticated == true && _user?.FindFirst("u")?.Value == "svc";
+
+    /// <inheritdoc />
+    public string? CorrelationId { get; }
+
+    /// <inheritdoc />
+    public bool IsPrefetch { get; }
+
+    private static bool CheckPrefetch(IHeaderDictionary? headers)
+    {
+        if (headers == null) return false;
+        string[] prefetchHeaderNames = ["Purpose", "Sec-Purpose", "X-Purpose"];
+        char[] separators = [',', ';', ' ', '\t'];
+
+        foreach (var headerName in prefetchHeaderNames)
+        {
+            if (headers.TryGetValue(headerName, out var values))
+            {
+                foreach (var val in values)
+                {
+                    if (string.IsNullOrWhiteSpace(val)) continue;
+                    var tokens = val.Split(separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    foreach (var token in tokens)
+                    {
+                        if (string.Equals(token, "prefetch", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /// <inheritdoc />

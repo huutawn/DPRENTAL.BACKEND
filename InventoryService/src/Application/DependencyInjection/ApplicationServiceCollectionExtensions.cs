@@ -24,6 +24,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IWarehouseService, WarehouseService>();
         services.AddScoped<IInventoryAssetService, InventoryAssetService>();
         services.AddScoped<IPublicEquipmentListingService, PublicEquipmentListingService>();
+        services.AddScoped<IBehaviorEventRecorder, BehaviorEventRecorder>();
         services.AddScoped<ICalendarService, CalendarService>();
         services.AddScoped<IInventoryMediaService, InventoryMediaService>();
         services.AddScoped<IInventoryAllocationService, InventoryAllocationService>();

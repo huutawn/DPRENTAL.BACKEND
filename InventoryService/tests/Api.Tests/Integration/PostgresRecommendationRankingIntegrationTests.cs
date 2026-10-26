@@ -37,7 +37,7 @@ public sealed class PostgresRecommendationRankingIntegrationTests : IClassFixtur
     }
 
     [Fact]
-    public async Task Ranking_LexicographicOrdering_InterestBeforePopularity_AndTieBreakers()
+    public async Task Ranking_WeightedSelection_StablePerSeed_And_ScoreAdvantage()
     {
         await using var db = CreateDbContext();
         var repo = new EquipmentListingRepository(db);
@@ -84,30 +84,64 @@ public sealed class PostgresRecommendationRankingIntegrationTests : IClassFixtur
             new(listing3.Id, 500)
         };
 
-        var criteria = new EquipmentListingSearchCriteria(
+        string seedA = "test_cycle_100";
+        var criteriaA = new EquipmentListingSearchCriteria(
             filters: new AssetSearchFilters(BrandId: brandId, Sort: AssetSortOption.Recommended),
             personalScores: personalScores,
             globalScores: globalScores,
             skip: 0,
-            take: 10);
+            take: 10,
+            seed: seedA);
 
-        var result = await repo.SearchPublicAsync(criteria);
+        var result1 = await repo.SearchPublicAsync(criteriaA);
+        var result2 = await repo.SearchPublicAsync(criteriaA);
 
-        Assert.Equal("personalized", result.EffectiveTier);
-        var resultIds = result.Items.Select(i => i.Listing.Id).ToList();
+        Assert.Equal("personalized", result1.EffectiveTier);
+        var resultIds1 = result1.Items.Select(i => i.Listing.Id).ToList();
+        var resultIds2 = result2.Items.Select(i => i.Listing.Id).ToList();
 
-        // Must not contain inactive listing
-        Assert.DoesNotContain(listingInactive.Id, resultIds);
+        // 1. Same seed produces exact same order (stability across requests in same cycle)
+        Assert.Equal(resultIds1, resultIds2);
 
-        // Within high interest (typeHigh = 20): listing2 (pop 50) before listing1 (pop 5)
-        // High interest (listing2, listing1) strictly before low interest (listing3, interest 10, despite pop 500)
-        int idxListing2 = resultIds.IndexOf(listing2.Id);
-        int idxListing1 = resultIds.IndexOf(listing1.Id);
-        int idxListing3 = resultIds.IndexOf(listing3.Id);
+        // 2. Must not contain inactive listing
+        Assert.DoesNotContain(listingInactive.Id, resultIds1);
 
-        Assert.True(idxListing2 >= 0 && idxListing1 >= 0 && idxListing3 >= 0);
-        Assert.True(idxListing2 < idxListing1, "Listing 2 (higher popularity) must precede Listing 1");
-        Assert.True(idxListing1 < idxListing3, "High interest must strictly precede low interest regardless of popularity");
+        // 3. Paging across pages with same seed does not duplicate items
+        var page1 = await repo.SearchPublicAsync(new EquipmentListingSearchCriteria(
+            filters: new AssetSearchFilters(BrandId: brandId, Sort: AssetSortOption.Recommended),
+            personalScores: personalScores,
+            globalScores: globalScores,
+            skip: 0,
+            take: 2,
+            seed: seedA));
+        var page2 = await repo.SearchPublicAsync(new EquipmentListingSearchCriteria(
+            filters: new AssetSearchFilters(BrandId: brandId, Sort: AssetSortOption.Recommended),
+            personalScores: personalScores,
+            globalScores: globalScores,
+            skip: 2,
+            take: 2,
+            seed: seedA));
+
+        Assert.Equal(2, page1.Items.Count);
+        Assert.Single(page2.Items);
+        var page1Ids = page1.Items.Select(i => i.Listing.Id).ToList();
+        var page2Ids = page2.Items.Select(i => i.Listing.Id).ToList();
+        Assert.Empty(page1Ids.Intersect(page2Ids));
+
+        // 4. Multiple cycles demonstrate order changes across seeds
+        var orders = new HashSet<string>();
+        for (int c = 1; c <= 20; c++)
+        {
+            var resCycle = await repo.SearchPublicAsync(new EquipmentListingSearchCriteria(
+                filters: new AssetSearchFilters(BrandId: brandId, Sort: AssetSortOption.Recommended),
+                personalScores: personalScores,
+                globalScores: globalScores,
+                skip: 0,
+                take: 10,
+                seed: $"cycle_{c}"));
+            orders.Add(string.Join(",", resCycle.Items.Select(i => i.Listing.Id)));
+        }
+        Assert.True(orders.Count > 1, "Different cycles/seeds must produce different orderings.");
     }
 
     [Fact]
@@ -193,7 +227,9 @@ public sealed class PostgresRecommendationRankingIntegrationTests : IClassFixtur
         var resultGlobal = await repo.SearchPublicAsync(criteriaGlobalFallback);
         Assert.Equal("global", resultGlobal.EffectiveTier);
         Assert.Equal(2, resultGlobal.Items.Count);
-        Assert.Equal(popularListing.Id, resultGlobal.Items[0].Listing.Id);
+        var globalIds = resultGlobal.Items.Select(i => i.Listing.Id).ToList();
+        Assert.Contains(popularListing.Id, globalIds);
+        Assert.Contains(regularListing.Id, globalIds);
 
         // 2. Both personal and global have no match -> falls back to default tier!
         var emptyGlobal = new List<ListingPopularityScore> { new(Guid.NewGuid(), 100) };
@@ -237,5 +273,81 @@ public sealed class PostgresRecommendationRankingIntegrationTests : IClassFixtur
         var resultBeyond = await repo.SearchPublicAsync(criteriaPageBeyond);
         Assert.Equal(2, resultBeyond.TotalCount);
         Assert.Empty(resultBeyond.Items);
+    }
+
+    [Fact]
+    public async Task Ranking_StatisticalAdvantage_256Seeds_GlobalAndPersonalized()
+    {
+        await using var db = CreateDbContext();
+        var repo = new EquipmentListingRepository(db);
+
+        var owner = Guid.NewGuid();
+        await SeedWarehouseAsync(db, owner);
+        var brandId = Guid.NewGuid();
+        var typeId = Guid.NewGuid();
+        var typeOther = Guid.NewGuid();
+
+        // Two global candidates
+        var lHigh = EquipmentListing.Create(
+            Guid.Parse("11111111-1111-1111-1111-111111111111"), owner, typeId, brandId, "High", null, "M1", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        lHigh.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+
+        var lLow = EquipmentListing.Create(
+            Guid.Parse("22222222-2222-2222-2222-222222222222"), owner, typeOther, brandId, "Low", null, "M2", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+        lLow.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
+
+        db.EquipmentListings.AddRange(lHigh, lLow);
+        await db.SaveChangesAsync();
+
+        // 1. Global: High (pop 100) vs Low (pop 10) across 256 fixed seeds
+        int globalHighWins = 0;
+        var globalScores = new List<ListingPopularityScore>
+        {
+            new(lHigh.Id, 100),
+            new(lLow.Id, 10)
+        };
+
+        for (int i = 0; i < 256; i++)
+        {
+            var res = await repo.SearchPublicAsync(new EquipmentListingSearchCriteria(
+                filters: new AssetSearchFilters(BrandId: brandId, Sort: AssetSortOption.Recommended),
+                globalScores: globalScores,
+                skip: 0,
+                take: 1,
+                seed: $"seed_{i}"));
+
+            if (res.Items.Count > 0 && res.Items[0].Listing.Id == lHigh.Id)
+            {
+                globalHighWins++;
+            }
+        }
+
+        double globalWinRate = (double)globalHighWins / 256.0;
+        Assert.True(globalWinRate > 0.70, $"Global high popularity win rate was {globalWinRate:P1}, expected > 70%");
+
+        // 2. Personalized: High interest (score 50) vs Normal (score 0) across 256 fixed seeds
+        int personalHighWins = 0;
+        var personalScores = new List<EquipmentTypeInterestScore>
+        {
+            new(typeId, 50)
+        };
+
+        for (int i = 0; i < 256; i++)
+        {
+            var res = await repo.SearchPublicAsync(new EquipmentListingSearchCriteria(
+                filters: new AssetSearchFilters(BrandId: brandId, Sort: AssetSortOption.Recommended),
+                personalScores: personalScores,
+                skip: 0,
+                take: 1,
+                seed: $"seed_{i}"));
+
+            if (res.Items.Count > 0 && res.Items[0].Listing.Id == lHigh.Id)
+            {
+                personalHighWins++;
+            }
+        }
+
+        double personalWinRate = (double)personalHighWins / 256.0;
+        Assert.True(personalWinRate > 0.85, $"Personalized high interest win rate was {personalWinRate:P1}, expected > 85%");
     }
 }

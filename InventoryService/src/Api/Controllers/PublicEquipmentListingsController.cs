@@ -134,7 +134,7 @@ public sealed class PublicEquipmentListingsController : ControllerBase
         Guid id,
         CancellationToken cancellationToken = default)
     {
-        var result = await _publicListingService.GetPublicListingByIdAsync(id, cancellationToken);
+        var result = await _publicListingService.GetPublicListingByIdAsync(id, _callerContext, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);

@@ -157,8 +157,8 @@ public sealed record MessageEnvelope<T>
     public required string CorrelationId { get; init; }
 
     [JsonPropertyName("causationId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? CausationId { get; init; }
-
     [JsonPropertyName("aggregateId")]
     public required string AggregateId { get; init; }
 
