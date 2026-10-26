@@ -76,7 +76,8 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
             {
                 Filter = filterString,
                 AttributesToRetrieve = ["id"],
-                Limit = candidateLimit
+                Limit = candidateLimit,
+                MatchingStrategy = "all"
             };
 
             var searchResult = await index.SearchAsync<PublicListingIndexDocument>(normalizedQ, searchQuery, cancellationToken);
@@ -153,7 +154,8 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
             {
                 Filter = filterString,
                 AttributesToRetrieve = ["id"],
-                Limit = candidateLimit
+                Limit = candidateLimit,
+                MatchingStrategy = "all"
             };
 
             var searchResult = await index.SearchAsync<OwnerListingIndexDocument>(normalizedQ, searchQuery, cancellationToken);
@@ -284,7 +286,8 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
 
     private static string NormalizeSearchText(string text)
     {
-        return text.Trim().Normalize(NormalizationForm.FormC);
+        var normalized = text.Normalize(NormalizationForm.FormC);
+        return System.Text.RegularExpressions.Regex.Replace(normalized.Trim(), @"\s+", " ");
     }
 
     private static bool IsCredentialOrPermissionError(MeilisearchApiError ex)

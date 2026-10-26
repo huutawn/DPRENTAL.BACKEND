@@ -45,9 +45,14 @@ public sealed partial class EquipmentListingRepository
         }
         else if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
         {
-            var escaped = EscapeLikePattern(filters.SearchKeyword);
-            clauses.Add("(l.name ILIKE @pSearch ESCAPE '\\' OR l.model ILIKE @pSearch ESCAPE '\\')");
-            parameters.Add(new NpgsqlParameter("pSearch", $"%{escaped}%"));
+            var words = filters.SearchKeyword.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            for (int i = 0; i < words.Length; i++)
+            {
+                string pName = $"pWord_{i}";
+                var escaped = EscapeLikePattern(words[i]);
+                clauses.Add($"(l.name ILIKE @{pName} ESCAPE '\\' OR l.model ILIKE @{pName} ESCAPE '\\')");
+                parameters.Add(new NpgsqlParameter(pName, $"%{escaped}%"));
+            }
         }
 
         if (filters.EquipmentTypeId.HasValue)
@@ -200,9 +205,14 @@ public sealed partial class EquipmentListingRepository
         }
         else if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
         {
-            var escaped = EscapeLikePattern(filters.SearchKeyword);
-            clauses.Add("(l.name ILIKE @pSearch ESCAPE '\\' OR l.model ILIKE @pSearch ESCAPE '\\')");
-            commonParams.Add(new NpgsqlParameter("pSearch", $"%{escaped}%"));
+            var words = filters.SearchKeyword.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            for (int i = 0; i < words.Length; i++)
+            {
+                string pName = $"pWord_{i}";
+                var escaped = EscapeLikePattern(words[i]);
+                clauses.Add($"(l.name ILIKE @{pName} ESCAPE '\\' OR l.model ILIKE @{pName} ESCAPE '\\')");
+                commonParams.Add(new NpgsqlParameter(pName, $"%{escaped}%"));
+            }
         }
 
         if (filters.EquipmentTypeId.HasValue)
@@ -456,15 +466,62 @@ public sealed partial class EquipmentListingRepository
         }
         else
         {
-            string orderSql = criteria.Filters.Sort switch
+            string orderSql;
+            if (criteria.Filters.Sort == AssetSortOption.Relevance)
             {
-                AssetSortOption.Relevance when hasCandidates => "ORDER BY cand.ord ASC",
-                AssetSortOption.Relevance => "ORDER BY l.created_at DESC, l.id DESC",
-                AssetSortOption.CreatedAsc => "ORDER BY l.created_at ASC, l.id ASC",
-                AssetSortOption.ModelDesc => "ORDER BY l.model DESC, l.id DESC",
-                AssetSortOption.ModelAsc => "ORDER BY l.model ASC, l.id ASC",
-                _ => "ORDER BY l.created_at DESC, l.id DESC"
-            };
+                bool hasKeyword = !string.IsNullOrWhiteSpace(criteria.Filters.SearchKeyword);
+                if (hasKeyword)
+                {
+                    string kw = criteria.Filters.SearchKeyword!.Trim();
+                    string exact = kw.ToLowerInvariant();
+                    string phrase = $"%{EscapeLikePattern(kw)}%";
+                    pageParamsList.Add(new NpgsqlParameter("pExact", exact));
+                    pageParamsList.Add(new NpgsqlParameter("pPhrase", phrase));
+
+                    if (hasCandidates)
+                    {
+                        orderSql = """
+                            ORDER BY
+                                CASE
+                                    WHEN LOWER(l.name) = @pExact OR LOWER(l.model) = @pExact THEN 1
+                                    WHEN l.name ILIKE @pPhrase ESCAPE '\' OR l.model ILIKE @pPhrase ESCAPE '\' THEN 2
+                                    ELSE 3
+                                END ASC,
+                                cand.ord ASC,
+                                l.id ASC
+                            """;
+                    }
+                    else
+                    {
+                        orderSql = """
+                            ORDER BY
+                                CASE
+                                    WHEN LOWER(l.name) = @pExact OR LOWER(l.model) = @pExact THEN 1
+                                    WHEN l.name ILIKE @pPhrase ESCAPE '\' OR l.model ILIKE @pPhrase ESCAPE '\' THEN 2
+                                    ELSE 3
+                                END ASC,
+                                l.created_at DESC,
+                                l.id DESC
+                            """;
+                    }
+                }
+                else
+                {
+                    orderSql = hasCandidates
+                        ? "ORDER BY cand.ord ASC, l.id ASC"
+                        : "ORDER BY l.created_at DESC, l.id DESC";
+                }
+            }
+            else
+            {
+                orderSql = criteria.Filters.Sort switch
+                {
+                    AssetSortOption.CreatedAsc => "ORDER BY l.created_at ASC, l.id ASC",
+                    AssetSortOption.ModelDesc => "ORDER BY l.model DESC, l.id DESC",
+                    AssetSortOption.ModelAsc => "ORDER BY l.model ASC, l.id ASC",
+                    _ => "ORDER BY l.created_at DESC, l.id DESC"
+                };
+            }
 
             pageSql = $"""
                 SELECT l.id AS "Id", ({totalQtyExpr}) AS "TotalQuantity", ({availableQtyExpr}) AS "AvailableQuantity", NULL AS "EffectiveTier"

@@ -247,7 +247,7 @@ public sealed class AssetSearchQueryValidator
     }
 
     /// <summary>
-    /// Xác thực và chuẩn hóa từ khóa tìm kiếm (q): trim, tối đa 200 ký tự; thiếu hoặc rỗng trả về null.
+    /// Xác thực và chuẩn hóa từ khóa tìm kiếm (q): trim, bỏ khoảng trắng thừa, Unicode NFC, tối đa 200 ký tự; thiếu hoặc rỗng trả về null.
     /// </summary>
     public static Result<string?> ValidateSearchKeyword(string? q)
     {
@@ -256,12 +256,23 @@ public sealed class AssetSearchQueryValidator
             return Result.Success<string?>(null);
         }
 
-        string trimmed = q.Trim();
-        if (trimmed.Length > 200)
+        string normalized = NormalizeKeyword(q);
+        if (normalized.Length > 200)
         {
             return Error.Validation("INVALID_QUERY_PARAMETER", "Từ khóa tìm kiếm tối đa 200 ký tự.");
         }
 
-        return Result.Success<string?>(trimmed.Length > 0 ? trimmed : null);
+        return Result.Success<string?>(normalized.Length > 0 ? normalized : null);
+    }
+
+    public static string NormalizeKeyword(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var normalized = text.Normalize(System.Text.NormalizationForm.FormC);
+        return System.Text.RegularExpressions.Regex.Replace(normalized.Trim(), @"\s+", " ");
     }
 }

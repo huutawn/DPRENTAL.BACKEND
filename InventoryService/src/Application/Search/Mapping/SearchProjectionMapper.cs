@@ -55,6 +55,7 @@ public static class SearchProjectionMapper
             Id = asset.Id.ToString("D"),
             OwnerUserId = asset.Listing.OwnerUserId.ToString("D"),
             EquipmentListingId = asset.EquipmentListingId.ToString("D"),
+            Name = asset.Listing.Name,
             SerialNumber = asset.SerialNumber,
             Model = asset.Listing.Model,
             EquipmentTypeId = asset.Listing.EquipmentTypeId.ToString("D"),

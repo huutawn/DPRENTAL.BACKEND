@@ -416,7 +416,7 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
             effectiveEquipmentTypeId,
             cancellationToken => _listingRepository.GetDistinctSchemaVersionsPublicAsync(
                 new AssetSearchFilters(
-                    SearchKeyword: candidateIds == null ? validated.SearchKeyword : null,
+                    SearchKeyword: validated.SearchKeyword,
                     EquipmentTypeId: effectiveEquipmentTypeId,
                     BrandId: validated.BrandId,
                     CandidateIds: candidateIds,
@@ -452,7 +452,7 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
         var evaluationNowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
 
         var searchFilters = new AssetSearchFilters(
-            SearchKeyword: candidateIds == null ? validated.SearchKeyword : null,
+            SearchKeyword: validated.SearchKeyword,
             EquipmentTypeId: effectiveEquipmentTypeId,
             BrandId: validated.BrandId,
             Sort: validated.Sort,

@@ -231,7 +231,7 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
                         new OwnerAssetSearchCriteria(
                             ownerUserId,
                             new AssetSearchFilters(
-                                candidateIds == null ? validated.SearchKeyword : null,
+                                validated.SearchKeyword,
                                 validated.EquipmentTypeId,
                                 validated.BrandId,
                                 validated.ManufactureYearFrom,
@@ -248,7 +248,7 @@ public sealed partial class InventoryAssetService : IInventoryAssetService
                 var resolvedFilters = resolveResult.Value;
 
                 var searchFilters = new AssetSearchFilters(
-                    SearchKeyword: candidateIds == null ? validated.SearchKeyword : null,
+                    SearchKeyword: validated.SearchKeyword,
                     EquipmentTypeId: validated.EquipmentTypeId,
                     BrandId: validated.BrandId,
                     ManufactureYearFrom: validated.ManufactureYearFrom,

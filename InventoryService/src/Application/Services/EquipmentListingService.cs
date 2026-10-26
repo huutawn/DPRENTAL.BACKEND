@@ -256,7 +256,7 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
 
                 var criteria = new OwnerEquipmentListingSearchCriteria(
                     ownerUserId,
-                    candidateIds == null ? keywordResult.Value : null,
+                    keywordResult.Value,
                     skip,
                     pageSize,
                     request.EquipmentTypeId,
