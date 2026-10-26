@@ -576,7 +576,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
             try
             {
-                Result allocResult;
+                Result<AllocationEventApplyResult> allocResult;
                 if (msg.MessageType is KafkaContractSpec.EventTypes.ReturnedUnitsApplied or KafkaContractSpec.EventTypes.ReturnedUnitsRejected)
                 {
                     if (_inventoryReturnResultHandler is null)
@@ -585,9 +585,10 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                         _unitOfWork.DiscardChanges();
                         return Error.Failure("RETURN_RESULT_HANDLER_NOT_CONFIGURED", "Inventory return result handler is required.");
                     }
-                    allocResult = msg.MessageType == KafkaContractSpec.EventTypes.ReturnedUnitsApplied
+                    var res = msg.MessageType == KafkaContractSpec.EventTypes.ReturnedUnitsApplied
                         ? await _inventoryReturnResultHandler.ApplyStagedAsync(msg.Payload, cancellationToken)
                         : await _inventoryReturnResultHandler.RejectStagedAsync(msg.Payload, cancellationToken);
+                    allocResult = res.IsFailure ? res.Error : Result.Success(AllocationEventApplyResult.NoChange());
                 }
                 else
                 {
@@ -606,83 +607,18 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                 await tx.CommitAsync(cancellationToken);
                 _logger.LogInformation("Successfully processed allocation inbox message {Id} ({Type}) for Order {OrderId}",
                     msg.Id, msg.MessageType, orderId);
-
-                bool isAllocationSuccess = string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded, StringComparison.OrdinalIgnoreCase);
-                if (_notifier != null && order != null && isAllocationSuccess)
+                if (_notifier != null && order != null && allocResult.Value.Metadata is { } allocMeta)
                 {
                     try
                     {
-                        using var doc = JsonDocument.Parse(msg.Payload);
-                        if (doc.RootElement.TryGetProperty("payload", out var payloadElem))
+                        if (allocMeta.RenterNotification is { } renterNote)
                         {
-                            string commandType = payloadElem.TryGetProperty("commandType", out var ctProp) ? ctProp.GetString() ?? string.Empty : string.Empty;
-                            Guid rentalItemId = payloadElem.TryGetProperty("rentalItemId", out var riProp) && riProp.TryGetGuid(out var ri) ? ri : Guid.Empty;
+                            await _notifier.NotifyRenterOrderChangedAsync(order.RenterId, renterNote, cancellationToken);
+                        }
 
-                            var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
-                            if (item != null)
-                            {
-                                var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
-                                Guid subOrderId = subOrder?.Id ?? Guid.Empty;
-
-                                if (string.Equals(commandType, KafkaContractSpec.CommandTypes.ConfirmAllocation, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    if (item.Status == RentalItemStatus.AwaitingHandover)
-                                    {
-                                        await _notifier.NotifyRenterOrderChangedAsync(
-                                            order.RenterId,
-                                            new RenterOrderChangedNotification(
-                                                Guid.NewGuid(),
-                                                order.Id,
-                                                order.Version,
-                                                OrderChangeTypes.SupplierConfirmed,
-                                                utcNow),
-                                            cancellationToken);
-
-                                        if (subOrderId != Guid.Empty)
-                                        {
-                                            await _notifier.NotifySupplierSubOrderChangedAsync(
-                                                item.SupplierId,
-                                                new SupplierSubOrderChangedNotification(
-                                                    Guid.NewGuid(),
-                                                    order.Id,
-                                                    subOrderId,
-                                                    order.Version,
-                                                    OrderChangeTypes.SupplierConfirmed,
-                                                    utcNow),
-                                                cancellationToken);
-                                        }
-                                    }
-                                }
-                                else if (string.Equals(commandType, KafkaContractSpec.CommandTypes.MarkAssetsHandedOver, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    if (item.Status == RentalItemStatus.InRental || item.HandoverRecord != null)
-                                    {
-                                        await _notifier.NotifyRenterOrderChangedAsync(
-                                            order.RenterId,
-                                            new RenterOrderChangedNotification(
-                                                Guid.NewGuid(),
-                                                order.Id,
-                                                order.Version,
-                                                OrderChangeTypes.HandoverConfirmed,
-                                                utcNow),
-                                            cancellationToken);
-
-                                        if (subOrderId != Guid.Empty)
-                                        {
-                                            await _notifier.NotifySupplierSubOrderChangedAsync(
-                                                item.SupplierId,
-                                                new SupplierSubOrderChangedNotification(
-                                                    Guid.NewGuid(),
-                                                    order.Id,
-                                                    subOrderId,
-                                                    order.Version,
-                                                    OrderChangeTypes.HandoverConfirmed,
-                                                    utcNow),
-                                                cancellationToken);
-                                        }
-                                    }
-                                }
-                            }
+                        foreach (var (supplierId, supplierNote) in allocMeta.SupplierNotifications)
+                        {
+                            await _notifier.NotifySupplierSubOrderChangedAsync(supplierId, supplierNote, cancellationToken);
                         }
                     }
                     catch (Exception nex)
@@ -690,7 +626,6 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                         _logger.LogError(nex, "Error dispatching realtime notification for allocation event {MessageId}", msg.Id);
                     }
                 }
-
                 if (_notifier != null && order != null && string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.ReturnedUnitsApplied, StringComparison.OrdinalIgnoreCase))
                 {
                     try

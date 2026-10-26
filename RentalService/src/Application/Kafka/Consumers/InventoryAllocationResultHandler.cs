@@ -1,4 +1,5 @@
 #pragma warning disable CA1848, CA1873
+using Dprental.RentalService.Application.Hubs;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -71,7 +72,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         _paymentClient = paymentClient;
     }
 
-    public async Task<Result> HandleAllocationEventAsync(
+    public async Task<Result<AllocationEventApplyResult>> HandleAllocationEventAsync(
         Guid orderId,
         RentalInboxMessage msg,
         RentalOrder? order,
@@ -99,7 +100,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             string.Equals(commandType, "BlockDamagedAssets", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogInformation("Skipping return-related command {CommandType} in allocation handler", commandType);
-            return Result.Success();
+            return Result.Success(AllocationEventApplyResult.NoChange());
         }
 
         bool isSuccess = string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded, StringComparison.OrdinalIgnoreCase);
@@ -112,7 +113,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 return await HandleRecoveryHoldResultAsync(order, rentalItemId, operationKey, isSuccess, payloadElement, utcNow, cancellationToken);
             }
             _logger.LogInformation("Ignored Kafka CreateHold result for order {OrderId} as checkout hold is now synchronous", orderId);
-            return Result.Success();
+            return Result.Success(AllocationEventApplyResult.NoChange());
         }
 
         // For non-CreateHold commands, an existing order is required (except compensation release on failed/timed-out checkout)
@@ -124,7 +125,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 { Status: CheckoutOperationStatus.Failed or CheckoutOperationStatus.TimedOut })
             {
                 _logger.LogInformation("Release reply {OperationKey} for unfinished checkout order {OrderId} acknowledged", operationKey, orderId);
-                return Result.Success();
+                return Result.Success(AllocationEventApplyResult.NoChange());
             }
 
             return Error.NotFound("ORDER_NOT_FOUND", $"Không tìm thấy đơn hàng '{orderId}'.");
@@ -137,7 +138,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         if (receipt == null)
         {
             _logger.LogWarning("Receipt for operationKey {OperationKey} not found on order {OrderId}", operationKey, orderId);
-            return Result.Success();
+            return Result.Success(AllocationEventApplyResult.NoChange());
         }
         if (!IsReceiptForCommand(receipt, commandType))
             return Error.Validation("INVENTORY_RESULT_ACTION_MISMATCH", "Inventory result action does not match the staged operation.");
@@ -146,13 +147,13 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         {
             bool sameSuccess = isSuccess && !string.IsNullOrWhiteSpace(receipt.ResponseJson) &&
                 CanonicalJson.AreEquivalent(receipt.ResponseJson, payloadElement.GetRawText());
-            return sameSuccess ? Result.Success() : Error.Conflict("INVENTORY_RESULT_CONFLICT", "Operation already has a different terminal result.");
+            return sameSuccess ? Result.Success(AllocationEventApplyResult.NoChange()) : Error.Conflict("INVENTORY_RESULT_CONFLICT", "Operation already has a different terminal result.");
         }
         if (receipt.Status == RentalOperationReceipt.StatusFailed)
         {
             string incomingCode = payloadElement.TryGetProperty("errorCode", out var errorCodeElement) ? errorCodeElement.GetString() ?? "" : "";
             bool sameFailure = !isSuccess && string.Equals(receipt.ErrorCode, incomingCode, StringComparison.OrdinalIgnoreCase);
-            return sameFailure ? Result.Success() : Error.Conflict("INVENTORY_RESULT_CONFLICT", "Operation already has a different terminal result.");
+            return sameFailure ? Result.Success(AllocationEventApplyResult.NoChange()) : Error.Conflict("INVENTORY_RESULT_CONFLICT", "Operation already has a different terminal result.");
         }
 
         if (string.Equals(commandType, KafkaContractSpec.CommandTypes.MarkAssetsOverdue, StringComparison.OrdinalIgnoreCase))
@@ -181,7 +182,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         }
 
         _logger.LogWarning("Unhandled allocation command type: {CommandType}", commandType);
-        return Result.Success();
+        return Result.Success(AllocationEventApplyResult.NoChange());
     }
 
     private static bool IsReceiptForCommand(RentalOperationReceipt receipt, string commandType) => commandType switch
@@ -191,10 +192,10 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         _ => string.Equals(receipt.Action, commandType, StringComparison.OrdinalIgnoreCase)
     };
 
-    private static Result HandleOverdueResult(RentalOrder order, RentalOperationReceipt receipt,
+    private static Result<AllocationEventApplyResult> HandleOverdueResult(RentalOrder order, RentalOperationReceipt receipt,
         string operationKey, bool isSuccess, JsonElement payload, DateTimeOffset now)
     {
-        if (receipt.Status == RentalOperationReceipt.StatusSucceeded) return Result.Success();
+        if (receipt.Status == RentalOperationReceipt.StatusSucceeded) return Result.Success(AllocationEventApplyResult.NoChange());
         if (receipt.InventoryOperationKey is not null && !string.Equals(receipt.InventoryOperationKey, operationKey, StringComparison.Ordinal))
             return Error.Conflict("INVENTORY_RESULT_CONFLICT", "Overdue result operation key differs from the staged command.");
         if (isSuccess)
@@ -213,7 +214,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             if (expected.Length != 1 || !expected.SequenceEqual(actual))
                 return Error.Validation("INVALID_OVERDUE_RESULT", "Overdue result allocation does not match the pending assignment.");
             receipt.MarkSucceeded(now, payload.GetRawText());
-            return Result.Success();
+            return Result.Success(AllocationEventApplyResult.NoChange());
         }
 
         string errorCode = payload.TryGetProperty("errorCode", out var codeElement) ? codeElement.GetString() ?? "" : "";
@@ -222,15 +223,15 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 .Any(u => u.Status is RentalUnitAssignmentStatus.ReturnedNormal or RentalUnitAssignmentStatus.ReturnedDamaged) == true)
         {
             receipt.MarkSucceeded(now);
-            return Result.Success();
+            return Result.Success(AllocationEventApplyResult.NoChange());
         }
         receipt.MarkFailed(errorCode, payload.TryGetProperty("errorMessage", out var errorElement) ? errorElement.GetString() : null,
             now, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
-        return Result.Success();
+        return Result.Success(AllocationEventApplyResult.NoChange());
     }
 
 
-    private async Task<Result> HandleConfirmAllocationResultAsync(
+    private async Task<Result<AllocationEventApplyResult>> HandleConfirmAllocationResultAsync(
         RentalOrder order,
         RentalOperationReceipt receipt,
         Guid rentalItemId,
@@ -283,10 +284,21 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
 
         await _orderRepository.UpdateAsync(order, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return Result.Success();
+
+        if (isSuccess)
+        {
+            var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
+            if (item != null && item.Status == RentalItemStatus.AwaitingHandover)
+            {
+                var meta = BuildAllocationMetadata(order, item.SupplierId, OrderChangeTypes.SupplierConfirmed, utcNow);
+                return Result.Success(AllocationEventApplyResult.WithMetadata(meta));
+            }
+        }
+
+        return Result.Success(AllocationEventApplyResult.NoChange());
     }
 
-    private async Task<Result> HandleExtendHoldResultAsync(
+    private async Task<Result<AllocationEventApplyResult>> HandleExtendHoldResultAsync(
         RentalOrder order,
         RentalOperationReceipt receipt,
         Guid rentalItemId,
@@ -299,7 +311,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         if (isSuccess)
         {
             receipt.MarkSucceeded(utcNow, payloadElement.GetRawText());
-            await CheckAndCompleteHoldConfirmationAsync(order, utcNow, cancellationToken);
+            return await CheckAndCompleteHoldConfirmationAsync(order, utcNow, cancellationToken);
         }
         else
         {
@@ -359,17 +371,17 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 else
                 {
                     _logger.LogWarning("ExtendHold failed for item {ItemId} and cannot recover. Triggering all-or-nothing compensation for order {OrderId}.", item.Id, order.Id);
-                    await CompensateAndRefundAllItemsAsync(order, errCode, errMsg, utcNow, cancellationToken);
+                    return await CompensateAndRefundAllItemsAsync(order, errCode, errMsg, utcNow, cancellationToken);
                 }
             }
         }
 
         await _orderRepository.UpdateAsync(order, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return Result.Success();
+        return Result.Success(AllocationEventApplyResult.NoChange());
     }
 
-    private async Task<Result> HandleRecoveryHoldResultAsync(
+    private async Task<Result<AllocationEventApplyResult>> HandleRecoveryHoldResultAsync(
         RentalOrder order,
         Guid rentalItemId,
         string operationKey,
@@ -382,7 +394,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         if (item == null)
         {
             _logger.LogWarning("Item {ItemId} not found on order {OrderId} for recovery hold reply", rentalItemId, order.Id);
-            return Result.Success();
+            return Result.Success(AllocationEventApplyResult.NoChange());
         }
 
         if (order.Status == RentalOrderStatus.Cancelled)
@@ -395,7 +407,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                     new ReleaseAllocationCommandPayload(order.Id, item.Id, operationKey + ":rel", "Order was cancelled", relGroup),
                     order.Id.ToString("D"), cancellationToken: cancellationToken);
             }
-            return Result.Success();
+            return Result.Success(AllocationEventApplyResult.NoChange());
         }
 
         string recOpKey = RentalOperationExecutor.ComputeOperationKey("RecoveryHold", $"{order.Id}:{item.Id}");
@@ -428,7 +440,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 item.ReassignAllocationGroup(allocatedGroup, assignments);
             }
 
-            await CheckAndCompleteHoldConfirmationAsync(order, utcNow, cancellationToken);
+            return await CheckAndCompleteHoldConfirmationAsync(order, utcNow, cancellationToken);
         }
         else
         {
@@ -439,12 +451,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             _logger.LogWarning("Recovery hold rejected for item {ItemId} on order {OrderId} ({ErrCode}: {ErrMsg}). Triggering all-or-nothing compensation.",
                 item.Id, order.Id, errCode, errMsg);
 
-            await CompensateAndRefundAllItemsAsync(order, errCode, errMsg, utcNow, cancellationToken);
+            return await CompensateAndRefundAllItemsAsync(order, errCode, errMsg, utcNow, cancellationToken);
         }
-
-        await _orderRepository.UpdateAsync(order, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return Result.Success();
     }
 
     private static DateTimeOffset CalculateRecoveryCutoff(RentalOrder order)
@@ -463,7 +471,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         return cutoff < startOfDayCutoff ? cutoff : startOfDayCutoff;
     }
 
-    private async Task<Result> CheckAndCompleteHoldConfirmationAsync(
+    private async Task<Result<AllocationEventApplyResult>> CheckAndCompleteHoldConfirmationAsync(
         RentalOrder order,
         DateTimeOffset utcNow,
         CancellationToken cancellationToken)
@@ -478,7 +486,9 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
 
             if (extendReceipt == null && recReceipt == null)
             {
-                return Result.Success();
+                await _orderRepository.UpdateAsync(order, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                return Result.Success(AllocationEventApplyResult.NoChange());
             }
         }
 
@@ -548,10 +558,14 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             }
         }
 
-        return Result.Success();
+        await _orderRepository.UpdateAsync(order, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var paidMeta = BuildAllSuppliersMetadata(order, OrderChangeTypes.PaymentConfirmed, order.PaymentConfirmedAt ?? utcNow);
+        return Result.Success(AllocationEventApplyResult.WithMetadata(paidMeta));
     }
 
-    private async Task<Result> CompensateAndRefundAllItemsAsync(
+    private async Task<Result<AllocationEventApplyResult>> CompensateAndRefundAllItemsAsync(
         RentalOrder order,
         string errorCode,
         string errorMessage,
@@ -621,11 +635,15 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         }
 
         RentalOrderStatusPolicy.Apply(order, utcNow, "Compensation");
+        order.RecordReadModelUpdate(utcNow);
+        await _orderRepository.UpdateAsync(order, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return Result.Success();
+        var refundMeta = BuildRenterOnlyMetadata(order, OrderChangeTypes.PaymentRefundRequired, utcNow);
+        return Result.Success(AllocationEventApplyResult.WithMetadata(refundMeta));
     }
 
-    private async Task<Result> HandleReleaseAllocationResultAsync(
+    private async Task<Result<AllocationEventApplyResult>> HandleReleaseAllocationResultAsync(
         RentalOrder order,
         RentalOperationReceipt receipt,
         Guid rentalItemId,
@@ -647,20 +665,29 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             }
             string refundOpKey = RentalOperationExecutor.ComputeOperationKey("RequestRefund", $"{order.Id}:{rentalItemId}");
             var pendingRefund = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundOpKey && r.Status == RentalOperationReceipt.StatusPending);
+
+            await _orderRepository.UpdateAsync(order, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            if (assignmentsChanged || rollupChanged)
+            {
+                var meta = BuildAllocationMetadata(order, item?.SupplierId, OrderChangeTypes.AllocationChanged, utcNow);
+                return Result.Success(AllocationEventApplyResult.WithMetadata(meta));
+            }
+            return Result.Success(AllocationEventApplyResult.NoChange());
         }
         else
         {
             string errCode = payloadElement.TryGetProperty("errorCode", out var ec) ? ec.GetString() ?? "RELEASE_REJECTED" : "RELEASE_REJECTED";
             string errMsg = payloadElement.TryGetProperty("errorMessage", out var em) ? em.GetString() ?? "Release rejected by Inventory" : "Release rejected";
             receipt.MarkFailed(errCode, errMsg, utcNow, RentalOperationReceipt.ClassificationBusiness, isTransient: false);
+            await _orderRepository.UpdateAsync(order, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return Result.Success(AllocationEventApplyResult.NoChange());
         }
-
-        await _orderRepository.UpdateAsync(order, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return Result.Success();
     }
 
-    private async Task<Result> HandleMarkAssetsHandedOverResultAsync(
+    private async Task<Result<AllocationEventApplyResult>> HandleMarkAssetsHandedOverResultAsync(
         RentalOrder order,
         RentalOperationReceipt receipt,
         Guid rentalItemId,
@@ -673,7 +700,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         // Kết quả trùng lặp cho một lệnh đã xử lý xong thì bỏ qua.
         if (receipt.Status == RentalOperationReceipt.StatusSucceeded)
         {
-            return Result.Success();
+            return Result.Success(AllocationEventApplyResult.NoChange());
         }
 
         if (isSuccess)
@@ -700,7 +727,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                         receipt.MarkManualReconciliationRequired(utcNow, "Inventory đã xác nhận bàn giao nhưng receipt không có bằng chứng để ghi nhận.");
                         await _orderRepository.UpdateAsync(order, cancellationToken);
                         await _unitOfWork.SaveChangesAsync(cancellationToken);
-                        return Result.Success();
+                        return Result.Success(AllocationEventApplyResult.NoChange());
                     }
 
                     var completed = item.CompleteHandover(
@@ -717,7 +744,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                         receipt.MarkManualReconciliationRequired(utcNow, $"Không ghi nhận được bàn giao: {completed.Error.Code}.");
                         await _orderRepository.UpdateAsync(order, cancellationToken);
                         await _unitOfWork.SaveChangesAsync(cancellationToken);
-                        return Result.Success();
+                        return Result.Success(AllocationEventApplyResult.NoChange());
                     }
                 }
 
@@ -751,6 +778,63 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return Result.Success();
+
+        if (isSuccess && handedOverItem != null)
+        {
+            var meta = BuildAllocationMetadata(order, handedOverItem.SupplierId, OrderChangeTypes.HandoverConfirmed, utcNow);
+            return Result.Success(AllocationEventApplyResult.WithMetadata(meta));
+        }
+
+        return Result.Success(AllocationEventApplyResult.NoChange());
+    }
+
+    private static AllocationNotificationMetadata BuildAllocationMetadata(
+        RentalOrder order,
+        Guid? targetSupplierId,
+        string changeType,
+        DateTimeOffset occurredAt)
+    {
+        var renterNote = new RenterOrderChangedNotification(
+            Guid.NewGuid(), order.Id, order.Version, changeType, occurredAt);
+
+        List<(Guid SupplierId, SupplierSubOrderChangedNotification Notification)> supplierNotes = [];
+        if (targetSupplierId.HasValue && targetSupplierId.Value != Guid.Empty)
+        {
+            var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == targetSupplierId.Value);
+            if (subOrder != null)
+            {
+                supplierNotes.Add((targetSupplierId.Value, new SupplierSubOrderChangedNotification(
+                    Guid.NewGuid(), order.Id, subOrder.Id, order.Version, changeType, occurredAt)));
+            }
+        }
+
+        return new AllocationNotificationMetadata(renterNote, supplierNotes);
+    }
+
+    private static AllocationNotificationMetadata BuildAllSuppliersMetadata(
+        RentalOrder order,
+        string changeType,
+        DateTimeOffset occurredAt)
+    {
+        var renterNote = new RenterOrderChangedNotification(
+            Guid.NewGuid(), order.Id, order.Version, changeType, occurredAt);
+
+        var supplierNotes = order.SubOrders
+            .Select(s => (s.SupplierId, new SupplierSubOrderChangedNotification(
+                Guid.NewGuid(), order.Id, s.Id, order.Version, changeType, occurredAt)))
+            .ToList();
+
+        return new AllocationNotificationMetadata(renterNote, supplierNotes);
+    }
+
+    private static AllocationNotificationMetadata BuildRenterOnlyMetadata(
+        RentalOrder order,
+        string changeType,
+        DateTimeOffset occurredAt)
+    {
+        var renterNote = new RenterOrderChangedNotification(
+            Guid.NewGuid(), order.Id, order.Version, changeType, occurredAt);
+
+        return new AllocationNotificationMetadata(renterNote, []);
     }
 }

@@ -52,6 +52,7 @@ public static class OrderChangeTypes
     public const string SupplierConfirmed = "SUPPLIER_CONFIRMED";
     public const string SupplierRejected = "SUPPLIER_REJECTED";
     public const string HandoverConfirmed = "HANDOVER_CONFIRMED";
+    public const string AllocationChanged = "ALLOCATION_CHANGED";
     public const string OrderCancelled = "ORDER_CANCELLED";
     public const string ItemCancelled = "ITEM_CANCELLED";
     public const string PaymentExpired = "PAYMENT_EXPIRED";

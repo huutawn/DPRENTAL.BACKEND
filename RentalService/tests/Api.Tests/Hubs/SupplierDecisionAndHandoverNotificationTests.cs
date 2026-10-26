@@ -76,6 +76,31 @@ public sealed class SupplierDecisionAndHandoverNotificationTests
         return order;
     }
 
+    private static RentalOrder CreateMultiSupplierPendingOrder(Guid orderId, Guid renterId, Guid supplierA, Guid supplierB)
+    {
+        var unitA = new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var initialItemA = new InitialRentalItemDto(
+            Guid.NewGuid(), Guid.NewGuid(), supplierA, 1,
+            new DateOnly(2026, 10, 28), new DateOnly(2026, 10, 30),
+            "Thiết bị A", "Desc", "Kho A", 1_000_000m, 5_000_000m,
+            "grp-A", [unitA],
+            TestListingSnapshots.Default);
+
+        var unitB = new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var initialItemB = new InitialRentalItemDto(
+            Guid.NewGuid(), Guid.NewGuid(), supplierB, 1,
+            new DateOnly(2026, 10, 28), new DateOnly(2026, 10, 30),
+            "Thiết bị B", "Desc", "Kho B", 2_000_000m, 8_000_000m,
+            "grp-B", [unitB],
+            TestListingSnapshots.Default);
+
+        return RentalOrder.Create(
+            orderId, "DH-2026-MULTI-02", renterId, "VND", "Pickup",
+            "Nguyễn Văn An", "0901234567", "123 Đường A", null,
+            "v1.0", "terms-doc", "terms-hash", "op-create", FixedNow,
+            [initialItemA, initialItemB]).Value;
+    }
+
     [Fact]
     public async Task SupplierRejectSubOrder_EmitsSupplierRejected_ToRenterAndOnlyRejectingSupplier()
     {
@@ -563,6 +588,280 @@ public sealed class SupplierDecisionAndHandoverNotificationTests
 
         // Duplicate reply must NOT emit notifications
         Assert.Empty(notifier.RenterNotifications);
+        Assert.Empty(notifier.SupplierNotifications);
+    }
+
+    [Fact]
+    public async Task ReleaseAllocation_Success_EmitsAllocationChanged_ToRenterAndAffectedSupplierOnly()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        var orders = new RentalOrderRepository(db);
+        var inboxes = new InboxRepository(db);
+        var outboxes = new OutboxRepository(db);
+        var lockManager = new FakeOrderLockManager();
+        var notifier = new FakeOrderHubNotifier();
+        var timeProvider = new FixedTimeProvider(FixedNow);
+
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        Guid supplierA = Guid.NewGuid();
+        Guid supplierB = Guid.NewGuid();
+        var order = CreateMultiSupplierPaidOrder(orderId, renterId, supplierA, supplierB, out _, out _);
+        order.MarkAsPaid("INV-1", "PAY-1", FixedNow, FixedNow);
+
+        var itemA = order.Items.First(i => i.SupplierId == supplierA);
+        string opKey = "rel-op-1";
+        var relReceipt = RentalOperationReceipt.CreatePending(
+            Guid.NewGuid(), orderId, opKey, "ReleaseAllocation", "fp-rel",
+            FixedNow, itemA.Id, "{}");
+        order.AddOperationReceipt(relReceipt);
+
+        await orders.CreateAsync(order);
+        await db.SaveChangesAsync();
+
+        var kafkaOptions = Options.Create(PaymentPublicationProofTestFixture.Configure(new KafkaOptions()));
+        var eventProducer = new RentalEventProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
+        var allocHandler = new InventoryAllocationResultHandler(
+            orders, db, lockManager, timeProvider,
+            rentalEvents: eventProducer);
+
+        var payload = new
+        {
+            rentalOrderId = orderId,
+            rentalItemId = itemA.Id,
+            operationKey = opKey,
+            commandType = KafkaContractSpec.CommandTypes.ReleaseAllocation
+        };
+
+        var envelope = new KafkaMessageEnvelope<object>(
+            Guid.NewGuid(),
+            KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded,
+            1,
+            "inventory-service",
+            orderId.ToString("D"),
+            FixedNow,
+            "corr-rel",
+            null,
+            payload);
+
+        string rawJson = JsonSerializer.Serialize(envelope, JsonOptions);
+        var inboxMsg = new RentalInboxMessage(
+            Guid.NewGuid(), envelope.MessageId, envelope.MessageType,
+            envelope.Producer, envelope.AggregateId, envelope.CorrelationId, null,
+            rawJson, FixedNow, "fp-inbox-rel");
+
+        await inboxes.AddAsync(inboxMsg);
+        await db.SaveChangesAsync();
+
+        var dispatcher = new PaymentEventsDispatcher(
+            inboxes, orders, lockManager,
+            new Mock<IPaymentWorkflowService>().Object,
+            new Mock<IRefundCompletedConsumer>().Object,
+            new KafkaOutboxWriter(outboxes), db,
+            allocHandler,
+            kafkaOptions,
+            null,
+            NullLogger<PaymentEventsDispatcher>.Instance,
+            timeProvider,
+            null, null, notifier);
+
+        var res = await dispatcher.ProcessInboxMessageAsync(inboxMsg.Id);
+        Assert.True(res.IsSuccess);
+
+        // Renter received ALLOCATION_CHANGED
+        Assert.Single(notifier.RenterNotifications);
+        var renterNote = notifier.RenterNotifications.Single();
+        Assert.Equal(renterId, renterNote.RenterId);
+        Assert.Equal(OrderChangeTypes.AllocationChanged, renterNote.Notification.ChangeType);
+
+        // Supplier A received ALLOCATION_CHANGED
+        Assert.Single(notifier.SupplierNotifications);
+        var supplierNote = notifier.SupplierNotifications.Single();
+        Assert.Equal(supplierA, supplierNote.SupplierId);
+        Assert.Equal(OrderChangeTypes.AllocationChanged, supplierNote.Notification.ChangeType);
+
+        // Supplier B received NOTHING
+        Assert.DoesNotContain(notifier.SupplierNotifications, n => n.SupplierId == supplierB);
+    }
+
+    [Fact]
+    public async Task RecoveryHold_AllSucceed_EmitsPaymentConfirmed_ToAllSuppliers()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        var orders = new RentalOrderRepository(db);
+        var inboxes = new InboxRepository(db);
+        var outboxes = new OutboxRepository(db);
+        var lockManager = new FakeOrderLockManager();
+        var notifier = new FakeOrderHubNotifier();
+        var timeProvider = new FixedTimeProvider(FixedNow);
+
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        Guid supplierA = Guid.NewGuid();
+        Guid supplierB = Guid.NewGuid();
+        var order = CreateMultiSupplierPendingOrder(orderId, renterId, supplierA, supplierB);
+        order.AttachInvoice("INV-REC", FixedNow);
+        order.RecordPaymentReceived("INV-REC", "PAY-REC", FixedNow, FixedNow);
+
+        var itemA = order.Items.First(i => i.SupplierId == supplierA);
+        var itemB = order.Items.First(i => i.SupplierId == supplierB);
+
+        string recOpKeyA = RentalOperationExecutor.ComputeOperationKey("RecoveryHold", $"{orderId}:{itemA.Id}");
+        string recOpKeyB = RentalOperationExecutor.ComputeOperationKey("RecoveryHold", $"{orderId}:{itemB.Id}");
+
+        var receiptA = RentalOperationReceipt.CreatePending(
+            Guid.NewGuid(), orderId, recOpKeyA, "RecoveryHold", "fp-rec-a",
+            FixedNow, itemA.Id, "{}");
+        var receiptB = RentalOperationReceipt.CreatePending(
+            Guid.NewGuid(), orderId, recOpKeyB, "RecoveryHold", "fp-rec-b",
+            FixedNow, itemB.Id, "{}");
+        order.AddOperationReceipt(receiptA);
+        order.AddOperationReceipt(receiptB);
+
+        await orders.CreateAsync(order);
+        await db.SaveChangesAsync();
+
+        var kafkaOptions = Options.Create(PaymentPublicationProofTestFixture.Configure(new KafkaOptions()));
+        var eventProducer = new RentalEventProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
+        var allocHandler = new InventoryAllocationResultHandler(
+            orders, db, lockManager, timeProvider,
+            rentalEvents: eventProducer);
+
+        var dispatcher = new PaymentEventsDispatcher(
+            inboxes, orders, lockManager,
+            new Mock<IPaymentWorkflowService>().Object,
+            new Mock<IRefundCompletedConsumer>().Object,
+            new KafkaOutboxWriter(outboxes), db,
+            allocHandler,
+            kafkaOptions,
+            null,
+            NullLogger<PaymentEventsDispatcher>.Instance,
+            timeProvider,
+            null, null, notifier);
+
+        // 1. First reply for item A succeeds -> does NOT emit PaymentConfirmed yet because item B is pending
+        var payloadA = new
+        {
+            rentalOrderId = orderId,
+            rentalItemId = itemA.Id,
+            operationKey = recOpKeyA,
+            commandType = KafkaContractSpec.CommandTypes.CreateHold
+        };
+        var envA = new KafkaMessageEnvelope<object>(
+            Guid.NewGuid(), KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded, 1,
+            "inventory-service", orderId.ToString("D"), FixedNow, "corr-a", null, payloadA);
+        var rawA = JsonSerializer.Serialize(envA, JsonOptions);
+        var msgA = new RentalInboxMessage(Guid.NewGuid(), envA.MessageId, envA.MessageType, envA.Producer, envA.AggregateId, envA.CorrelationId, null, rawA, FixedNow, "fp-a");
+        await inboxes.AddAsync(msgA);
+        await db.SaveChangesAsync();
+
+        var resA = await dispatcher.ProcessInboxMessageAsync(msgA.Id);
+        Assert.True(resA.IsSuccess);
+        Assert.Empty(notifier.RenterNotifications);
+        Assert.Empty(notifier.SupplierNotifications);
+
+        // 2. Second reply for item B succeeds -> now order is Paid! Emits PAYMENT_CONFIRMED to renter and both suppliers
+        var payloadB = new
+        {
+            rentalOrderId = orderId,
+            rentalItemId = itemB.Id,
+            operationKey = recOpKeyB,
+            commandType = KafkaContractSpec.CommandTypes.CreateHold
+        };
+        var envB = new KafkaMessageEnvelope<object>(
+            Guid.NewGuid(), KafkaContractSpec.EventTypes.InventoryAllocationCommandSucceeded, 1,
+            "inventory-service", orderId.ToString("D"), FixedNow, "corr-b", null, payloadB);
+        var rawB = JsonSerializer.Serialize(envB, JsonOptions);
+        var msgB = new RentalInboxMessage(Guid.NewGuid(), envB.MessageId, envB.MessageType, envB.Producer, envB.AggregateId, envB.CorrelationId, null, rawB, FixedNow, "fp-b");
+        await inboxes.AddAsync(msgB);
+        await db.SaveChangesAsync();
+
+        var resB = await dispatcher.ProcessInboxMessageAsync(msgB.Id);
+        Assert.True(resB.IsSuccess, resB.IsFailure ? $"{resB.Error.Code}: {resB.Error.Message}" : "");
+
+        Assert.Single(notifier.RenterNotifications);
+        Assert.Equal(OrderChangeTypes.PaymentConfirmed, notifier.RenterNotifications.Single().Notification.ChangeType);
+
+        Assert.Equal(2, notifier.SupplierNotifications.Count);
+        Assert.All(notifier.SupplierNotifications, s => Assert.Equal(OrderChangeTypes.PaymentConfirmed, s.Notification.ChangeType));
+    }
+
+    [Fact]
+    public async Task RecoveryHold_Failure_EmitsPaymentRefundRequired_ToRenterOnly()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        var orders = new RentalOrderRepository(db);
+        var inboxes = new InboxRepository(db);
+        var outboxes = new OutboxRepository(db);
+        var lockManager = new FakeOrderLockManager();
+        var notifier = new FakeOrderHubNotifier();
+        var timeProvider = new FixedTimeProvider(FixedNow);
+
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        Guid supplierA = Guid.NewGuid();
+        Guid supplierB = Guid.NewGuid();
+        var order = CreateMultiSupplierPendingOrder(orderId, renterId, supplierA, supplierB);
+        order.AttachInvoice("INV-REC-FAIL", FixedNow);
+        order.RecordPaymentReceived("INV-REC-FAIL", "PAY-REC-FAIL", FixedNow, FixedNow);
+
+        var itemA = order.Items.First(i => i.SupplierId == supplierA);
+        string recOpKeyA = RentalOperationExecutor.ComputeOperationKey("RecoveryHold", $"{orderId}:{itemA.Id}");
+
+        var receiptA = RentalOperationReceipt.CreatePending(
+            Guid.NewGuid(), orderId, recOpKeyA, "RecoveryHold", "fp-rec-a",
+            FixedNow, itemA.Id, "{}");
+        order.AddOperationReceipt(receiptA);
+
+        await orders.CreateAsync(order);
+        await db.SaveChangesAsync();
+
+        var kafkaOptions = Options.Create(PaymentPublicationProofTestFixture.Configure(new KafkaOptions()));
+        var eventProducer = new RentalEventProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
+        var allocHandler = new InventoryAllocationResultHandler(
+            orders, db, lockManager, timeProvider,
+            rentalEvents: eventProducer);
+
+        var dispatcher = new PaymentEventsDispatcher(
+            inboxes, orders, lockManager,
+            new Mock<IPaymentWorkflowService>().Object,
+            new Mock<IRefundCompletedConsumer>().Object,
+            new KafkaOutboxWriter(outboxes), db,
+            allocHandler,
+            kafkaOptions,
+            null,
+            NullLogger<PaymentEventsDispatcher>.Instance,
+            timeProvider,
+            null, null, notifier);
+
+        var payloadA = new
+        {
+            rentalOrderId = orderId,
+            rentalItemId = itemA.Id,
+            operationKey = recOpKeyA,
+            commandType = KafkaContractSpec.CommandTypes.CreateHold,
+            errorCode = "INSUFFICIENT_AVAILABILITY",
+            errorMessage = "No available units"
+        };
+        var envA = new KafkaMessageEnvelope<object>(
+            Guid.NewGuid(), KafkaContractSpec.EventTypes.InventoryAllocationCommandRejected, 1,
+            "inventory-service", orderId.ToString("D"), FixedNow, "corr-a-fail", null, payloadA);
+        var rawA = JsonSerializer.Serialize(envA, JsonOptions);
+        var msgA = new RentalInboxMessage(Guid.NewGuid(), envA.MessageId, envA.MessageType, envA.Producer, envA.AggregateId, envA.CorrelationId, null, rawA, FixedNow, "fp-a-fail");
+        await inboxes.AddAsync(msgA);
+        await db.SaveChangesAsync();
+
+        var resA = await dispatcher.ProcessInboxMessageAsync(msgA.Id);
+        Assert.True(resA.IsSuccess);
+
+        // Renter receives PAYMENT_REFUND_REQUIRED
+        Assert.Single(notifier.RenterNotifications);
+        Assert.Equal(OrderChangeTypes.PaymentRefundRequired, notifier.RenterNotifications.Single().Notification.ChangeType);
+
+        // Suppliers receive NOTHING
         Assert.Empty(notifier.SupplierNotifications);
     }
 }
