@@ -20,6 +20,14 @@ namespace Dprental.PaymentService.Api.Tests.Integration;
 
 public sealed class PostgresSePayPaymentRealDatabaseTests
 {
+    private static void AssertPaidOutboxPair(List<OutboxMessage> messages)
+    {
+        Assert.Equal(2, messages.Count);
+        Assert.Single(messages, x => x.MessageType == "InvoicePaid" && x.Topic == OutboxTopics.PaymentEventsV1);
+        Assert.Single(messages, x => x.MessageType == OutboxTopics.InvoicePaidFinancialMessageType &&
+                                     x.Topic == OutboxTopics.PaymentAnalyticsV1);
+    }
+
     private static readonly IOptions<PaymentMerchantOptions> MerchantOptions =
         Microsoft.Extensions.Options.Options.Create(new PaymentMerchantOptions
         {
@@ -146,7 +154,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
                 Assert.Equal(PaymentTransactionStatus.Matched, txs[0].Status);
 
                 var outbox = await verifyCtx.OutboxMessages.ToListAsync();
-                Assert.Single(outbox);
+                AssertPaidOutboxPair(outbox);
 
                 var inv = await verifyCtx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef);
                 Assert.Equal(InvoiceStatus.Paid, inv.Status);
@@ -284,7 +292,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             Assert.Equal(PaymentTransactionStatus.Matched, txs[0].Status);
 
             var outbox = await verifyCtx.OutboxMessages.ToListAsync();
-            Assert.Single(outbox);
+            AssertPaidOutboxPair(outbox);
 
             var inv = await verifyCtx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef);
             Assert.Equal(InvoiceStatus.Paid, inv.Status);
@@ -367,7 +375,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             var outbox = await verifyCtx.OutboxMessages.ToListAsync();
             if (results[0].IsSuccess)
             {
-                Assert.Single(outbox);
+                AssertPaidOutboxPair(outbox);
             }
             else
             {
@@ -481,8 +489,8 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             inner.FindPaymentTransactionByPaymentRefWithRowLockAsync(paymentRef, cancellationToken);
         public Task ExecuteStreamLockAsync(string streamId, CancellationToken cancellationToken = default) =>
             inner.ExecuteStreamLockAsync(streamId, cancellationToken);
-        public Task SaveLatePaymentAcceptanceAsync(Invoice invoice, PaymentTransaction transaction, OperationReceipt receipt, TransactionJournalEntry invoiceJournal, TransactionJournalEntry paymentTransactionJournal, CancellationToken cancellationToken = default) =>
-            inner.SaveLatePaymentAcceptanceAsync(invoice, transaction, receipt, invoiceJournal, paymentTransactionJournal, cancellationToken);
+        public Task SaveLatePaymentAcceptanceAsync(Invoice invoice, PaymentTransaction transaction, OperationReceipt receipt, OutboxMessage outboxMessage, TransactionJournalEntry invoiceJournal, TransactionJournalEntry paymentTransactionJournal, CancellationToken cancellationToken = default) =>
+            inner.SaveLatePaymentAcceptanceAsync(invoice, transaction, receipt, outboxMessage, invoiceJournal, paymentTransactionJournal, cancellationToken);
         public async Task<PaymentTransaction?> FindPaymentTransactionWithRowLockAsync(string provider, string providerTransactionId, CancellationToken cancellationToken = default)
         {
             var result = await inner.FindPaymentTransactionWithRowLockAsync(provider, providerTransactionId, cancellationToken);
@@ -502,8 +510,11 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             OutboxMessage? outboxMessage,
             TransactionJournalEntry journalEntry,
             TransactionJournalEntry? invoiceJournalEntry,
+            OutboxMessage? analyticsOutbox,
+            TransactionJournalEntry? analyticsJournal,
             CancellationToken cancellationToken = default) =>
-            inner.SavePaymentTransactionAsync(transaction, invoice, outboxMessage, journalEntry, invoiceJournalEntry, cancellationToken);
+            inner.SavePaymentTransactionAsync(transaction, invoice, outboxMessage, journalEntry, invoiceJournalEntry,
+                analyticsOutbox, analyticsJournal, cancellationToken);
 
         public Task<IReadOnlyList<Guid>> GetPendingExpiredCandidateIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
             inner.GetPendingExpiredCandidateIdsAsync(utcNow, batchSize, cancellationToken);
@@ -516,8 +527,11 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             OperationReceipt receipt,
             OutboxMessage? outboxMessage,
             TransactionJournalEntry journalEntry,
+            OutboxMessage? analyticsOutbox = null,
+            TransactionJournalEntry? analyticsJournal = null,
             CancellationToken cancellationToken = default) =>
-            inner.SaveNewInvoiceAsync(invoice, receipt, outboxMessage, journalEntry, cancellationToken);
+            inner.SaveNewInvoiceAsync(invoice, receipt, outboxMessage, journalEntry,
+                analyticsOutbox, analyticsJournal, cancellationToken);
 
         public Task SaveInvoiceChangesAsync(
             Invoice invoice,
@@ -584,7 +598,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
                 Assert.Equal(PaymentTransactionReason.InvoiceAlreadyPaid, txs[1].ReasonCode);
 
                 var outbox = await verifyCtx.OutboxMessages.ToListAsync();
-                Assert.Single(outbox); // Only 1 Outbox emitted!
+                AssertPaidOutboxPair(outbox);
 
                 var inv = await verifyCtx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef);
                 Assert.Equal("SEPAY:1003", inv.PaymentRef);
@@ -656,7 +670,7 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
                 Assert.Contains(txs, t => t.Status == PaymentTransactionStatus.ReviewRequired && t.ReasonCode == PaymentTransactionReason.InvoiceAlreadyPaid);
 
                 var outbox = await verifyCtx.OutboxMessages.ToListAsync();
-                Assert.Single(outbox);
+                AssertPaidOutboxPair(outbox);
 
                 var inv = await verifyCtx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef);
                 Assert.Equal(InvoiceStatus.Paid, inv.Status);
@@ -723,11 +737,11 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
                 Assert.True(retryRes.IsSuccess);
             }
 
-            // Verify after retry: 1 transaction, invoice is PAID, 1 outbox
+            // Verify after retry: one transaction and one event per audience.
             await using (var verifyCtx = new PaymentServiceDbContext(options))
             {
                 Assert.Equal(1, await verifyCtx.PaymentTransactions.CountAsync());
-                Assert.Equal(1, await verifyCtx.OutboxMessages.CountAsync());
+                AssertPaidOutboxPair(await verifyCtx.OutboxMessages.ToListAsync());
                 var inv = await verifyCtx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef);
                 Assert.Equal(InvoiceStatus.Paid, inv.Status);
                 Assert.Equal("SEPAY:1005", inv.PaymentRef);
@@ -782,20 +796,19 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
                 Assert.True(res.IsSuccess);
             }
 
-            // Assert: invoice kept Cancelled, PaymentRef recorded, transaction is MANUAL_REFUND_REQUIRED, 1 Outbox emitted
+            // A bank transfer dated before the deadline on a cancelled invoice needs reconciliation.
             await using (var verifyCtx = new PaymentServiceDbContext(options))
             {
                 var inv = await verifyCtx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef);
                 Assert.Equal(InvoiceStatus.Cancelled, inv.Status);
-                Assert.Equal("SEPAY:1006", inv.PaymentRef);
-                Assert.NotNull(inv.PaidAt);
+                Assert.Null(inv.PaymentRef);
+                Assert.Null(inv.PaidAt);
 
                 var txRecord = await verifyCtx.PaymentTransactions.SingleAsync();
-                Assert.Equal(PaymentTransactionStatus.ManualRefundRequired, txRecord.Status);
-                Assert.Equal(PaymentTransactionReason.LatePayment, txRecord.ReasonCode);
+                Assert.Equal(PaymentTransactionStatus.ReviewRequired, txRecord.Status);
+                Assert.Equal(PaymentTransactionReason.OnTimePaymentInvoiceClosed, txRecord.ReasonCode);
 
-                var outbox = await verifyCtx.OutboxMessages.SingleAsync();
-                Assert.Equal("InvoicePaid", outbox.MessageType);
+                Assert.Empty(await verifyCtx.OutboxMessages.ToListAsync());
             }
         }
         finally
@@ -912,16 +925,15 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             await using (var verifyCtx = new PaymentServiceDbContext(options))
             {
                 var inv = await verifyCtx.Invoices.SingleAsync(i => i.InvoiceRef == invoiceRef);
-                Assert.Equal(InvoiceStatus.Expired, inv.Status);
+                Assert.Equal(InvoiceStatus.Paid, inv.Status);
                 Assert.Equal("SEPAY:1008", inv.PaymentRef);
                 Assert.Equal(transferTime, inv.PaidAt);
 
                 var txRecord = await verifyCtx.PaymentTransactions.SingleAsync();
-                Assert.Equal(PaymentTransactionStatus.ManualRefundRequired, txRecord.Status);
-                Assert.Equal(PaymentTransactionReason.LatePayment, txRecord.ReasonCode);
+                Assert.Equal(PaymentTransactionStatus.Matched, txRecord.Status);
+                Assert.Equal(PaymentTransactionReason.ExactMatch, txRecord.ReasonCode);
 
-                var outbox = await verifyCtx.OutboxMessages.SingleAsync();
-                Assert.Equal("InvoicePaid", outbox.MessageType);
+                AssertPaidOutboxPair(await verifyCtx.OutboxMessages.ToListAsync());
             }
         }
         finally
@@ -963,8 +975,8 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             inner.FindPaymentTransactionByPaymentRefWithRowLockAsync(paymentRef, cancellationToken);
         public Task ExecuteStreamLockAsync(string streamId, CancellationToken cancellationToken = default) =>
             inner.ExecuteStreamLockAsync(streamId, cancellationToken);
-        public Task SaveLatePaymentAcceptanceAsync(Invoice invoice, PaymentTransaction transaction, OperationReceipt receipt, TransactionJournalEntry invoiceJournal, TransactionJournalEntry paymentTransactionJournal, CancellationToken cancellationToken = default) =>
-            inner.SaveLatePaymentAcceptanceAsync(invoice, transaction, receipt, invoiceJournal, paymentTransactionJournal, cancellationToken);
+        public Task SaveLatePaymentAcceptanceAsync(Invoice invoice, PaymentTransaction transaction, OperationReceipt receipt, OutboxMessage outboxMessage, TransactionJournalEntry invoiceJournal, TransactionJournalEntry paymentTransactionJournal, CancellationToken cancellationToken = default) =>
+            inner.SaveLatePaymentAcceptanceAsync(invoice, transaction, receipt, outboxMessage, invoiceJournal, paymentTransactionJournal, cancellationToken);
         public Task<Invoice?> FindInvoiceByPaymentCodeWithRowLockAsync(string paymentCode, CancellationToken cancellationToken = default) =>
             inner.FindInvoiceByPaymentCodeWithRowLockAsync(paymentCode, cancellationToken);
 
@@ -974,13 +986,16 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             OutboxMessage? outboxMessage,
             TransactionJournalEntry journalEntry,
             TransactionJournalEntry? invoiceJournalEntry,
+            OutboxMessage? analyticsOutbox,
+            TransactionJournalEntry? analyticsJournal,
             CancellationToken cancellationToken = default)
         {
             if (shouldThrowOnSave)
             {
                 throw new InvalidOperationException("Simulated database failure before commit.");
             }
-            return inner.SavePaymentTransactionAsync(transaction, invoice, outboxMessage, journalEntry, invoiceJournalEntry, cancellationToken);
+            return inner.SavePaymentTransactionAsync(transaction, invoice, outboxMessage, journalEntry,
+                invoiceJournalEntry, analyticsOutbox, analyticsJournal, cancellationToken);
         }
 
         public Task<IReadOnlyList<Guid>> GetPendingExpiredCandidateIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
@@ -994,8 +1009,11 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
             OperationReceipt receipt,
             OutboxMessage? outboxMessage,
             TransactionJournalEntry journalEntry,
+            OutboxMessage? analyticsOutbox = null,
+            TransactionJournalEntry? analyticsJournal = null,
             CancellationToken cancellationToken = default) =>
-            inner.SaveNewInvoiceAsync(invoice, receipt, outboxMessage, journalEntry, cancellationToken);
+            inner.SaveNewInvoiceAsync(invoice, receipt, outboxMessage, journalEntry,
+                analyticsOutbox, analyticsJournal, cancellationToken);
 
         public Task SaveInvoiceChangesAsync(
             Invoice invoice,

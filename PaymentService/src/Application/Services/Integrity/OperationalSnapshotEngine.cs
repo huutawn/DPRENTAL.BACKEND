@@ -119,7 +119,7 @@ public static class OperationalSnapshotEngine
     public static IReadOnlyDictionary<string, object?> CreateManualRefundSnapshot(ManualRefundRequirement refund, long revision)
     {
         ArgumentNullException.ThrowIfNull(refund);
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        var snapshot = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["entityType"] = "ManualRefundRequirement",
             ["entityId"] = refund.RequirementRef,
@@ -139,6 +139,9 @@ public static class OperationalSnapshotEngine
             ["recipientAdminId"] = refund.CompletedBy?.ToString("D") ?? string.Empty,
             ["externalTransferReference"] = refund.ExternalTransferReference?.Trim() ?? string.Empty
         };
+        if (refund.FinancialRefundKind is not null)
+            snapshot["financialRefundKind"] = refund.FinancialRefundKind;
+        return snapshot;
     }
 
     public static IReadOnlyDictionary<string, object?> CreateOperationReceiptSnapshot(OperationReceipt receipt, long revision)

@@ -583,7 +583,8 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             "rec-order-1");
 
         var acceptResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/accept-late-payment", acceptReq);
-        Assert.Equal(HttpStatusCode.OK, acceptResp.StatusCode);
+        Assert.True(acceptResp.StatusCode == HttpStatusCode.OK,
+            $"Expected OK, got {acceptResp.StatusCode}: {await acceptResp.Content.ReadAsStringAsync()}");
         var acceptBody = await acceptResp.Content.ReadFromJsonAsync<AcceptLatePaymentResponse>();
         Assert.NotNull(acceptBody);
         Assert.Equal(invoiceRef, acceptBody.InvoiceRef);

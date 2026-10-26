@@ -32,6 +32,8 @@ public interface IInvoiceRepository
         OutboxMessage? outboxMessage,
         TransactionJournalEntry journalEntry,
         TransactionJournalEntry? invoiceJournalEntry,
+        OutboxMessage? analyticsOutbox,
+        TransactionJournalEntry? analyticsJournal,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<Guid>> GetPendingExpiredCandidateIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default);
@@ -43,6 +45,8 @@ public interface IInvoiceRepository
         OperationReceipt receipt,
         OutboxMessage? outboxMessage,
         TransactionJournalEntry journalEntry,
+        OutboxMessage? analyticsOutbox = null,
+        TransactionJournalEntry? analyticsJournal = null,
         CancellationToken cancellationToken = default);
 
     Task SaveInvoiceChangesAsync(
@@ -55,6 +59,7 @@ public interface IInvoiceRepository
         Invoice invoice,
         PaymentTransaction transaction,
         OperationReceipt receipt,
+        OutboxMessage outboxMessage,
         TransactionJournalEntry invoiceJournal,
         TransactionJournalEntry paymentTransactionJournal,
         CancellationToken cancellationToken = default);

@@ -46,13 +46,17 @@ public sealed class EfSupplierPayoutRepository : ISupplierPayoutRepository
             mutate: (p, _) => p.AttachDestination(selected!),
             buildAudit: (p, now, previousRef) => FinancialOperationAudit.Create(
                 command.OperationKey, type, fingerprint, p, command.AdminId, command.AuditReason, now, previousRef),
+            createPublication: null,
             ct);
     }
 
     public Task<Result<SupplierPayoutWriteResult>> CompleteAsync(
-        CompleteSupplierPayoutCommand command, CancellationToken ct)
+        CompleteSupplierPayoutCommand command,
+        Func<SupplierPayout, DateTimeOffset, CancellationToken, Task<SupplierPayoutPublication>> createPublication,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
+        ArgumentNullException.ThrowIfNull(createPublication);
         const string type = FinancialOperationTypes.CompleteSupplierPayout;
         var fingerprint = Fingerprint(type, command.PayoutId, command.AdminId, command.ExternalTransferReference, command.AuditReason);
 
@@ -78,6 +82,7 @@ public sealed class EfSupplierPayoutRepository : ISupplierPayoutRepository
             mutate: (p, now) => p.Complete(command.ExternalTransferReference, command.AdminId, now),
             buildAudit: (p, now, previousRef) => FinancialOperationAudit.Create(
                 command.OperationKey, type, fingerprint, p, command.AdminId, command.AuditReason, now),
+            createPublication: createPublication,
             ct);
     }
 
@@ -86,6 +91,7 @@ public sealed class EfSupplierPayoutRepository : ISupplierPayoutRepository
         Func<SupplierPayout, CancellationToken, Task<Error?>> validate,
         Action<SupplierPayout, DateTimeOffset> mutate,
         Func<SupplierPayout, DateTimeOffset, string?, FinancialOperationAudit> buildAudit,
+        Func<SupplierPayout, DateTimeOffset, CancellationToken, Task<SupplierPayoutPublication>>? createPublication,
         CancellationToken ct)
     {
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
@@ -107,6 +113,12 @@ public sealed class EfSupplierPayoutRepository : ISupplierPayoutRepository
             var previousRef = payout.DestinationRef;
             mutate(payout, now);
             _db.FinancialOperationAudits.Add(buildAudit(payout, now, previousRef));
+            if (createPublication is not null)
+            {
+                var publication = await createPublication(payout, now, ct);
+                _db.OutboxMessages.Add(publication.Message);
+                _db.TransactionJournals.Add(publication.Journal);
+            }
 
             await _db.SaveChangesAsync(ct);            // payout + audit: một transaction
             await tx.CommitAsync(ct);

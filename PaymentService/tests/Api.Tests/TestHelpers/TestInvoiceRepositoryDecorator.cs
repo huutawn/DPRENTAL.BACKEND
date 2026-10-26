@@ -58,10 +58,11 @@ public sealed class TestInvoiceRepositoryDecorator : IInvoiceRepository
         Invoice invoice,
         PaymentTransaction transaction,
         OperationReceipt receipt,
+        OutboxMessage outboxMessage,
         TransactionJournalEntry invoiceJournal,
         TransactionJournalEntry paymentTransactionJournal,
         CancellationToken cancellationToken = default) =>
-        _inner.SaveLatePaymentAcceptanceAsync(invoice, transaction, receipt, invoiceJournal, paymentTransactionJournal, cancellationToken);
+        _inner.SaveLatePaymentAcceptanceAsync(invoice, transaction, receipt, outboxMessage, invoiceJournal, paymentTransactionJournal, cancellationToken);
     public Task<Invoice?> FindInvoiceByPaymentCodeWithRowLockAsync(string paymentCode, CancellationToken cancellationToken = default) =>
         _inner.FindInvoiceByPaymentCodeWithRowLockAsync(paymentCode, cancellationToken);
 
@@ -71,8 +72,11 @@ public sealed class TestInvoiceRepositoryDecorator : IInvoiceRepository
         OutboxMessage? outboxMessage,
         TransactionJournalEntry journalEntry,
         TransactionJournalEntry? invoiceJournalEntry,
+        OutboxMessage? analyticsOutbox,
+        TransactionJournalEntry? analyticsJournal,
         CancellationToken cancellationToken = default) =>
-        _inner.SavePaymentTransactionAsync(transaction, invoice, outboxMessage, journalEntry, invoiceJournalEntry, cancellationToken);
+        _inner.SavePaymentTransactionAsync(transaction, invoice, outboxMessage, journalEntry, invoiceJournalEntry,
+            analyticsOutbox, analyticsJournal, cancellationToken);
 
     public Task<IReadOnlyList<Guid>> GetPendingExpiredCandidateIdsAsync(DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
         _inner.GetPendingExpiredCandidateIdsAsync(utcNow, batchSize, cancellationToken);
@@ -85,8 +89,11 @@ public sealed class TestInvoiceRepositoryDecorator : IInvoiceRepository
         OperationReceipt receipt,
         OutboxMessage? outboxMessage,
         TransactionJournalEntry journalEntry,
+        OutboxMessage? analyticsOutbox = null,
+        TransactionJournalEntry? analyticsJournal = null,
         CancellationToken cancellationToken = default) =>
-        _inner.SaveNewInvoiceAsync(invoice, receipt, outboxMessage, journalEntry, cancellationToken);
+        _inner.SaveNewInvoiceAsync(invoice, receipt, outboxMessage, journalEntry,
+            analyticsOutbox, analyticsJournal, cancellationToken);
 
     public Task SaveInvoiceChangesAsync(
         Invoice invoice,

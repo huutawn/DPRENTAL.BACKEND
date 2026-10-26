@@ -8,6 +8,10 @@ public static class JournalEventTypes
     public const string BankIncoming = "BANK_INCOMING";
     public const string BankOutgoing = "BANK_OUTGOING";
     public const string PaymentMatched = "PAYMENT_MATCHED";
+    public const string InvoicePaidFinancialLinked = "INVOICE_PAID_FINANCIAL_LINKED";
+    public const string RentalItemFinancialSettledLinked = "RENTAL_ITEM_FINANCIAL_SETTLED_LINKED";
+    public const string RefundCompletedFinancialLinked = "REFUND_COMPLETED_FINANCIAL_LINKED";
+    public const string SupplierPayoutCompleted = "SUPPLIER_PAYOUT_COMPLETED";
     public const string PaymentUnmatched = "PAYMENT_UNMATCHED";
     public const string RentalSettled = "RENTAL_SETTLED";
     public const string RefundRequired = "REFUND_REQUIRED";
@@ -29,4 +33,5 @@ public static class JournalStreamTypes
     public const string PaymentTransaction = "PaymentTransaction";
     public const string RentalSettlement = "RentalSettlement";
     public const string ManualRefund = "ManualRefund";
+    public const string SupplierPayout = "SupplierPayout";
 }

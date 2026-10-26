@@ -1,5 +1,6 @@
 using Dprental.PaymentService.Application.DTOs.SePay;
 using System.Globalization;
+using System.Text.Json;
 using Dprental.PaymentService.Common;
 using Dprental.PaymentService.Application.Options;
 using Dprental.PaymentService.Application.Services;
@@ -386,6 +387,18 @@ public sealed class PaymentMatchingTests
         Assert.Equal($"SEPAY:{tx.Id}", invoice.PaymentRef);
         Assert.NotNull(repo.SavedOutbox);
         Assert.Equal("InvoicePaid", repo.SavedOutbox.MessageType);
+        Assert.NotNull(repo.SavedAnalyticsOutbox);
+        Assert.Equal(OutboxTopics.PaymentAnalyticsV1, repo.SavedAnalyticsOutbox.Topic);
+        Assert.Equal(OutboxTopics.PaymentEventsV1, repo.SavedOutbox.Topic);
+        Assert.NotNull(repo.SavedAnalyticsJournal);
+        Assert.Equal(repo.SavedAnalyticsOutbox.MessageId, repo.SavedAnalyticsJournal.OutboxMessageId);
+        using var financialEvent = JsonDocument.Parse(repo.SavedAnalyticsOutbox.Payload);
+        var payload = financialEvent.RootElement.GetProperty("payload");
+        Assert.Equal(invoice.Id, payload.GetProperty("invoiceId").GetGuid());
+        Assert.Equal(invoice.TotalRentalAmount, payload.GetProperty("rentalAmount").GetDecimal());
+        Assert.Equal(invoice.TotalDepositAmount, payload.GetProperty("depositAmount").GetDecimal());
+        Assert.Equal(invoice.TotalAmount, payload.GetProperty("totalAmount").GetDecimal());
+        Assert.Equal(invoice.PaidAt, payload.GetProperty("paidAt").GetDateTimeOffset());
     }
 
     [Fact]
@@ -646,7 +659,7 @@ public sealed class PaymentMatchingTests
     }
 
     [Fact]
-    public async Task ProcessAsync_LatePayment_ProcessedPastDeadline_SetsManualRefundRequired_AndEmitsInvoicePaid()
+    public async Task ProcessAsync_OnTimePayment_ProcessedPastDeadline_RemainsMatched()
     {
         var invoice = CreatePendingInvoice();
         // Bank transfer occurred before deadline, but processor runs after deadline
@@ -657,16 +670,16 @@ public sealed class PaymentMatchingTests
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(repo.SavedTransaction);
-        Assert.Equal(PaymentTransactionStatus.ManualRefundRequired, repo.SavedTransaction.Status);
-        Assert.Equal(PaymentTransactionReason.LatePayment, repo.SavedTransaction.ReasonCode);
-        Assert.Equal(InvoiceStatus.Expired, invoice.Status);
+        Assert.Equal(PaymentTransactionStatus.Matched, repo.SavedTransaction.Status);
+        Assert.Equal(PaymentTransactionReason.ExactMatch, repo.SavedTransaction.ReasonCode);
+        Assert.Equal(InvoiceStatus.Paid, invoice.Status);
         Assert.Equal($"SEPAY:{tx.Id}", invoice.PaymentRef);
         Assert.NotNull(repo.SavedOutbox);
         Assert.Equal("InvoicePaid", repo.SavedOutbox.MessageType);
     }
 
     [Fact]
-    public async Task ProcessAsync_LatePayment_CancelledInvoice_PreservesCancelledStatus_SetsManualRefundRequired()
+    public async Task ProcessAsync_OnTimePayment_CancelledInvoice_RequiresReview()
     {
         var invoice = CreatePendingInvoice();
         invoice.Cancel("User cancelled", FixedNow.AddMinutes(5));
@@ -677,10 +690,10 @@ public sealed class PaymentMatchingTests
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(repo.SavedTransaction);
-        Assert.Equal(PaymentTransactionStatus.ManualRefundRequired, repo.SavedTransaction.Status);
+        Assert.Equal(PaymentTransactionStatus.ReviewRequired, repo.SavedTransaction.Status);
+        Assert.Equal(PaymentTransactionReason.OnTimePaymentInvoiceClosed, repo.SavedTransaction.ReasonCode);
         Assert.Equal(InvoiceStatus.Cancelled, invoice.Status);
-        Assert.Equal($"SEPAY:{tx.Id}", invoice.PaymentRef);
-        Assert.NotNull(repo.SavedOutbox);
+        Assert.Null(repo.SavedOutbox);
     }
 
     private sealed class FakeInvoiceRepo : IInvoiceRepository
@@ -688,6 +701,8 @@ public sealed class PaymentMatchingTests
         private readonly Invoice? _invoice;
         public PaymentTransaction? SavedTransaction { get; private set; }
         public OutboxMessage? SavedOutbox { get; private set; }
+        public OutboxMessage? SavedAnalyticsOutbox { get; private set; }
+        public TransactionJournalEntry? SavedAnalyticsJournal { get; private set; }
         public bool TransactionStarted { get; private set; }
 
         public FakeInvoiceRepo(Invoice? invoice)
@@ -731,7 +746,7 @@ public sealed class PaymentMatchingTests
         public Task<PaymentTransaction?> FindPaymentTransactionByPaymentRefWithRowLockAsync(string paymentRef, CancellationToken cancellationToken = default) =>
             Task.FromResult<PaymentTransaction?>(null);
         public Task ExecuteStreamLockAsync(string streamId, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task SaveLatePaymentAcceptanceAsync(Invoice invoice, PaymentTransaction transaction, OperationReceipt receipt, TransactionJournalEntry invoiceJournal, TransactionJournalEntry paymentTransactionJournal, CancellationToken cancellationToken = default) =>
+        public Task SaveLatePaymentAcceptanceAsync(Invoice invoice, PaymentTransaction transaction, OperationReceipt receipt, OutboxMessage outboxMessage, TransactionJournalEntry invoiceJournal, TransactionJournalEntry paymentTransactionJournal, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
         public Task SavePaymentTransactionAsync(
@@ -740,10 +755,14 @@ public sealed class PaymentMatchingTests
             OutboxMessage? outboxMessage,
             TransactionJournalEntry journalEntry,
             TransactionJournalEntry? invoiceJournalEntry,
+            OutboxMessage? analyticsOutbox,
+            TransactionJournalEntry? analyticsJournal,
             CancellationToken cancellationToken = default)
         {
             SavedTransaction = transaction;
             SavedOutbox = outboxMessage;
+            SavedAnalyticsOutbox = analyticsOutbox;
+            SavedAnalyticsJournal = analyticsJournal;
             return Task.CompletedTask;
         }
 
@@ -758,6 +777,8 @@ public sealed class PaymentMatchingTests
             OperationReceipt receipt,
             OutboxMessage? outboxMessage,
             TransactionJournalEntry journalEntry,
+            OutboxMessage? analyticsOutbox = null,
+            TransactionJournalEntry? analyticsJournal = null,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 

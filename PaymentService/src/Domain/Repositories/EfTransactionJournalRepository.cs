@@ -57,6 +57,8 @@ public sealed class EfTransactionJournalRepository : ITransactionJournalReposito
         return await _dbContext.TransactionJournals
             .Where(j => !j.IsConfirmed)
             .OrderBy(j => j.TimestampUtc)
+            .ThenBy(j => j.StreamId)
+            .ThenBy(j => j.Version)
             .ThenBy(j => j.Id)
             .Take(batchSize)
             .ToListAsync(cancellationToken);

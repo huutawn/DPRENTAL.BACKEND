@@ -71,6 +71,8 @@ public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outbox
 
         builder.Property(o => o.MessageId).IsRequired();
         builder.Property(o => o.MessageType).IsRequired().HasMaxLength(64);
+        builder.Property(o => o.Topic).IsRequired().HasMaxLength(128)
+            .HasDefaultValue(OutboxTopics.PaymentEventsV1);
         builder.Property(o => o.AggregateType).IsRequired().HasMaxLength(64);
         builder.Property(o => o.AggregateId).IsRequired().HasMaxLength(64);
         builder.Property(o => o.Payload).IsRequired();
@@ -209,6 +211,7 @@ public sealed class ManualRefundRequirementConfiguration : IEntityTypeConfigurat
         builder.Property(x => x.Revision).IsRequired().HasDefaultValue(1);
         builder.Property(x => x.ExternalTransferReference).HasMaxLength(256);
         builder.Property(x => x.Kind).HasConversion<int>().HasDefaultValue(ManualRefundKind.SettlementDeposit);
+        builder.Property(x => x.FinancialRefundKind).HasMaxLength(48);
         builder.Property(x => x.OperationKey).HasMaxLength(64).IsRequired();
         builder.HasIndex(x => x.ExternalTransferReference).IsUnique();
         builder.HasMany(x => x.Items).WithOne().HasForeignKey(x => x.RequirementId).OnDelete(DeleteBehavior.Restrict);

@@ -229,10 +229,16 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
         OutboxMessage? outboxMessage,
         TransactionJournalEntry journalEntry,
         TransactionJournalEntry? invoiceJournalEntry,
+        OutboxMessage? analyticsOutbox,
+        TransactionJournalEntry? analyticsJournal,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(journalEntry);
+        if ((analyticsOutbox is null) != (analyticsJournal is null))
+        {
+            throw new ArgumentException("Analytics outbox và journal liên kết phải đi cùng nhau.");
+        }
 
         if (_dbContext.Entry(transaction).State == EntityState.Detached)
         {
@@ -257,6 +263,12 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
         if (invoiceJournalEntry is not null)
         {
             await _dbContext.TransactionJournals.AddAsync(invoiceJournalEntry, cancellationToken);
+        }
+
+        if (analyticsOutbox is not null)
+        {
+            await _dbContext.OutboxMessages.AddAsync(analyticsOutbox, cancellationToken);
+            await _dbContext.TransactionJournals.AddAsync(analyticsJournal!, cancellationToken);
         }
 
         try
@@ -309,11 +321,15 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
         OperationReceipt receipt,
         OutboxMessage? outboxMessage,
         TransactionJournalEntry journalEntry,
+        OutboxMessage? analyticsOutbox = null,
+        TransactionJournalEntry? analyticsJournal = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(invoice);
         ArgumentNullException.ThrowIfNull(receipt);
         ArgumentNullException.ThrowIfNull(journalEntry);
+        if ((analyticsOutbox is null) != (analyticsJournal is null))
+            throw new ArgumentException("Analytics outbox và journal liên kết phải đi cùng nhau.");
 
         try
         {
@@ -322,6 +338,11 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
             if (outboxMessage is not null)
             {
                 _dbContext.OutboxMessages.Add(outboxMessage);
+            }
+            if (analyticsOutbox is not null)
+            {
+                _dbContext.OutboxMessages.Add(analyticsOutbox);
+                _dbContext.TransactionJournals.Add(analyticsJournal!);
             }
             _dbContext.TransactionJournals.Add(journalEntry);
 
@@ -378,6 +399,7 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
         Invoice invoice,
         PaymentTransaction transaction,
         OperationReceipt receipt,
+        OutboxMessage outboxMessage,
         TransactionJournalEntry invoiceJournal,
         TransactionJournalEntry paymentTransactionJournal,
         CancellationToken cancellationToken = default)
@@ -385,6 +407,7 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
         ArgumentNullException.ThrowIfNull(invoice);
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(receipt);
+        ArgumentNullException.ThrowIfNull(outboxMessage);
         ArgumentNullException.ThrowIfNull(invoiceJournal);
         ArgumentNullException.ThrowIfNull(paymentTransactionJournal);
 
@@ -401,6 +424,7 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
             }
 
             _dbContext.OperationReceipts.Add(receipt);
+            _dbContext.OutboxMessages.Add(outboxMessage);
             _dbContext.TransactionJournals.Add(invoiceJournal);
             _dbContext.TransactionJournals.Add(paymentTransactionJournal);
 
