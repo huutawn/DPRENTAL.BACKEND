@@ -1,4 +1,4 @@
-using System.Text;
+using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.Search;
 using Dprental.InventoryService.Application.Search.Models;
@@ -55,7 +55,7 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
                 return Error.Unavailable(generation.ErrorCode, "Dịch vụ tìm kiếm chưa được cấu hình hợp lệ.");
             if (generation?.IsReady != true)
                 return Error.Unavailable("SEARCH_NOT_READY", "Chỉ mục tìm kiếm chưa sẵn sàng.");
-            var normalizedQ = NormalizeSearchText(query.Keyword);
+            var normalizedQ = AssetSearchQueryValidator.NormalizeKeyword(query.Keyword);
             var filterClauses = new List<string>();
 
             if (query.EquipmentTypeId.HasValue)
@@ -125,7 +125,7 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
                 return Error.Unavailable(generation.ErrorCode, "Dịch vụ tìm kiếm chưa được cấu hình hợp lệ.");
             if (generation?.IsReady != true)
                 return Error.Unavailable("SEARCH_NOT_READY", "Chỉ mục tìm kiếm chưa sẵn sàng.");
-            var normalizedQ = NormalizeSearchText(query.Keyword);
+            var normalizedQ = AssetSearchQueryValidator.NormalizeKeyword(query.Keyword);
             var filterClauses = new List<string>
             {
                 $"ownerUserId = \"{query.OwnerUserId}\""
@@ -203,7 +203,7 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
                 return Error.Unavailable(generation.ErrorCode, "Dịch vụ tìm kiếm chưa được cấu hình hợp lệ.");
             if (generation?.IsReady != true)
                 return Error.Unavailable("SEARCH_NOT_READY", "Chỉ mục tìm kiếm chưa sẵn sàng.");
-            var normalizedQ = NormalizeSearchText(query.Keyword);
+            var normalizedQ = AssetSearchQueryValidator.NormalizeKeyword(query.Keyword);
             var filterClauses = new List<string>
             {
                 $"ownerUserId = \"{query.OwnerUserId}\""
@@ -282,12 +282,6 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
         {
             return false;
         }
-    }
-
-    private static string NormalizeSearchText(string text)
-    {
-        var normalized = text.Normalize(NormalizationForm.FormC);
-        return System.Text.RegularExpressions.Regex.Replace(normalized.Trim(), @"\s+", " ");
     }
 
     private static bool IsCredentialOrPermissionError(MeilisearchApiError ex)

@@ -290,8 +290,8 @@ JWT RS256 lấy keys trực tiếp từ Auth; timeout/cache/maximum usable age c
 
 1. **Phân tách phạm vi (Scope Separation)**:
    - Tách biệt rõ ràng giữa luồng đọc Owner (`IEquipmentListingService`, `IInventoryAssetService`) và luồng công khai (`IPublicEquipmentListingService`, `EquipmentListingSearchCriteria`, `SearchPublicListingsAsync`).
-   - Owner search: Bắt buộc `OwnerUserId`, tìm kiếm chuỗi con trong `Name` OR `Model` (không phân biệt hoa/thường, giữ phân biệt dấu tiếng Việt), hỗ trợ lọc `equipmentTypeId`, `brandId`, `status`, không có date availability filter.
-   - Public search: Không có caller context hay owner predicate; bắt buộc Listing `status = Active` và `totalQuantity > 0`; tìm kiếm chuỗi con trong `Name` OR `Model` (không phân biệt hoa/thường, giữ phân biệt dấu tiếng Việt); hỗ trợ availability filter toàn khoảng thời gian (`from`, `to`, `requestedQuantity`) trước phân trang.
+   - Owner search: Bắt buộc `OwnerUserId`, tìm kiếm đủ các từ trong `Name`/`Model`, không tìm trong mô tả, hỗ trợ lọc `equipmentTypeId`, `brandId`, `status`, không có date availability filter.
+   - Public search: Không có caller context hay owner predicate; bắt buộc Listing `status = Active` và `totalQuantity > 0`; tìm kiếm đủ các từ trong `Name`/`Model`, không tìm trong mô tả; hỗ trợ availability filter toàn khoảng thời gian (`from`, `to`, `requestedQuantity`) trước phân trang.
    - Bỏ lọc theo năm sản xuất công khai (`manufactureYear` thuộc từng unit vật lý, không thuộc Listing).
 
 2. **Tái sử dụng bộ lọc dùng chung (Shared Filter Architecture)**:
@@ -322,6 +322,27 @@ owns authorization, filters, availability, exact counts and pagination. Keyword 
 use ordered candidate IDs only when the generation is ready; no keyword, unavailable
 indexes, transient failures and truncation use the existing SQL query. Invalid credentials
 or index settings return the existing unavailable error format with HTTP 503.
+
+Keyword normalization (Unicode NFC and collapsed whitespace) is owned by
+`AssetSearchQueryValidator.NormalizeKeyword` and reused by validation, the Meilisearch
+adapter and search cache keys. All three index queries use `matchingStrategy = all`:
+"xe nâng" cannot fall back to matching only "xe". Listings search name/model; owner assets
+search listing name/model/serial, with typo tolerance disabled for serials. Relevance puts
+exact field matches before phrase matches and then other full-term matches; explicit
+sorts still take precedence. SQL fallback requires all whitespace-separated terms,
+retains accent-sensitive matching and does not provide typo correction.
+
+Asset-name upgrade (`20261026100000_RebuildSearchForAssetNames`): finish/reconcile any
+active backfill or unknown live submission, then stop old Inventory writers before
+migration. The migration rejects Building/CatchingUp/Swapping runs and uncertain
+submissions instead of losing their recovery state. It preserves documents and marks
+existing generations unavailable with a rebuild request. The existing host bootstrap
+loads names from PostgreSQL into staging indexes, replays updates and atomically swaps
+all three indexes; keyword requests use SQL until the swap succeeds. Confirm that every
+owner asset document has `name`, search "xe nâng" and an exact listing name, then restart
+and confirm no second backfill occurs. A failed build remains unavailable and is retried;
+rolling the data migration back does not assert readiness or remove indexed names.
+Search cache version 3 avoids reusing empty results cached before the asset-name rebuild.
 
 `ISearchProjectionStore` owns PostgreSQL access and short atomic state updates. Application
 has no EF/Npgsql reference in its compiled assembly. The worker acquires the shared index

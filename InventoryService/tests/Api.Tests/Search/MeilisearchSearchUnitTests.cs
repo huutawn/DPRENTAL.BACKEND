@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
+using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.Search.Adapters;
 using Dprental.InventoryService.Application.Search.Workers;
 using Dprental.InventoryService.Application.Search.DependencyInjection;
@@ -240,8 +242,23 @@ public sealed class MeilisearchSearchUnitTests
     }
 
     [Fact]
-    public void CacheKeyHelper_SearchCacheVersion_IsV2()
+    public void CacheKeyHelper_AssetNameUpgrade_DoesNotReusePreviousEmptyResults()
     {
-        Assert.Equal(2, Dprental.InventoryService.Application.Caching.CacheKeyHelper.SearchCacheVersion);
+        var previousDescriptor = new
+        {
+            version = 2,
+            page = 1,
+            pageSize = 20,
+            q = "xe nâng",
+            equipmentTypeId = (Guid?)null,
+            brandId = (Guid?)null,
+            status = (string?)null,
+            sort = (string?)null
+        };
+        string previousKey = CacheKeyHelper.ComputeSha256(JsonSerializer.Serialize(previousDescriptor));
+        string currentKey = CacheKeyHelper.ComputeOwnerListingSearchHash(1, 20, "xe nâng", null, null, null, null);
+        Assert.NotEqual(previousKey, currentKey);
+        Assert.Equal(currentKey, CacheKeyHelper.ComputeOwnerListingSearchHash(1, 20,
+            "  xe   nâng ".Normalize(NormalizationForm.FormD), null, null, null, null));
     }
 }
