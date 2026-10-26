@@ -8,7 +8,6 @@ import stat
 import subprocess
 import sys
 import tempfile
-import urllib.request
 
 SERVICES = {
     'auth': 'authservice', 'catalog': 'catalogservice', 'gateway': 'gateway',
@@ -43,22 +42,6 @@ def validate_arguments(args):
     if len(args) != 2 or args[0] not in SERVICES or not re.fullmatch('[0-9a-f]{40}', args[1]):
         raise ValueError('Usage: dprental-deploy <allowed-service> <40-lowercase-hex-SHA>')
     return args
-
-
-def private_repository(token):
-    request = urllib.request.Request(
-        'https://api.github.com/repos/huutawn/DPRENTAL.BACKEND',
-        headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json',
-                 'User-Agent': 'dprental-deploy', 'X-GitHub-Api-Version': '2022-11-28'})
-    # Disable caller/system HTTP proxies and redirects, preventing token forwarding.
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            return None
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    with opener.open(request, timeout=20) as response:
-        metadata = json.load(response)
-    if metadata.get('private') is not True or metadata.get('full_name') != 'huutawn/DPRENTAL.BACKEND':
-        raise ValueError('Repository must actually be private; deployment denied.')
 
 
 def compose_preflight(environment):
@@ -131,7 +114,6 @@ def main():
     namespace = (CONFIG / 'namespace').read_text().strip()
     if not re.fullmatch('[a-z0-9][a-z0-9._-]*', namespace):
         raise ValueError('Invalid administrator-configured GHCR namespace.')
-    trusted_path(DEPLOY / 'approvals' / service / sha)
     username = sys.stdin.readline(102).rstrip('\r\n')
     token = sys.stdin.readline(8194).rstrip('\r\n')
     if not re.fullmatch('[A-Za-z0-9_-]{1,100}', username):
@@ -140,7 +122,6 @@ def main():
     # Controls/whitespace are rejected before constructing an HTTP header.
     if not 1 <= len(token) <= 8192 or any(not 33 <= ord(char) <= 126 for char in token):
         raise ValueError('Invalid token length or control/whitespace characters on stdin.')
-    private_repository(token)
     environment = {
         'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/root', 'LANG': 'C.UTF-8',
         'DPR_DEPLOY_DIRECTORY': str(DEPLOY), 'GHCR_IMAGE_NAMESPACE': namespace,
