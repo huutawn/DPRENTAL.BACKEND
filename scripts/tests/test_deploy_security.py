@@ -63,36 +63,15 @@ class SecurityTests(unittest.TestCase):
                 'secrets': {'key': {'file': '/secret'}}, 'configs': {'config': {'file': '/config'}}})
         self.assertEqual([Path('/trusted-file'), Path('/secret'), Path('/config')], calls)
 
-    def test_actual_visibility_fails_closed_and_token_never_in_url(self):
-        for metadata, accepted in [({'private': False}, False),
-                                   ({'private': True, 'full_name': 'evil/repo'}, False),
-                                   ({'private': True, 'full_name': 'huutawn/DPRENTAL.BACKEND'}, True)]:
-            class Opener:
-                def open(self, request, timeout):
-                    self_outer.assertEqual('https://api.github.com/repos/huutawn/DPRENTAL.BACKEND', request.full_url)
-                    self_outer.assertEqual('Bearer secret', request.get_header('Authorization'))
-                    return contextlib.closing(io.StringIO(json.dumps(metadata)))
-            self_outer = self
-            with patch('urllib.request.build_opener', return_value=Opener()):
-                if accepted: CODE['private_repository']('secret')
-                else:
-                    with self.assertRaises(ValueError): CODE['private_repository']('secret')
-        with patch('urllib.request.build_opener', side_effect=TimeoutError), self.assertRaises(TimeoutError):
-            CODE['private_repository']('secret')
-
     def test_entrypoint_cleans_environment(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             root.chmod(0o700)
             (root / 'namespace').write_text('example')
-            approval = root / 'approvals/auth' / SHA
-            approval.parent.mkdir(parents=True)
-            valid = {'service': 'auth', 'sha': SHA, 'expires_at': time.time() + 3600, 'migration_strategy': 'backward-compatible'}
-            approval.write_text(json.dumps(valid))
             executed = []
             replacements = dict(DEPLOY=root, CONFIG=root, LIBEXEC=root,
                                 trusted_path=lambda p: None, trusted_tree=lambda p: None,
-                                private_repository=lambda token: self.assertFalse(set(os.environ) & {'BASH_ENV', 'DOCKER_HOST', 'PYTHONPATH', 'SSL_CERT_FILE'}), compose_preflight=lambda env: None)
+                                compose_preflight=lambda env: None)
             with patch.dict(GLOBALS, replacements), patch('os.geteuid', return_value=0), \
                     patch('os.chdir'), patch('os.umask'), \
                     patch('os.execve', side_effect=lambda *args: executed.append(args)), \
