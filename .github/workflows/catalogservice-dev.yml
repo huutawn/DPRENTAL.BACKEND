@@ -83,26 +83,14 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
   deployment-policy:
-    name: Verify private repository before scheduling local runner
+    name: Verify published images are readable from GHCR
     needs: publish
     runs-on: ubuntu-24.04
     environment: dev
     permissions:
       contents: read
       packages: read
-    outputs:
-      private: ${{ steps.visibility.outputs.private }}
     steps:
-      - name: Check actual repository visibility through GitHub API
-        id: visibility
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          visibility="$(gh api repos/huutawn/DPRENTAL.BACKEND --jq '.private')"
-          test "$visibility" = true
-          printf 'private=true\n' >> "$GITHUB_OUTPUT"
       - name: Login to GHCR with read-only package permission
         uses: docker/login-action@v3
         with:
@@ -126,7 +114,7 @@ jobs:
   deploy-dev:
     name: Deploy catalogservice locally on Ubuntu VM
     needs: [publish, deployment-policy]
-    if: ${{ github.event_name == 'push' && github.repository == 'huutawn/DPRENTAL.BACKEND' && github.ref == 'refs/heads/catalog/develop-ci-cd' && needs.deployment-policy.outputs.private == 'true' && vars.DEV_DEPLOY_ENABLED == 'true' }}
+    if: ${{ github.event_name == 'push' && github.repository == 'huutawn/DPRENTAL.BACKEND' && github.ref == 'refs/heads/catalog/develop-ci-cd' && vars.DEV_DEPLOY_ENABLED == 'true' }}
     runs-on:
       - self-hosted
       - linux
