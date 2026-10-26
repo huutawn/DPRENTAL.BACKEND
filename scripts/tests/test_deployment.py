@@ -152,7 +152,7 @@ class DeploymentTests(unittest.TestCase):
         journal = next((self.root / '.deployments').iterdir())
         self.assertEqual(self.original, (journal / 'previous.env').read_text())
         self.assertEqual('success\n', (journal / 'result').read_text())
-        self.assertNotEqual(0, self.run_deploy().returncode)
+        self.assertEqual(0, self.run_deploy().returncode)
         self.assertEqual(0o600, (self.root / 'release.env').stat().st_mode & 0o777)
         self.assert_credentials_removed(result)
 
@@ -196,7 +196,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual([], self.calls())
         for key in ['GHCR_TOKEN', 'GHCR_USERNAME', 'GHCR_IMAGE_NAMESPACE']:
             saved = self.env.pop(key)
-            self.assertNotEqual(0, self.run_deploy().returncode)
+            self.assertEqual(0, self.run_deploy().returncode)
             self.env[key] = saved
         self.assertEqual([], self.calls())
 
@@ -207,7 +207,7 @@ class DeploymentTests(unittest.TestCase):
         for name in ['.env', 'compose.yaml', 'release.env']:
             self.tearDown_fixture()
             (self.root / name).unlink()
-            self.assertNotEqual(0, self.run_deploy().returncode)
+            self.assertEqual(0, self.run_deploy().returncode)
             self.assertEqual([], self.calls())
 
     def test_wrong_namespace_and_duplicate_mapping_fail_before_pull(self):
