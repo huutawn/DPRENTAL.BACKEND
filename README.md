@@ -77,7 +77,7 @@ Sau khi khởi tạo Git trong thư mục service, chạy `./scripts/setup-git-h
 Workflow chỉ nhận push vào `payment/develop-ci-cd`. Build/publish vẫn chạy trên
 `ubuntu-24.04`, giữ nguyên Dockerfile, build context và toàn bộ targets/tag full SHA.
 CI kiểm thử script deployment trên runner hosted; job deploy chỉ được gửi tới
-`self-hosted, linux, x64, dprental-deploy` sau khi GitHub API xác nhận repository private và repository variable
+`self-hosted, linux, x64, dprental-deploy` khi repository variable
 `DEV_DEPLOY_ENABLED=true` được bật theo phê duyệt Phase 3. Mặc định job deploy được skip.
 
 Deployment gọi entrypoint do root quản lý; không checkout shell để chạy bằng sudo,

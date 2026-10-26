@@ -4,33 +4,13 @@ Ngày audit: 25/10/2026. Phạm vi: 8 branch `*/develop-ci-cd`; không thay busi
 Đọc kèm `CICD_AUDIT.md`. Các lệnh deploy/restore/cấp quyền dưới đây là hướng dẫn
 cho đợt kích hoạt đã được phê duyệt, không phải các lệnh đã thực thi trong refactor.
 
-## Trạng thái bàn giao và điều kiện kích hoạt
+## Trạng thái deployment
 
-Repository hiện đã được GitHub API xác nhận **private**. Sau khi người dùng cho phép,
-đã harden `/opt/dprental/dev` về root:root 0700 và cài sudoers chỉ cho entrypoint.
-Auth PEM/Firebase dùng root:1654 0440; đã kiểm tra đọc lại trong container UID 1654.
-Không đổi nội dung cấu hình, Docker group/socket, DB, volumes hoặc restart container.
-Metadata trước hardening lưu tại
-`/opt/dprental/permission-backups/20261025T092304Z/metadata.json`.
+Runner deploy chạy trên Ubuntu VM. Workflow build/publish dùng GitHub-hosted runner; deploy được bật khi repository variable `DEV_DEPLOY_ENABLED=true` và push lên nhánh service `develop-ci-cd`. Đặt variable thành `false` để tạm ngừng deploy.
 
-**Deployment Phase 3 chưa được bật.** Job deploy chỉ được lên lịch khi repository private
-và **repository variable** `DEV_DEPLOY_ENABLED` bằng chuỗi `true`. Variable này hiện chưa
-được tạo; deploy được skip, build/publish và preflight vẫn chạy. Chỉ đặt repository
-variable này sau khi được duyệt deployment riêng, không đặt ở Environment scope vì job
-condition được đánh giá trước khi runner chạy. Per-SHA approval trên VM vẫn bắt buộc.
-Đây là khóa kích hoạt Phase 3, không chọn giữa hai implementation: đường SSH đã bỏ.
+Không còn kiểm tra visibility Private hay approval file theo từng SHA. Hosted policy vẫn xác minh image GHCR có thể đọc; wrapper giữ allowlist service, SHA 40 ký tự, kiểm tra quyền Compose, rồi script backup/migration/health theo policy service.
 
-Build/publish vẫn dùng hosted `ubuntu-24.04`, Buildx, GHCR và full commit SHA.
-Payment giữ đủ bốn targets. Gateway không có migrator. Job hosted xác minh trạng thái
-private bằng API trước khi lên lịch job local; wrapper kiểm tra lại bằng API ngay
-trước thao tác Docker. Hosted preflight dùng token `packages: read` để inspect
-manifest của đủ runtime/migrator/integrity images, không pull layers hay thay runtime. Chỉ dùng event push trên đúng branch và repository.
-PR, kể cả `pull_request_target`, không phải trigger của các workflow này.
-
-Quản trị viên cần chuyển repo private, bảo vệ tám branch, giới hạn quyền sửa workflow,
-và bảo vệ environment `dev` theo tính năng gói GitHub đang dùng. Label không phải ranh
-giới phân quyền: audit cả các workflow khác trước khi cho phép dùng runner. Quyền đọc
-repo private không tự bảo đảm workflow đáng tin cậy. Không tự động đổi các settings này.
+`CICD_AUDIT.md` là snapshot audit ban đầu; một số nhận xét trạng thái kích hoạt trong đó không còn là trạng thái hiện tại.
 
 ## Ranh giới đặc quyền và cài đặt
 
@@ -96,7 +76,7 @@ labels `self-hosted`, `linux`, `x64`, `dprental-deploy` (API có thể hiển th
 SSH chỉ phục vụ quản trị/kiểm tra ngoài pipeline, không là dependency của deployment.
 
 Workflow publish dùng `packages: write`; deployment dùng `packages: read` và
-`contents: read` cho API private check. Token `GITHUB_TOKEN` của job có hạn đến khi job
+Token `GITHUB_TOKEN` của job có hạn đến khi job
 kết thúc (tối đa 24h theo GitHub); không tạo PAT mới hoặc lưu token lâu dài trên VM.
 GHCR packages phải cấp repository này Actions access cho cả runtime/migrator; Payment
 cần bốn packages. Build dùng metadata source như trước. Việc repo private không tự đổi
@@ -109,42 +89,9 @@ token job đã hết hạn. Không log credentials hoặc dùng `set -x`. Không
 runner làm GHCR token. Manifest check ban đầu của root không có credential bị unauthorized; đây không phải
 bằng chứng image không tồn tại. Hosted preflight mới kiểm tra quyền đọc bằng job token; Docker pull trên VM chưa chạy.
 
-## Phê duyệt một release và deployment thủ công
+## Deployment
 
-Service allowlist: `auth`, `gateway`, `catalog`, `media`, `inventory`, `rental`,
-`payment`, `recommendation`. Giữ contract SHA positional; fallback `GITHUB_SHA` vẫn
-có trong script cho admin/test. Workflow luôn truyền SHA rõ ràng qua entrypoint.
-
-Admin review diff migration cho đúng SHA, tương thích schema với runtime hiện tại,
-khả năng restore và dung lượng backup. Không duyệt destructive migrations vào runner.
-Các migration xóa cột/backfill/cutover phải có kế hoạch thủ công riêng và maintenance
-window; không biến chúng thành “backward-compatible” chỉ để vượt guard.
-
-Trong `/opt/dprental/dev/approvals/<service>/<SHA>`, admin tạo JSON root:root 0600:
-
-```json
-{"service":"auth","sha":"<40-hex-lowercase>","expires_at":<unix-epoch>,"migration_strategy":"backward-compatible"}
-```
-
-`expires_at` phải nằm trong 24 giờ tới; Gateway dùng `migration_strategy: "none"`.
-Approval được kiểm tra **sau khi có host lock**, rồi chuyển vào journal trước login;
-chỉ dùng một lần. Dù preflight lỗi, cần approval mới để thử lại. Không tạo approval
-trong workflow; tài khoản runner không được ghi hoặc đọc thư mục này.
-
-Chỉ sau khi có phê duyệt deployment riêng và đáp ứng các gates, admin có thể chạy:
-
-```bash
-# Token đã được cấp hợp lệ cho phiên làm việc, không lưu trong shell history/file.
-read -r -p 'GitHub username: ' GHCR_USERNAME
-read -r -s -p 'Token: ' GHCR_TOKEN; printf '\n'
-read -r -p 'Release SHA: ' RELEASE_SHA
-printf '%s\n' "$GHCR_USERNAME" "$GHCR_TOKEN" | \
-  sudo -n /usr/local/sbin/dprental-deploy auth "$RELEASE_SHA"
-unset GHCR_TOKEN
-```
-
-Trong Actions token lấy từ job, không cần thao tác đăng nhập thủ công. Không chạy trực
-tiếp scripts trong checkout bằng sudo hoặc stream shell qua SSH.
+Khi repository variable `DEV_DEPLOY_ENABLED=true`, push vào nhánh service `develop-ci-cd` sẽ tự chạy deployment sau publish. Đặt variable thành `false` để ngừng deploy. Mỗi service vẫn xác thực SHA, kiểm tra Compose và image, backup/migration theo policy của service, rồi kiểm tra health.
 
 ## Release state, migration, backup và quan sát
 
@@ -158,7 +105,7 @@ toàn platform. File lock chỉ ngăn các caller tuân thủ giao thức, khôn
 cố tình sửa tay. Trong tám workflow đã refactor không có hai writer đồng thời.
 
 Journal `.deployments/<service>-<SHA>.<attempt>/` có `previous.env`, `candidate.env`,
-approval, `phase`, `events`, `result`, và backup khi service cần. Snapshot dưới lock;
+`phase`, `events`, `result`, và backup khi service cần. Snapshot dưới lock;
 candidate chỉ đổi image của service, giữ nguyên namespace, tag SHA và mapping khác.
 Compose validation và pull tất cả image đích xảy ra trước stop/migration/recreate.
 Dependencies phải sẵn sàng; script không tự khởi động/recreate dependencies không liên quan.
@@ -225,9 +172,9 @@ restore riêng một DB hoặc reset Kafka/MinIO để “đồng bộ”. Khôn
 
 ## Kế hoạch Phase 3 và ngừng VPS
 
-Chỉ chạy khi được duyệt riêng: Auth → Gateway → Catalog → Media → Inventory → Rental →
+Trình tự triển khai đề xuất: Auth → Gateway → Catalog → Media → Inventory → Rental →
 Payment → Recommendation; điều chỉnh khi dependency thực tế yêu cầu. Với mỗi service:
-duyệt SHA/migration, kiểm tra quyền GHCR cho đủ variants, backup/rehearsal, release state,
+kiểm tra quyền GHCR cho đủ variants, backup/rehearsal, release state,
 chạy một deployment, xác nhận healthy/internal/public, đối chiếu image SHA và chỉ biến
 release liên quan đổi, quan sát logs/resource, diễn tập failure/recovery trước service kế.
 Không kích hoạt đồng loạt tám workflow để thử runner có RAM khoảng 5GB.
