@@ -167,6 +167,11 @@ public sealed class SynchronousCheckoutFlowTests
             Assert.Equal("Paid", resp.Status);
             Assert.Equal(0m, resp.TotalAmount);
             Assert.Null(resp.Payment);
+            // Version is bumped upon MarkAsPaid
+            await using var verifyContext = _harness.NewContext();
+            var savedOrder = await verifyContext.RentalOrders.FindAsync(orderId);
+            Assert.NotNull(savedOrder);
+            Assert.Equal(3, savedOrder.Version);
         }
     }
 

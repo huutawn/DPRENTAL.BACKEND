@@ -565,33 +565,37 @@ public sealed class CheckoutService : ICheckoutService
                 var zeroInv = zeroInvoiceRes.Value;
                 if (order.Status == RentalOrderStatus.PendingPayment)
                 {
-                    order.MarkAsPaid(zeroInv.InvoiceRef, zeroInv.InvoiceRef, utcNow, utcNow);
-                    await _orders.UpdateAsync(order, cancellationToken);
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
-                    if (_notifier != null)
+                    var markPaidRes = order.MarkAsPaid(zeroInv.InvoiceRef, zeroInv.InvoiceRef, utcNow, utcNow);
+                    if (markPaidRes.IsSuccess)
                     {
-                        await _notifier.NotifyRenterOrderChangedAsync(
-                            order.RenterId,
-                            new RenterOrderChangedNotification(
-                                Guid.NewGuid(),
-                                order.Id,
-                                order.Version,
-                                OrderChangeTypes.PaymentConfirmed,
-                                utcNow),
-                            cancellationToken);
-
-                        foreach (var subOrder in order.SubOrders)
+                        order.RecordReadModelUpdate(utcNow);
+                        await _orders.UpdateAsync(order, cancellationToken);
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                        if (_notifier != null)
                         {
-                            await _notifier.NotifySupplierSubOrderChangedAsync(
-                                subOrder.SupplierId,
-                                new SupplierSubOrderChangedNotification(
+                            await _notifier.NotifyRenterOrderChangedAsync(
+                                order.RenterId,
+                                new RenterOrderChangedNotification(
                                     Guid.NewGuid(),
                                     order.Id,
-                                    subOrder.Id,
                                     order.Version,
                                     OrderChangeTypes.PaymentConfirmed,
                                     utcNow),
                                 cancellationToken);
+
+                            foreach (var subOrder in order.SubOrders)
+                            {
+                                await _notifier.NotifySupplierSubOrderChangedAsync(
+                                    subOrder.SupplierId,
+                                    new SupplierSubOrderChangedNotification(
+                                        Guid.NewGuid(),
+                                        order.Id,
+                                        subOrder.Id,
+                                        order.Version,
+                                        OrderChangeTypes.PaymentConfirmed,
+                                        utcNow),
+                                cancellationToken);
+                            }
                         }
                     }
                 }

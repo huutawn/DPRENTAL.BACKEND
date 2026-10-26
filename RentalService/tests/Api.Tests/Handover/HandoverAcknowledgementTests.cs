@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 using Dprental.RentalService.Api.Tests.Checkout;
 using Dprental.RentalService.Api.Tests.Orders;
 using Dprental.RentalService.Api.Tests.TestHelpers;
@@ -31,12 +32,13 @@ public sealed class HandoverAcknowledgementTests
     private RentalServiceDbContext NewContext() => new(
         new DbContextOptionsBuilder<RentalServiceDbContext>().UseInMemoryDatabase(_dbName).Options);
 
-    private HandoverAcknowledgementService CreateService(RentalServiceDbContext context) => new(
+    private HandoverAcknowledgementService CreateService(RentalServiceDbContext context, IOrderHubNotifier? notifier = null) => new(
         new RentalOrderRepository(context),
         new FakeOrderLockManager(),
         context,
         _clock,
-        NullLogger<HandoverAcknowledgementService>.Instance);
+        NullLogger<HandoverAcknowledgementService>.Instance,
+        notifier);
 
     private async Task SeedAsync(bool withHandover = true, RentalItemStatus itemStatus = RentalItemStatus.InRental)
     {
@@ -268,6 +270,69 @@ public sealed class HandoverAcknowledgementTests
             Assert.Equal(_clock.GetUtcNow(), handoverDto.RenterAcknowledgedAt);
             Assert.Equal(_renterId, handoverDto.RenterAcknowledgedById);
             Assert.Equal("Ghi chú kiểm tra mapper", handoverDto.RenterAcknowledgementNote);
+        }
+    }
+
+    [Fact]
+    public async Task Acknowledge_IncrementsOrderVersion_AndEmitsHandoverAcknowledged_ToRenterAndSupplier()
+    {
+        await SeedAsync(withHandover: true);
+        var notifier = new FakeOrderHubNotifier();
+
+        long versionBefore;
+        await using (var ctx = NewContext())
+        {
+            var ord = await ctx.RentalOrders.FindAsync(_order.Id);
+            versionBefore = ord!.Version;
+        }
+
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            var service = CreateService(context, notifier);
+            var res = await service.AcknowledgeAsync(
+                _item.Id, new AcknowledgeReceiptRequest("Nhận máy tốt"), OrderTestData.User(_renterId));
+            Assert.True(res.IsSuccess);
+        }
+
+        await using (RentalServiceDbContext verifyContext = NewContext())
+        {
+            var ord = await verifyContext.RentalOrders.FindAsync(_order.Id);
+            Assert.Equal(versionBefore + 1, ord!.Version);
+        }
+
+        // Renter received HANDOVER_ACKNOWLEDGED
+        Assert.Single(notifier.RenterNotifications);
+        var renterNote = notifier.RenterNotifications.Single();
+        Assert.Equal(_renterId, renterNote.RenterId);
+        Assert.Equal(_order.Id, renterNote.Notification.OrderId);
+        Assert.Equal(OrderChangeTypes.HandoverAcknowledged, renterNote.Notification.ChangeType);
+        Assert.Equal(versionBefore + 1, renterNote.Notification.Version);
+
+        // Supplier received HANDOVER_ACKNOWLEDGED
+        Assert.Single(notifier.SupplierNotifications);
+        var supplierNote = notifier.SupplierNotifications.Single();
+        Assert.Equal(_supplierId, supplierNote.SupplierId);
+        Assert.Equal(_order.Id, supplierNote.Notification.OrderId);
+        Assert.Equal(OrderChangeTypes.HandoverAcknowledged, supplierNote.Notification.ChangeType);
+        Assert.Equal(versionBefore + 1, supplierNote.Notification.OrderVersion);
+
+        // Replay acknowledgement -> no new notification, no version change
+        notifier.Reset();
+        await using (RentalServiceDbContext context2 = NewContext())
+        {
+            var service2 = CreateService(context2, notifier);
+            var res2 = await service2.AcknowledgeAsync(
+                _item.Id, new AcknowledgeReceiptRequest("Ghi chú lần hai"), OrderTestData.User(_renterId));
+            Assert.True(res2.IsSuccess);
+        }
+
+        Assert.Empty(notifier.RenterNotifications);
+        Assert.Empty(notifier.SupplierNotifications);
+
+        await using (RentalServiceDbContext verifyContext2 = NewContext())
+        {
+            var ord2 = await verifyContext2.RentalOrders.FindAsync(_order.Id);
+            Assert.Equal(versionBefore + 1, ord2!.Version);
         }
     }
 }
