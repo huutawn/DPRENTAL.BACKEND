@@ -17,6 +17,46 @@ Kiểm tra generator:
 python3 -m unittest discover -s scripts/tests -v
 ```
 
+
+## Tra cứu các service trên Git
+
+Hệ thống triển khai theo mô hình microservices, mã nguồn của từng service được lưu trên các nhánh riêng biệt theo nguyên tắc:
+
+```text
+<tên-service>/develop-ci-cd
+```
+
+Ví dụ nhánh chính thức (develop CI/CD) của các service:
+
+- **Auth Service**: `auth/develop-ci-cd`
+- **Catalog Service**: `catalog/develop-ci-cd`
+- **Inventory Service**: `inventory/develop-ci-cd`
+- **Rental Service**: `rental/develop-ci-cd`
+- **Payment Service**: `payment/develop-ci-cd`
+- **Media Service**: `media/develop-ci-cd`
+- **Recommendation Service**: `recommendation/develop-ci-cd`
+- **API Gateway**: `gateway/develop-ci-cd`
+
+### Cách kiểm tra và chuyển nhánh
+
+Liệt kê tất cả các nhánh remote:
+
+```bash
+git fetch origin
+git branch -r
+```
+
+Lọc các nhánh `develop-ci-cd` của các service:
+
+```bash
+git branch -r | grep "develop-ci-cd"
+```
+
+Checkout sang nhánh của service cần làm việc (ví dụ `catalog`):
+
+```bash
+git checkout -b catalog/develop-ci-cd origin/catalog/develop-ci-cd
+```
 ## Common và xử lý lỗi
 
 Template có `Result`/`Result<T>` và `Error`/`ErrorType` (tham khảo AuthService).
