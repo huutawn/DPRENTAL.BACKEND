@@ -118,4 +118,32 @@ public sealed class InventoryAllocationsController : ControllerBase
 
         return Ok(result.Value);
     }
+
+    /// <summary>
+    /// Xác nhận nhóm phân bổ (Hold -> Allocated) theo nhóm.
+    /// </summary>
+    /// <param name="allocationGroupId">Định danh nhóm phân bổ.</param>
+    /// <param name="request">Thông tin yêu cầu gồm operationKey bắt buộc.</param>
+    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
+    /// <returns>200 OK trả về thông tin nhóm phân bổ đã xác nhận.</returns>
+    [HttpPost("allocation-groups/{allocationGroupId}/confirm")]
+    [ProducesResponseType(typeof(ConfirmAllocationResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> ConfirmAllocationGroup(
+        string allocationGroupId,
+        [FromBody] ConfirmAllocationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _allocationService.ConfirmAllocationGroupAsync(allocationGroupId, request, _callerContext, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
 }

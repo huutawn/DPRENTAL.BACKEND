@@ -38,6 +38,16 @@ public interface IInventoryAllocationService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Xác nhận nhóm phân bổ (Hold -> Allocated) theo allocationGroupId và operationKey.
+    /// Dành cho Service Principal có scope inventory.allocation.write.
+    /// </summary>
+    Task<Result<ConfirmAllocationResponse>> ConfirmAllocationGroupAsync(
+        string allocationGroupId,
+        ConfirmAllocationRequest request,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Xử lý lệnh CreateHold bất đồng bộ từ Kafka hoặc orchestration.
     /// </summary>
     Task<Result<AllocationCommandOutcome>> ProcessCreateHoldCommandAsync(
