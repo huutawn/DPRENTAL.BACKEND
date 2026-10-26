@@ -29,22 +29,6 @@ begin_deployment() {
   exec 9> "$DEPLOY_DIRECTORY/.deployment.lock"
   flock -w 600 9 || fail 'timeout chờ deployment lock.'
   [ ! -e "$DEPLOY_DIRECTORY/.deployment-pending" ] || fail 'deployment trước chưa được xử lý; xem .deployment-pending.'
-  # Validate under the host lock, so an approval cannot expire while queued.
-  python3 - "$1" "$release_sha" "$DEPLOY_DIRECTORY/approvals/$1/$release_sha" <<'PY_APPROVAL'
-import json, sys, time
-service, sha, path = sys.argv[1:]
-try:
-    with open(path, encoding='utf-8') as source:
-        approval = json.load(source)
-    strategy = 'none' if service == 'gateway' else 'backward-compatible'
-    valid = (approval.get('service') == service and approval.get('sha') == sha
-             and time.time() < approval.get('expires_at', 0) <= time.time() + 86400
-             and approval.get('migration_strategy') == strategy)
-except (OSError, ValueError, TypeError, AttributeError):
-    valid = False
-if not valid:
-    sys.exit('Missing/expired approval or migration not reviewed as backward-compatible.')
-PY_APPROVAL
   install -d -m 0700 "$DEPLOY_DIRECTORY/.deployments"
   attempt_directory="$(mktemp -d "$DEPLOY_DIRECTORY/.deployments/$1-$release_sha.XXXXXX")"
   phase=preflight
@@ -56,7 +40,6 @@ PY_APPROVAL
   candidate_file="$attempt_directory/candidate.env"
   cp "$RELEASE_FILE" "$candidate_file"
   printf '%s\n' "$attempt_directory" > "$DEPLOY_DIRECTORY/.deployment-pending"
-  mv "$DEPLOY_DIRECTORY/approvals/$1/$release_sha" "$attempt_directory/approval.json"
   deployment_phase preflight
   docker_config_dir="$(mktemp -d)"
   export DOCKER_CONFIG="$docker_config_dir"

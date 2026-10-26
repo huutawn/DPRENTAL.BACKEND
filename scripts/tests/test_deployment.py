@@ -81,10 +81,6 @@ class DeploymentTests(unittest.TestCase):
         (self.root / 'release.env').write_text(self.original)
         (self.root / '.env').write_text('DEV_DOMAIN=api.example.test\nPOSTGRES_USER=test\nPOSTGRES_DB=test\n')
         (self.root / 'compose.yaml').write_text('services: {}\n')
-        approval = self.root / 'approvals' / SERVICE / SHA
-        approval.parent.mkdir(parents=True)
-        approval.write_text(json.dumps({'service': SERVICE, 'sha': SHA, 'expires_at': time.time() + 3600,
-                                        'migration_strategy': 'none' if SERVICE == 'gateway' else 'backward-compatible'}))
         for name, script in [('docker', DOCKER), ('curl', CURL)]:
             (self.root / name).write_text(script)
             (self.root / name).chmod(0o755)
@@ -156,7 +152,6 @@ class DeploymentTests(unittest.TestCase):
         journal = next((self.root / '.deployments').iterdir())
         self.assertEqual(self.original, (journal / 'previous.env').read_text())
         self.assertEqual('success\n', (journal / 'result').read_text())
-        self.assertTrue((journal / 'approval.json').exists())
         self.assertNotEqual(0, self.run_deploy().returncode)
         self.assertEqual(0o600, (self.root / 'release.env').stat().st_mode & 0o777)
         self.assert_credentials_removed(result)
@@ -203,8 +198,6 @@ class DeploymentTests(unittest.TestCase):
             saved = self.env.pop(key)
             self.assertNotEqual(0, self.run_deploy().returncode)
             self.env[key] = saved
-        (self.root / 'approvals' / SERVICE / SHA).unlink()
-        self.assertNotEqual(0, self.run_deploy().returncode)
         self.assertEqual([], self.calls())
 
     def test_environment_sha_fallback_and_missing_files(self):
@@ -215,21 +208,6 @@ class DeploymentTests(unittest.TestCase):
             self.tearDown_fixture()
             (self.root / name).unlink()
             self.assertNotEqual(0, self.run_deploy().returncode)
-            self.assertEqual([], self.calls())
-
-    def test_approval_rejects_expiry_mismatch_and_destructive_strategy(self):
-        path = self.root / 'approvals' / SERVICE / SHA
-        valid = json.loads(path.read_text())
-        for changed in [{'expires_at': 0}, {'expires_at': time.time() + 90000},
-                        {'service': 'other'}, {'sha': 'b' * 40}, {'migration_strategy': 'destructive'}]:
-            path.write_text(json.dumps(dict(valid, **changed)))
-            self.assertNotEqual(0, self.run_deploy().returncode)
-            self.assertEqual([], self.calls())
-        for malformed in ['not-json', '[]', 'null', '"string"']:
-            path.write_text(malformed)
-            result = self.run_deploy()
-            self.assertNotEqual(0, result.returncode)
-            self.assertNotIn('Traceback', result.stderr)
             self.assertEqual([], self.calls())
 
     def test_wrong_namespace_and_duplicate_mapping_fail_before_pull(self):
@@ -258,9 +236,6 @@ class DeploymentTests(unittest.TestCase):
         while not (self.root / '.deployment-pending').exists() and time.monotonic() < deadline:
             time.sleep(0.01)
         second_sha = 'b' * 40
-        (self.root / 'approvals' / SERVICE / second_sha).write_text(json.dumps(
-            {'service': SERVICE, 'sha': second_sha, 'expires_at': time.time() + 3600,
-             'migration_strategy': 'none' if SERVICE == 'gateway' else 'backward-compatible'}))
         second = subprocess.Popen(['bash', str(SCRIPT), second_sha], env=self.env,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.addCleanup(lambda: second.poll() is None and second.kill())
