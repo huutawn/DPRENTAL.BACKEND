@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Application.Security;
 using Microsoft.AspNetCore.SignalR;
@@ -19,6 +20,7 @@ public static class OrderHubServiceCollectionExtensions
         services.AddOptions<OrderHubOptions>()
             .Bind(configuration.GetSection(OrderHubOptions.SectionName));
 
+        services.AddScoped<IOrderHubNotifier, OrderHubNotifier>();
         services.AddSignalR();
 
         services.AddOptions<HubOptions<OrderHub>>()

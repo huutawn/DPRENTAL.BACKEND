@@ -24,6 +24,7 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
     {
         return await _dbContext.RentalOrders
             .Include(o => o.TermsAcceptance)
+            .Include(o => o.SubOrders)
             .Include(o => o.Items)
                 .ThenInclude(i => i.UnitAssignments)
             .Include(o => o.Items)
@@ -44,6 +45,7 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
 
         return await _dbContext.RentalOrders
             .Include(o => o.TermsAcceptance)
+            .Include(o => o.SubOrders)
             .Include(o => o.Items)
                 .ThenInclude(i => i.UnitAssignments)
             .Include(o => o.Items)

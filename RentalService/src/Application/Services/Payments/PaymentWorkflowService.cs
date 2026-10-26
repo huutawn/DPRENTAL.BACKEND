@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 #pragma warning disable CA1848, CA1873
 using System.Security.Cryptography;
 using System.Text;
@@ -40,6 +41,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
     private readonly string _rentalEventsTopic;
     private readonly IInventoryCommandProducer _inventoryCommands;
     private readonly IRentalEventProducer _rentalEventProducer;
+    private readonly IOrderHubNotifier? _notifier;
     public PaymentWorkflowService(
         IRentalOrderRepository orderRepository,
         IInboxRepository inboxRepository,
@@ -52,7 +54,8 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         IConfiguration configuration,
         ILogger<PaymentWorkflowService> logger,
         IRentalEventProducer rentalEventProducer,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IOrderHubNotifier? notifier = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _inboxRepository = inboxRepository ?? throw new ArgumentNullException(nameof(inboxRepository));
@@ -66,6 +69,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         _timeProvider = timeProvider ?? TimeProvider.System;
         _rentalEventsTopic = configuration["Kafka:RentalEventsTopic"] ?? "rental.events.v1";
         _rentalEventProducer = rentalEventProducer ?? throw new ArgumentNullException(nameof(rentalEventProducer));
+        _notifier = notifier;
     }
 
     public async Task<Result<bool>> ApplyInvoicePaidStagedAsync(
@@ -444,6 +448,34 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
 
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await tx.CommitAsync(cancellationToken);
+
+                if (result.Value && _notifier != null)
+                {
+                    DateTimeOffset occurredAt = order.PaymentConfirmedAt ?? utcNow;
+                    await _notifier.NotifyRenterOrderChangedAsync(
+                        order.RenterId,
+                        new RenterOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            order.Version,
+                            OrderChangeTypes.PaymentConfirmed,
+                            occurredAt),
+                        cancellationToken);
+
+                    foreach (var subOrder in order.SubOrders)
+                    {
+                        await _notifier.NotifySupplierSubOrderChangedAsync(
+                            subOrder.SupplierId,
+                            new SupplierSubOrderChangedNotification(
+                                Guid.NewGuid(),
+                                order.Id,
+                                subOrder.Id,
+                                order.Version,
+                                OrderChangeTypes.PaymentConfirmed,
+                                occurredAt),
+                            cancellationToken);
+                    }
+                }
             }
             catch (Exception)
             {

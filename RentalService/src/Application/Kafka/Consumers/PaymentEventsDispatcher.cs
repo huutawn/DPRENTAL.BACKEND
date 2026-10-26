@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 #pragma warning disable CA1848, CA1873
 using System.Security.Cryptography;
 using System.Text;
@@ -47,6 +48,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
     private readonly IRentalCheckoutOperationRepository? _checkoutOperationRepo;
     private readonly IInventoryAllocationResultHandler _allocationResultHandler;
     private readonly InventoryReturnResultHandler? _inventoryReturnResultHandler;
+    private readonly IOrderHubNotifier? _notifier;
     [ActivatorUtilitiesConstructor]
     public PaymentEventsDispatcher(
         IInboxRepository inboxRepository,
@@ -62,7 +64,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         ILogger<PaymentEventsDispatcher>? logger = null,
         TimeProvider? timeProvider = null,
         IRentalSettledConsumer? rentalSettledConsumer = null,
-        InventoryReturnResultHandler? inventoryReturnResultHandler = null)
+        InventoryReturnResultHandler? inventoryReturnResultHandler = null,
+        IOrderHubNotifier? notifier = null)
     {
         _inboxRepository = inboxRepository ?? throw new ArgumentNullException(nameof(inboxRepository));
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
@@ -79,6 +82,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         _rentalSettledConsumer = rentalSettledConsumer ?? new Dprental.RentalService.Application.Services.Integration.RentalSettledConsumer(
             new RentalEventProducer(outboxWriter, Microsoft.Extensions.Options.Options.Create(_kafkaOptions), _timeProvider), _timeProvider);
         _inventoryReturnResultHandler = inventoryReturnResultHandler;
+        _notifier = notifier;
     }
 
     internal PaymentEventsDispatcher(
@@ -813,6 +817,37 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                 await tx.CommitAsync(cancellationToken);
                 _logger.LogInformation("Successfully processed inbox message {Id} ({Type}) for Order {OrderId}",
                     msg.Id, msg.MessageType, order!.Id);
+
+                if (result.Value && _notifier != null)
+                {
+                    if (string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.InvoicePaid, StringComparison.OrdinalIgnoreCase))
+                    {
+                        DateTimeOffset occurredAt = order!.PaymentConfirmedAt ?? utcNow;
+                        await _notifier.NotifyRenterOrderChangedAsync(
+                            order.RenterId,
+                            new RenterOrderChangedNotification(
+                                Guid.NewGuid(),
+                                order.Id,
+                                order.Version,
+                                OrderChangeTypes.PaymentConfirmed,
+                                occurredAt),
+                            cancellationToken);
+
+                        foreach (var subOrder in order.SubOrders)
+                        {
+                            await _notifier.NotifySupplierSubOrderChangedAsync(
+                                subOrder.SupplierId,
+                                new SupplierSubOrderChangedNotification(
+                                    Guid.NewGuid(),
+                                    order.Id,
+                                    subOrder.Id,
+                                    order.Version,
+                                    OrderChangeTypes.PaymentConfirmed,
+                                    occurredAt),
+                                cancellationToken);
+                        }
+                    }
+                }
                 return Result.Success();
             }
             catch (Exception ex)
@@ -979,6 +1014,37 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             }
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
+
+            if (result.Value && _notifier != null)
+            {
+                if (string.Equals(message.MessageType, KafkaContractSpec.EventTypes.InvoicePaid, StringComparison.OrdinalIgnoreCase))
+                {
+                    DateTimeOffset occurredAt = order.PaymentConfirmedAt ?? now;
+                    await _notifier.NotifyRenterOrderChangedAsync(
+                        order.RenterId,
+                        new RenterOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            order.Version,
+                            OrderChangeTypes.PaymentConfirmed,
+                            occurredAt),
+                        cancellationToken);
+
+                    foreach (var subOrder in order.SubOrders)
+                    {
+                        await _notifier.NotifySupplierSubOrderChangedAsync(
+                            subOrder.SupplierId,
+                            new SupplierSubOrderChangedNotification(
+                                Guid.NewGuid(),
+                                order.Id,
+                                subOrder.Id,
+                                order.Version,
+                                OrderChangeTypes.PaymentConfirmed,
+                                occurredAt),
+                            cancellationToken);
+                    }
+                }
+            }
             return Result.Success();
         }
         catch

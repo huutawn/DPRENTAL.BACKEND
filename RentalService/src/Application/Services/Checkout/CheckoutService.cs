@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 #pragma warning disable CA1848, CA1873
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -44,7 +45,7 @@ public sealed class CheckoutService : ICheckoutService
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<CheckoutService> _logger;
-
+    private readonly IOrderHubNotifier? _notifier;
     public CheckoutService(
         ICheckoutPreparationService preparation,
         IRentalCheckoutOperationRepository operationRepository,
@@ -58,7 +59,8 @@ public sealed class CheckoutService : ICheckoutService
         IUnitOfWork unitOfWork,
         TimeProvider? timeProvider = null,
         IPaymentRentalClient? paymentClient = null,
-        ILogger<CheckoutService>? logger = null)
+        ILogger<CheckoutService>? logger = null,
+        IOrderHubNotifier? notifier = null)
     {
         _preparation = preparation ?? throw new ArgumentNullException(nameof(preparation));
         _operationRepository = operationRepository ?? throw new ArgumentNullException(nameof(operationRepository));
@@ -73,6 +75,7 @@ public sealed class CheckoutService : ICheckoutService
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<CheckoutService>.Instance;
+        _notifier = notifier;
     }
 
     public async Task<CheckoutSubmitResult> SubmitAsync(
@@ -527,6 +530,19 @@ public sealed class CheckoutService : ICheckoutService
             await _operationRepository.UpdateAsync(op, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await createTx.CommitAsync(cancellationToken);
+
+            if (_notifier != null)
+            {
+                await _notifier.NotifyRenterOrderChangedAsync(
+                    order.RenterId,
+                    new RenterOrderChangedNotification(
+                        Guid.NewGuid(),
+                        order.Id,
+                        order.Version,
+                        OrderChangeTypes.OrderCreated,
+                        orderCreatedAt),
+                    cancellationToken);
+            }
         }
 
         // 4. HTTP Payment: tạo invoice, nhận cả qrUrl (commit trước khi gọi Payment; không giữ db tx)
@@ -552,6 +568,32 @@ public sealed class CheckoutService : ICheckoutService
                     order.MarkAsPaid(zeroInv.InvoiceRef, zeroInv.InvoiceRef, utcNow, utcNow);
                     await _orders.UpdateAsync(order, cancellationToken);
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    if (_notifier != null)
+                    {
+                        await _notifier.NotifyRenterOrderChangedAsync(
+                            order.RenterId,
+                            new RenterOrderChangedNotification(
+                                Guid.NewGuid(),
+                                order.Id,
+                                order.Version,
+                                OrderChangeTypes.PaymentConfirmed,
+                                utcNow),
+                            cancellationToken);
+
+                        foreach (var subOrder in order.SubOrders)
+                        {
+                            await _notifier.NotifySupplierSubOrderChangedAsync(
+                                subOrder.SupplierId,
+                                new SupplierSubOrderChangedNotification(
+                                    Guid.NewGuid(),
+                                    order.Id,
+                                    subOrder.Id,
+                                    order.Version,
+                                    OrderChangeTypes.PaymentConfirmed,
+                                    utcNow),
+                                cancellationToken);
+                        }
+                    }
                 }
             }
             return CheckoutResponse.From(order, isReplay, payment: null);
