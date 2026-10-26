@@ -52,6 +52,16 @@ public sealed class KafkaOptionsValidator : IValidateOptions<KafkaOptions>
             failures.Add("SaslMechanism, SaslUsername và SaslPassword là bắt buộc khi SecurityProtocol dùng SASL.");
         }
 
+        if (options.RetryInitialDelayMilliseconds <= 0)
+        {
+            failures.Add("RetryInitialDelayMilliseconds phải lớn hơn 0.");
+        }
+
+        if (options.RetryMaxDelaySeconds <= 0 || options.RetryMaxDelaySeconds * 1000L < options.RetryInitialDelayMilliseconds)
+        {
+            failures.Add("RetryMaxDelaySeconds phải lớn hơn 0 và không nhỏ hơn RetryInitialDelayMilliseconds.");
+        }
+
         return failures.Count == 0
             ? ValidateOptionsResult.Success
             : ValidateOptionsResult.Fail(failures);

@@ -36,4 +36,11 @@ public sealed class KafkaOptions
     public string? SaslPassword { get; set; }
 
     public string? SslCaLocation { get; set; }
+
+    /// <summary>
+    /// Lỗi tạm thời (DB) thì thử lại chính message đó, chờ tăng dần: 500ms, 1s, 2s... tối đa RetryMaxDelaySeconds.
+    /// </summary>
+    public int RetryInitialDelayMilliseconds { get; set; } = 500;
+
+    public int RetryMaxDelaySeconds { get; set; } = 30;
 }

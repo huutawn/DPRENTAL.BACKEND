@@ -1,4 +1,5 @@
 using Dprental.AnalyticsService.Application.Kafka.Configuration;
+using Dprental.AnalyticsService.Application.Kafka.Consumers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -22,6 +23,12 @@ public static class KafkaServiceCollectionExtensions
             .Bind(configuration.GetSection(KafkaOptions.SectionName))
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<KafkaOptions>, KafkaOptionsValidator>();
+
+        // Scoped: worker tạo một scope (DbContext mới) cho mỗi message
+        services.AddScoped<IAnalyticsEventDispatcher, AnalyticsEventDispatcher>();
+
+        // Singleton: tự tạo scope mới cho từng lần xử lý message
+        services.AddSingleton<KafkaRecordProcessor>();
 
         return services;
     }

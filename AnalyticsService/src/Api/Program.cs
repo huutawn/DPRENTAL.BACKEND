@@ -1,5 +1,10 @@
 using System.IO;
+using Dprental.AnalyticsService.Api.Background;
 using Dprental.AnalyticsService.Api.Exceptions;
+using Dprental.AnalyticsService.Api.Security;
+using Dprental.AnalyticsService.Application.DependencyInjection;
+using Dprental.AnalyticsService.Application.Hub.Extensions;
+using Dprental.AnalyticsService.Application.Kafka.Configuration;
 using Dprental.AnalyticsService.Application.Kafka.DependencyInjection;
 using Dprental.AnalyticsService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -8,7 +13,16 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAnalyticsServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
+builder.Services.AddAnalyticsApplication();
+builder.Services.AddAnalyticsJwtAuthentication(builder.Configuration);
+builder.Services.AddAnalyticsHub(builder.Configuration);
 builder.Services.AddAnalyticsKafka(builder.Configuration);
+
+// Worker chỉ chạy khi bật Kafka tường minh; cấu hình sai đã bị chặn lúc khởi động bởi KafkaOptionsValidator
+if (builder.Configuration.GetValue<bool>($"{KafkaOptions.SectionName}:{nameof(KafkaOptions.Enabled)}"))
+{
+    builder.Services.AddHostedService<AnalyticsKafkaConsumerWorker>();
+}
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AnalyticsServiceDbContext>(
@@ -39,6 +53,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+app.UseAnalyticsHubOriginGuard();
+app.UseAuthentication();
+app.UseAuthorization();
 
 HealthCheckOptions livenessOptions = new()
 {
@@ -55,6 +72,7 @@ HealthCheckOptions readinessOptions = new()
 app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
 
 app.MapControllers();
+app.MapAnalyticsHub();
 
 app.Run();
 

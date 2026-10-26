@@ -1,7 +1,8 @@
 namespace Dprental.AnalyticsService.Application.Kafka.Contracts;
 
 /// <summary>
-/// Tên các event Analytics xử lý (giá trị messageType trong envelope). Event khác được bỏ qua.
+/// Tên các event Analytics xử lý (giá trị messageType trong envelope).
+/// Danh sách thật sự được xử lý là bảng định tuyến trong AnalyticsEventDispatcher; event khác được bỏ qua.
 /// </summary>
 public static class AnalyticsMessageTypes
 {
@@ -22,27 +23,4 @@ public static class AnalyticsMessageTypes
     // payment.events.v1
     public const string RentalSettled = "RentalSettled";
     public const string RefundCompleted = "RefundCompleted";
-
-    private static readonly HashSet<string> Handled = new(StringComparer.Ordinal)
-    {
-        RentalOrderCreated,
-        RentalOrderPaid,
-        RentalOrderCompleted,
-        RentalOrderCancelled,
-        RentalOrderExpired,
-        RentalItemConfirmed,
-        RentalItemRejected,
-        RentalItemExpired,
-        RentalItemCancelled,
-        RentalItemHandoverCompleted,
-        RentalItemReturned,
-        RentalItemCompleted,
-        RentalSettled,
-        RefundCompleted
-    };
-
-    /// <summary>
-    /// True nếu Analytics cần xử lý loại event này; false thì chỉ đánh dấu đã đọc rồi bỏ qua.
-    /// </summary>
-    public static bool IsHandled(string messageType) => Handled.Contains(messageType);
 }

@@ -151,17 +151,6 @@ public sealed class KafkaMessageReaderTests
         Assert.Equal(20000000m, item.RefundedDepositAmount);
     }
 
-    [Theory]
-    [InlineData("RentalOrderPaid", true)]
-    [InlineData("RentalSettled", true)]
-    [InlineData("InvoicePaid", false)]     // Payment event Analytics không dùng
-    [InlineData("RentalItemPaid", false)]  // Đã có RentalOrderPaid điền PaidAt cho mọi item
-    [InlineData("rentalorderpaid", false)] // Phân biệt hoa thường, đúng như messageType gửi
-    public void IsHandled_OnlyForEventsAnalyticsProjects(string messageType, bool expected)
-    {
-        Assert.Equal(expected, AnalyticsMessageTypes.IsHandled(messageType));
-    }
-
     private static string Envelope(string messageType, string payloadJson) => $$"""
         {
           "messageId": "660e8400-e29b-41d4-a716-446655440001",

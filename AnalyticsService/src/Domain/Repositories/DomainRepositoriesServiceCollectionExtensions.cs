@@ -1,3 +1,4 @@
+using Dprental.AnalyticsService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -19,6 +20,15 @@ public static class DomainRepositoriesServiceCollectionExtensions
         }
 
         services.AddDbContext<AnalyticsServiceDbContext>(options => options.UseNpgsql(connectionString));
+
+        // Scoped: cùng vòng đời với DbContext, mỗi message Kafka một scope riêng
+        services.AddScoped<IRentalFactRepository, RentalFactRepository>();
+        services.AddScoped<IFinancialFactRepository, FinancialFactRepository>();
+        services.AddScoped<IInboxRepository, InboxRepository>();
+        services.AddScoped<IDeadLetterRepository, DeadLetterRepository>();
+
+        // Unit of work chính là DbContext của scope, để repository và SaveChanges dùng chung một DbContext
+        services.AddScoped<IAnalyticsUnitOfWork>(provider => provider.GetRequiredService<AnalyticsServiceDbContext>());
 
         return services;
     }
