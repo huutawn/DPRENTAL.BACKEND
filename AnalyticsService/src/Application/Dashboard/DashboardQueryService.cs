@@ -1,4 +1,5 @@
 using Dprental.AnalyticsService.Application.Events;
+using Dprental.AnalyticsService.Application.Projections;
 using Dprental.AnalyticsService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 
@@ -52,8 +53,7 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
     }
 
     public Task<int> ActiveCountAsync(CancellationToken ct) => db.RentalOrders.AsNoTracking()
-        .CountAsync(x => x.PaidAt != null && x.Status != "COMPLETED" &&
-            x.Status != "CANCELLED" && x.Status != "EXPIRED" && x.Status != "REJECTED", ct);
+        .CountAsync(x => x.PaidAt != null && !OrderStatuses.Terminal.Contains(x.Status), ct);
 
     public async Task<EquipmentResponse> EquipmentAsync(DashboardDateRange range, int limit, CancellationToken ct)
     {
@@ -62,22 +62,26 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
                    where order.PaidAt >= range.StartUtc && order.PaidAt < range.EndUtc
                    select item;
 
-        var types = await paid.GroupBy(x => x.EquipmentTypeId)
-            .Select(g => new EquipmentRank(g.Key, g.Max(x => x.EquipmentTypeName) ?? "Không xác định",
-                g.Count(), g.Sum(x => x.HandoverAt != null ? x.Quantity : 0), g.Sum(x => x.RentalAmount)))
-            .OrderByDescending(x => x.RentalItemCount).ThenByDescending(x => x.RentedQuantity)
-            .ThenBy(x => x.Id).Take(limit).ToListAsync(ct);
-        var listings = await paid.GroupBy(x => x.EquipmentListingId)
-            .Select(g => new EquipmentRank(g.Key, string.Empty, g.Count(),
-                g.Sum(x => x.HandoverAt != null ? x.Quantity : 0), g.Sum(x => x.RentalAmount)))
-            .OrderByDescending(x => x.RentalItemCount).ThenByDescending(x => x.RentedQuantity)
-            .ThenBy(x => x.Id).Take(limit).ToListAsync(ct);
-        listings = listings.Select(x => x with { Name = x.Id?.ToString("D") ?? "Không xác định" }).ToList();
-        var brands = await paid.GroupBy(x => x.BrandId)
-            .Select(g => new EquipmentRank(g.Key, g.Max(x => x.BrandName) ?? "Không xác định",
-                g.Count(), g.Sum(x => x.HandoverAt != null ? x.Quantity : 0), g.Sum(x => x.RentalAmount)))
-            .OrderByDescending(x => x.RentalItemCount).ThenByDescending(x => x.RentedQuantity)
-            .ThenBy(x => x.Id).Take(limit).ToListAsync(ct);
+        // Gom nhóm, xếp hạng và Take chạy trên DB bằng kiểu ẩn danh; chỉ N dòng kết quả mới đổi sang EquipmentRank.
+        // (OrderBy theo thuộc tính của record dựng trong Select không dịch được sang SQL → lỗi 500 trên PostgreSQL.)
+        var types = (await paid.GroupBy(x => x.EquipmentTypeId)
+            .Select(g => new { Id = g.Key, Name = g.Max(x => x.EquipmentTypeName), Count = g.Count(),
+                Rented = g.Sum(x => x.HandoverAt != null ? x.Quantity : 0), Gmv = g.Sum(x => x.RentalAmount) })
+            .OrderByDescending(x => x.Count).ThenByDescending(x => x.Rented).ThenBy(x => x.Id)
+            .Take(limit).ToListAsync(ct))
+            .Select(x => new EquipmentRank(x.Id, x.Name ?? "Không xác định", x.Count, x.Rented, x.Gmv)).ToList();
+        var listings = (await paid.GroupBy(x => x.EquipmentListingId)
+            .Select(g => new { Id = g.Key, Count = g.Count(),
+                Rented = g.Sum(x => x.HandoverAt != null ? x.Quantity : 0), Gmv = g.Sum(x => x.RentalAmount) })
+            .OrderByDescending(x => x.Count).ThenByDescending(x => x.Rented).ThenBy(x => x.Id)
+            .Take(limit).ToListAsync(ct))
+            .Select(x => new EquipmentRank(x.Id, x.Id.ToString("D"), x.Count, x.Rented, x.Gmv)).ToList();
+        var brands = (await paid.GroupBy(x => x.BrandId)
+            .Select(g => new { Id = g.Key, Name = g.Max(x => x.BrandName), Count = g.Count(),
+                Rented = g.Sum(x => x.HandoverAt != null ? x.Quantity : 0), Gmv = g.Sum(x => x.RentalAmount) })
+            .OrderByDescending(x => x.Count).ThenByDescending(x => x.Rented).ThenBy(x => x.Id)
+            .Take(limit).ToListAsync(ct))
+            .Select(x => new EquipmentRank(x.Id, x.Name ?? "Không xác định", x.Count, x.Rented, x.Gmv)).ToList();
         return new EquipmentResponse(range.From, range.To, types, listings, brands);
     }
 

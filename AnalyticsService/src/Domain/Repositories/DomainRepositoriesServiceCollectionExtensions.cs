@@ -1,3 +1,4 @@
+using Dprental.AnalyticsService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -19,6 +20,14 @@ public static class DomainRepositoriesServiceCollectionExtensions
         }
 
         services.AddDbContext<AnalyticsServiceDbContext>(options => options.UseNpgsql(connectionString));
+
+        // Scoped: cùng vòng đời với DbContext; worker tạo một scope cho mỗi message
+        services.AddScoped<IRentalFactRepository, RentalFactRepository>();
+        services.AddScoped<IProcessedRentalEventRepository, ProcessedRentalEventRepository>();
+        services.AddScoped<IPaymentFinancialEventRepository, PaymentFinancialEventRepository>();
+        services.AddScoped<IDeadLetterRepository, DeadLetterRepository>();
+        // Unit of work chính là DbContext của scope, để repository và SaveChanges dùng chung một DbContext
+        services.AddScoped<IAnalyticsUnitOfWork>(provider => provider.GetRequiredService<AnalyticsServiceDbContext>());
 
         return services;
     }

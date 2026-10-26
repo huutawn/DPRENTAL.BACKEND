@@ -1,87 +1,87 @@
-using System.Net.Http.Headers;
+using Dprental.AnalyticsService.Application.Hub.Options;
+using Dprental.AnalyticsService.Application.Hub.Security;
+using Dprental.AnalyticsService.Application.Security;
+using Dprental.AnalyticsService.Application.Security.Jwt;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Protocols;
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Dprental.AnalyticsService.Api.Security;
 
+/// <summary>
+/// Xác thực JWT của AuthService cho dashboard API và SignalR Hub. Giữ tên và cách dùng của bản trước
+/// (AddAnalyticsSecurity, AdminPolicy); bổ sung: cấu hình được kiểm tra lúc khởi động, chỉ nhận RS256,
+/// dùng tiếp key cũ khi AuthService lỗi tạm thời, lấy token từ cookie cho Hub, quy tắc admin dùng chung.
+/// </summary>
 public static class AnalyticsJwtAuthentication
 {
     public const string AdminPolicy = "AnalyticsAdmin";
+    private const string JwksHttpClientName = "analytics-auth-jwks";
 
     public static IServiceCollection AddAnalyticsSecurity(this IServiceCollection services, IConfiguration configuration)
     {
-        string issuer = configuration["Authentication:Jwt:Issuer"] ?? "dprental-authservice-dev";
-        string audience = configuration["Authentication:Jwt:Audience"] ?? "dprental-clients";
-        string jwksUri = configuration["Authentication:Jwt:JwksUri"]
-            ?? "http://auth-service:8080/.well-known/jwks.json";
+        ArgumentNullException.ThrowIfNull(configuration);
 
-        services.AddHttpClient<AnalyticsJwksManager>();
+        services.AddOptions<AnalyticsJwtOptions>()
+            .Bind(configuration.GetSection(AnalyticsJwtOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddHttpClient(JwksHttpClientName, (provider, client) =>
+            client.Timeout = TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<AnalyticsJwtOptions>>().Value.TimeoutSeconds));
+
+        services.AddSingleton(provider => new AnalyticsJwksConfigurationManager(
+            provider.GetRequiredService<IHttpClientFactory>().CreateClient(JwksHttpClientName),
+            provider.GetRequiredService<IOptions<AnalyticsJwtOptions>>().Value,
+            provider.GetService<TimeProvider>() ?? TimeProvider.System));
+
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
-            .Configure<AnalyticsJwksManager>((options, jwksManager) =>
-            {
-                options.MapInboundClaims = false;
-                options.RefreshOnIssuerKeyNotFound = true;
-                options.ConfigurationManager = jwksManager;
-                options.TokenValidationParameters = new TokenValidationParameters
+            .Configure<AnalyticsJwksConfigurationManager, IOptions<AnalyticsJwtOptions>, IOptions<AnalyticsHubOptions>>(
+                (bearer, keys, jwtAccessor, hubAccessor) =>
                 {
-                    ValidateIssuer = true,
-                    ValidIssuer = issuer,
-                    ValidateAudience = true,
-                    ValidAudience = audience,
-                    ValidateLifetime = true,
-                    ClockSkew = TimeSpan.FromSeconds(30),
-                    RequireSignedTokens = true,
-                    RequireExpirationTime = true
-                };
-            });
+                    AnalyticsJwtOptions jwt = jwtAccessor.Value;
+                    string hubPath = hubAccessor.Value.HubPath;
 
+                    bearer.Events = new JwtBearerEvents
+                    {
+                        // Trình duyệt không gắn được header Authorization cho WebSocket:
+                        // với Hub, lấy token từ cookie accessToken giống PaymentHub
+                        OnMessageReceived = context =>
+                        {
+                            if (string.IsNullOrWhiteSpace(context.Token)
+                                && context.Request.Path.StartsWithSegments(hubPath, StringComparison.OrdinalIgnoreCase)
+                                && context.Request.Cookies.TryGetValue(AnalyticsHubSecurityConstants.AccessTokenCookieName, out string? cookieToken)
+                                && !string.IsNullOrWhiteSpace(cookieToken))
+                            {
+                                context.Token = cookieToken;
+                            }
+
+                            return Task.CompletedTask;
+                        }
+                    };
+                    bearer.MapInboundClaims = false; // Giữ nguyên tên claim gốc: sub, aud, r, u
+                    bearer.RefreshOnIssuerKeyNotFound = true;
+                    bearer.ConfigurationManager = keys;
+                    bearer.TokenValidationParameters = new TokenValidationParameters
+                    {
+                        ValidateIssuer = true,
+                        ValidIssuer = jwt.Issuer,
+                        ValidateAudience = true,
+                        ValidAudience = jwt.Audience,
+                        ValidateLifetime = true,
+                        ClockSkew = TimeSpan.FromSeconds(jwt.ClockSkewSeconds),
+                        RequireSignedTokens = true,
+                        RequireExpirationTime = true,
+                        ValidAlgorithms = [SecurityAlgorithms.RsaSha256] // Chặn tấn công đổi thuật toán
+                    };
+                });
+
+        // Admin = người dùng thật có role admin; token service (u=svc) luôn bị từ chối
         services.AddAuthorizationBuilder().AddPolicy(AdminPolicy, policy => policy
             .RequireAuthenticatedUser()
-            .RequireAssertion(context =>
-                !context.User.HasClaim("u", "svc") &&
-                context.User.FindAll("r").Any(claim =>
-                    claim.Value is "adm" or "adp" or "admin" or "admin_platform")));
+            .RequireAssertion(context => context.User.IsPlatformAdmin()));
+
         return services;
     }
-}
-
-public sealed class AnalyticsJwksManager(HttpClient client, IConfiguration configuration) :
-    IConfigurationManager<OpenIdConnectConfiguration>, IDisposable
-{
-    private readonly SemaphoreSlim _gate = new(1, 1);
-    private OpenIdConnectConfiguration? _cached;
-    private DateTimeOffset _refreshAfter;
-
-    public async Task<OpenIdConnectConfiguration> GetConfigurationAsync(CancellationToken cancel)
-    {
-        if (_cached is not null && DateTimeOffset.UtcNow < _refreshAfter) return _cached;
-        await _gate.WaitAsync(cancel);
-        try
-        {
-            if (_cached is not null && DateTimeOffset.UtcNow < _refreshAfter) return _cached;
-            string uri = configuration["Authentication:Jwt:JwksUri"]
-                ?? "http://auth-service:8080/.well-known/jwks.json";
-            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            using var response = await client.SendAsync(request, cancel);
-            response.EnsureSuccessStatusCode();
-            var keys = new JsonWebKeySet(await response.Content.ReadAsStringAsync(cancel));
-            var result = new OpenIdConnectConfiguration();
-            foreach (var key in keys.GetSigningKeys()) result.SigningKeys.Add(key);
-            _cached = result;
-            _refreshAfter = DateTimeOffset.UtcNow.AddMinutes(15);
-            return result;
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    public void RequestRefresh() => _refreshAfter = DateTimeOffset.MinValue;
-
-    public void Dispose() => _gate.Dispose();
 }
