@@ -28,7 +28,7 @@ using Xunit;
 
 namespace Dprental.InventoryService.Api.Tests.Search;
 
-public sealed class EquipmentSearchFullWordAndExactMatchTests : IAsyncLifetime, IAsyncDisposable
+public sealed partial class EquipmentSearchFullWordAndExactMatchTests : IAsyncLifetime, IAsyncDisposable
 {
     private const string MeiliUrl = "http://localhost:7700";
     private const string MasterKey = "dev_meili_master_key_32_chars_long";

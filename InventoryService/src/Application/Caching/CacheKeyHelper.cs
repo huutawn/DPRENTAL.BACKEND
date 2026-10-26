@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Domain.Entities;
 
@@ -13,7 +14,7 @@ namespace Dprental.InventoryService.Application.Caching;
 /// </summary>
 public static class CacheKeyHelper
 {
-    public const int SearchCacheVersion = 2;
+    public const int SearchCacheVersion = 3;
     private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
 
     private static string? NormalizeSearchQuery(string? q)
@@ -23,9 +24,7 @@ public static class CacheKeyHelper
             return null;
         }
 
-        var normalized = q.Normalize(NormalizationForm.FormC);
-        var collapsed = System.Text.RegularExpressions.Regex.Replace(normalized.Trim(), @"\s+", " ");
-        return collapsed.Length > 0 ? collapsed : null;
+        return AssetSearchQueryValidator.NormalizeKeyword(q);
     }
     /// <summary>
     /// Băm chuỗi input đã chuẩn hóa thành chuỗi hex SHA256 ngắn gọn.
