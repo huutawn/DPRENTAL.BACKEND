@@ -25,7 +25,7 @@ using Dprental.RentalService.Api.Tests.Domain;
 
 namespace Dprental.RentalService.Api.Tests.Supplier;
 
-public sealed class SupplierDecisionIntegrationTests
+public sealed partial class SupplierDecisionIntegrationTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 8, 8, 15, 30, TimeSpan.Zero);
 

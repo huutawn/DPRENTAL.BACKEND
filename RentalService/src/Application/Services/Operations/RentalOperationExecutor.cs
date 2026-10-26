@@ -235,7 +235,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
                     {
                         return Error.Conflict("ITEM_IN_TERMINAL_STATE", $"Mục thuê đã ở trạng thái {item.Status}; không thể áp dụng accept.");
                     }
-                    var acceptResult = await ConfirmAllocationCoreAsync(order, item, receipt, receipt.OperationId, item.SupplierId, isReconciliation: true, cancellationToken);
+                    var acceptResult = await ConfirmAllocationCoreAsync(order, item, receipt, receipt.OperationId, cancellationToken);
                     return acceptResult.IsSuccess ? Result.Success() : acceptResult.Error;
                 }
 
