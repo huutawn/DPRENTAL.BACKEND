@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using Dprental.AnalyticsService.Domain.Entities;
+using Dprental.AnalyticsService.Domain.IRepositories;
 
 namespace Dprental.AnalyticsService.Domain.Repositories;
 
-public sealed class AnalyticsServiceDbContext : DbContext
+// SaveChangesAsync của IAnalyticsUnitOfWork được DbContext có sẵn đáp ứng
+public sealed class AnalyticsServiceDbContext : DbContext, IAnalyticsUnitOfWork
 {
     public AnalyticsServiceDbContext(DbContextOptions<AnalyticsServiceDbContext> options) : base(options)
     {
@@ -13,6 +15,9 @@ public sealed class AnalyticsServiceDbContext : DbContext
     public DbSet<RentalOrderFact> RentalOrders => Set<RentalOrderFact>();
     public DbSet<RentalItemFact> RentalItems => Set<RentalItemFact>();
     public DbSet<ProcessedRentalEvent> ProcessedRentalEvents => Set<ProcessedRentalEvent>();
+    public DbSet<AnalyticsDeadLetter> DeadLetters => Set<AnalyticsDeadLetter>();
+
+    public void DiscardChanges() => ChangeTracker.Clear();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -43,7 +48,8 @@ public sealed class AnalyticsServiceDbContext : DbContext
             nameof(PaymentFinancialEvent.Amount)
         })
         {
-            financialEvent.Property<decimal?>(property).HasPrecision(18, 2);
+            // VND là số nguyên (AC DPR-258): numeric(18,0). Projector đã chặn số lẻ trước khi lưu.
+            financialEvent.Property<decimal?>(property).HasPrecision(18, 0);
         }
 
         financialEvent.Property(x => x.PlatformFeeRate).HasPrecision(9, 6);
@@ -74,6 +80,8 @@ public sealed class AnalyticsServiceDbContext : DbContext
         items.Property(x => x.Model).HasMaxLength(200);
         items.Property(x => x.ExpiryReason).HasMaxLength(100);
         items.Property(x => x.RejectionReason).HasMaxLength(100);
+        // Dòng item có sẵn trước migration nhận "UNKNOWN" (chưa biết trạng thái), không phải chuỗi rỗng
+        items.Property(x => x.Status).HasMaxLength(40).HasDefaultValue("UNKNOWN");
         items.Property(x => x.RentalAmount).HasPrecision(18, 0);
         items.Property(x => x.DepositAmount).HasPrecision(18, 0);
         items.HasIndex(x => x.RentalOrderId);
@@ -85,9 +93,20 @@ public sealed class AnalyticsServiceDbContext : DbContext
         items.HasIndex(x => x.EquipmentTypeId);
         items.HasIndex(x => x.EquipmentListingId);
         items.HasIndex(x => x.BrandId);
+        items.HasIndex(x => x.Status);
 
         var processed = modelBuilder.Entity<ProcessedRentalEvent>();
         processed.ToTable("analytics_processed_rental_events");
         processed.HasKey(x => x.MessageId);
+
+        var deadLetters = modelBuilder.Entity<AnalyticsDeadLetter>();
+        deadLetters.ToTable("analytics_dead_letters");
+        deadLetters.HasKey(x => x.Id);
+        deadLetters.Property(x => x.Id).ValueGeneratedNever();
+        deadLetters.Property(x => x.Topic).HasMaxLength(255);
+        deadLetters.Property(x => x.MessageType).HasMaxLength(100);
+        deadLetters.Property(x => x.ErrorCode).HasMaxLength(64);
+        // Worker thử lại cùng message lỗi không tạo thêm dòng thứ hai
+        deadLetters.HasIndex(x => new { x.Topic, x.Partition, x.Offset }).IsUnique();
     }
 }

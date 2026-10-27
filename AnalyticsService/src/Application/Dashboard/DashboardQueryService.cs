@@ -1,4 +1,5 @@
 using Dprental.AnalyticsService.Application.Events;
+using Dprental.AnalyticsService.Application.Projections;
 using Dprental.AnalyticsService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 
@@ -85,6 +86,7 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
         return await balances.SumAsync(balance => balance > 0m ? balance : 0m, ct);
     }
 
+
     public async Task<EquipmentResponse> EquipmentAsync(DashboardDateRange range, int limit, CancellationToken ct)
     {
         var paid = from item in db.RentalItems.AsNoTracking()
@@ -121,6 +123,7 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
             .ThenBy(x => x.Id).Take(limit).ToListAsync(ct);
         var brands = brandRows.Select(x => new EquipmentRank(x.Id, x.Name ?? "Không xác định",
             x.Count, x.Quantity, x.Value, x.Completed)).ToList();
+
         return new EquipmentResponse(range.From, range.To, types, listings, brands);
     }
 

@@ -1,11 +1,10 @@
 using System.IO;
+using Dprental.AnalyticsService.Api.Background;
 using Dprental.AnalyticsService.Api.Exceptions;
 using Dprental.AnalyticsService.Api.Security;
-using Dprental.AnalyticsService.Api.Background;
-using Dprental.AnalyticsService.Application.Dashboard.Revenue;
-using Dprental.AnalyticsService.Application.Dashboard;
-using Dprental.AnalyticsService.Application.Events.Rental;
-using Dprental.AnalyticsService.Application.Events.Payment;
+using Dprental.AnalyticsService.Application.DependencyInjection;
+using Dprental.AnalyticsService.Application.Hub.Extensions;
+using Dprental.AnalyticsService.Application.Kafka.Configuration;
 using Dprental.AnalyticsService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -13,13 +12,16 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAnalyticsServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
-builder.Services.AddScoped<PaymentAnalyticsEventIngestor>();
-builder.Services.AddScoped<RevenueAnalyticsQueryService>();
-builder.Services.AddScoped<RentalEventIngestor>();
-builder.Services.AddScoped<DashboardQueryService>();
-builder.Services.AddScoped<OrderTrendQueryService>();
-builder.Services.Configure<AnalyticsKafkaOptions>(builder.Configuration.GetSection("Kafka"));
-builder.Services.AddHostedService<AnalyticsKafkaConsumerWorker>();
+builder.Services.AddAnalyticsApplication();
+builder.Services.AddAnalyticsKafka(builder.Configuration);
+builder.Services.AddAnalyticsSecurity(builder.Configuration);
+builder.Services.AddAnalyticsHub(builder.Configuration);
+
+// Worker chỉ chạy khi bật Kafka tường minh; cấu hình sai đã bị chặn lúc khởi động bởi AnalyticsKafkaOptionsValidator
+if (builder.Configuration.GetValue<bool>($"{AnalyticsKafkaOptions.SectionName}:{nameof(AnalyticsKafkaOptions.Enabled)}"))
+{
+    builder.Services.AddHostedService<AnalyticsKafkaConsumerWorker>();
+}
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AnalyticsServiceDbContext>(
@@ -28,7 +30,6 @@ builder.Services.AddHealthChecks()
         tags: ["ready"]);
 
 builder.Services.AddControllers();
-builder.Services.AddAnalyticsSecurity(builder.Configuration);
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();
@@ -52,6 +53,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+app.UseAnalyticsHubOriginGuard(); // Chặn Origin lạ trước khi tốn công xác thực
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -70,6 +72,7 @@ HealthCheckOptions readinessOptions = new()
 app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
 
 app.MapControllers();
+app.MapAnalyticsHub();
 
 app.Run();
 
