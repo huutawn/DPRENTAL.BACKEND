@@ -65,6 +65,15 @@ Chạy toàn bộ bộ kiểm thử tự động (unit tests và integration tes
 dotnet test Gateway/Gateway.sln
 ```
 
+#### Dependency và kiểm thử tích hợp Gateway → Rental Realtime End-to-End
+
+Bộ kiểm thử tích hợp `RentalRealtimeGatewayEndToEndTests` kiểm chứng toàn bộ luồng WebSocket / SignalR kết nối công khai qua Gateway tới Rental Hub thật chạy trên loopback Kestrel:
+- **Dependency mã nguồn**: Repository `RentalService` bắt buộc phải được checkout cùng cấp với `Gateway` (`/RentalService/RentalService/src/Api/RentalService.Api.csproj`). Project `ApiGateway.Tests` tham chiếu trực tiếp project Rental API với alias `RentalApi`.
+- **Dependency cơ sở dữ liệu**: PostgreSQL đang chạy trên cổng 5433 (container `rentalservice-postgres-1` trong Docker Compose).
+- **Cách chạy kiểm thử riêng biệt**:
+  ```bash
+  dotnet test Gateway/Gateway.sln --filter "FullyQualifiedName~RentalRealtimeGatewayEndToEndTests"
+  ```
 ### Khởi động Gateway chạy local (kết nối AuthService trên máy host)
 
 Khởi động AuthService tại `http://localhost:64837` (cổng HTTP chuẩn theo `launchSettings.json` của AuthService), sau đó khởi động Gateway với môi trường `Development`:
