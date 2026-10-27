@@ -1,5 +1,8 @@
 namespace Dprental.AnalyticsService.Domain.Entities;
 
+/// <summary>
+/// Một dòng read model cho một dòng thuê (một thiết bị của một NCC trong đơn). Chỉ chứa dữ liệu.
+/// </summary>
 public sealed class RentalItemFact
 {
     public Guid RentalItemId { get; set; }
@@ -19,7 +22,12 @@ public sealed class RentalItemFact
     public string? RejectionReason { get; set; }
     public DateTimeOffset? ExpiredAt { get; set; }
     public string? ExpiryReason { get; set; }
+    public DateTimeOffset? CancelledAt { get; set; }
     public DateTimeOffset? HandoverAt { get; set; }
     public DateTimeOffset? ReturnedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
+
+    // Trạng thái hiện tại của dòng thuê và orderVersion của event cuối đã đổi nó (0 = chưa có version)
+    public string Status { get; set; } = "UNKNOWN";
+    public long StatusVersion { get; set; }
 }

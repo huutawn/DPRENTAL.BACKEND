@@ -22,6 +22,45 @@ namespace AnalyticsService.Domain.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Dprental.AnalyticsService.Domain.Entities.AnalyticsDeadLetter", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ErrorCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("FailedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MessageType")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<long>("Offset")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Partition")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Topic")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Topic", "Partition", "Offset")
+                        .IsUnique();
+
+                    b.ToTable("analytics_dead_letters", (string)null);
+                });
+
             modelBuilder.Entity("Dprental.AnalyticsService.Domain.Entities.PaymentFinancialEvent", b =>
                 {
                     b.Property<Guid>("MessageId")
@@ -34,8 +73,8 @@ namespace AnalyticsService.Domain.Migrations
                         .HasColumnType("character varying(100)");
 
                     b.Property<decimal?>("Amount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
 
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
@@ -46,16 +85,16 @@ namespace AnalyticsService.Domain.Migrations
                         .HasColumnType("character varying(3)");
 
                     b.Property<decimal?>("DepositAmount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
 
                     b.Property<decimal?>("DepositRefundDue")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
 
                     b.Property<decimal?>("FinalDeductionAmount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
 
                     b.Property<Guid?>("InvoiceId")
                         .HasColumnType("uuid");
@@ -88,8 +127,8 @@ namespace AnalyticsService.Domain.Migrations
                         .HasColumnType("character varying(100)");
 
                     b.Property<decimal?>("PlatformFeeAmount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
 
                     b.Property<decimal?>("PlatformFeeRate")
                         .HasPrecision(9, 6)
@@ -107,8 +146,8 @@ namespace AnalyticsService.Domain.Migrations
                         .HasColumnType("character varying(100)");
 
                     b.Property<decimal?>("RentalAmount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
 
                     b.Property<Guid?>("RentalItemId")
                         .HasColumnType("uuid");
@@ -130,12 +169,12 @@ namespace AnalyticsService.Domain.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<decimal?>("SupplierPayable")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
 
                     b.Property<decimal?>("TotalAmount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)");
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
 
                     b.HasKey("MessageId");
 
@@ -179,6 +218,9 @@ namespace AnalyticsService.Domain.Migrations
                     b.Property<string>("BrandName")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
@@ -234,6 +276,16 @@ namespace AnalyticsService.Domain.Migrations
                     b.Property<DateTimeOffset?>("ReturnedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasDefaultValue("UNKNOWN");
+
+                    b.Property<long>("StatusVersion")
+                        .HasColumnType("bigint");
+
                     b.Property<Guid>("SupplierId")
                         .HasColumnType("uuid");
 
@@ -246,6 +298,8 @@ namespace AnalyticsService.Domain.Migrations
                     b.HasIndex("EquipmentTypeId");
 
                     b.HasIndex("RentalOrderId");
+
+                    b.HasIndex("Status");
 
                     b.HasIndex("SupplierId", "CompletedAt");
 
