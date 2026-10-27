@@ -132,6 +132,16 @@ public sealed class RentalOrderProjector
         return Result.Success();
     }
 
+    public async Task<Result> ApplyAsync(RentalOrderRejectedPayload payload, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+
+        RentalOrderFact order = await RentalFactRows.GetOrCreateOrderAsync(_repository, payload.RentalOrderId, cancellationToken);
+        order.RejectedAt ??= payload.RejectedAt.ToUniversalTime();
+        StatusGate.Apply(order, OrderStatuses.Rejected, payload.OrderVersion);
+        return Result.Success();
+    }
+
     private static Error? FirstAmountError(params decimal[] amounts)
     {
         foreach (decimal amount in amounts)

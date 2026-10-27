@@ -3,7 +3,7 @@
 set -euo pipefail
 
 readonly BASE_REMOTE="origin"
-readonly BASE_BRANCH="analytics/develop"
+readonly BASE_BRANCH="analytic/develop"
 readonly BASE_REF="refs/remotes/${BASE_REMOTE}/${BASE_BRANCH}"
 readonly SOLUTION_FILE="AnalyticsService.sln"
 

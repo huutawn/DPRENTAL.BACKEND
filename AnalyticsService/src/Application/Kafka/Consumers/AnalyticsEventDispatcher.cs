@@ -165,6 +165,7 @@ public sealed partial class AnalyticsEventDispatcher : IAnalyticsEventDispatcher
         RentalAnalyticsEventTypes.RentalOrderCompleted => Project<RentalOrderCompletedPayload>(envelope, p => _orders.ApplyAsync(p, ct)),
         RentalAnalyticsEventTypes.RentalOrderCancelled => Project<RentalOrderCancelledPayload>(envelope, p => _orders.ApplyAsync(p, ct)),
         RentalAnalyticsEventTypes.RentalOrderExpired => Project<RentalOrderExpiredPayload>(envelope, p => _orders.ApplyAsync(p, ct)),
+        RentalAnalyticsEventTypes.RentalOrderRejected => Project<RentalOrderRejectedPayload>(envelope, p => _orders.ApplyAsync(p, ct)),
         RentalAnalyticsEventTypes.RentalItemConfirmed => Project<RentalItemConfirmedPayload>(envelope, p => _items.ApplyAsync(p, ct)),
         RentalAnalyticsEventTypes.RentalItemRejected => Project<RentalItemRejectedPayload>(envelope, p => _items.ApplyAsync(p, ct)),
         RentalAnalyticsEventTypes.RentalItemExpired => Project<RentalItemExpiredPayload>(envelope, p => _items.ApplyAsync(p, ct)),
@@ -181,6 +182,7 @@ public sealed partial class AnalyticsEventDispatcher : IAnalyticsEventDispatcher
     {
         PaymentAnalyticsEventTypes.InvoicePaidFinancial => Project<InvoicePaidFinancialPayload>(envelope, p => _financial.ApplyAsync(envelope, p, ct)),
         PaymentAnalyticsEventTypes.RentalItemFinancialSettled => Project<RentalItemFinancialSettledPayload>(envelope, p => _financial.ApplyAsync(envelope, p, ct)),
+        PaymentAnalyticsEventTypes.RefundRequestedFinancial => Project<RefundRequestedFinancialPayload>(envelope, p => _financial.ApplyAsync(envelope, p, ct)),
         PaymentAnalyticsEventTypes.RefundCompletedFinancial => Project<RefundCompletedFinancialPayload>(envelope, p => _financial.ApplyAsync(envelope, p, ct)),
         PaymentAnalyticsEventTypes.SupplierPayoutCompleted => Project<SupplierPayoutCompletedPayload>(envelope, p => _financial.ApplyAsync(envelope, p, ct)),
         _ => null

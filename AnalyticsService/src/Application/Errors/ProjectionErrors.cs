@@ -12,6 +12,7 @@ public static class ProjectionErrors
     public const string QuantityInvalidCode = "ANALYTICS_QUANTITY_INVALID";
     public const string FactConflictCode = "ANALYTICS_FACT_CONFLICT";
     public const string DuplicateItemCode = "ANALYTICS_DUPLICATE_ITEM";
+    public const string FinancialFactsInvalidCode = "ANALYTICS_FINANCIAL_FACTS_INVALID";
 
     public const string SupportedCurrency = "VND";
 
@@ -30,4 +31,7 @@ public static class ProjectionErrors
 
     public static Error DuplicateItem(Guid rentalItemId) =>
         Error.Validation(DuplicateItemCode, $"Event chứa dòng thuê '{rentalItemId}' lặp lại.");
+
+    public static Error FinancialFactsInvalid() =>
+        Error.Validation(FinancialFactsInvalidCode, "Các số tiền trong event tài chính không nhất quán.");
 }

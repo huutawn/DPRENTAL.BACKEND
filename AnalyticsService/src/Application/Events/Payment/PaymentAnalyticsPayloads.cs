@@ -50,6 +50,17 @@ public sealed record RefundCompletedFinancialPayload
     public required DateTimeOffset CompletedAt { get; init; }
 }
 
+public sealed record RefundRequestedFinancialPayload
+{
+    public required string RefundRef { get; init; }
+    public required Guid RentalOrderId { get; init; }
+    public Guid? RentalItemId { get; init; }
+    public required string RefundKind { get; init; }
+    public required decimal Amount { get; init; }
+    public required string Currency { get; init; }
+    public required DateTimeOffset RequestedAt { get; init; }
+}
+
 public sealed record SupplierPayoutCompletedPayload
 {
     public required Guid PayoutId { get; init; }

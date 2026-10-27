@@ -1,4 +1,5 @@
 using Dprental.AnalyticsService.Api.Tests.TestHelpers;
+using Dprental.AnalyticsService.Application.Dashboard;
 using Dprental.AnalyticsService.Application.Errors;
 using Dprental.AnalyticsService.Application.Events;
 using Dprental.AnalyticsService.Application.Kafka.Consumers;
@@ -45,6 +46,30 @@ public sealed class PaymentIngestionTests
         Assert.Equal(DispatchOutcome.Duplicate, replay.Outcome);
         await using AnalyticsServiceDbContext db = h.Read();
         Assert.Single(await db.PaymentFinancialEvents.ToListAsync());
+    }
+
+    [Fact]
+    public async Task RefundRequest_ReplayDoesNotIncreasePendingRefund()
+    {
+        using DispatcherHarness h = new();
+        var requested = new
+        {
+            refundRef = "REF-1", rentalOrderId = OrderId, rentalItemId = (Guid?)null,
+            refundKind = "CancellationRefund", amount = 1000m, currency = "VND",
+            requestedAt = CompletedAt.AddHours(-1)
+        };
+
+        DispatchResult first = await h.DispatchAsync(h.Payment(PaymentAnalyticsEventTypes.RefundRequestedFinancial, requested));
+        DispatchResult replay = await h.DispatchAsync(h.Payment(PaymentAnalyticsEventTypes.RefundRequestedFinancial, requested));
+        DispatchResult completed = await h.DispatchAsync(h.Payment(PaymentAnalyticsEventTypes.RefundCompletedFinancial, Refund(400m)));
+
+        Assert.Equal(DispatchOutcome.Processed, first.Outcome);
+        Assert.Equal(DispatchOutcome.Duplicate, replay.Outcome);
+        Assert.Equal(DispatchOutcome.Processed, completed.Outcome);
+        await using AnalyticsServiceDbContext db = h.Read();
+        OverviewResponse overview = await new DashboardQueryService(db).OverviewAsync(
+            DashboardDateRange.Create(new DateOnly(2026, 11, 16), new DateOnly(2026, 11, 16)), CancellationToken.None);
+        Assert.Equal(600m, overview.Financial.PendingRefund);
     }
 
     [Fact]
@@ -186,7 +211,7 @@ public sealed class PaymentIngestionTests
         depositRefundDue = 3_000_000m,
         platformFeeRate = 0.1m,
         platformFeeAmount = fee,
-        supplierPayable = 810_000m,
+        supplierPayable = 900_000m - fee,
         completedAt = CompletedAt
     };
 

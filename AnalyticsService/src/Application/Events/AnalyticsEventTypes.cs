@@ -11,11 +11,12 @@ public static class PaymentAnalyticsEventTypes
 {
     public const string InvoicePaidFinancial = "InvoicePaidFinancial";
     public const string RentalItemFinancialSettled = "RentalItemFinancialSettled";
+    public const string RefundRequestedFinancial = "RefundRequestedFinancial";
     public const string RefundCompletedFinancial = "RefundCompletedFinancial";
     public const string SupplierPayoutCompleted = "SupplierPayoutCompleted";
 
     public static bool IsFinancial(string? messageType) => messageType is
-        InvoicePaidFinancial or RentalItemFinancialSettled or RefundCompletedFinancial or SupplierPayoutCompleted;
+        InvoicePaidFinancial or RentalItemFinancialSettled or RefundRequestedFinancial or RefundCompletedFinancial or SupplierPayoutCompleted;
 }
 
 /// <summary>Event vòng đời đơn thuê trên rental.events.v1 mà Analytics chiếu vào read model.</summary>
@@ -26,6 +27,7 @@ public static class RentalAnalyticsEventTypes
     public const string RentalOrderCompleted = "RentalOrderCompleted";
     public const string RentalOrderCancelled = "RentalOrderCancelled";
     public const string RentalOrderExpired = "RentalOrderExpired";
+    public const string RentalOrderRejected = "RentalOrderRejected";
     public const string RentalItemConfirmed = "RentalItemConfirmed";
     public const string RentalItemRejected = "RentalItemRejected";
     public const string RentalItemExpired = "RentalItemExpired";

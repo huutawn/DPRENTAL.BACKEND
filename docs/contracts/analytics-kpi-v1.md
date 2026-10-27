@@ -92,7 +92,7 @@ Khóa **một ý nghĩa duy nhất** cho từng con số báo cáo, để Rental
 | `RentalSettled` | `payment.events.v1` | Payment | `settlementRef`, `rentalItemId`, `finalDeductionAmount`, `refundedDepositAmount` (= DepositRefundDue); **cần thêm** `platformFeeAmount`, `supplierPayable`, `supplierId`, `rentalAmount`, `depositAmount` | `completedAt` | `settlementRef` | **Thiếu field (P1)** |
 | `RefundCompleted` | `payment.events.v1` | Payment | `refundRef`, `rentalOrderId`, `items[]`: `rentalItemId`, `refundedRentalAmount`, `refundedDepositAmount`; **cần thêm** `kind` | `completedAt` | `refundRef` + `rentalItemId` | Có, thiếu `kind` (P4) |
 | `SupplierPayoutCompleted` | `payment.events.v1` | Payment | `payoutRef`, `supplierId`, `rentalItemId`, `amount` | `completedAt` | `payoutRef` | **Chưa có (P3)** |
-| `RefundRequested` | `payment.events.v1` | Payment | `refundRef`, `rentalOrderId`, `rentalItemId`, `kind`, `amount` | `requestedAt` | `refundRef` | **Chưa có (P5)** |
+| `RefundRequestedFinancial` | `payment.analytics.v1` | Payment | `refundRef`, `rentalOrderId`, `rentalItemId?`, `refundKind`, `amount`, `currency` | `requestedAt` | `refundRef` | Analytics consumer hỗ trợ; Payment producer cần phát event |
 
 **Không được lưu** từ bất kỳ event nào: số tài khoản ngân hàng, số điện thoại người nhận, địa chỉ giao hàng, nội dung chuyển khoản, raw payload SePay, `SerialNumber`, `AssetCode`, và raw JSON của message.
 
@@ -108,7 +108,7 @@ Ký hiệu "Chưa có nguồn (Px/Rx)": KPI đã được định nghĩa nhưng 
 | --- | --- | --- | --- | --- | --- |
 | `TotalOrders` | Số đơn được tạo | `COUNT(order)` | `RentalOrderCreated` | `CreatedAt` | Period |
 | `PaidOrders` | Số đơn đã thanh toán | `COUNT(order) WHERE PaidAt IS NOT NULL` | `RentalOrderPaid` | `PaidAt` | Period |
-| `ActiveOrders` | Số đơn đã thanh toán và chưa kết thúc | `COUNT(order) WHERE PaidAt IS NOT NULL AND Status NOT IN (Completed, Cancelled, Expired, Rejected)` | Tổng hợp từ các event đơn | Lúc gọi | Snapshot |
+| `ActiveOrders` | Số đơn đã thanh toán và chưa kết thúc tại cuối ngày `to` theo giờ Việt Nam | `COUNT(order) WHERE PaidAt < endUtc AND các mốc CompletedAt/CancelledAt/ExpiredAt/RejectedAt đều null hoặc >= endUtc` | Tổng hợp từ các event đơn; khi chưa có `RejectedAt`, loại status `REJECTED` | Cuối ngày `to` | As-of snapshot |
 | `CompletedOrders` | Số đơn hoàn thành | `COUNT(order)` | `RentalOrderCompleted` | `CompletedAt` | Period |
 | `CancelledOrders` | Số đơn bị hủy | `COUNT(order)` | `RentalOrderCancelled` | `CancelledAt` | Period |
 | `RejectedOrders` | Số đơn mà **mọi** item đều bị NCC từ chối, theo đúng luật rollup của Rental (`RentalOrderStatusPolicy`). Đơn chỉ có một phần item bị từ chối **không** thuộc KPI này. Đơn có item bị từ chối và item hết hạn được Rental tính là `Expired` | `COUNT(order)` | `RentalOrderRejected` — Chưa có nguồn (R1) | `RejectedAt` | Period |
@@ -125,7 +125,7 @@ Ký hiệu "Chưa có nguồn (Px/Rx)": KPI đã được định nghĩa nhưng 
 | `PlatformRevenue` | Phí nền tảng thực thu. **Chỉ lấy từ Payment**, Analytics không tự nhân tỉ lệ phí | `Σ PlatformFeeAmount` | Payment `RentalSettled` — Chưa có nguồn (P1) | `Settlement.CompletedAt` | Period |
 | `DeductionAmount` | Tổng khấu trừ cọc sau quyết toán (bồi thường hư hỏng) | `Σ FinalDeductionAmount` | Payment `RentalSettled` | `Settlement.CompletedAt` | Period |
 | `RefundAmount` | Tổng tiền đã hoàn cho khách (tiền thuê + tiền cọc), tính theo **ngày hoàn tiền** | `Σ (refundedRentalAmount + refundedDepositAmount)` | Payment `RefundCompleted` | `Refund.CompletedAt` | Period |
-| `PendingRefundAmount` | Tiền đã phát sinh nghĩa vụ hoàn nhưng chưa hoàn xong | `Σ RefundRequested.amount − Σ RefundCompleted` (theo `refundRef`) | Payment — Chưa có nguồn (P5) | Lúc gọi | Snapshot |
+| `PendingRefundAmount` | Tiền đã phát sinh nghĩa vụ hoàn nhưng chưa hoàn xong | `Σ max(requested.amount − completed.amount, 0)` theo `refundRef` | Payment `RefundRequestedFinancial` và `RefundCompletedFinancial`; cần Payment producer phát yêu cầu hoàn | Lúc gọi | Snapshot |
 | `SupplierPayable` | Tiền nền tảng phải trả NCC sau quyết toán | `Σ SupplierPayable` | Payment `RentalSettled` — Chưa có nguồn (P1) | `Settlement.CompletedAt` | Period |
 | `SupplierPayoutCompleted` | Tiền đã thực chuyển cho NCC | `Σ Amount WHERE Status = COMPLETED` | Payment `SupplierPayoutCompleted` — Chưa có nguồn (P3) | `Payout.CompletedAt` | Period |
 
@@ -146,7 +146,7 @@ Ghi chú:
 
 **Quy tắc xếp hạng chung cho các bảng Top:**
 1. Tập dữ liệu: các item đã trả tiền, có `PaidAt` trong khoảng `from`–`to`.
-2. Xếp theo `RentalItemCount` (số lượt thuê) giảm dần. Hòa thì xếp theo `RentedQuantity` (đếm các item của nhóm đã bàn giao, không giới hạn theo `from`–`to`), rồi theo Id tăng dần để kết quả luôn ổn định.
+2. Xếp theo `RentalItemCount` (số lượt thuê) giảm dần. Hòa thì xếp theo `RentedQuantity` (đếm các item của nhóm đã bàn giao trước cuối ngày `to`), rồi theo Id tăng dần để kết quả không thay đổi do vòng đời item sau khoảng đã chọn.
 3. Mặc định lấy top 10.
 4. Mỗi dòng trả kèm `GrossRentalValue` để tham khảo. Giá trị này **không** dùng để xếp hạng.
 5. Item thiếu snapshot (`EquipmentTypeId` / `BrandId` null) được gom vào nhóm **"Không xác định"**. Không tạo giá trị giả.
@@ -239,7 +239,7 @@ KPI phụ thuộc vào yêu cầu nào thì hiển thị "Chưa có nguồn" cho
 | P2 | `messageId` tất định theo `settlementRef` / `refundRef` / `payoutRef` | — | Khuyến nghị. Analytics vẫn dedupe theo khóa tự nhiên |
 | P3 | Event mới `SupplierPayoutCompleted { payoutRef, supplierId, rentalItemId, amount, currency, createdAt, completedAt }` | `SupplierPayoutCompleted` | **Không** mang thông tin tài khoản nhận tiền |
 | P4 | `RefundCompleted` thêm `kind` (ví dụ `CANCELLATION`, `SUPPLIER_REJECTION`, `LATE_PAYMENT`, `DEPOSIT_SETTLEMENT`) | Phân loại `RefundAmount` | `RefundAmount` tổng vẫn tính được khi chưa có `kind` |
-| P5 | Event mới `RefundRequested { refundRef, rentalOrderId, rentalItemId?, kind, amount, currency, requestedAt }` | `PendingRefundAmount` | `refundRef` trùng với `RefundCompleted.refundRef` để đối chiếu |
+| P5 | Event mới `RefundRequestedFinancial { refundRef, rentalOrderId, rentalItemId?, refundKind, amount, currency, requestedAt }` trên `payment.analytics.v1` | `PendingRefundAmount` | Analytics đã ingest và khử trùng theo `refundRef`; Payment producer cần phát event, dùng cùng `refundRef` với `RefundCompletedFinancial` |
 
 ### 9.2. RentalService
 

@@ -46,7 +46,7 @@ public sealed class OrderTrendQueryService(AnalyticsServiceDbContext db, Dashboa
             if (opened) await db.Database.CloseConnectionAsync();
         }
 
-        return new OrdersResponse(range.From, range.To, await dashboard.ActiveCountAsync(ct),
+        return new OrdersResponse(range.From, range.To, await dashboard.ActiveCountAsync(range, ct),
             points.Select(x => new OrderTrendPoint(x.Key, x.Value[0], x.Value[1], x.Value[2],
                 x.Value[3], x.Value[4])).ToList());
     }

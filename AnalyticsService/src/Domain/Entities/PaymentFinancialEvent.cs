@@ -37,6 +37,7 @@ public sealed class PaymentFinancialEvent
     public string? RefundRef { get; set; }
     public string? RefundKind { get; set; }
     public decimal? Amount { get; set; }
+    public DateTimeOffset? RequestedAt { get; set; }
 
     public Guid? PayoutId { get; set; }
     public string? PayoutRef { get; set; }

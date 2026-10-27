@@ -31,6 +31,11 @@ public sealed class PaymentFinancialProjector
     {
         ArgumentNullException.ThrowIfNull(payload);
 
+        if (payload.RentalAmount + payload.DepositAmount != payload.TotalAmount)
+        {
+            return Task.FromResult(Result.Failure<bool>(ProjectionErrors.FinancialFactsInvalid()));
+        }
+
         PaymentFinancialEvent row = NewRow(envelope, $"{envelope.MessageType}:{payload.InvoiceId:D}");
         row.InvoiceId = payload.InvoiceId;
         row.InvoiceRef = payload.InvoiceRef;
@@ -46,6 +51,15 @@ public sealed class PaymentFinancialProjector
     public Task<Result<bool>> ApplyAsync(KafkaEnvelope envelope, RentalItemFinancialSettledPayload payload, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(payload);
+
+        if (payload.FinalDeductionAmount > payload.DepositAmount ||
+            payload.DepositRefundDue + payload.FinalDeductionAmount != payload.DepositAmount ||
+            payload.PlatformFeeRate is < 0 or > 1 ||
+            payload.PlatformFeeAmount > payload.RentalAmount ||
+            payload.SupplierPayable != payload.RentalAmount - payload.PlatformFeeAmount + payload.FinalDeductionAmount)
+        {
+            return Task.FromResult(Result.Failure<bool>(ProjectionErrors.FinancialFactsInvalid()));
+        }
 
         PaymentFinancialEvent row = NewRow(envelope, $"{envelope.MessageType}:{payload.SettlementRef}");
         row.SettlementId = payload.SettlementId;
@@ -79,6 +93,20 @@ public sealed class PaymentFinancialProjector
         row.RefundKind = payload.RefundKind;
         row.Amount = payload.Amount;
         row.CompletedAt = payload.CompletedAt.ToUniversalTime();
+        return RecordAsync(row, payload.Currency, cancellationToken);
+    }
+
+    public Task<Result<bool>> ApplyAsync(KafkaEnvelope envelope, RefundRequestedFinancialPayload payload, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+
+        PaymentFinancialEvent row = NewRow(envelope, $"{envelope.MessageType}:{payload.RefundRef}");
+        row.RefundRef = payload.RefundRef;
+        row.RentalOrderId = payload.RentalOrderId;
+        row.RentalItemId = payload.RentalItemId;
+        row.RefundKind = payload.RefundKind;
+        row.Amount = payload.Amount;
+        row.RequestedAt = payload.RequestedAt.ToUniversalTime();
         return RecordAsync(row, payload.Currency, cancellationToken);
     }
 
@@ -159,6 +187,9 @@ public sealed class PaymentFinancialProjector
         Amounts(a).SequenceEqual(Amounts(b))
         && a.PaidAt == b.PaidAt
         && a.CompletedAt == b.CompletedAt
+        && a.RequestedAt == b.RequestedAt
         && a.RentalItemId == b.RentalItemId
+        && a.RentalOrderId == b.RentalOrderId
+        && a.RefundKind == b.RefundKind
         && a.SupplierId == b.SupplierId;
 }

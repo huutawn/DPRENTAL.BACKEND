@@ -167,7 +167,8 @@ public sealed class AnalyticsPostgreSqlTests
         DashboardQueryService dashboard = new(db);
         OverviewResponse overview = await dashboard.OverviewAsync(Range, CancellationToken.None);
 
-        Assert.Equal(new OrderMetrics(Created: 1, Paid: 1, Active: 0, Completed: 1, Cancelled: 0, Expired: 0), overview.Orders);
+        Assert.Equal(new OrderMetrics(TotalOrders: 1, PaidOrders: 1, ActiveOrders: 0, CompletedOrders: 1,
+            CancelledOrders: 0, ExpiredOrders: 0, RejectedItems: 1), overview.Orders);
         Assert.Equal(new FinancialMetrics(
             GrossRentalValue: 6_900_000m,      // tiền thuê đã trả, không gồm cọc
             CompletedRentalValue: 900_000m,     // chỉ item đã hoàn thành
@@ -176,7 +177,8 @@ public sealed class AnalyticsPostgreSqlTests
             DeductionAmount: 0m,
             RefundAmount: 26_000_000m,
             SupplierPayable: 810_000m,
-            PayoutCompleted: 810_000m), overview.Financial);
+            PayoutCompleted: 810_000m,
+            PendingRefund: 0m), overview.Financial);
         Assert.Equal(new RentalMetrics(PaidItems: 2, RentedQuantity: 3, CompletedRentals: 1), overview.Rental);
 
         SuppliersResponse suppliers = await dashboard.SuppliersAsync(Range, 1, 20, CancellationToken.None);

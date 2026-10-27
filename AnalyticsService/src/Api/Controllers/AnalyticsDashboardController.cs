@@ -17,11 +17,8 @@ public sealed class AnalyticsDashboardController(
     OrderTrendQueryService orderTrend,
     RevenueAnalyticsQueryService revenue) : ControllerBase
 {
-    /// <summary>Tổng quan đơn hàng, tài chính và lượt thuê. Active là số đang hoạt động tại thời điểm gọi.</summary>
-    /// <remarks>GMV và cọc lấy từ item của đơn đã thanh toán. CompletedRentalValue là tiền thuê của item hoàn thành.
-    /// PlatformRevenue, DeductionAmount và SupplierPayable lấy trực tiếp từ settlement của Payment;
-    /// RefundAmount là tiền đã hoàn thực tế, PayoutCompleted là tiền đã chuyển NCC.
-    /// Các chỉ số kỳ dùng ngày Việt Nam; Active là ảnh chụp hiện tại.</remarks>
+    /// <summary>Tổng quan KPI theo ngày Việt Nam.</summary>
+    /// <remarks>Active là số đơn còn hoạt động tại cuối ngày to. PendingRefund là null cho đến khi có event nghĩa vụ hoàn tiền. GMV không gồm tiền cọc; phí nền tảng chỉ lấy từ settlement Payment.</remarks>
     [HttpGet("overview")]
     [ProducesResponseType(typeof(OverviewResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<OverviewResponse>> Overview(
@@ -31,8 +28,8 @@ public sealed class AnalyticsDashboardController(
         return Ok(await dashboard.OverviewAsync(range!, ct));
     }
 
-    /// <summary>Doanh thu nền tảng từ phí đã chốt, theo ngày Việt Nam; tuần bắt đầu thứ Hai.</summary>
-    /// <remarks>Không bao gồm tiền cọc hoặc toàn bộ tiền thuê. Tổng và bucket chỉ tính settlement có CompletedAt trong from..to theo giờ Việt Nam. Bucket trống có giá trị 0.</remarks>
+    /// <summary>GMV, phí nền tảng, tiền hoàn và tiền chi nhà cung cấp theo ngày, tuần hoặc tháng Việt Nam.</summary>
+    /// <remarks>GMV dùng ngày thanh toán, phí dùng ngày settlement, hoàn tiền và payout dùng ngày hoàn tất. Tiền cọc không thuộc GMV hoặc phí nền tảng. Tuần bắt đầu thứ Hai; bucket trống bằng 0.</remarks>
     [HttpGet("revenue")]
     [ProducesResponseType(typeof(RevenueAnalyticsResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<RevenueAnalyticsResponse>> Revenue(
@@ -47,8 +44,8 @@ public sealed class AnalyticsDashboardController(
         return Ok(await revenue.GetAsync(range!.From, range.To, unit, ct));
     }
 
-    /// <summary>Số đơn tạo, trả tiền và kết thúc theo ngày Việt Nam; Active là snapshot hiện tại.</summary>
-    /// <remarks>Created/Paid/Completed/Cancelled/Expired dùng mốc nghiệp vụ tương ứng từ Rental. Active không bị giới hạn bởi from/to.</remarks>
+    /// <summary>Số đơn tạo, trả tiền và kết thúc theo ngày Việt Nam.</summary>
+    /// <remarks>Created/Paid/Completed/Cancelled/Expired dùng mốc nghiệp vụ từ Rental. Active là số đơn đã thanh toán và chưa kết thúc tại cuối ngày to.</remarks>
     [HttpGet("orders")]
     [ProducesResponseType(typeof(OrdersResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<OrdersResponse>> Orders(
@@ -59,7 +56,7 @@ public sealed class AnalyticsDashboardController(
     }
 
     /// <summary>Top loại thiết bị, listing và hãng theo số lượt thuê đã thanh toán; không tính cọc vào GMV.</summary>
-    /// <remarks>Xếp theo số item giảm dần, hòa thì theo số lượng đã bàn giao giảm dần, sau đó Id tăng dần. Thiếu snapshot loại/hãng được gom vào Không xác định.</remarks>
+    /// <remarks>Tập item được chọn theo ngày thanh toán. Quantity và CompletedCount chỉ tính hoạt động trước cuối ngày to. Xếp theo số item giảm dần, hòa thì theo số lượng đã bàn giao rồi Id. Thiếu snapshot loại/hãng được gom vào Không xác định.</remarks>
     [HttpGet("equipment")]
     [ProducesResponseType(typeof(EquipmentResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<EquipmentResponse>> Equipment(
@@ -75,7 +72,7 @@ public sealed class AnalyticsDashboardController(
     }
 
     /// <summary>Hiệu suất và số tiền phải trả, đã chi theo từng nhà cung cấp; có phân trang.</summary>
-    /// <remarks>Accepted/Rejected/Timeout/CompletedRentals và RentalValue lấy từ Rental. SupplierPayable và PayoutCompleted lấy trực tiếp từ Payment, không tự tính lại phí.</remarks>
+    /// <remarks>TotalRequests dùng ngày tạo đơn. Accepted/Rejected/Timeout/CompletedRentals dùng mốc item; RentalValue dùng ngày thanh toán. SupplierPayable và PayoutCompleted lấy trực tiếp từ Payment.</remarks>
     [HttpGet("suppliers")]
     [ProducesResponseType(typeof(SuppliersResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<SuppliersResponse>> Suppliers(

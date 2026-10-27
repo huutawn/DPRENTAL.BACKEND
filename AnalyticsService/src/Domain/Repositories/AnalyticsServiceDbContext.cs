@@ -58,6 +58,7 @@ public sealed class AnalyticsServiceDbContext : DbContext, IAnalyticsUnitOfWork
         financialEvent.HasIndex(x => new { x.MessageType, x.CompletedAt, x.Currency });
         financialEvent.HasIndex(x => new { x.RentalOrderId, x.MessageType });
         financialEvent.HasIndex(x => new { x.SupplierId, x.MessageType, x.CompletedAt });
+        financialEvent.HasIndex(x => new { x.MessageType, x.RefundRef });
 
         var orders = modelBuilder.Entity<RentalOrderFact>();
         orders.ToTable("analytics_rental_orders");
@@ -68,6 +69,7 @@ public sealed class AnalyticsServiceDbContext : DbContext, IAnalyticsUnitOfWork
         orders.HasIndex(x => x.CompletedAt);
         orders.HasIndex(x => x.CancelledAt);
         orders.HasIndex(x => x.ExpiredAt);
+        orders.HasIndex(x => x.RejectedAt);
         orders.HasIndex(x => new { x.Status, x.PaidAt });
 
         var items = modelBuilder.Entity<RentalItemFact>();
@@ -83,6 +85,7 @@ public sealed class AnalyticsServiceDbContext : DbContext, IAnalyticsUnitOfWork
         items.Property(x => x.RentalAmount).HasPrecision(18, 0);
         items.Property(x => x.DepositAmount).HasPrecision(18, 0);
         items.HasIndex(x => x.RentalOrderId);
+        items.HasIndex(x => new { x.SupplierId, x.RentalOrderId });
         items.HasIndex(x => new { x.SupplierId, x.ConfirmedAt });
         items.HasIndex(x => new { x.SupplierId, x.RejectedAt });
         items.HasIndex(x => new { x.SupplierId, x.ExpiredAt });

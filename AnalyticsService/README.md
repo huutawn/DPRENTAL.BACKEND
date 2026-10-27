@@ -10,6 +10,11 @@ Khi chạy local, đặt `ConnectionStrings:Postgres` trong .NET User Secrets c�
 
 Sau khi cấu hình PostgreSQL, áp dụng migration bằng `dotnet ef database update --project AnalyticsService/src/Domain/AnalyticsService.Domain.csproj --startup-project AnalyticsService/src/Api/AnalyticsService.Api.csproj`. Việc replay cùng event được chống trùng theo `messageId` (Rental) hoặc khóa nghiệp vụ (Payment).
 
+
+Một số KPI vẫn phụ thuộc producer: Payment cần phát `RefundRequestedFinancial` lên `payment.analytics.v1` để `pendingRefund` đầy đủ; Payment cũng cần gửi phần tiền thuê riêng trong refund để tính `GrossRentalValueRefunded`. Rental cần phát `RentalOrderRejected` và một số đường `Expired` còn thiếu. Analytics đã có consumer cho các event được nêu trong contract.
+
+Overview tính `pendingRefund` bằng tổng nghĩa vụ `RefundRequestedFinancial` trừ tiền `RefundCompletedFinancial` theo `refundRef`, không thấp hơn 0. Giá trị chỉ đầy đủ khi Payment phát đủ event yêu cầu hoàn. `active` là số đơn còn hoạt động tại cuối ngày `to` theo giờ Việt Nam. Revenue timeline dùng ngày thanh toán cho GMV, ngày chốt settlement cho platform fee, và ngày hoàn tất cho refund/payout. Tổng tiền cọc không được đưa vào doanh thu nền tảng.
+
 ## Xử lý message (DPR-258)
 
 ```text

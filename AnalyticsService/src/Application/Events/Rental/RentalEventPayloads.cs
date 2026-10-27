@@ -58,6 +58,13 @@ public sealed record RentalOrderExpiredPayload
     public long? OrderVersion { get; init; }
 }
 
+public sealed record RentalOrderRejectedPayload
+{
+    public required Guid RentalOrderId { get; init; }
+    public required DateTimeOffset RejectedAt { get; init; }
+    public long? OrderVersion { get; init; }
+}
+
 public sealed record RentalItemConfirmedPayload
 {
     public required Guid RentalOrderId { get; init; }
