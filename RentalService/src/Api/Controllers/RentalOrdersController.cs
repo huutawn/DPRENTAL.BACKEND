@@ -17,6 +17,7 @@ namespace Dprental.RentalService.Api.Controllers;
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 [Authorize(Policy = "Renter")]
 [Route("orders")]
+[Route("~/rental/orders")]
 public sealed class RentalOrdersController(
     IRenterOrderQueryService orders,
     IRenterOrderCancellationService cancellation,

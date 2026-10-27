@@ -20,6 +20,12 @@ using Xunit;
 
 namespace Dprental.RentalService.Api.Tests.Hubs;
 
+/// <summary>
+/// Test mô phỏng router và delivery với Mock IHubContext / simulated group routing.
+/// Dùng để kiểm chứng logic routing và PostgreSQL resync trong phạm vi harness unit/integration.
+/// Không dùng test này để tuyên bố WebSocket end-to-end đã pass; việc nghiệm thu WebSocket thật
+/// với Kestrel loopback và client SignalR thực tế do RentalHubRealClientIntegrationTests đảm nhiệm.
+/// </summary>
 public sealed class RentalRealtimeEndToEndIntegrationTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 10, 26, 17, 0, 0, TimeSpan.Zero);
