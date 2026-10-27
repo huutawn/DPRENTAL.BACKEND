@@ -126,6 +126,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         {
             _logger.LogWarning("Payment arrived for cancelled Order {OrderId}. Staging full refund.", order.Id);
             order.MarkAsLatePayment(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
+            order.RecordReadModelUpdate(utcNow);
             await StageFullRefundAndReleaseAsync(order, payload, utcNow, cancellationToken);
             var refundMeta = BuildPaymentMetadata(order, OrderChangeTypes.PaymentRefundRequired, payload.PaidAt, visibleToSuppliers: false);
             return Result.Success(PaymentApplyResult.RefundRequired(refundMeta));
@@ -227,6 +228,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             {
                 _logger.LogWarning("Payment arrived after recovery cutoff for Order {OrderId}. Cannot recover. Staging full refund.", order.Id);
                 order.MarkAsLatePayment(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
+                order.RecordReadModelUpdate(utcNow);
                 await StageFullRefundAndReleaseAsync(order, payload, utcNow, cancellationToken);
                 var refundMeta = BuildPaymentMetadata(order, OrderChangeTypes.PaymentRefundRequired, payload.PaidAt, visibleToSuppliers: false);
                 return Result.Success(PaymentApplyResult.RefundRequired(refundMeta));

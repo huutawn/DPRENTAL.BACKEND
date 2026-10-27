@@ -98,7 +98,7 @@ Phát khi đơn con của nhà cung cấp có thay đổi dữ liệu hiển th�
 | Thanh toán đúng hạn | Commit MarkAsPaid | `PAYMENT_CONFIRMED` | Có | Đúng các SubOrder | Có |
 | Thanh toán late/recovery | Commit RecordPayment | `PAYMENT_RECOVERY_PENDING` | Có | Không | Có |
 | Recovery hoàn tất | Commit MarkAsPaid | `PAYMENT_CONFIRMED` | Có | Đúng các SubOrder | Có |
-| Recovery thất bại/quá hạn | Commit LateRefund | `PAYMENT_REFUND_REQUIRED` | Có | Không | Có |
+| Recovery thất bại/quá hạn/Cancelled | Commit LateRefund | `PAYMENT_REFUND_REQUIRED` | Có | Không (Có nếu từng visible) | Có |
 | Cập nhật DeliveryNote | Commit note | `DELIVERY_NOTE_UPDATED` | Có | Có (nếu đơn Paid) | Có |
 | Xác nhận bàn giao ngoài công trường | Commit Acknowledge | `HANDOVER_ACKNOWLEDGED` | Có | Đúng SubOrder sở hữu | Có |
 | Biên bản trả máy gửi | Commit ReturnRecord | `RETURN_SUBMITTED` | Có | Đúng SubOrder sở hữu | Có |
