@@ -419,9 +419,8 @@ public sealed class OrderNotificationIntegrationTests
             "payment-service", orderId.ToString("D"), "corr-rec", null,
             rawJson, latePaidAt, "fp-rec");
         inboxMsg.AssignPublicationProof(
-            PaymentPublicationProofTestFixture.Create(rawJson),
+            PaymentPublicationProofTestFixture.Create(rawJson, issuedAt: FixedNow),
             orderId.ToString("D"));
-
         await inboxes.AddAsync(inboxMsg);
         await db.SaveChangesAsync();
 

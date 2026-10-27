@@ -415,6 +415,21 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             r.TargetItemId == rentalItemId &&
             (string.Equals(r.OperationId, operationKey, StringComparison.OrdinalIgnoreCase) ||
              string.Equals(r.OperationId, recOpKey, StringComparison.OrdinalIgnoreCase)));
+        if (receipt != null)
+        {
+            if (receipt.Status == RentalOperationReceipt.StatusSucceeded)
+            {
+                bool sameSuccess = isSuccess && !string.IsNullOrWhiteSpace(receipt.ResponseJson) &&
+                    CanonicalJson.AreEquivalent(receipt.ResponseJson, payloadElement.GetRawText());
+                return sameSuccess ? Result.Success(AllocationEventApplyResult.NoChange()) : Error.Conflict("INVENTORY_RESULT_CONFLICT", "Operation already has a different terminal result.");
+            }
+            if (receipt.Status == RentalOperationReceipt.StatusFailed)
+            {
+                string incomingCode = payloadElement.TryGetProperty("errorCode", out var errorCodeElement) ? errorCodeElement.GetString() ?? "" : "";
+                bool sameFailure = !isSuccess && string.Equals(receipt.ErrorCode, incomingCode, StringComparison.OrdinalIgnoreCase);
+                return sameFailure ? Result.Success(AllocationEventApplyResult.NoChange()) : Error.Conflict("INVENTORY_RESULT_CONFLICT", "Operation already has a different terminal result.");
+            }
+        }
 
         if (isSuccess)
         {
@@ -491,6 +506,22 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 return Result.Success(AllocationEventApplyResult.NoChange());
             }
         }
+        // Terminal order must not be revived by callback.
+        if (order.Status is RentalOrderStatus.Cancelled or RentalOrderStatus.Expired)
+        {
+            await _orderRepository.UpdateAsync(order, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return Result.Success(AllocationEventApplyResult.NoChange());
+        }
+
+        // For orders already Paid or advanced beyond Paid, normal hold callbacks just persist the receipt.
+        // Do not repeat payment transition, do not recalculate deadlines, do not advance version, and do not emit payment events.
+        if (order.Status != RentalOrderStatus.PendingPayment)
+        {
+            await _orderRepository.UpdateAsync(order, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return Result.Success(AllocationEventApplyResult.NoChange());
+        }
 
         bool usedRecovery = order.Items.Any(item =>
         {
@@ -499,7 +530,6 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         });
 
         bool wasLatePayment = order.LatePaymentRefundRequired ||
-                              order.Status == RentalOrderStatus.Expired ||
                               usedRecovery ||
                               (order.PaymentConfirmedAt.HasValue && order.PaymentConfirmedAt.Value >= order.PaymentDeadline);
 
