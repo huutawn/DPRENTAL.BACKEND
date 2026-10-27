@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -78,6 +79,34 @@ public sealed partial class DeductionResponseService
         order.RecordReadModelUpdate(now);
         await orders.UpdateAsync(order, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        if (notifier != null)
+        {
+            await notifier.NotifyRenterOrderChangedAsync(
+                order.RenterId,
+                new RenterOrderChangedNotification(
+                    Guid.NewGuid(),
+                    order.Id,
+                    order.Version,
+                    OrderChangeTypes.SettlementChanged,
+                    now),
+                cancellationToken);
+
+            var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+            if (subOrder != null)
+            {
+                await notifier.NotifySupplierSubOrderChangedAsync(
+                    item.SupplierId,
+                    new SupplierSubOrderChangedNotification(
+                        Guid.NewGuid(),
+                        order.Id,
+                        subOrder.Id,
+                        order.Version,
+                        OrderChangeTypes.SettlementChanged,
+                        now),
+                    cancellationToken);
+            }
+        }
         return response;
     }
 

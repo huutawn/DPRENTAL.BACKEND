@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Common;
@@ -6,7 +7,7 @@ namespace Dprental.RentalService.Application.IServices.Payments;
 
 public interface IPaymentWorkflowService
 {
-    Task<Result<bool>> ApplyInvoicePaidStagedAsync(
+    Task<Result<PaymentApplyResult>> ApplyInvoicePaidStagedAsync(
         Dprental.RentalService.Domain.Entities.RentalOrder order,
         KafkaMessageEnvelope<InvoicePaidPayload> envelope,
         Dprental.RentalService.Domain.Entities.RentalInboxMessage inboxMessage,

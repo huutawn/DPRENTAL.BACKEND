@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 #pragma warning disable CA1848, CA1873
 using System.Text.Json;
 using Dprental.RentalService.Application.Kafka.Contracts;
@@ -35,6 +36,7 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
     private readonly ILogger<ExpiryWorkflowService> _logger;
     private readonly string _rentalEventsTopic;
     private readonly IRentalEventProducer _rentalEvents;
+    private readonly IOrderHubNotifier? _notifier;
     public ExpiryWorkflowService(
         IRentalOrderRepository orderRepository,
         IOutboxRepository outboxRepository,
@@ -44,7 +46,8 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
         IConfiguration configuration,
         ILogger<ExpiryWorkflowService> logger,
         TimeProvider? timeProvider = null,
-        IRentalEventProducer? rentalEvents = null)
+        IRentalEventProducer? rentalEvents = null,
+        IOrderHubNotifier? notifier = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _outboxRepository = outboxRepository ?? throw new ArgumentNullException(nameof(outboxRepository));
@@ -58,6 +61,7 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
             outboxRepository,
             Microsoft.Extensions.Options.Options.Create(new Dprental.RentalService.Application.Kafka.Configuration.KafkaOptions { RentalEventsTopic = _rentalEventsTopic }),
             _timeProvider);
+        _notifier = notifier;
     }
     public async Task<int> ProcessPaymentTimeoutsAsync(CancellationToken cancellationToken = default)
     {
@@ -241,6 +245,34 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                     await _orderRepository.UpdateAsync(order, cancellationToken);
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
                     await tx.CommitAsync(cancellationToken);
+
+                    if (_notifier != null)
+                    {
+                        await _notifier.NotifyRenterOrderChangedAsync(
+                            order.RenterId,
+                            new RenterOrderChangedNotification(
+                                Guid.NewGuid(),
+                                order.Id,
+                                order.Version,
+                                OrderChangeTypes.SupplierConfirmationExpired,
+                                utcNow),
+                            cancellationToken);
+
+                        var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+                        if (subOrder != null)
+                        {
+                            await _notifier.NotifySupplierSubOrderChangedAsync(
+                                item.SupplierId,
+                                new SupplierSubOrderChangedNotification(
+                                    Guid.NewGuid(),
+                                    order.Id,
+                                    subOrder.Id,
+                                    order.Version,
+                                    OrderChangeTypes.SupplierConfirmationExpired,
+                                    utcNow),
+                                cancellationToken);
+                        }
+                    }
                 }
                 catch
                 {

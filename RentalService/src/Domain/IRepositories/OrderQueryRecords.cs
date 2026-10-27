@@ -38,7 +38,8 @@ public sealed record RenterOrderSummaryRecord(
     int SubOrderCount,
     DateTimeOffset PaymentDeadline,
     DateTimeOffset CreatedAt,
-    IReadOnlyList<OrderItemSummaryRecord> Items)
+    IReadOnlyList<OrderItemSummaryRecord> Items,
+    long Version)
 {
     public RenterOrderSummaryRecord(
         Guid orderId,
@@ -50,8 +51,9 @@ public sealed record RenterOrderSummaryRecord(
         int itemCount,
         int subOrderCount,
         DateTimeOffset paymentDeadline,
-        DateTimeOffset createdAt)
-        : this(orderId, orderCode, status, currency, totalRentalAmount, totalDepositAmount, itemCount, subOrderCount, paymentDeadline, createdAt, [])
+        DateTimeOffset createdAt,
+        long version)
+        : this(orderId, orderCode, status, currency, totalRentalAmount, totalDepositAmount, itemCount, subOrderCount, paymentDeadline, createdAt, [], version)
     {
     }
 }
@@ -69,7 +71,8 @@ public sealed record SupplierSubOrderSummaryRecord(
     decimal TotalDepositAmount,
     IReadOnlyList<RentalItemStatus> ItemStatuses,
     DateTimeOffset? PaidAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    long OrderVersion);
 
 /// <summary>
 /// Điều kiện tìm đơn của Admin; ô rỗng là không lọc. Các điều kiện cấp dòng (dòng, thiết bị, máy, nhà cung cấp,

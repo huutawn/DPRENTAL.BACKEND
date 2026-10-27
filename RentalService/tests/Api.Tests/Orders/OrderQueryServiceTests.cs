@@ -59,6 +59,7 @@ public sealed class OrderQueryServiceTests
         Assert.Equal(2, mixed.ItemCount);
         Assert.Equal(2, mixed.SubOrderCount);
         Assert.Equal(RentalOrderStatus.Paid, mixed.Status);
+        Assert.Equal(_paidMixedOrder.Version, mixed.Version);
         Assert.Equal(2, mixed.Items.Count);
         OrderSummaryItemResponse excavator = mixed.Items.Single(i => i.Name == "Máy xúc CAT 320");
         Assert.Equal(1, excavator.Quantity);
@@ -109,8 +110,9 @@ public sealed class OrderQueryServiceTests
         Assert.True(firstItem.TryGetProperty("startDate", out _));
         Assert.True(firstItem.TryGetProperty("endDate", out _));
         Assert.True(firstItem.TryGetProperty("status", out _));
+        Assert.True(root.TryGetProperty("version", out JsonElement versionProp));
+        Assert.Equal(_paidMixedOrder.Version, versionProp.GetInt64());
     }
-
     [Fact]
     public async Task Renter_ListPaging_ReturnsRequestedPageAndClampsInvalidValues()
     {
@@ -369,8 +371,8 @@ public sealed class OrderQueryServiceTests
         Assert.Equal(1, mixed.ItemCount);
         Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, mixed.Status);
         Assert.Equal(OrderTestData.Now.AddMinutes(5), mixed.PaidAt);
+        Assert.Equal(_paidMixedOrder.Version, mixed.OrderVersion);
     }
-
     [Fact]
     public async Task Supplier_SubOrderDetail_ShowsOnlyOwnEquipmentAndDeliveryInfo()
     {
@@ -522,6 +524,86 @@ public sealed class OrderQueryServiceTests
 
         Assert.Equal(ErrorType.Unauthorized, anonymous.Error.Type);
         Assert.Equal(ErrorType.Forbidden, service.Error.Type);
+    }
+
+    [Fact]
+    public async Task ListAndDetail_ReturnMatchingParentVersion_ForRenterAndSupplier()
+    {
+        await SeedAsync();
+
+        // 1. Renter list & detail have identical version matching aggregate
+        Result<PagedResponse<RenterOrderSummaryResponse>> renterList =
+            await RenterService().GetMyOrdersAsync(1, 20, null, OrderTestData.User(_an));
+        Assert.True(renterList.IsSuccess);
+        RenterOrderSummaryResponse renterSummary = renterList.Value.Items.Single(o => o.OrderId == _paidMixedOrder.Id);
+
+        Result<RenterOrderDetailResponse> renterDetail =
+            await RenterService().GetMyOrderAsync(_paidMixedOrder.Id, OrderTestData.User(_an));
+        Assert.True(renterDetail.IsSuccess);
+
+        Assert.Equal(_paidMixedOrder.Version, renterSummary.Version);
+        Assert.Equal(_paidMixedOrder.Version, renterDetail.Value.Version);
+        Assert.Equal(renterSummary.Version, renterDetail.Value.Version);
+
+        // JSON contract checks for renter
+        string renterSummaryJson = JsonSerializer.Serialize(renterSummary, WebJson);
+        using (JsonDocument doc = JsonDocument.Parse(renterSummaryJson))
+        {
+            Assert.True(doc.RootElement.TryGetProperty("version", out JsonElement vProp));
+            Assert.Equal(_paidMixedOrder.Version, vProp.GetInt64());
+        }
+        string renterDetailJson = JsonSerializer.Serialize(renterDetail.Value, WebJson);
+        using (JsonDocument doc = JsonDocument.Parse(renterDetailJson))
+        {
+            Assert.True(doc.RootElement.TryGetProperty("version", out JsonElement vProp));
+            Assert.Equal(_paidMixedOrder.Version, vProp.GetInt64());
+        }
+
+        // 2. Supplier list & detail have identical orderVersion matching aggregate
+        Guid binhSubOrderId = _paidMixedOrder.SubOrders.Single(s => s.SupplierId == _binh).Id;
+
+        Result<PagedResponse<SupplierSubOrderSummaryResponse>> supplierList =
+            await SupplierService().GetMySubOrdersAsync(1, 20, null, OrderTestData.User(_binh));
+        Assert.True(supplierList.IsSuccess);
+        SupplierSubOrderSummaryResponse supplierSummary = supplierList.Value.Items.Single(s => s.SubOrderId == binhSubOrderId);
+
+        Result<SupplierSubOrderDetailResponse> supplierDetail =
+            await SupplierService().GetMySubOrderAsync(binhSubOrderId, OrderTestData.User(_binh));
+        Assert.True(supplierDetail.IsSuccess);
+
+        Assert.Equal(_paidMixedOrder.Version, supplierSummary.OrderVersion);
+        Assert.Equal(_paidMixedOrder.Version, supplierDetail.Value.OrderVersion);
+        Assert.Equal(supplierSummary.OrderVersion, supplierDetail.Value.OrderVersion);
+
+        // JSON contract checks for supplier
+        string supplierSummaryJson = JsonSerializer.Serialize(supplierSummary, WebJson);
+        using (JsonDocument doc = JsonDocument.Parse(supplierSummaryJson))
+        {
+            Assert.True(doc.RootElement.TryGetProperty("orderVersion", out JsonElement ovProp));
+            Assert.Equal(_paidMixedOrder.Version, ovProp.GetInt64());
+        }
+        string supplierDetailJson = JsonSerializer.Serialize(supplierDetail.Value, WebJson);
+        using (JsonDocument doc = JsonDocument.Parse(supplierDetailJson))
+        {
+            Assert.True(doc.RootElement.TryGetProperty("orderVersion", out JsonElement ovProp));
+            Assert.Equal(_paidMixedOrder.Version, ovProp.GetInt64());
+        }
+
+        // 3. Empty page returns empty list without error
+        Guid strangerId = Guid.NewGuid();
+        Result<PagedResponse<RenterOrderSummaryResponse>> emptyRenter =
+            await RenterService().GetMyOrdersAsync(1, 20, null, OrderTestData.User(strangerId));
+        Assert.True(emptyRenter.IsSuccess);
+        Assert.Empty(emptyRenter.Value.Items);
+        Assert.Equal(0, emptyRenter.Value.TotalCount);
+        Assert.Equal(0, emptyRenter.Value.TotalPages);
+
+        Result<PagedResponse<SupplierSubOrderSummaryResponse>> emptySupplier =
+            await SupplierService().GetMySubOrdersAsync(1, 20, null, OrderTestData.User(strangerId));
+        Assert.True(emptySupplier.IsSuccess);
+        Assert.Empty(emptySupplier.Value.Items);
+        Assert.Equal(0, emptySupplier.Value.TotalCount);
+        Assert.Equal(0, emptySupplier.Value.TotalPages);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.DTOs.Payment;
 using System.Net.Sockets;
 using System.Text.Json;
 using Confluent.Kafka;
@@ -315,8 +316,8 @@ public sealed class KafkaRealBrokerIntegrationTests
 
     private sealed class StubPaymentWorkflow : IPaymentWorkflowService
     {
-        public Task<Result<bool>> ApplyInvoicePaidStagedAsync(RentalOrder order, KafkaMessageEnvelope<InvoicePaidPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(true));
+        public Task<Result<PaymentApplyResult>> ApplyInvoicePaidStagedAsync(RentalOrder order, KafkaMessageEnvelope<InvoicePaidPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success(PaymentApplyResult.Paid(PaymentNotificationMetadata.Empty)));
 
         public Task<Result> ProcessInvoicePaidAsync(KafkaMessageEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success());

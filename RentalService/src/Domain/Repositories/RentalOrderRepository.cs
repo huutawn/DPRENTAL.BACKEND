@@ -24,6 +24,7 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
     {
         return await _dbContext.RentalOrders
             .Include(o => o.TermsAcceptance)
+            .Include(o => o.SubOrders)
             .Include(o => o.Items)
                 .ThenInclude(i => i.UnitAssignments)
             .Include(o => o.Items)
@@ -44,6 +45,7 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
 
         return await _dbContext.RentalOrders
             .Include(o => o.TermsAcceptance)
+            .Include(o => o.SubOrders)
             .Include(o => o.Items)
                 .ThenInclude(i => i.UnitAssignments)
             .Include(o => o.Items)
@@ -391,7 +393,8 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                         i.ExpectedStartDate,
                         i.ExpectedEndDate,
                         i.Status))
-                    .ToList()))
+                    .ToList(),
+                o.Version))
             .ToListAsync(cancellationToken);
 
         return new RecordPage<RenterOrderSummaryRecord>(items, totalCount);
@@ -450,7 +453,8 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 s.Items.Sum(i => i.DepositAmount),
                 s.Items.Select(i => i.Status).ToList(),
                 s.RentalOrder.PaymentConfirmedAt,
-                s.CreatedAt))
+                s.CreatedAt,
+                s.RentalOrder.Version))
             .ToListAsync(cancellationToken);
 
         return new RecordPage<SupplierSubOrderSummaryRecord>(items, totalCount);

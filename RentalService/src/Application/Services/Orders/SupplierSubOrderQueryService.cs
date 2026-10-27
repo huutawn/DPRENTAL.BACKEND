@@ -54,7 +54,8 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
                 r.TotalRentalAmount + r.TotalDepositAmount,
                 r.ItemStatuses.Count,
                 r.PaidAt,
-                r.CreatedAt))
+                r.CreatedAt,
+                r.OrderVersion))
             .ToList();
 
         return OrderQueryMapper.ToPage(items, normalizedPage, normalizedPageSize, records.TotalCount);

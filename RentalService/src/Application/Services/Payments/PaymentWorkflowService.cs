@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 #pragma warning disable CA1848, CA1873
 using System.Security.Cryptography;
 using System.Text;
@@ -40,6 +41,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
     private readonly string _rentalEventsTopic;
     private readonly IInventoryCommandProducer _inventoryCommands;
     private readonly IRentalEventProducer _rentalEventProducer;
+    private readonly IOrderHubNotifier? _notifier;
     public PaymentWorkflowService(
         IRentalOrderRepository orderRepository,
         IInboxRepository inboxRepository,
@@ -52,7 +54,8 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         IConfiguration configuration,
         ILogger<PaymentWorkflowService> logger,
         IRentalEventProducer rentalEventProducer,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IOrderHubNotifier? notifier = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _inboxRepository = inboxRepository ?? throw new ArgumentNullException(nameof(inboxRepository));
@@ -66,9 +69,10 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         _timeProvider = timeProvider ?? TimeProvider.System;
         _rentalEventsTopic = configuration["Kafka:RentalEventsTopic"] ?? "rental.events.v1";
         _rentalEventProducer = rentalEventProducer ?? throw new ArgumentNullException(nameof(rentalEventProducer));
+        _notifier = notifier;
     }
 
-    public async Task<Result<bool>> ApplyInvoicePaidStagedAsync(
+    public async Task<Result<PaymentApplyResult>> ApplyInvoicePaidStagedAsync(
         RentalOrder order,
         KafkaMessageEnvelope<InvoicePaidPayload> envelope,
         RentalInboxMessage inboxMessage,
@@ -112,7 +116,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         {
             if (string.Equals(order.PaymentRef, payload.PaymentRef, StringComparison.OrdinalIgnoreCase))
             {
-                return Result.Success(false);
+                return Result.Success(PaymentApplyResult.Unchanged());
             }
             return Error.Conflict("PAYMENT_REF_CONFLICT", "Đơn hàng đã được thanh toán với mã tham chiếu thanh toán khác.");
         }
@@ -122,8 +126,10 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         {
             _logger.LogWarning("Payment arrived for cancelled Order {OrderId}. Staging full refund.", order.Id);
             order.MarkAsLatePayment(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
+            order.RecordReadModelUpdate(utcNow);
             await StageFullRefundAndReleaseAsync(order, payload, utcNow, cancellationToken);
-            return Result.Success(true);
+            var refundMeta = BuildPaymentMetadata(order, OrderChangeTypes.PaymentRefundRequired, payload.PaidAt, visibleToSuppliers: false);
+            return Result.Success(PaymentApplyResult.RefundRequired(refundMeta));
         }
 
         // 2. Calculate recovery cutoff
@@ -222,8 +228,10 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             {
                 _logger.LogWarning("Payment arrived after recovery cutoff for Order {OrderId}. Cannot recover. Staging full refund.", order.Id);
                 order.MarkAsLatePayment(payload.InvoiceRef, payload.PaymentRef, payload.PaidAt, utcNow);
+                order.RecordReadModelUpdate(utcNow);
                 await StageFullRefundAndReleaseAsync(order, payload, utcNow, cancellationToken);
-                return Result.Success(true);
+                var refundMeta = BuildPaymentMetadata(order, OrderChangeTypes.PaymentRefundRequired, payload.PaidAt, visibleToSuppliers: false);
+                return Result.Success(PaymentApplyResult.RefundRequired(refundMeta));
             }
 
             _logger.LogInformation("Payment arrived late/hold expired for Order {OrderId}. Initiating recovery re-allocation before cutoff {Cutoff}.", order.Id, cutoff);
@@ -271,9 +279,45 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                     }
                 }
             }
+            var recMeta = BuildPaymentMetadata(order, OrderChangeTypes.PaymentRecoveryPending, payload.PaidAt, visibleToSuppliers: false);
+            return Result.Success(PaymentApplyResult.RecoveryPending(recMeta));
+        }
+        var paidMeta = BuildPaymentMetadata(order, OrderChangeTypes.PaymentConfirmed, payload.PaidAt, visibleToSuppliers: true);
+        return Result.Success(PaymentApplyResult.Paid(paidMeta));
+    }
+
+    private static PaymentNotificationMetadata BuildPaymentMetadata(
+        RentalOrder order,
+        string changeType,
+        DateTimeOffset occurredAt,
+        bool visibleToSuppliers)
+    {
+        var renterNotification = new RenterOrderChangedNotification(
+            Guid.NewGuid(),
+            order.Id,
+            order.Version,
+            changeType,
+            occurredAt);
+
+        List<(Guid SupplierId, SupplierSubOrderChangedNotification Notification)> supplierNotifications;
+        if (visibleToSuppliers)
+        {
+            supplierNotifications = order.SubOrders
+                .Select(s => (s.SupplierId, new SupplierSubOrderChangedNotification(
+                    Guid.NewGuid(),
+                    order.Id,
+                    s.Id,
+                    order.Version,
+                    changeType,
+                    occurredAt)))
+                .ToList();
+        }
+        else
+        {
+            supplierNotifications = [];
         }
 
-        return Result.Success(true);
+        return new PaymentNotificationMetadata(renterNotification, supplierNotifications);
     }
 
     private async Task StageFullRefundAndReleaseAsync(
@@ -428,7 +472,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                 {
                     await tx.RollbackAsync(cancellationToken);
                     _unitOfWork.DiscardChanges();
-                    return result;
+                    return result.Error;
                 }
 
                 inboxMessage.MarkProcessed(utcNow);
@@ -437,13 +481,26 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                     _inboxRepository.Update(inboxMessage);
                 }
 
-                if (result.Value)
+                if (result.Value.Changed)
                 {
                     await _orderRepository.UpdateAsync(order, cancellationToken);
                 }
 
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await tx.CommitAsync(cancellationToken);
+
+                if (_notifier != null && result.Value.Metadata is { } meta)
+                {
+                    if (meta.RenterNotification is { } renterNote)
+                    {
+                        await _notifier.NotifyRenterOrderChangedAsync(order.RenterId, renterNote, cancellationToken);
+                    }
+
+                    foreach (var (supplierId, supplierNote) in meta.SupplierNotifications)
+                    {
+                        await _notifier.NotifySupplierSubOrderChangedAsync(supplierId, supplierNote, cancellationToken);
+                    }
+                }
             }
             catch (Exception)
             {

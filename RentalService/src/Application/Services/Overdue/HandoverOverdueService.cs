@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 #pragma warning disable CA1848, CA1873
 using System.Text.Json;
 using Dprental.RentalService.Application.IServices.Cancellation;
@@ -26,7 +27,8 @@ public sealed class HandoverOverdueService(
     TimeProvider timeProvider,
     IOptions<HandoverOverdueOptions> options,
     ILogger<HandoverOverdueService> logger,
-    IRentalEventProducer? rentalEvents = null) : IHandoverOverdueService
+    IRentalEventProducer? rentalEvents = null,
+    IOrderHubNotifier? notifier = null) : IHandoverOverdueService
 {
     private readonly IRentalEventProducer _rentalEvents = rentalEvents ?? new Dprental.RentalService.Application.Kafka.Producers.RentalEventProducer(
         outboxRepository,
@@ -156,6 +158,34 @@ public sealed class HandoverOverdueService(
 
                     await orders.UpdateAsync(freshOrder, cancellationToken);
                     await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                    if (notifier != null)
+                    {
+                        await notifier.NotifyRenterOrderChangedAsync(
+                            freshOrder.RenterId,
+                            new RenterOrderChangedNotification(
+                                Guid.NewGuid(),
+                                freshOrder.Id,
+                                freshOrder.Version,
+                                OrderChangeTypes.HandoverOverdue,
+                                now),
+                            cancellationToken);
+
+                        var subOrder = freshOrder.SubOrders.FirstOrDefault(s => s.SupplierId == freshItem.SupplierId);
+                        if (subOrder != null)
+                        {
+                            await notifier.NotifySupplierSubOrderChangedAsync(
+                                freshItem.SupplierId,
+                                new SupplierSubOrderChangedNotification(
+                                    Guid.NewGuid(),
+                                    freshOrder.Id,
+                                    subOrder.Id,
+                                    freshOrder.Version,
+                                    OrderChangeTypes.HandoverOverdue,
+                                    now),
+                                cancellationToken);
+                        }
+                    }
 
                     noticesSent++;
                     processedItems++;

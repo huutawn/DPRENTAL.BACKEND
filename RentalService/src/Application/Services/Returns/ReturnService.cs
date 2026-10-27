@@ -17,6 +17,7 @@ using Dprental.RentalService.Application.DTOs.Integration;
 using Microsoft.Extensions.Configuration;
 using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Services.Operations;
+using Dprental.RentalService.Application.Hubs;
 using Dprental.RentalService.Application.Kafka.Producers;
 
 namespace Dprental.RentalService.Application.Services.Returns;
@@ -29,7 +30,8 @@ public sealed class ReturnService(
     TimeProvider timeProvider,
     IRentalEventProducer rentalEvents,
     IConfiguration configuration,
-    IInventoryCommandProducer inventoryCommands) : IReturnService
+    IInventoryCommandProducer inventoryCommands,
+    IOrderHubNotifier? notifier = null) : IReturnService
 {
 
     public async Task<Result<RecordReturnResponse>> RecordReturnAsync(Guid itemId, IRentalCallerContext caller,
@@ -145,9 +147,37 @@ public sealed class ReturnService(
             unitOfWork.DiscardChanges();
             throw;
         }
+
+        if (notifier != null)
+        {
+            await notifier.NotifyRenterOrderChangedAsync(
+                order.RenterId,
+                new RenterOrderChangedNotification(
+                    Guid.NewGuid(),
+                    order.Id,
+                    order.Version,
+                    OrderChangeTypes.ReturnSubmitted,
+                    now),
+                cancellationToken);
+
+            var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+            if (subOrder != null)
+            {
+                await notifier.NotifySupplierSubOrderChangedAsync(
+                    item.SupplierId,
+                    new SupplierSubOrderChangedNotification(
+                        Guid.NewGuid(),
+                        order.Id,
+                        subOrder.Id,
+                        order.Version,
+                        OrderChangeTypes.ReturnSubmitted,
+                        now),
+                    cancellationToken);
+            }
+        }
+
         return response;
     }
-
     internal static ApplyReturnedUnitsCommandPayload ScheduleKafkaInventoryReturn(
         RentalOrder order, RentalItem item, ReturnRecord record, DateTimeOffset now)
     {
