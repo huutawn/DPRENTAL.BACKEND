@@ -241,6 +241,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         DateTimeOffset utcNow,
         CancellationToken cancellationToken)
     {
+        bool wasVisible = SupplierOrderVisibilityPolicy.CanSupplierView(order);
         if (isSuccess)
         {
             string? apiResponseJson = null;
@@ -290,7 +291,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
             if (item != null && item.Status == RentalItemStatus.AwaitingHandover)
             {
-                var meta = BuildAllocationMetadata(order, item.SupplierId, OrderChangeTypes.SupplierConfirmed, utcNow);
+                bool isVisible = SupplierOrderVisibilityPolicy.CanSupplierView(order);
+                var meta = BuildAllocationMetadata(order, item.SupplierId, OrderChangeTypes.SupplierConfirmed, utcNow, wasVisible, isVisible);
                 return Result.Success(AllocationEventApplyResult.WithMetadata(meta));
             }
         }
@@ -602,8 +604,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         DateTimeOffset utcNow,
         CancellationToken cancellationToken)
     {
+        bool wasVisible = SupplierOrderVisibilityPolicy.CanSupplierView(order);
         order.MarkAsLatePayment(order.InvoiceRef ?? string.Empty, order.PaymentRef ?? string.Empty, order.PaymentConfirmedAt ?? utcNow, utcNow);
-
         foreach (var item in order.Items)
         {
             if (item.Status != RentalItemStatus.Expired && item.Status != RentalItemStatus.Cancelled)
@@ -669,7 +671,21 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         await _orderRepository.UpdateAsync(order, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var refundMeta = BuildRenterOnlyMetadata(order, OrderChangeTypes.PaymentRefundRequired, utcNow);
+        bool isVisible = SupplierOrderVisibilityPolicy.CanSupplierView(order);
+        var renterNote = new RenterOrderChangedNotification(
+            Guid.NewGuid(), order.Id, order.Version, OrderChangeTypes.PaymentRefundRequired, utcNow);
+
+        List<(Guid SupplierId, SupplierSubOrderChangedNotification Notification)> supplierNotes = [];
+        if (wasVisible || isVisible)
+        {
+            foreach (var subOrder in order.SubOrders)
+            {
+                supplierNotes.Add((subOrder.SupplierId, new SupplierSubOrderChangedNotification(
+                    Guid.NewGuid(), order.Id, subOrder.Id, order.Version, OrderChangeTypes.PaymentRefundRequired, utcNow)));
+            }
+        }
+
+        var refundMeta = new AllocationNotificationMetadata(renterNote, supplierNotes);
         return Result.Success(AllocationEventApplyResult.WithMetadata(refundMeta));
     }
 
@@ -684,6 +700,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
     {
         if (isSuccess)
         {
+            bool wasVisible = SupplierOrderVisibilityPolicy.CanSupplierView(order);
             receipt.MarkSucceeded(utcNow, payloadElement.GetRawText());
             var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
             bool assignmentsChanged = item?.MarkAssignmentsReleased(utcNow) ?? false;
@@ -701,7 +718,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
 
             if (assignmentsChanged || rollupChanged)
             {
-                var meta = BuildAllocationMetadata(order, item?.SupplierId, OrderChangeTypes.AllocationChanged, utcNow);
+                bool isVisible = SupplierOrderVisibilityPolicy.CanSupplierView(order);
+                var meta = BuildAllocationMetadata(order, item?.SupplierId, OrderChangeTypes.AllocationChanged, utcNow, wasVisible, isVisible);
                 return Result.Success(AllocationEventApplyResult.WithMetadata(meta));
             }
             return Result.Success(AllocationEventApplyResult.NoChange());
@@ -733,6 +751,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             return Result.Success(AllocationEventApplyResult.NoChange());
         }
 
+        bool wasVisible = SupplierOrderVisibilityPolicy.CanSupplierView(order);
         if (isSuccess)
         {
             var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
@@ -811,7 +830,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
 
         if (isSuccess && handedOverItem != null)
         {
-            var meta = BuildAllocationMetadata(order, handedOverItem.SupplierId, OrderChangeTypes.HandoverConfirmed, utcNow);
+            bool isVisible = SupplierOrderVisibilityPolicy.CanSupplierView(order);
+            var meta = BuildAllocationMetadata(order, handedOverItem.SupplierId, OrderChangeTypes.HandoverConfirmed, utcNow, wasVisible, isVisible);
             return Result.Success(AllocationEventApplyResult.WithMetadata(meta));
         }
 
@@ -822,13 +842,15 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         RentalOrder order,
         Guid? targetSupplierId,
         string changeType,
-        DateTimeOffset occurredAt)
+        DateTimeOffset occurredAt,
+        bool wasVisibleToSuppliers,
+        bool isVisibleToSuppliers)
     {
         var renterNote = new RenterOrderChangedNotification(
             Guid.NewGuid(), order.Id, order.Version, changeType, occurredAt);
 
         List<(Guid SupplierId, SupplierSubOrderChangedNotification Notification)> supplierNotes = [];
-        if (targetSupplierId.HasValue && targetSupplierId.Value != Guid.Empty)
+        if (targetSupplierId.HasValue && targetSupplierId.Value != Guid.Empty && (wasVisibleToSuppliers || isVisibleToSuppliers))
         {
             var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == targetSupplierId.Value);
             if (subOrder != null)

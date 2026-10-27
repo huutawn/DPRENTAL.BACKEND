@@ -861,7 +861,9 @@ public sealed class SupplierDecisionAndHandoverNotificationTests
         Assert.Single(notifier.RenterNotifications);
         Assert.Equal(OrderChangeTypes.PaymentRefundRequired, notifier.RenterNotifications.Single().Notification.ChangeType);
 
-        // Suppliers receive NOTHING
-        Assert.Empty(notifier.SupplierNotifications);
+        // Previously visible order compensation notifies suppliers so they drop old data
+        Assert.Equal(2, notifier.SupplierNotifications.Count);
+        Assert.Contains(notifier.SupplierNotifications, n => n.SupplierId == supplierA && n.Notification.ChangeType == OrderChangeTypes.PaymentRefundRequired);
+        Assert.Contains(notifier.SupplierNotifications, n => n.SupplierId == supplierB && n.Notification.ChangeType == OrderChangeTypes.PaymentRefundRequired);
     }
 }
