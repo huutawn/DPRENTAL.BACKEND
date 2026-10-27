@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -12,12 +13,21 @@ namespace Dprental.Gateway.Security;
 public sealed class ServiceOnlyRouteBlockingMiddleware
 {
     private readonly RequestDelegate _next;
+    private readonly string _internalApiKey;
 
-    public ServiceOnlyRouteBlockingMiddleware(RequestDelegate next)
+    public ServiceOnlyRouteBlockingMiddleware(RequestDelegate next, IConfiguration configuration)
     {
         _next = next ?? throw new ArgumentNullException(nameof(next));
+        ArgumentNullException.ThrowIfNull(configuration);
+        _internalApiKey = configuration["InternalAuthentication:ApiKey"]
+            ?? configuration["INTERNAL_API_KEY"]
+            ?? string.Empty;
     }
 
+    public ServiceOnlyRouteBlockingMiddleware(RequestDelegate next)
+        : this(next, new ConfigurationBuilder().Build())
+    {
+    }
     public async Task InvokeAsync(HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -26,10 +36,21 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
         string path = context.Request.Path.Value ?? string.Empty;
         string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
-        if (segments.Length >= 2 &&
+        bool isPaymentHub = segments.Length >= 2 &&
             segments[0].Equals("hubs", StringComparison.OrdinalIgnoreCase) &&
-            segments[1].Equals("payments", StringComparison.OrdinalIgnoreCase))
+            segments[1].Equals("payments", StringComparison.OrdinalIgnoreCase);
+
+        bool isRentalOrderHub = segments.Length >= 5 &&
+            segments[0].Equals("api", StringComparison.OrdinalIgnoreCase) &&
+            segments[1].Equals("v1", StringComparison.OrdinalIgnoreCase) &&
+            segments[2].Equals("rental", StringComparison.OrdinalIgnoreCase) &&
+            segments[3].Equals("hubs", StringComparison.OrdinalIgnoreCase) &&
+            segments[4].Equals("orders", StringComparison.OrdinalIgnoreCase);
+
+        if (isPaymentHub || isRentalOrderHub)
         {
+            string hubName = isRentalOrderHub ? "Rental Order Hub" : "Payment Hub";
+
             if (context.User?.Identity?.IsAuthenticated != true)
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -39,7 +60,7 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
                     Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
                     Title = "Unauthorized",
                     Status = StatusCodes.Status401Unauthorized,
-                    Detail = "User authentication is required to access Payment Hub.",
+                    Detail = $"User authentication is required to access {hubName}.",
                     Instance = context.Request.Path
                 };
                 await context.Response.WriteAsJsonAsync(problem);
@@ -55,12 +76,33 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
                     Type = "https://tools.ietf.org/html/rfc9110#section-15.5.4",
                     Title = "Forbidden",
                     Status = StatusCodes.Status403Forbidden,
-                    Detail = "Service tokens are not permitted to connect to Payment Hub.",
+                    Detail = $"Service tokens are not permitted to connect to {hubName}.",
                     Instance = context.Request.Path
                 };
                 await context.Response.WriteAsJsonAsync(problem);
                 return;
             }
+
+            // Forward only accessToken cookie; strip refreshToken and other cookies
+            if (context.Request.Cookies.TryGetValue("accessToken", out string? accessToken) && !string.IsNullOrWhiteSpace(accessToken))
+            {
+                context.Request.Headers["Cookie"] = $"accessToken={accessToken}";
+            }
+            else
+            {
+                context.Request.Headers.Remove("Cookie");
+            }
+
+            // Supply X-Api-Key for downstream (crucial for WebSocket proxying which bypasses HTTP DelegatingHandler)
+            if (!string.IsNullOrWhiteSpace(_internalApiKey))
+            {
+                context.Request.Headers["X-Api-Key"] = _internalApiKey;
+            }
+        }
+
+        if (context.WebSockets.IsWebSocketRequest && !string.IsNullOrWhiteSpace(_internalApiKey))
+        {
+            context.Request.Headers["X-Api-Key"] = _internalApiKey;
         }
 
         if (IsServiceOnlyRoute(method, segments))
