@@ -53,7 +53,8 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
                 r.SubOrderCount,
                 r.PaymentDeadline,
                 r.CreatedAt,
-                r.Items.Select(OrderQueryMapper.ToSummaryItem).ToList()))
+                r.Items.Select(OrderQueryMapper.ToSummaryItem).ToList(),
+                r.Version))
             .ToList();
 
         return OrderQueryMapper.ToPage(items, normalizedPage, normalizedPageSize, records.TotalCount);

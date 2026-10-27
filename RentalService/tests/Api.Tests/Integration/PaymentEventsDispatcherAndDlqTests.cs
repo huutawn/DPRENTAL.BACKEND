@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.Kafka.Consumers;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
@@ -53,14 +54,14 @@ public sealed class PaymentEventsDispatcherAndDlqTests
     private sealed class StubPaymentWorkflowService : IPaymentWorkflowService
     {
         public bool ProcessCalled { get; set; }
-        public Task<Result<bool>> ApplyInvoicePaidStagedAsync(
+        public Task<Result<PaymentApplyResult>> ApplyInvoicePaidStagedAsync(
             RentalOrder order,
             KafkaMessageEnvelope<InvoicePaidPayload> envelope,
             RentalInboxMessage inboxMessage,
             CancellationToken cancellationToken = default)
         {
             ProcessCalled = true;
-            return Task.FromResult(Result.Success(true));
+            return Task.FromResult(Result.Success(PaymentApplyResult.Paid(PaymentNotificationMetadata.Empty)));
         }
 
         public Task<Result> ProcessInvoicePaidAsync(KafkaMessageEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default)

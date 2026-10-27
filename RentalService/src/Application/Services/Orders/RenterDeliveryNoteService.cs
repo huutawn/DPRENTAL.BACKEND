@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 using Dprental.RentalService.Application.DTOs.Orders;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.IServices.Orders;
@@ -19,7 +20,8 @@ namespace Dprental.RentalService.Application.Services.Orders;
 public sealed class RenterDeliveryNoteService(
     IRentalOrderRepository orders,
     IUnitOfWork unitOfWork,
-    TimeProvider timeProvider) : IRenterDeliveryNoteService
+    TimeProvider timeProvider,
+    IOrderHubNotifier? notifier = null) : IRenterDeliveryNoteService
 {
     private static readonly RentalOrderStatus[] EditableOrderStatuses =
         [RentalOrderStatus.PendingPayment, RentalOrderStatus.Paid, RentalOrderStatus.AwaitingHandover];
@@ -74,6 +76,37 @@ public sealed class RenterDeliveryNoteService(
         {
             unitOfWork.DiscardChanges();
             return Error.Conflict("Order.ConcurrencyConflict", "Đơn hàng vừa được cập nhật. Vui lòng tải lại rồi sửa.");
+        }
+
+        if (notifier != null)
+        {
+            DateTimeOffset occurredAt = order.UpdatedAt;
+            await notifier.NotifyRenterOrderChangedAsync(
+                order.RenterId,
+                new RenterOrderChangedNotification(
+                    Guid.NewGuid(),
+                    order.Id,
+                    order.Version,
+                    OrderChangeTypes.DeliveryNoteUpdated,
+                    occurredAt),
+                cancellationToken);
+
+            if (order.Status != RentalOrderStatus.PendingPayment)
+            {
+                foreach (var subOrder in order.SubOrders)
+                {
+                    await notifier.NotifySupplierSubOrderChangedAsync(
+                        subOrder.SupplierId,
+                        new SupplierSubOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            subOrder.Id,
+                            order.Version,
+                            OrderChangeTypes.DeliveryNoteUpdated,
+                            occurredAt),
+                        cancellationToken);
+                }
+            }
         }
 
         return OrderQueryMapper.ToDelivery(order);

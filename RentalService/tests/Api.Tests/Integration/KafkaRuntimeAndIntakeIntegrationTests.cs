@@ -139,10 +139,10 @@ public sealed class KafkaRuntimeAndIntakeIntegrationTests
     private sealed class TrackingPaymentWorkflow : IPaymentWorkflowService
     {
         public bool ApplyCalled { get; set; }
-        public Task<Result<bool>> ApplyInvoicePaidStagedAsync(RentalOrder order, KafkaMessageEnvelope<InvoicePaidPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default)
+        public Task<Result<PaymentApplyResult>> ApplyInvoicePaidStagedAsync(RentalOrder order, KafkaMessageEnvelope<InvoicePaidPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default)
         {
             ApplyCalled = true;
-            return Task.FromResult(Result.Success(true));
+            return Task.FromResult(Result.Success(PaymentApplyResult.Paid(PaymentNotificationMetadata.Empty)));
         }
 
         public Task<Result> ProcessInvoicePaidAsync(KafkaMessageEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default)
