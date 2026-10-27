@@ -12,8 +12,11 @@ public sealed class RentalGatewayIntegrationTests
     private const string Issuer = "https://auth.example.test";
     private const string HumanAudience = "dprental-clients";
 
-    [Fact]
-    public async Task RentalRouteValidBearerTokenProxiesAndForwardsToken()
+    [Theory]
+    [InlineData("/api/v1/rental/me/calendar?month=2026-10")]
+    [InlineData("/api/v1/rental/me/addresses")]
+    [InlineData("/api/v1/rental/me/bank-accounts")]
+    public async Task RentalRouteValidBearerTokenProxiesAndForwardsToken(string path)
     {
         using RSA signingKey = RSA.Create(2048);
         await using LoopbackTestService upstream = new(CreateJwks(signingKey, "key-1"));
@@ -21,25 +24,28 @@ public sealed class RentalGatewayIntegrationTests
         using HttpClient client = factory.CreateClient();
 
         string token = CreateToken(signingKey, "key-1", Issuer, HumanAudience, Guid.NewGuid().ToString("D"));
-        using HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/rental/me/calendar?month=2026-10");
+        using HttpRequestMessage request = new(HttpMethod.Get, path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         using HttpResponseMessage response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("/rental/me/calendar?month=2026-10", upstream.LastRequest?.Path);
+        Assert.Equal(path, upstream.LastRequest?.Path);
         Assert.Equal($"Bearer {token}", upstream.LastRequest?.Authorization);
     }
 
-    [Fact]
-    public async Task RentalRouteMissingBearerTokenReturns401()
+    [Theory]
+    [InlineData("/api/v1/rental/me/calendar")]
+    [InlineData("/api/v1/rental/me/addresses")]
+    [InlineData("/api/v1/rental/me/bank-accounts")]
+    public async Task RentalRouteMissingBearerTokenReturns401(string path)
     {
         using RSA signingKey = RSA.Create(2048);
         await using LoopbackTestService upstream = new(CreateJwks(signingKey, "key-1"));
         using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
         using HttpClient client = factory.CreateClient();
 
-        using HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/rental/me/calendar");
+        using HttpRequestMessage request = new(HttpMethod.Get, path);
         using HttpResponseMessage response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
