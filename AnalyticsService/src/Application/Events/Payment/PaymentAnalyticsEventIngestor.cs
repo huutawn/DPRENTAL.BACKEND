@@ -112,6 +112,7 @@ public sealed class PaymentAnalyticsEventIngestor(AnalyticsServiceDbContext dbCo
                 row.PaidAt = invoice.PaidAt.ToUniversalTime();
                 break;
             case RentalItemFinancialSettledPayload settlement:
+                ValidateSettlement(settlement);
                 row.LogicalEventId = $"{envelope.MessageType}:{settlement.SettlementRef}";
                 row.SettlementId = settlement.SettlementId;
                 row.SettlementRef = settlement.SettlementRef;
@@ -187,6 +188,29 @@ public sealed class PaymentAnalyticsEventIngestor(AnalyticsServiceDbContext dbCo
             {
                 throw new InvalidOperationException("Financial amount must be a non-negative whole number of VND.");
             }
+        }
+
+        if (row.MessageType == PaymentAnalyticsEventTypes.InvoicePaidFinancial &&
+            row.RentalAmount.HasValue && row.DepositAmount.HasValue && row.TotalAmount.HasValue &&
+            row.RentalAmount.Value + row.DepositAmount.Value != row.TotalAmount.Value)
+        {
+            throw new InvalidOperationException("Invoice total must equal rental amount plus deposit amount.");
+        }
+    }
+
+    private static void ValidateSettlement(RentalItemFinancialSettledPayload settlement)
+    {
+        // Settlement events are VND-only in analytics v1; the contract intentionally has no
+        // currency field because the MVP supports a single currency. Validate the transferred
+        // financial facts without recalculating or replacing Payment's amounts.
+        if (settlement.FinalDeductionAmount > settlement.DepositAmount ||
+            settlement.DepositRefundDue + settlement.FinalDeductionAmount != settlement.DepositAmount ||
+            settlement.PlatformFeeRate is < 0 or > 1 ||
+            settlement.PlatformFeeAmount > settlement.RentalAmount ||
+            settlement.SupplierPayable != settlement.RentalAmount - settlement.PlatformFeeAmount +
+                settlement.FinalDeductionAmount)
+        {
+            throw new InvalidOperationException("Rental settlement financial facts are inconsistent.");
         }
     }
 }

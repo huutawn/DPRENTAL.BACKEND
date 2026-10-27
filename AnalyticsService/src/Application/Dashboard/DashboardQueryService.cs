@@ -25,11 +25,14 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
                         join order in orders on item.RentalOrderId equals order.RentalOrderId
                         where order.PaidAt >= range.StartUtc && order.PaidAt < range.EndUtc
                         select item;
-        var settled = financial.Where(x => x.MessageType == PaymentAnalyticsEventTypes.RentalItemFinancialSettled &&
+        var settled = financial.Where(x => x.Currency == "VND" &&
+            x.MessageType == PaymentAnalyticsEventTypes.RentalItemFinancialSettled &&
             x.CompletedAt >= range.StartUtc && x.CompletedAt < range.EndUtc);
-        var refunds = financial.Where(x => x.MessageType == PaymentAnalyticsEventTypes.RefundCompletedFinancial &&
+        var refunds = financial.Where(x => x.Currency == "VND" &&
+            x.MessageType == PaymentAnalyticsEventTypes.RefundCompletedFinancial &&
             x.CompletedAt >= range.StartUtc && x.CompletedAt < range.EndUtc);
-        var payouts = financial.Where(x => x.MessageType == PaymentAnalyticsEventTypes.SupplierPayoutCompleted &&
+        var payouts = financial.Where(x => x.Currency == "VND" &&
+            x.MessageType == PaymentAnalyticsEventTypes.SupplierPayoutCompleted &&
             x.CompletedAt >= range.StartUtc && x.CompletedAt < range.EndUtc);
 
         var money = new FinancialMetrics(
@@ -63,19 +66,23 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
 
     private async Task<decimal> PendingRefundAsync(CancellationToken ct)
     {
-        var requested = await db.PaymentFinancialEvents.AsNoTracking()
-            .Where(x => x.MessageType == PaymentAnalyticsEventTypes.RefundRequestedFinancial && x.RefundRef != null)
+        // PendingRefund is an outstanding-obligation snapshot at query time, not a period flow.
+        // Aggregate in PostgreSQL so only one scalar returns to the API rather than one row per refund.
+        var requested = db.PaymentFinancialEvents.AsNoTracking()
+            .Where(x => x.Currency == "VND" &&
+                x.MessageType == PaymentAnalyticsEventTypes.RefundRequestedFinancial && x.RefundRef != null)
             .GroupBy(x => x.RefundRef!)
-            .Select(g => new { RefundRef = g.Key, Amount = g.Sum(x => x.Amount ?? 0m) })
-            .ToDictionaryAsync(x => x.RefundRef, x => x.Amount, ct);
-        var completed = await db.PaymentFinancialEvents.AsNoTracking()
-            .Where(x => x.MessageType == PaymentAnalyticsEventTypes.RefundCompletedFinancial && x.RefundRef != null)
+            .Select(g => new { RefundRef = g.Key, Amount = g.Sum(x => x.Amount ?? 0m) });
+        var completed = db.PaymentFinancialEvents.AsNoTracking()
+            .Where(x => x.Currency == "VND" &&
+                x.MessageType == PaymentAnalyticsEventTypes.RefundCompletedFinancial && x.RefundRef != null)
             .GroupBy(x => x.RefundRef!)
-            .Select(g => new { RefundRef = g.Key, Amount = g.Sum(x => x.Amount ?? 0m) })
-            .ToDictionaryAsync(x => x.RefundRef, x => x.Amount, ct);
-
-        return requested.Sum(request => Math.Max(
-            request.Value - completed.GetValueOrDefault(request.Key), 0m));
+            .Select(g => new { RefundRef = g.Key, Amount = g.Sum(x => x.Amount ?? 0m) });
+        var balances = from request in requested
+                       join completion in completed on request.RefundRef equals completion.RefundRef into completions
+                       from completion in completions.DefaultIfEmpty()
+                       select request.Amount - (completion == null ? 0m : completion.Amount);
+        return await balances.SumAsync(balance => balance > 0m ? balance : 0m, ct);
     }
 
     public async Task<EquipmentResponse> EquipmentAsync(DashboardDateRange range, int limit, CancellationToken ct)
@@ -178,7 +185,7 @@ public sealed class DashboardQueryService(AnalyticsServiceDbContext db)
             }).ToDictionaryAsync(x => x.SupplierId, ct);
 
         var financialStats = await db.PaymentFinancialEvents.AsNoTracking()
-            .Where(x => x.SupplierId != null && ids.Contains(x.SupplierId.Value) &&
+            .Where(x => x.Currency == "VND" && x.SupplierId != null && ids.Contains(x.SupplierId.Value) &&
                 x.CompletedAt >= range.StartUtc && x.CompletedAt < range.EndUtc)
             .GroupBy(x => x.SupplierId!.Value)
             .Select(g => new
