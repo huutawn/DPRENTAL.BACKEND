@@ -504,4 +504,14 @@ public sealed class EfInvoiceRepository : IInvoiceRepository
             await _transaction.DisposeAsync();
         }
     }
+    public async Task<IReadOnlyList<string>> FindPaidInvoicesMissingAnalyticsAsync(DateTimeOffset before, int limit, CancellationToken ct) =>
+        await _dbContext.Invoices.AsNoTracking()
+            .Where(i => i.Status == InvoiceStatus.Paid && i.PaidAt < before &&
+                !_dbContext.OutboxMessages.Any(m => m.MessageType == OutboxTopics.InvoicePaidFinancialMessageType &&
+                    m.AggregateId == i.RentalOrderId.ToString()))
+            .OrderBy(i => i.PaidAt).ThenBy(i => i.Id).Take(limit)
+            .Select(i => i.InvoiceRef).ToListAsync(ct);
+
+    public Task<bool> HasOutboxMessageAsync(Guid messageId, CancellationToken ct) =>
+        _dbContext.OutboxMessages.AsNoTracking().AnyAsync(m => m.MessageId == messageId, ct);
 }

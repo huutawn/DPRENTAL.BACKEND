@@ -460,6 +460,9 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
     {
         private int _readCount;
 
+        public Task<IReadOnlyList<string>> FindPaidInvoicesMissingAnalyticsAsync(DateTimeOffset before, int limit, CancellationToken ct) => inner.FindPaidInvoicesMissingAnalyticsAsync(before, limit, ct);
+        public Task<bool> HasOutboxMessageAsync(Guid messageId, CancellationToken ct) => inner.HasOutboxMessageAsync(messageId, ct);
+
         public Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default) => inner.GetInvoiceSnapshotByIdAsync(id, cancellationToken);
         public Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
             IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default) => inner.SaveFinancialOperationAsync(receipt, journals, messages, cancellationToken);
@@ -944,6 +947,9 @@ public sealed class PostgresSePayPaymentRealDatabaseTests
 
     private sealed class FaultyInvoiceRepository(IInvoiceRepository inner, bool shouldThrowOnSave) : IInvoiceRepository
     {
+        public Task<IReadOnlyList<string>> FindPaidInvoicesMissingAnalyticsAsync(DateTimeOffset before, int limit, CancellationToken ct) => inner.FindPaidInvoicesMissingAnalyticsAsync(before, limit, ct);
+        public Task<bool> HasOutboxMessageAsync(Guid messageId, CancellationToken ct) => inner.HasOutboxMessageAsync(messageId, ct);
+
         public Task<Invoice?> GetInvoiceSnapshotByIdAsync(Guid id, CancellationToken cancellationToken = default) => inner.GetInvoiceSnapshotByIdAsync(id, cancellationToken);
         public Task SaveFinancialOperationAsync(OperationReceipt receipt, IReadOnlyList<TransactionJournalEntry> journals,
             IReadOnlyList<OutboxMessage> messages, CancellationToken cancellationToken = default) => inner.SaveFinancialOperationAsync(receipt, journals, messages, cancellationToken);

@@ -7,6 +7,9 @@ namespace Dprental.PaymentService.Domain.IRepositories;
 /// </summary>
 public interface IInvoiceRepository
 {
+    Task<IReadOnlyList<string>> FindPaidInvoicesMissingAnalyticsAsync(DateTimeOffset before, int limit, CancellationToken ct);
+    Task<bool> HasOutboxMessageAsync(Guid messageId, CancellationToken ct);
+
     Task<IExecutionTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
 
     Task<OperationReceipt?> GetOperationReceiptAsync(string operationKey, CancellationToken cancellationToken = default);
