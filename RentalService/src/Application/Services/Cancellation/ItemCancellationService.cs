@@ -168,28 +168,15 @@ public sealed class ItemCancellationService : IItemCancellationService
         bool handoverInProgress = order.OperationReceipts.Any(r =>
             r.TargetItemId == item.Id &&
             r.Action == "MarkAssetsHandedOver" &&
-            r.Status is RentalOperationReceipt.StatusPending or RentalOperationReceipt.StatusProcessing);
+            r.Status is RentalOperationReceipt.StatusPending or RentalOperationReceipt.StatusProcessing or RentalOperationReceipt.StatusManualReconciliationRequired);
 
         if (handoverInProgress)
         {
             return RentalErrors.HandoverInProgress;
         }
 
-        // 10. Chuyển trạng thái dòng, rollup đơn hàng
         Guid actorId = caller.UserId!.Value;
         string cancelReason = string.IsNullOrWhiteSpace(reason) ? "Renter hủy do thiết bị không được bàn giao" : reason;
-        var cancelResult = item.ApplyNotDeliveredCancellation(actorId, ActorRole.Renter, utcNow, cancelReason, normalizedKey);
-        if (cancelResult.IsFailure)
-        {
-            return cancelResult.Error;
-        }
-
-        RentalOrderStatus previousOrderStatus = order.Status;
-        RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
-
-        // 11. Lên lịch nhả lịch và hoàn tiền 100%
-        await _operationExecutor.ScheduleReleaseAndRefundAsync(order, item, actorId, cancelReason, utcNow, cancellationToken);
-
         decimal refundAmount = item.RentalAmount + item.DepositAmount;
         var response = new CancelNotDeliveredResponse(item.Id, RentalItemStatus.Cancelled.ToString(), utcNow, refundAmount);
         string responseJson = JsonSerializer.Serialize(response, JsonOptions);
@@ -208,9 +195,25 @@ public sealed class ItemCancellationService : IItemCancellationService
             completedAt: utcNow,
             targetItemId: item.Id,
             apiResponseJson: responseJson);
+
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
+            // 10. Chuyển trạng thái dòng, rollup đơn hàng
+            var cancelResult = item.ApplyNotDeliveredCancellation(actorId, ActorRole.Renter, utcNow, cancelReason, normalizedKey);
+            if (cancelResult.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return cancelResult.Error;
+            }
+
+            RentalOrderStatus previousOrderStatus = order.Status;
+            RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
+
+            // 11. Lên lịch nhả allocation và hoàn tiền 100% trong transaction
+            await _operationExecutor.ScheduleReleaseAndRefundAsync(order, item, actorId, cancelReason, utcNow, cancellationToken);
+
             order.AddOperationReceipt(receipt);
             order.RecordReadModelUpdate(utcNow);
 
@@ -358,7 +361,7 @@ public sealed class ItemCancellationService : IItemCancellationService
         bool handoverInProgress = order.OperationReceipts.Any(r =>
             r.TargetItemId == item.Id &&
             r.Action == "MarkAssetsHandedOver" &&
-            r.Status is RentalOperationReceipt.StatusPending or RentalOperationReceipt.StatusProcessing);
+            r.Status is RentalOperationReceipt.StatusPending or RentalOperationReceipt.StatusProcessing or RentalOperationReceipt.StatusManualReconciliationRequired);
 
         if (handoverInProgress)
         {
@@ -366,17 +369,6 @@ public sealed class ItemCancellationService : IItemCancellationService
         }
 
         const string transitionAction = "HandoverDeadlineExpired";
-        item.SetStatus(RentalItemStatus.Expired);
-        order.AddStateTransition(new RentalStateTransition(
-            Guid.NewGuid(), order.Id, item.Id, RentalItemStatus.AwaitingHandover.ToString(),
-            RentalItemStatus.Expired.ToString(), transitionAction, null, ActorRole.System,
-            reason, utcNow, normalizedKey));
-
-        RentalOrderStatus previousOrderStatus = order.Status;
-        RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
-
-        await _operationExecutor.ScheduleReleaseAndRefundAsync(order, item, Guid.Empty, reason, utcNow, cancellationToken);
-
         var receipt = new RentalOperationReceipt(
             Guid.NewGuid(),
             order.Id,
@@ -390,9 +382,21 @@ public sealed class ItemCancellationService : IItemCancellationService
             status: RentalOperationReceipt.StatusSucceeded,
             completedAt: utcNow,
             targetItemId: item.Id);
+
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
+            item.SetStatus(RentalItemStatus.Expired);
+            order.AddStateTransition(new RentalStateTransition(
+                Guid.NewGuid(), order.Id, item.Id, RentalItemStatus.AwaitingHandover.ToString(),
+                RentalItemStatus.Expired.ToString(), transitionAction, null, ActorRole.System,
+                reason, utcNow, normalizedKey));
+
+            RentalOrderStatus previousOrderStatus = order.Status;
+            RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
+
+            await _operationExecutor.ScheduleReleaseAndRefundAsync(order, item, Guid.Empty, reason, utcNow, cancellationToken);
+
             order.AddOperationReceipt(receipt);
             order.RecordReadModelUpdate(utcNow);
 

@@ -755,53 +755,74 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         if (isSuccess)
         {
             var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
-            if (item != null)
+            if (item == null)
             {
-                if (item.HandoverRecord is not null)
-                {
-                    // Receipt tạo trước khi bằng chứng được hoãn tới lúc Inventory xác nhận: bản ghi đã có sẵn.
-                    foreach (var assignment in item.UnitAssignments)
-                    {
-                        assignment.ConfirmHandoverCompleted();
-                    }
-
-                    item.ApplyHandover(utcNow, operationKey);
-                }
-                else
-                {
-                    var snapshot = HandoverEvidenceSnapshot.TryParse(receipt.PayloadJson);
-                    if (snapshot is null)
-                    {
-                        _logger.LogError("Handover receipt {OperationKey} of item {ItemId} has no evidence payload", operationKey, rentalItemId);
-                        receipt.MarkManualReconciliationRequired(utcNow, "Inventory đã xác nhận bàn giao nhưng receipt không có bằng chứng để ghi nhận.");
-                        await _orderRepository.UpdateAsync(order, cancellationToken);
-                        await _unitOfWork.SaveChangesAsync(cancellationToken);
-                        return Result.Success(AllocationEventApplyResult.NoChange());
-                    }
-
-                    var completed = item.CompleteHandover(
-                        snapshot.SubmittedById,
-                        snapshot.SubmittedAt,
-                        snapshot.ActualHandoverAt,
-                        snapshot.Note,
-                        snapshot.ToUnitData(),
-                        utcNow,
-                        operationKey);
-                    if (completed.IsFailure)
-                    {
-                        _logger.LogWarning("Handover result {OperationKey} not applied to item {ItemId}: {Code}", operationKey, rentalItemId, completed.Error.Code);
-                        receipt.MarkManualReconciliationRequired(utcNow, $"Không ghi nhận được bàn giao: {completed.Error.Code}.");
-                        await _orderRepository.UpdateAsync(order, cancellationToken);
-                        await _unitOfWork.SaveChangesAsync(cancellationToken);
-                        return Result.Success(AllocationEventApplyResult.NoChange());
-                    }
-                }
-
-                RentalOrderStatusPolicy.Apply(order, utcNow, operationKey);
-                order.RecordReadModelUpdate(utcNow);
-
+                _logger.LogWarning("Handover result {OperationKey} item {ItemId} not found on order {OrderId}", operationKey, rentalItemId, order.Id);
+                receipt.MarkManualReconciliationRequired(utcNow, "Không tìm thấy mục thuê thuộc đơn hàng.");
+                await _orderRepository.UpdateAsync(order, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                return Result.Success(AllocationEventApplyResult.NoChange());
             }
 
+            if (item.Status != RentalItemStatus.AwaitingHandover && item.HandoverRecord == null)
+            {
+                _logger.LogWarning("Handover result {OperationKey} arrived late for item {ItemId} in status {Status}; requires reconciliation", operationKey, rentalItemId, item.Status);
+                receipt.MarkManualReconciliationRequired(utcNow, $"Mục thuê ở trạng thái {item.Status}; không thể áp dụng bàn giao.");
+                await _orderRepository.UpdateAsync(order, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                return Result.Success(AllocationEventApplyResult.NoChange());
+            }
+
+            if (item.HandoverRecord is not null)
+            {
+                // Receipt tạo trước khi bằng chứng được hoãn tới lúc Inventory xác nhận: bản ghi đã có sẵn.
+                foreach (var assignment in item.UnitAssignments)
+                {
+                    assignment.ConfirmHandoverCompleted();
+                }
+
+                item.ApplyHandover(utcNow, operationKey);
+            }
+            else
+            {
+                var snapshot = HandoverEvidenceSnapshot.TryParse(receipt.PayloadJson);
+                if (snapshot is null)
+                {
+                    _logger.LogError("Handover receipt {OperationKey} of item {ItemId} has no evidence payload", operationKey, rentalItemId);
+                    receipt.MarkManualReconciliationRequired(utcNow, "Inventory đã xác nhận bàn giao nhưng receipt không có bằng chứng để ghi nhận.");
+                    await _orderRepository.UpdateAsync(order, cancellationToken);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    return Result.Success(AllocationEventApplyResult.NoChange());
+                }
+
+                var unitData = snapshot.ToUnitData();
+                if (unitData.Count != item.UnitAssignments.Count ||
+                    unitData.Select(u => u.AssignmentId).Distinct().Count() != unitData.Count ||
+                    unitData.Any(u => item.UnitAssignments.All(a => a.Id != u.AssignmentId) || u.MediaIds.Count == 0))
+                {
+                    _logger.LogWarning("Handover snapshot units invalid for item {ItemId}", rentalItemId);
+                    receipt.MarkManualReconciliationRequired(utcNow, "Bằng chứng bàn giao trong snapshot không khớp với danh sách máy của mục thuê.");
+                    await _orderRepository.UpdateAsync(order, cancellationToken);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    return Result.Success(AllocationEventApplyResult.NoChange());
+                }
+
+                var record = new HandoverRecord(
+                    Guid.NewGuid(), item.Id, snapshot.ActualHandoverAt, snapshot.Note, snapshot.SubmittedById, snapshot.SubmittedAt, snapshot.SubmittedAt);
+                item.SetHandoverRecord(record);
+
+                foreach (HandoverUnitData unit in unitData)
+                {
+                    RentalUnitAssignment assignment = item.UnitAssignments.First(a => a.Id == unit.AssignmentId);
+                    assignment.RecordHandover(record.Id, unit.Condition, unit.Note, unit.MediaIds);
+                    record.AddAssignment(assignment);
+                }
+
+                item.ApplyHandover(utcNow, operationKey);
+            }
+
+            RentalOrderStatusPolicy.Apply(order, utcNow, operationKey);
+            order.RecordReadModelUpdate(utcNow);
             receipt.MarkSucceeded(utcNow, payloadElement.GetRawText());
         }
         else
@@ -813,25 +834,51 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
 
         await _orderRepository.UpdateAsync(order, cancellationToken);
 
-        var handedOverItem = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
-        if (isSuccess && handedOverItem?.HandoverRecord is { } handover)
+        IUnitOfWorkTransaction? transaction = null;
+        if (!_unitOfWork.HasActiveTransaction)
         {
-            var handoverPayload = new RentalItemHandoverCompletedPayload(
-                order.Id, handedOverItem.Id, order.RenterId, handedOverItem.SupplierId,
-                handedOverItem.EquipmentListingId, handedOverItem.Quantity, handover.Id,
-                handover.ActualHandoverAt, utcNow, order.Version);
-            var published = await _rentalEvents!.EnqueueRentalItemHandoverCompletedAsync(
-                handoverPayload,
-                order.Id.ToString("D"), receipt.Id, cancellationToken);
-            if (published.IsFailure) return published.Error;
+            transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         }
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            var handedOverItem = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
+            if (isSuccess && handedOverItem?.HandoverRecord is { } handover)
+            {
+                var handoverPayload = new RentalItemHandoverCompletedPayload(
+                    order.Id, handedOverItem.Id, order.RenterId, handedOverItem.SupplierId,
+                    handedOverItem.EquipmentListingId, handedOverItem.Quantity, handover.Id,
+                    handover.ActualHandoverAt, utcNow, order.Version);
+                var published = await _rentalEvents!.EnqueueRentalItemHandoverCompletedAsync(
+                    handoverPayload,
+                    order.Id.ToString("D"), receipt.Id, cancellationToken);
+                if (published.IsFailure)
+                {
+                    if (transaction != null) await transaction.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    return published.Error;
+                }
+            }
 
-        if (isSuccess && handedOverItem != null)
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            if (transaction != null) await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            if (transaction != null) await transaction.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
+            throw;
+        }
+        finally
+        {
+            if (transaction != null) await transaction.DisposeAsync();
+        }
+
+        var completedItem = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
+        if (isSuccess && completedItem != null)
         {
             bool isVisible = SupplierOrderVisibilityPolicy.CanSupplierView(order);
-            var meta = BuildAllocationMetadata(order, handedOverItem.SupplierId, OrderChangeTypes.HandoverConfirmed, utcNow, wasVisible, isVisible);
+            var meta = BuildAllocationMetadata(order, completedItem.SupplierId, OrderChangeTypes.HandoverConfirmed, utcNow, wasVisible, isVisible);
             return Result.Success(AllocationEventApplyResult.WithMetadata(meta));
         }
 

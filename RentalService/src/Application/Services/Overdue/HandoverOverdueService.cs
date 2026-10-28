@@ -69,7 +69,7 @@ public sealed class HandoverOverdueService(
             bool handoverInProgress = order.OperationReceipts.Any(r =>
                 r.TargetItemId == item.Id &&
                 r.Action == "MarkAssetsHandedOver" &&
-                r.Status is RentalOperationReceipt.StatusPending or RentalOperationReceipt.StatusProcessing);
+                r.Status is RentalOperationReceipt.StatusPending or RentalOperationReceipt.StatusProcessing or RentalOperationReceipt.StatusManualReconciliationRequired);
 
             if (handoverInProgress)
             {
