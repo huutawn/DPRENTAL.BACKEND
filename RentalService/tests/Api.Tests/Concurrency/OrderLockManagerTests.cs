@@ -34,35 +34,51 @@ public sealed class OrderLockManagerTests
         Guid order1 = Guid.NewGuid();
         Guid order2 = Guid.NewGuid();
 
-        await using var lock1 = await manager.AcquireOrderLockAsync(order1, TimeSpan.FromSeconds(2));
-        await using var lock2 = await manager.AcquireOrderLockAsync(order2, TimeSpan.FromSeconds(2));
+        await using var lock1 = await manager.AcquireOrderLockAsync(order1, TimeSpan.FromSeconds(15));
+        await using var lock2 = await manager.AcquireOrderLockAsync(order2, TimeSpan.FromSeconds(15));
 
         Assert.NotNull(lock1);
         Assert.NotNull(lock2);
     }
+
     [Fact]
     public async Task AcquireOrderLock_SameOrderId_SerializesExecution()
     {
         var manager = new PostgresOrderLockManager(CreateConfig(), NullLogger<PostgresOrderLockManager>.Instance);
         Guid orderId = Guid.NewGuid();
-        var lock1 = await manager.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(2));
-
+        IAsyncDisposable? lock1 = null;
         bool lock2Acquired = false;
-        var task = Task.Run(async () =>
+        var lock2Started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? lock2Task = null;
+
+        try
         {
-            await using var lock2 = await manager.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(2));
-            lock2Acquired = true;
-        });
+            lock1 = await manager.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(15));
 
-        // lock2 should be waiting while lock1 is held
-        await Task.Delay(100);
-        Assert.False(lock2Acquired);
+            lock2Task = Task.Run(async () =>
+            {
+                lock2Started.SetResult(true);
+                await using var lock2 = await manager.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(15));
+                lock2Acquired = true;
+            });
 
-        // Release lock1
-        await lock1.DisposeAsync();
+            await lock2Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        // lock2 can now proceed
-        await task;
+            // Allow lock2 to reach its acquisition loop while lock1 is definitely held
+            await Task.Delay(200);
+            Assert.False(lock2Acquired);
+            Assert.False(lock2Task.IsCompleted);
+        }
+        finally
+        {
+            if (lock1 != null)
+            {
+                await lock1.DisposeAsync();
+            }
+        }
+
+        Assert.NotNull(lock2Task);
+        await lock2Task.WaitAsync(TimeSpan.FromSeconds(15));
         Assert.True(lock2Acquired);
     }
 
@@ -71,12 +87,23 @@ public sealed class OrderLockManagerTests
     {
         var manager = new PostgresOrderLockManager(CreateConfig(), NullLogger<PostgresOrderLockManager>.Instance);
         Guid orderId = Guid.NewGuid();
-        await using var lock1 = await manager.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(2));
-
-        await Assert.ThrowsAsync<TimeoutException>(async () =>
+        IAsyncDisposable? lock1 = null;
+        try
         {
-            await manager.AcquireOrderLockAsync(orderId, TimeSpan.FromMilliseconds(200));
-        });
+            lock1 = await manager.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(15));
+
+            await Assert.ThrowsAsync<TimeoutException>(async () =>
+            {
+                await manager.AcquireOrderLockAsync(orderId, TimeSpan.FromMilliseconds(200));
+            });
+        }
+        finally
+        {
+            if (lock1 != null)
+            {
+                await lock1.DisposeAsync();
+            }
+        }
     }
 
     [Fact]

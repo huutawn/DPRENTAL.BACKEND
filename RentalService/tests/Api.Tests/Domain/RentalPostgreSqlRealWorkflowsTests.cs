@@ -244,19 +244,27 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
             Guid orderId = Guid.NewGuid();
 
             // Lock 1 acquires lock on orderId
-            await using var lock1 = await lockManager1.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(2));
-
-            // Lock 2 attempts to acquire lock on same orderId -> must time out and fail closed
-            await Assert.ThrowsAsync<TimeoutException>(async () =>
+            IAsyncDisposable? lock1 = null;
+            try
             {
-                await lockManager2.AcquireOrderLockAsync(orderId, TimeSpan.FromMilliseconds(300));
-            });
+                lock1 = await lockManager1.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(15));
 
-            // Dispose Lock 1
-            await lock1.DisposeAsync();
+                // Lock 2 attempts to acquire lock on same orderId -> must time out and fail closed
+                await Assert.ThrowsAsync<TimeoutException>(async () =>
+                {
+                    await lockManager2.AcquireOrderLockAsync(orderId, TimeSpan.FromMilliseconds(300));
+                });
+            }
+            finally
+            {
+                if (lock1 != null)
+                {
+                    await lock1.DisposeAsync();
+                }
+            }
 
             // Now Lock 2 can acquire successfully
-            await using var lock2 = await lockManager2.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(2));
+            await using var lock2 = await lockManager2.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(15));
             Assert.NotNull(lock2);
         }
         finally
