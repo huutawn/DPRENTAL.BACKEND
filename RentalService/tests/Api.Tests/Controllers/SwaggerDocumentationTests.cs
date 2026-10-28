@@ -38,7 +38,7 @@ public sealed class SwaggerDocumentationTests
                 Assert.True(operation.Value.GetProperty("responses").TryGetProperty("500", out _), $"{where} thiếu response 500");
             }
         }
-        Assert.Equal(39, operationCount);
+        Assert.Equal(40, operationCount);
         Assert.True(paths.GetProperty("/api/v1/rental/orders/{orderId}/delivery-note").TryGetProperty("patch", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/me/addresses", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/me/addresses/{addressId}/default", out _));
@@ -50,6 +50,7 @@ public sealed class SwaggerDocumentationTests
         Assert.True(paths.GetProperty("/api/v1/rental/orders/{orderId}/cancel")
             .GetProperty("post").GetProperty("responses").TryGetProperty("409", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/returns", out _));
+        Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/return-requests", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/deductions", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/handover", out _));
         Assert.True(paths.TryGetProperty("/api/v1/rental/items/{itemId}/acknowledge-receipt", out _));

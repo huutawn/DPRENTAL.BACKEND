@@ -208,7 +208,9 @@ public static class RentalAuthorizationPolicy
         }
 
         bool isParticipant = user.Value == order.RenterId || user.Value == item.SupplierId || caller.IsAdmin();
-        if (!isParticipant || !item.ContainsEvidenceMedia(mediaId))
+        bool containsMedia = item.ContainsEvidenceMedia(mediaId) ||
+            item.ReturnRequests.SelectMany(r => r.Units).Any(u => u.MediaIds.Contains(mediaId));
+        if (!isParticipant || !containsMedia)
         {
             return Error.NotFound(ErrorCodes.EvidenceNotFound, "MediaId không thuộc bằng chứng của khoản thuê này.");
         }

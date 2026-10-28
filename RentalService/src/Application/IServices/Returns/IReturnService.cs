@@ -6,6 +6,9 @@ namespace Dprental.RentalService.Application.IServices.Returns;
 
 public interface IReturnService
 {
+    Task<Result<CreateReturnRequestResponse>> CreateReturnRequestAsync(Guid itemId, IRentalCallerContext caller,
+        CreateReturnRequest request, string idempotencyKey, CancellationToken cancellationToken = default);
+
     Task<Result<RecordReturnResponse>> RecordReturnAsync(Guid itemId, IRentalCallerContext caller,
         RecordReturnRequest request, string idempotencyKey, CancellationToken cancellationToken = default);
 }

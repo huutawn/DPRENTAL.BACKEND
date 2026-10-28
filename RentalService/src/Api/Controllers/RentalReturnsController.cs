@@ -9,11 +9,27 @@ namespace Dprental.RentalService.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("items/{itemId:guid}/returns")]
+[Route("items/{itemId:guid}")]
 public sealed class RentalReturnsController(IReturnService returns, IRentalCallerContext caller) : ControllerBase
 {
+    /// <summary>Người thuê khai báo trả một hoặc nhiều máy; chưa xác nhận thu hồi hoặc giải phóng Inventory.</summary>
+    [HttpPost("return-requests")]
+    [ProducesResponseType(typeof(CreateReturnRequestResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> CreateReturnRequest(Guid itemId, [FromBody] CreateReturnRequest request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey, CancellationToken cancellationToken)
+    {
+        var result = await returns.CreateReturnRequestAsync(itemId, caller, request, idempotencyKey ?? string.Empty, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
     /// <summary>Supplier ghi nhận thu hồi một hoặc nhiều máy đã bàn giao.</summary>
-    [HttpPost]
+    [HttpPost("returns")]
     [ProducesResponseType(typeof(RecordReturnResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
