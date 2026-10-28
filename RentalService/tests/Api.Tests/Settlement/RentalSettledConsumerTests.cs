@@ -20,6 +20,7 @@ public sealed class RentalSettledConsumerTests
     {
         var order = Returns.ReturnTests.NewOrder(1);
         var item = order.Items.Single();
+        typeof(RentalItem).GetProperty(nameof(RentalItem.EquipmentTypeId))!.SetValue(item, null);
         var unit = item.UnitAssignments.Single();
         Assert.True(item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "Damaged", [])], Now, item.SupplierId).IsSuccess);
@@ -40,7 +41,8 @@ public sealed class RentalSettledConsumerTests
             "payment-service", order.Id.ToString("D"), Now.AddHours(2), null, null, payload);
         var inbox = new RentalInboxMessage(Guid.NewGuid(), envelope.MessageId, "RentalSettled", "payment-service",
             order.Id.ToString("D"), null, null, JsonSerializer.Serialize(envelope), Now.AddHours(2));
-        var consumer = new RentalSettledConsumer(new FakeRentalEventProducer(), TimeProvider.System);
+        var eventProducer = new FakeRentalEventProducer();
+        var consumer = new RentalSettledConsumer(eventProducer, TimeProvider.System);
 
         var early = await consumer.ApplyRentalSettledStagedAsync(order, envelope, inbox);
         Assert.True(early.IsFailure);
@@ -50,6 +52,9 @@ public sealed class RentalSettledConsumerTests
             "inventory-1", Now.AddHours(2)).IsSuccess);
         Assert.True((await consumer.ApplyRentalSettledStagedAsync(order, envelope, inbox)).IsSuccess);
         Assert.Equal(RentalItemStatus.Completed, item.Status);
+        var completedEvent = Assert.Single(eventProducer.CompletedEvents);
+        Assert.Null(completedEvent.EquipmentTypeId);
+        Assert.Equal(payload.CompletedAt, completedEvent.CompletedAt);
         Assert.True((await consumer.ApplyRentalSettledStagedAsync(order, envelope, inbox)).IsSuccess);
 
         var wrong = envelope with { Payload = payload with { FinalDeductionAmount = amount + 1 } };

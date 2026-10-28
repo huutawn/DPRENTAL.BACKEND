@@ -233,7 +233,7 @@ public sealed partial class RentalOperationExecutor
                 status: RentalOperationReceipt.StatusPending,
                 targetItemId: item.Id,
                 prerequisiteOperationId: releaseKey,
-                payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, reason, refundKey), JsonOptions));
+                payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, reason, refundKey, RentalRefundKinds.CancellationRefund), JsonOptions));
             order.AddOperationReceipt(refundReceipt);
         }
 

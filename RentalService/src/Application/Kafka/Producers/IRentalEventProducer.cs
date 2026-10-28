@@ -41,6 +41,12 @@ public interface IRentalEventProducer
         Guid? causationId = null,
         CancellationToken cancellationToken = default);
 
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalOrderRejectedAsync(
+        RentalOrderRejectedPayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
+
     Task<Result<ProducerEnqueueResult>> EnqueueRentalOrderCancelledAsync(
         RentalOrderCancelledPayload payload,
         string? correlationId = null,
