@@ -93,6 +93,22 @@ internal static partial class PaymentOutboxFactory
             refund.Id, invoice.RentalOrderId.ToString("D"), refund.CompletedAt.Value, payload);
     }
 
+    public static OutboxMessage CreateRefundRequestedFinancial(
+        ManualRefundRequirement refund, Invoice invoice)
+    {
+        ArgumentNullException.ThrowIfNull(refund);
+        ArgumentNullException.ThrowIfNull(invoice);
+        if (refund.Status != ManualRefundStatus.PendingManualRefund ||
+            string.IsNullOrWhiteSpace(refund.FinancialRefundKind))
+            throw new InvalidOperationException("Financial refund request event requires a classified pending refund.");
+
+        var payload = new RefundRequestedFinancialPayload(refund.RequirementRef,
+            invoice.RentalOrderId, refund.RentalItemId, refund.FinancialRefundKind,
+            refund.Amount, invoice.Currency, refund.CreatedAt);
+        return CreateFinancialOutbox(OutboxTopics.RefundRequestedFinancialMessageType,
+            refund.Id, invoice.RentalOrderId.ToString("D"), refund.CreatedAt, payload);
+    }
+
     public static OutboxMessage CreateSupplierPayoutCompleted(SupplierPayout payout)
     {
         ArgumentNullException.ThrowIfNull(payout);
