@@ -100,9 +100,9 @@ public sealed class ReturnConfirmationOverdueWorkerTests : IAsyncLifetime
 
         var dueOrderIds = await service.GetDueOrderIdsAsync(100);
         Assert.Empty(dueOrderIds);
-
         var warned = await service.ProcessOrderAsync(order.Id);
-        Assert.Equal(0, warned);
+        Assert.True(warned.IsSuccess);
+        Assert.Equal(0, warned.Value);
         Assert.Empty(fakeProducer.ReturnConfirmationOverdueEvents);
 
         await using var verifyDb = NewDb();
@@ -128,8 +128,8 @@ public sealed class ReturnConfirmationOverdueWorkerTests : IAsyncLifetime
         Assert.Equal(order.Id, dueOrderIds[0]);
 
         var warned = await service.ProcessOrderAsync(order.Id);
-        Assert.Equal(2, warned);
-
+        Assert.True(warned.IsSuccess);
+        Assert.Equal(2, warned.Value);
         // Verify outbox event enqueued with correct payload
         Assert.Single(fakeProducer.ReturnConfirmationOverdueEvents);
         var overdueEvent = fakeProducer.ReturnConfirmationOverdueEvents[0];
@@ -187,8 +187,8 @@ public sealed class ReturnConfirmationOverdueWorkerTests : IAsyncLifetime
         var service = CreateService(db, fakeProducer);
 
         var warned = await service.ProcessOrderAsync(order.Id);
-        Assert.Equal(1, warned);
-
+        Assert.True(warned.IsSuccess);
+        Assert.Equal(1, warned.Value);
         Assert.Single(fakeProducer.ReturnConfirmationOverdueEvents);
         var payload = fakeProducer.ReturnConfirmationOverdueEvents[0];
         Assert.Single(payload.OverdueAssignmentIds);
@@ -224,8 +224,8 @@ public sealed class ReturnConfirmationOverdueWorkerTests : IAsyncLifetime
         var service = CreateService(db, fakeProducer);
 
         var warned = await service.ProcessOrderAsync(order.Id);
-        Assert.Equal(1, warned);
-        Assert.Single(fakeProducer.ReturnConfirmationOverdueEvents);
+        Assert.True(warned.IsSuccess);
+        Assert.Equal(1, warned.Value);
     }
 
     [Fact]
@@ -256,8 +256,8 @@ public sealed class ReturnConfirmationOverdueWorkerTests : IAsyncLifetime
         Assert.Empty(dueOrderIds);
 
         var warned = await service.ProcessOrderAsync(order.Id);
-        Assert.Equal(0, warned);
-        Assert.Empty(fakeProducer.ReturnConfirmationOverdueEvents);
+        Assert.True(warned.IsSuccess);
+        Assert.Equal(0, warned.Value);
     }
 
     [Fact]
@@ -272,13 +272,14 @@ public sealed class ReturnConfirmationOverdueWorkerTests : IAsyncLifetime
 
         // Run 1
         var warned1 = await service.ProcessOrderAsync(order.Id);
-        Assert.Equal(2, warned1);
+        Assert.True(warned1.IsSuccess);
+        Assert.Equal(2, warned1.Value);
         Assert.Single(fakeProducer.ReturnConfirmationOverdueEvents);
 
         // Run 2 immediately after
         var warned2 = await service.ProcessOrderAsync(order.Id);
-        Assert.Equal(0, warned2);
-        Assert.Single(fakeProducer.ReturnConfirmationOverdueEvents); // Still only 1 event
+        Assert.True(warned2.IsSuccess);
+        Assert.Equal(0, warned2.Value);
 
         // Server-side query returns empty
         var dueOrderIds = await service.GetDueOrderIdsAsync(100);
@@ -303,8 +304,8 @@ public sealed class ReturnConfirmationOverdueWorkerTests : IAsyncLifetime
         var service = CreateService(db, failingProducerMock.Object);
 
         var warned = await service.ProcessOrderAsync(order.Id);
-        Assert.Equal(0, warned);
-
+        Assert.True(warned.IsFailure);
+        Assert.Equal("KAFKA_ERROR", warned.Error.Code);
         // Verify rollback: unit OverdueNotifiedAt is STILL NULL!
         await using var verifyDb = NewDb();
         var unit = await verifyDb.ReturnRequestUnits.SingleAsync();
@@ -313,5 +314,191 @@ public sealed class ReturnConfirmationOverdueWorkerTests : IAsyncLifetime
         // Which means next run can retry
         var dueOrderIds = await service.GetDueOrderIdsAsync(100);
         Assert.Single(dueOrderIds);
+    }
+
+    [Fact]
+    public async Task OverdueScan_TwoRequestsSameOrder_SecondEnqueueFails_RollsBackEntireOrderAndNoFlagsPersisted()
+    {
+        var order = ReturnTests.NewOrder(2);
+        var item = order.Items.Single();
+        var u1 = item.UnitAssignments.ElementAt(0);
+        var u2 = item.UnitAssignments.ElementAt(1);
+
+        Guid req1Id = Guid.NewGuid();
+        Guid req2Id = Guid.NewGuid();
+        var req1 = new ReturnRequest(req1Id, item.Id, RequestSubmittedAt, "Note 1", order.RenterId, RequestSubmittedAt,
+            [new ReturnRequestUnit(Guid.NewGuid(), req1Id, u1.Id, [])]);
+        var req2 = new ReturnRequest(req2Id, item.Id, RequestSubmittedAt, "Note 2", order.RenterId, RequestSubmittedAt,
+            [new ReturnRequestUnit(Guid.NewGuid(), req2Id, u2.Id, [])]);
+        item.AddReturnRequest(req1);
+        item.AddReturnRequest(req2);
+
+        await using (var dbInit = NewDb())
+        {
+            dbInit.Add(order);
+            await dbInit.SaveChangesAsync();
+        }
+
+        long initialVersion = order.Version;
+        _clock.SetUtcNow(RequestSubmittedAt.AddHours(24));
+
+        int callCount = 0;
+        var mockProducer = new Mock<IRentalEventProducer>();
+        mockProducer.Setup(p => p.EnqueueReturnConfirmationOverdueAsync(
+            It.IsAny<ReturnConfirmationOverduePayload>(),
+            It.IsAny<string?>(),
+            It.IsAny<Guid?>(),
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "ReturnConfirmationOverdue", "topic", "key"));
+                }
+                return Error.Failure("KAFKA_FAIL_SECOND", "Simulated failure on 2nd request");
+            });
+
+        var mockNotifier = new Mock<IOrderHubNotifier>();
+
+        await using var db = NewDb();
+        var service = CreateService(db, mockProducer.Object, mockNotifier.Object);
+
+        var result = await service.ProcessOrderAsync(order.Id);
+        Assert.True(result.IsFailure);
+        Assert.Equal("KAFKA_FAIL_SECOND", result.Error.Code);
+
+        // Notifications must NOT be sent on rollback
+        mockNotifier.Verify(n => n.NotifyRenterOrderChangedAsync(It.IsAny<Guid>(), It.IsAny<RenterOrderChangedNotification>(), It.IsAny<CancellationToken>()), Times.Never);
+        mockNotifier.Verify(n => n.NotifySupplierSubOrderChangedAsync(It.IsAny<Guid>(), It.IsAny<SupplierSubOrderChangedNotification>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        // Verify entire order in DB: NO flags persisted, version NOT changed, no outbox messages
+        await using var verifyDb = NewDb();
+        var reloadedOrder = await verifyDb.RentalOrders
+            .Include(o => o.Items).ThenInclude(i => i.ReturnRequests).ThenInclude(r => r.Units)
+            .SingleAsync(o => o.Id == order.Id);
+
+        Assert.Equal(initialVersion, reloadedOrder.Version);
+        var allUnits = reloadedOrder.Items.Single().ReturnRequests.SelectMany(r => r.Units).ToList();
+        Assert.Equal(2, allUnits.Count);
+        Assert.All(allUnits, u => Assert.Null(u.OverdueNotifiedAt));
+
+        var outboxCount = await verifyDb.RentalOutboxMessages.CountAsync();
+        Assert.Equal(0, outboxCount);
+    }
+
+    [Fact]
+    public async Task OverdueScan_RetryAfterFailure_WarnsAllDueUnitsAndIncrementsVersionOnce()
+    {
+        var order = ReturnTests.NewOrder(2);
+        var item = order.Items.Single();
+        var u1 = item.UnitAssignments.ElementAt(0);
+        var u2 = item.UnitAssignments.ElementAt(1);
+
+        Guid req1Id = Guid.NewGuid();
+        Guid req2Id = Guid.NewGuid();
+        var req1 = new ReturnRequest(req1Id, item.Id, RequestSubmittedAt, "Note 1", order.RenterId, RequestSubmittedAt,
+            [new ReturnRequestUnit(Guid.NewGuid(), req1Id, u1.Id, [])]);
+        var req2 = new ReturnRequest(req2Id, item.Id, RequestSubmittedAt, "Note 2", order.RenterId, RequestSubmittedAt,
+            [new ReturnRequestUnit(Guid.NewGuid(), req2Id, u2.Id, [])]);
+        item.AddReturnRequest(req1);
+        item.AddReturnRequest(req2);
+
+        await using (var dbInit = NewDb())
+        {
+            dbInit.Add(order);
+            await dbInit.SaveChangesAsync();
+        }
+
+        long initialVersion = order.Version;
+        _clock.SetUtcNow(RequestSubmittedAt.AddHours(24));
+
+        // Step 1: run with failing producer -> failure
+        var failingProducerMock = new Mock<IRentalEventProducer>();
+        failingProducerMock.Setup(p => p.EnqueueReturnConfirmationOverdueAsync(
+            It.IsAny<ReturnConfirmationOverduePayload>(),
+            It.IsAny<string?>(),
+            It.IsAny<Guid?>(),
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Error.Failure("KAFKA_ERROR", "Broker down"));
+
+        await using (var db1 = NewDb())
+        {
+            var service1 = CreateService(db1, failingProducerMock.Object);
+            var failRes = await service1.ProcessOrderAsync(order.Id);
+            Assert.True(failRes.IsFailure);
+        }
+
+        // Step 2: retry with working producer -> success
+        var workingProducer = new FakeRentalEventProducer();
+        var mockNotifier = new Mock<IOrderHubNotifier>();
+
+        await using (var db2 = NewDb())
+        {
+            var service2 = CreateService(db2, workingProducer, mockNotifier.Object);
+            var successRes = await service2.ProcessOrderAsync(order.Id);
+            Assert.True(successRes.IsSuccess);
+            Assert.Equal(2, successRes.Value);
+        }
+
+        // Verify DB: version incremented by 1, both units flagged
+        await using (var verifyDb = NewDb())
+        {
+            var reloadedOrder = await verifyDb.RentalOrders
+                .Include(o => o.Items).ThenInclude(i => i.ReturnRequests).ThenInclude(r => r.Units)
+                .SingleAsync(o => o.Id == order.Id);
+
+            Assert.Equal(initialVersion + 1, reloadedOrder.Version);
+            var allUnits = reloadedOrder.Items.Single().ReturnRequests.SelectMany(r => r.Units).ToList();
+            Assert.All(allUnits, u => Assert.NotNull(u.OverdueNotifiedAt));
+        }
+
+        // Verify exactly 1 notification to Renter and 1 to Supplier
+        mockNotifier.Verify(n => n.NotifyRenterOrderChangedAsync(
+            order.RenterId,
+            It.Is<RenterOrderChangedNotification>(notif => notif.ChangeType == OrderChangeTypes.ReturnConfirmationOverdue),
+            It.IsAny<CancellationToken>()), Times.Once);
+        mockNotifier.Verify(n => n.NotifySupplierSubOrderChangedAsync(
+            item.SupplierId,
+            It.Is<SupplierSubOrderChangedNotification>(notif => notif.ChangeType == OrderChangeTypes.ReturnConfirmationOverdue),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessBatchAsync_WhenOrderFails_CountsFailedAndNotProcessed()
+    {
+        var (order, item, returnReq) = await SeedOrderWithReturnRequestAsync(1);
+        _clock.SetUtcNow(RequestSubmittedAt.AddHours(24));
+
+        var failingProducerMock = new Mock<IRentalEventProducer>();
+        failingProducerMock.Setup(p => p.EnqueueReturnConfirmationOverdueAsync(
+            It.IsAny<ReturnConfirmationOverduePayload>(),
+            It.IsAny<string?>(),
+            It.IsAny<Guid?>(),
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Error.Failure("KAFKA_ERROR", "Broker down"));
+
+        await using var db = NewDb();
+        var service = CreateService(db, failingProducerMock.Object);
+
+        var batchRes = await service.ProcessBatchAsync(100);
+        Assert.Equal(1, batchRes.FailedOrders);
+        Assert.Equal(0, batchRes.ProcessedOrders);
+        Assert.Equal(0, batchRes.WarnedUnits);
+    }
+
+    [Fact]
+    public async Task ProcessBatchAsync_WhenCancelled_ThrowsOperationCanceledException()
+    {
+        var (order, item, returnReq) = await SeedOrderWithReturnRequestAsync(1);
+        _clock.SetUtcNow(RequestSubmittedAt.AddHours(24));
+
+        await using var db = NewDb();
+        var service = CreateService(db);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.ProcessBatchAsync(100, cts.Token));
     }
 }
