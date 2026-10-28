@@ -84,6 +84,10 @@ Phát khi đơn con của nhà cung cấp có thay đổi dữ liệu hiển th�
 - `SUPPLIER_CONFIRMATION_EXPIRED`: Quá hạn 24h xác nhận của nhà cung cấp.
 - `HANDOVER_OVERDUE`: Cảnh báo quá hạn ngày bàn giao.
 - `HANDOVER_EXPIRED`: Hết hạn bàn giao thiết bị sau grace period.
+- `RETURN_REQUESTED`: Người thuê gửi yêu cầu trả máy; item chưa tự kết thúc thuê.
+- `RETURN_DISPUTED`: Renter hoặc Supplier báo vấn đề trên request unit còn mở.
+- `RETURN_CONFIRMATION_OVERDUE`: Worker ghi nhận cảnh báo quá hạn xác nhận trả; không tự xác nhận thu hồi.
+- `RETURN_RESOLVED`: Admin xác nhận thực nhận hoặc bác một phần/toàn bộ yêu cầu trả.
 - `RETURN_SUBMITTED`: Nhà cung cấp ghi nhận biên bản trả máy (phát ngay sau khi commit biên bản tại Rental).
 - `RETURN_RECORDED`: Thiết bị hoàn trả được Inventory xác nhận đóng allocation.
 - `SETTLEMENT_CHANGED`: Thay đổi đề xuất khấu trừ, khiếu nại hoặc tất toán hoàn tất.
@@ -101,6 +105,10 @@ Phát khi đơn con của nhà cung cấp có thay đổi dữ liệu hiển th�
 | Recovery thất bại/quá hạn/Cancelled | Commit LateRefund | `PAYMENT_REFUND_REQUIRED` | Có | Không (Có nếu từng visible) | Có |
 | Cập nhật DeliveryNote | Commit note | `DELIVERY_NOTE_UPDATED` | Có | Có (nếu đơn Paid) | Có |
 | Xác nhận bàn giao ngoài công trường | Commit Acknowledge | `HANDOVER_ACKNOWLEDGED` | Có | Đúng SubOrder sở hữu | Có |
+| Người thuê khai báo trả máy | Commit ReturnRequest | `RETURN_REQUESTED` | Có | Đúng SubOrder sở hữu | Có |
+| Báo vấn đề trả máy | Commit issue | `RETURN_DISPUTED` | Có | Đúng SubOrder sở hữu | Có |
+| Cảnh báo quá hạn xác nhận trả | Commit dấu cảnh báo + outbox | `RETURN_CONFIRMATION_OVERDUE` | Có | Đúng SubOrder sở hữu | Có |
+| Admin xử lý yêu cầu trả | Commit resolution | `RETURN_RESOLVED` | Có | Đúng SubOrder sở hữu | Có |
 | Biên bản trả máy gửi | Commit ReturnRecord | `RETURN_SUBMITTED` | Có | Đúng SubOrder sở hữu | Có |
 | Inventory đóng hoàn trả | Commit Return closure | `RETURN_RECORDED` | Có | Đúng SubOrder sở hữu | Có |
 | Inventory giải phóng allocation | Commit Release closure | `ALLOCATION_CHANGED` | Có | Đúng SubOrder sở hữu | Có |
@@ -109,6 +117,8 @@ Phát khi đơn con của nhà cung cấp có thay đổi dữ liệu hiển th�
 ## 3. Chiến lược Resync & Cache Invalidation
 
 Notification SignalR đóng vai trò **Invalidation Signal**; client nhận event để biết dữ liệu đã thay đổi và kích hoạt gọi lại 4 API REST hiện hữu (`/api/v1/rental/orders`, `/api/v1/rental/orders/{orderId}`, `/api/v1/rental/supplier/sub-orders`, `/api/v1/rental/supplier/sub-orders/{subOrderId}`).
+
+Luồng và JSON mock Task 1–4 nằm trong [FE Guide bàn giao và trả thiết bị](rental-handover-return-fe-guide.md). Các changeType mới vẫn đi qua hai typed event cũ, không tạo channel riêng. Admin ConfirmReceived có thể phát `RETURN_SUBMITTED` và `RETURN_RESOLVED` cùng version; FE coalesce refetch, không cần hiển thị hai toast. Admin screen refetch API `/api/v1/rental/admin/return-requests` khi mở/focus hoặc sau resolve; không giả định Admin có group SignalR riêng.
 
 ### 3.1. Nguyên tắc so sánh Version
 1. **Renter Detail**: So sánh theo `order.version` của đơn hàng tương ứng `orderId`. Nếu phiên bản nhận từ event lớn hơn phiên bản trong cache UI, kích hoạt fetch lại.

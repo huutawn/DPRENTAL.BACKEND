@@ -1,6 +1,6 @@
 # FE Guide — Bàn giao, yêu cầu trả, thu hồi và bất đồng
 
-Ngày đối chiếu: 28/10/2026. Đối tượng: FE Renter, Supplier và mock API.
+Ngày đối chiếu: 28/10/2026. Bản tích hợp: `659efa41`, branch `rental/feat/handover-implementaion`. Đối tượng: FE Renter, Supplier, Admin và mock API.
 
 ## 1. Phạm vi và mức độ sẵn sàng
 
@@ -8,13 +8,12 @@ Tài liệu nối bốn task thành một luồng sản phẩm. **Có code trên
 
 | Phần | Nguồn đối chiếu | Cách FE sử dụng |
 | --- | --- | --- |
-| Task 1: handover, acknowledgement, cancel-not-delivered | Branch `rental/feat/direct-handover-completion`, commit `08aafa6b` | Contract đã có implementation; kiểm tra branch đã merge/deploy trước khi tích hợp |
-| Task 2: tạo return request | Branch chính `rental/feat/handover-implementaion`, commit `82651ea5` | Có endpoint tạo request |
-| Task 2: đọc Units/ReturnRequests, đóng request unit | Branch `rental/fix/partial-return-review`, commit `62705b27` | Có implementation bổ sung; cần deploy branch sửa để FE đọc dữ liệu này |
-| Task 3: Supplier inspection và thu hồi | API `/returns` đã tồn tại; phần hoàn thiện theo kế hoạch đã chốt | Mock theo mục 7; DAMAGED bắt buộc mô tả + ảnh là yêu cầu sắp bổ sung |
-| Task 4: report issue, deadline, Admin resolution | Kế hoạch, chưa phải contract đã triển khai | Các field/response gắn **DỰ KIẾN** chỉ dùng mock, cần đối chiếu Swagger khi BE bàn giao |
+| Task 1: handover, acknowledgement, cancel-not-delivered | Đã merge qua `810add97` | Mock theo mục 5 |
+| Task 2: tạo request, đọc Units/ReturnRequests, đóng request unit | Đã tích hợp các commit tới `62705b27` | Mock theo mục 6 |
+| Task 3: Supplier inspection và thu hồi | Đã merge tại `10e57a24` | Mock theo mục 7; DAMAGED đã bắt buộc mô tả + ảnh |
+| Task 4: report issue, deadline, Admin resolution | Đã merge tại `659efa41` | Route/DTO có implementation, mock theo mục 8 |
 
-Task 1 và branch sửa Task 2 chưa nằm trong HEAD chính tại thời điểm viết. Không coi tài liệu này là bằng chứng các nhánh đã tích hợp với nhau.
+Cả bốn task đã nằm trong bản tích hợp trên. FE cần xác nhận staging đang chạy cùng phiên bản và đã áp dụng migration return issues trước khi chuyển từ mock sang API thật. Các lỗi còn mở sau review được ghi tại mục 11; tài liệu không khẳng định bản tích hợp đã đạt mọi kiểm thử.
 
 Nguồn nghiệp vụ: [Project Guide](PROJECT_GUIDE.md). Realtime: [hướng dẫn SignalR](rental-realtime-client-integration.md). Chi tiết backend: [Returns](../RentalService/docs/RETURNS.md).
 
@@ -57,15 +56,16 @@ Base path public: **`/api/v1/rental`**. Các route bên dưới viết tương �
 
 - Gửi user authentication theo app hiện có; không đưa API key nội bộ lên browser.
 - JSON camelCase; timestamp ISO 8601 có offset, ưu tiên UTC `Z`. Hiển thị theo `Asia/Ho_Chi_Minh`.
-- Enum có kiểu enum thực tế serialize `UPPER_SNAKE_CASE`: `IN_RENTAL`, `PENDING_SETTLEMENT`, `NORMAL`, `RETURNED_DAMAGED`.
+- Enum item/assignment/condition serialize `UPPER_SNAKE_CASE`: `IN_RENTAL`, `PENDING_SETTLEMENT`, `NORMAL`, `RETURNED_DAMAGED`.
+- **Ngoại lệ Task 4 dùng PascalCase** do converter riêng: request/unit status là `PendingSupplierConfirmation`, `Disputed`, `Confirmed`, `Rejected`, `Resolved` (Resolved chỉ có ở request); decision là `ConfirmReceived`/`RejectRequest`; reporterRole là `Renter`/`Supplier`/`Admin`/`System`. Không đổi toàn bộ status sang cùng một case.
 - Field kiểu string không tự đổi case: handover operation có thể là `Processing`, `Pending`, `Succeeded`; cancel response dùng `Cancelled`. Không dùng chung enum item cho operation status.
-- Header `Idempotency-Key`: bắt buộc cho handover, cancel, return request, Supplier return; tối đa 64 ký tự. Task 4 dự kiến áp dụng tương tự cho report/resolve.
+- Header `Idempotency-Key`: bắt buộc cho handover, cancel, return request, Supplier return, report issue và Admin resolve; tối đa 64 ký tự.
 - Mỗi thao tác mới tạo một key. Retry do timeout/mất mạng giữ nguyên key và payload. Khi sửa payload, tạo key mới sau khi đã xác định kết quả operation cũ.
 - Acknowledgement không yêu cầu key; server giữ thông tin xác nhận đầu tiên.
 
 Các JSON trong tài liệu là **fragment phục vụ mock**, không phải đầy đủ response order. Khi mock GET thật, đặt item trong `subOrders[].items[]` của Renter hoặc `items[]` của Supplier detail.
 
-Fixture cố định: một item 3 máy, mọi thời điểm đều <= mock clock `2026-10-28T10:00:00Z`:
+Fixture cố định: một item 3 máy. Mock clock ban đầu `2026-10-28T10:00:00Z`; kịch bản quá hạn chủ động advance tới `2026-10-29T08:05:00Z`. Thời điểm người dùng khai báo không được vượt mock clock:
 
 | Alias | ID |
 | --- | --- |
@@ -96,7 +96,7 @@ Fixture cố định: một item 3 máy, mọi thời điểm đều <= mock clo
 
 - Task 1: từ 00:00 giờ VN ngày D+1, B có thể hủy vì chưa nhận máy. D là ExpectedStartDate. Auto-expire mặc định D+2 theo grace cấu hình.
 - Bàn giao pending/processing/đối soát chặn hủy, kể cả đã quá hạn. Hiển thị “Đang đối soát bàn giao”.
-- Task 4: hạn xác nhận trả dự kiến bằng ReturnRequest.SubmittedAt + 24 giờ. Không dùng ActualReturnAt do B tự khai để tính hạn.
+- Task 4: `confirmationDeadlineAt` bằng ReturnRequest.SubmittedAt + 24 giờ. Không dùng ActualReturnAt do B tự khai để tính hạn.
 - Hết hạn xác nhận trả chỉ cảnh báo/chuyển xử lý thủ công; không tự xác nhận hoặc trả tiền.
 
 ## 5. Task 1 — Bàn giao và xác nhận nhận
@@ -158,7 +158,7 @@ Item đã hủy nhưng refund còn bất đồng bộ. Không hiển thị “Đ
 
 ## 6. Task 2 — B khai báo trả một phần
 
-GET `/orders/{orderId}` trả fragment item sau khi branch sửa Task 2 được deploy:
+GET `/orders/{orderId}` trả fragment item:
 
 ```json
 {
@@ -190,7 +190,7 @@ Renter không nhận AssetId/AllocationId. AssignmentId là opaque ID để gử
 
 Ảnh optional ở request của B; cần gửi collection `[]` nếu không có. Không gửi field `condition`; inspection thực tế do A thực hiện.
 
-Response Task 2 sau sửa:
+Response `200 OK` tại bản tích hợp Task 1–4:
 
 ```json
 {
@@ -200,12 +200,17 @@ Response Task 2 sau sửa:
   "note": "Đã trả máy thứ nhất tại kho",
   "submittedAt": "2026-10-28T08:05:00Z",
   "units": [
-    { "rentalUnitAssignmentId": "20000000-0000-4000-8000-000000000001", "mediaIds": [], "closedAt": null }
-  ]
+    { "rentalUnitAssignmentId": "20000000-0000-4000-8000-000000000001", "assignmentId": "20000000-0000-4000-8000-000000000001", "mediaIds": [], "closedAt": null, "rejectedAt": null, "status": "PendingSupplierConfirmation", "isOverdue": false, "overdueNotifiedAt": null }
+  ],
+  "status": "PendingSupplierConfirmation",
+  "confirmationDeadlineAt": "2026-10-29T08:05:00Z",
+  "isOverdue": false,
+  "issues": [],
+  "resolutions": []
 }
 ```
 
-Branch sửa còn serialize alias `assignmentId` trên response unit; FE dùng `rentalUnitAssignmentId` làm khóa chính của request unit, không phụ thuộc alias.
+Response unit serialize cả alias `assignmentId`; FE dùng `rentalUnitAssignmentId` làm khóa chính của request unit, không phụ thuộc alias. `units[].status` ở đây là trạng thái request unit (PascalCase), khác `item.units[].status` là trạng thái assignment (UPPER_SNAKE_CASE).
 
 Sau POST, reload GET: u1 có `hasOpenReturnRequest=true`, `canRequestReturn=false`; u2/u3 vẫn chọn được. Item vẫn IN_RENTAL, chưa có ReturnRecord và không có lệnh giải phóng Inventory.
 
@@ -213,7 +218,7 @@ Renter/Supplier xem lịch sử qua `returnRequests` trong detail. GET phản á
 
 ## 7. Task 3 — A kiểm tra và ghi nhận thực nhận
 
-**Dự kiến hoàn thiện trên API đã tồn tại:** `POST /items/{itemId}/returns` — `200 OK`. Không gọi `/return-requests/{id}/confirm`; chưa có route này trong phương án đã chốt.
+`POST /items/{itemId}/returns` — `200 OK`. Không gọi `/return-requests/{id}/confirm`; không có route này trong implementation hiện tại.
 
 ```json
 {
@@ -257,13 +262,13 @@ GET sau đó: request unit u1 có ClosedAt = `2026-10-28T09:05:00Z`, assignment 
 
 Chưa hiển thị COMPLETED hoặc “Đã hoàn cọc” từ POST này. Inventory xử lý NORMAL bằng đóng allocation; DAMAGED bằng đóng allocation và chặn đơn mới. Settlement/Payment tiếp tục riêng.
 
-Task 3 chưa chốt field public cho trạng thái operation Inventory. Nếu API detail chưa cung cấp, hiển thị “Đã ghi nhận thu hồi”, không suy ra “Đã đồng bộ Inventory” từ assignment hoặc ClosedAt. Mock có thể giữ cờ nội bộ của mock server; không tự thêm cờ đó vào contract BE hiện có.
+Renter/Supplier detail chưa có field public biểu thị trạng thái operation Inventory. Hiển thị “Đã ghi nhận thu hồi”, không suy ra “Đã đồng bộ Inventory” từ assignment hoặc ClosedAt. Admin detail có `inventoryUnits` (mục 8). Mock giữ trạng thái Inventory riêng để mô phỏng pending/success/rejected, không thêm field tự đặt vào response Renter/Supplier.
 
-## 8. Task 4 — DỰ KIẾN: bất đồng, quá hạn và xử lý thủ công
+## 8. Task 4 — Bất đồng, quá hạn và xử lý thủ công
 
 ### Báo vấn đề
 
-`POST /items/{itemId}/return-requests/{returnRequestId}/report-issue`, Idempotency-Key bắt buộc. **Route/body theo kế hoạch; response dưới đây là đề xuất mock, chưa freeze.**
+`POST /items/{itemId}/return-requests/{returnRequestId}/report-issue` — `200 OK`, Idempotency-Key bắt buộc. Response là `ReturnRequestResponse` đầy đủ, cùng shape với request trong GET detail.
 
 ```json
 {
@@ -276,7 +281,7 @@ Task 3 chưa chốt field public cho trạng thái operation Inventory. Nếu AP
 
 A hoặc B được báo trên unit còn actionable. Reason bắt buộc <= 500; Note <= 2.000; MediaIds optional tối đa 10, đúng actor upload. Bỏ assignmentIds nghĩa là áp dụng cho toàn bộ unit còn actionable của request. Unit đã confirmed/rejected không báo mới.
 
-**Mock projection DỰ KIẾN**, có thể gắn vào item.returnRequests thay cho request Task 2:
+Response mẫu sau B báo issue; cũng là shape trong `item.returnRequests`:
 
 ```json
 {
@@ -285,36 +290,148 @@ A hoặc B được báo trên unit còn actionable. Reason bắt buộc <= 500;
   "actualReturnAt": "2026-10-28T08:00:00Z",
   "note": "Đã trả máy thứ nhất tại kho",
   "submittedAt": "2026-10-28T08:05:00Z",
-  "status": "DISPUTED",
+  "status": "Disputed",
   "confirmationDeadlineAt": "2026-10-29T08:05:00Z",
-  "overdueConfirmation": false,
+  "isOverdue": false,
   "units": [
-    { "rentalUnitAssignmentId": "20000000-0000-4000-8000-000000000001", "mediaIds": [], "closedAt": null, "rejectedAt": null, "status": "DISPUTED" }
+    { "rentalUnitAssignmentId": "20000000-0000-4000-8000-000000000001", "assignmentId": "20000000-0000-4000-8000-000000000001", "mediaIds": [], "closedAt": null, "rejectedAt": null, "status": "Disputed", "isOverdue": false, "overdueNotifiedAt": null }
+  ],
+  "issues": [
+    {
+      "issueId": "80000000-0000-4000-8000-000000000001",
+      "returnRequestId": "30000000-0000-4000-8000-000000000001",
+      "reporterId": "60000000-0000-4000-8000-000000000001",
+      "reporterRole": "Renter",
+      "reason": "Chưa được xác nhận dù đã trả tại kho",
+      "note": "Đề nghị kiểm tra với nhân viên nhận máy",
+      "mediaIds": [],
+      "reportedAt": "2026-10-28T10:00:00Z",
+      "assignmentIds": ["20000000-0000-4000-8000-000000000001"]
+    }
+  ],
+  "resolutions": []
+}
+```
+
+Issue là lịch sử immutable. A báo thêm thì append report khác với reporterRole `Supplier`, không sửa report của B. Chỉ unit được chọn chuyển Disputed; unit khác của cùng request giữ trạng thái hiện có.
+
+### Status và badge
+
+Unit: `PendingSupplierConfirmation` → `Disputed` → `Confirmed` hoặc `Rejected`. Supplier có thể xác nhận trực tiếp từ pending. Actionable được suy ra bằng `closedAt === null && rejectedAt === null`; FE không gửi field actionable.
+
+Request tổng: còn unit mở và có disputed → `Disputed`; còn unit mở khác → `PendingSupplierConfirmation`; tất cả confirmed → `Confirmed`; tất cả rejected → `Rejected`; đã xử lý hết nhưng kết quả hỗn hợp → `Resolved`.
+
+**Field thực tế là `isOverdue`, không phải `overdueConfirmation`.** Đây là badge độc lập: có thể vừa “Có bất đồng” vừa “Quá hạn xác nhận”. Chỉ còn unit actionable mới overdue hiện tại. `overdueNotifiedAt` là lịch sử worker đã ghi cảnh báo, không quyết định badge.
+
+Tại `now >= confirmationDeadlineAt`, GET trả `isOverdue: true` cho unit actionable và request còn actionable unit, ngay cả khi worker chưa chạy. Worker poll khoảng 60 giây nên `overdueNotifiedAt` có thể còn null. FE refetch tại deadline hoặc khi focus; SignalR cảnh báo không được bảo đảm tới đúng giây hết hạn.
+
+Mock sau đó: advance clock, đặt isOverdue=true; khi giả lập worker thành công mới gán overdueNotifiedAt. Unit được xác nhận/bác thì isOverdue=false, giữ lịch sử timestamp. Không chuyển RentalItem, tạo ReturnRecord hoặc release/refund do hết hạn.
+
+### Admin API — có implementation, Admin UI có thể làm sau
+
+- `GET /admin/return-requests?page=1&pageSize=20&disputed=true&overdue=true`: hai filter kết hợp AND; bỏ filter để không giới hạn theo tiêu chí đó. Có thêm `itemId`, `orderId`. Page tối thiểu 1; pageSize được clamp 1–100.
+- `GET /admin/return-requests/{returnRequestId}`: chi tiết xử lý.
+- `POST /items/{itemId}/return-requests/{returnRequestId}/resolve`: quyết định có audit và Idempotency-Key.
+- ConfirmReceived: chọn assignment, actualReturnAt, inspection từng máy theo Task 3; DAMAGED có mô tả/ảnh do Admin upload. Ghi nhận Admin là actor, không giả mạo Supplier.
+- RejectRequest: chọn assignment, DecisionNote bắt buộc; không tạo ReturnRecord hoặc gọi Inventory. RejectedAt khác ClosedAt. B có thể tạo request mới nếu máy vẫn đủ điều kiện.
+
+Các API này yêu cầu user Admin; service token hoặc Supplier/Renter thông thường không được gọi. Không cho UI cập nhật state item tùy ý.
+
+**ConfirmReceived — body**, response `200 OK` là ReturnRequestResponse, không phải RecordReturnResponse:
+
+```json
+{
+  "decision": "ConfirmReceived",
+  "decisionNote": "Đã đối chiếu biên nhận tại kho",
+  "assignmentIds": ["20000000-0000-4000-8000-000000000001"],
+  "resolutionMediaIds": [],
+  "actualReturnAt": "2026-10-28T09:00:00Z",
+  "units": [
+    { "rentalUnitAssignmentId": "20000000-0000-4000-8000-000000000001", "condition": "NORMAL", "description": null, "mediaIds": [] }
   ]
 }
 ```
 
-Mock report trả `200` với projection trên là lựa chọn của mock; không khẳng định BE sẽ trả đúng shape này. Tách DTO mock Task 4 khỏi DTO đã có để dễ điều chỉnh khi contract được freeze.
+`units` phải khớp chính xác tập assignmentIds, không trùng. `decisionNote` bắt buộc <=2.000 ký tự. Media mức resolution là optional, tối đa 10; không thay thế yêu cầu ảnh từng máy DAMAGED. Thời điểm mock xử lý là `2026-10-28T10:00:00Z`.
 
-### Status và badge
+**RejectRequest — body** (kịch bản thay thế ConfirmReceived, không áp dụng liên tiếp lên cùng unit đã confirmed):
 
-Unit: `PENDING_SUPPLIER_CONFIRMATION` → `DISPUTED` → `CONFIRMED` hoặc `REJECTED`. Supplier có thể xác nhận trực tiếp từ pending.
+```json
+{
+  "decision": "RejectRequest",
+  "decisionNote": "Chưa có chứng cứ thiết bị đã được mang trả",
+  "assignmentIds": ["20000000-0000-4000-8000-000000000001"],
+  "resolutionMediaIds": []
+}
+```
 
-Request tổng: còn unit mở và có disputed → DISPUTED; còn unit mở khác → PENDING_SUPPLIER_CONFIRMATION; tất cả confirmed → CONFIRMED; tất cả rejected → REJECTED; đã xử lý hết nhưng kết quả hỗn hợp → RESOLVED.
+Sau ConfirmReceived: unit có `status: "Confirmed"`, closedAt khác null, rejectedAt=null. Sau RejectRequest: `status: "Rejected"`, rejectedAt khác null, closedAt=null. Cả hai hết actionable và isOverdue=false; giữ issues cũ. Request chỉ chứa u1 có status tương ứng; request nhiều unit áp dụng quy tắc tổng ở trên.
 
-OverdueConfirmation là badge độc lập: có thể vừa “Có bất đồng” vừa “Quá hạn xác nhận”. Chỉ còn unit actionable mới overdue hiện tại; giữ lịch sử cảnh báo sau xử lý.
+Append một phần tử vào `resolutions` (ví dụ RejectRequest):
 
-Khi mock clock tới deadline + request còn mở: bật badge quá hạn và CTA “Chờ hỗ trợ xử lý”. Không chuyển RentalItem, không tạo ReturnRecord, không release/refund. Request có dispute vẫn được Supplier xác nhận; giữ lịch sử issue.
+```json
+{
+  "resolutionId": "90000000-0000-4000-8000-000000000001",
+  "returnRequestId": "30000000-0000-4000-8000-000000000001",
+  "adminId": "60000000-0000-4000-8000-000000000002",
+  "decision": "RejectRequest",
+  "decisionNote": "Chưa có chứng cứ thiết bị đã được mang trả",
+  "resolutionMediaIds": [],
+  "resolvedAt": "2026-10-28T10:00:00Z",
+  "assignmentIds": ["20000000-0000-4000-8000-000000000001"]
+}
+```
 
-### Admin API — DỰ KIẾN, chưa cần Admin UI Phase 1
+Admin detail và resolve response có decisionNote. GET detail dành cho Renter/Supplier trả decisionNote=null, nhưng vẫn có decision, actor, media và thời điểm. Không copy nguyên Admin response vào cache/public view của Renter/Supplier.
 
-- `GET /admin/return-requests`: hàng đợi có phân trang, lọc disputed/overdue.
-- `GET /admin/return-requests/{returnRequestId}`: chi tiết xử lý.
-- `POST /items/{itemId}/return-requests/{returnRequestId}/resolve`: quyết định có audit và Idempotency-Key.
-- ConfirmReceived: chọn assignment, actualReturnAt, inspection từng máy theo Task 3; DAMAGED có mô tả/ảnh. Tạo ReturnRecord qua cùng nghiệp vụ Task 3.
-- RejectRequest: chọn assignment, DecisionNote bắt buộc; không tạo ReturnRecord hoặc gọi Inventory. RejectedAt khác ClosedAt. B có thể tạo request mới nếu máy vẫn đủ điều kiện.
+Sau reject, B có thể tạo request mới cho cùng assignment nếu canRequestReturn=true; request cũ vẫn Rejected. Nếu A thực nhận sau đó bằng `/returns`, không sửa lịch sử request bị bác. Một lần resolve có một decision; muốn nhận u1 và bác u2 phải gửi hai operation với hai key.
 
-Chưa freeze JSON resolve/list/filter; FE mock hành vi, không coi tên field nội bộ ngoài projection ví dụ là contract triển khai. Không cho UI cập nhật state item tùy ý.
+**Admin list — response mẫu**, tại clock `2026-10-29T08:05:00Z`, trước xử lý:
+
+```json
+{
+  "items": [
+    {
+      "returnRequestId": "30000000-0000-4000-8000-000000000001",
+      "itemId": "10000000-0000-4000-8000-000000000001",
+      "orderId": "a0000000-0000-4000-8000-000000000001",
+      "orderCode": "DH-2026-MOCK-001",
+      "renterId": "60000000-0000-4000-8000-000000000001",
+      "supplierId": "60000000-0000-4000-8000-000000000003",
+      "submittedAt": "2026-10-28T08:05:00Z",
+      "confirmationDeadlineAt": "2026-10-29T08:05:00Z",
+      "status": "Disputed",
+      "isOverdue": true,
+      "totalUnits": 1,
+      "actionableUnits": 1,
+      "disputedUnits": 1,
+      "confirmedUnits": 0,
+      "rejectedUnits": 0
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "totalCount": 1,
+  "totalPages": 1
+}
+```
+
+**Admin detail envelope:** `{ request, orderId, orderCode, supplierId, renterId, itemStatus, inventoryUnits }`. `request` dùng ReturnRequestResponse đầy đủ ở trên; `itemStatus` dùng UPPER_SNAKE_CASE. `inventoryUnits` chỉ có trên Admin detail, gồm các assignment thuộc request; phần tử ví dụ sau NORMAL đã được Inventory xác nhận:
+
+```json
+{
+  "rentalUnitAssignmentId": "20000000-0000-4000-8000-000000000001",
+  "assetId": "b0000000-0000-4000-8000-000000000001",
+  "allocationId": "c0000000-0000-4000-8000-000000000001",
+  "assignmentStatus": "RETURNED_NORMAL",
+  "returnRecordId": "70000000-0000-4000-8000-000000000001",
+  "returnCondition": "NORMAL",
+  "allocationClosedAt": "2026-10-28T10:00:10Z",
+  "inventoryDispositionRef": null
+}
+```
+
+Trước Inventory xác nhận, allocationClosedAt còn null dù assignmentStatus đã RETURNED_NORMAL/RETURNED_DAMAGED. Với DAMAGED thành công, inventoryDispositionRef phải có giá trị. Detail này không có receipt status/error, nên allocationClosedAt=null chỉ đủ hiển thị “Chưa có xác nhận Inventory”, chưa phân biệt pending với rejected.
 
 ## 9. Đồng bộ, lỗi và retry
 
@@ -324,8 +441,9 @@ GET nguồn dữ liệu chính:
 - A: `/supplier/sub-orders/{subOrderId}`.
 - SignalR chỉ báo cần reload: `RenterOrderChanged`, `SupplierSubOrderChanged`.
 - Task 1: HANDOVER_CONFIRMED, HANDOVER_ACKNOWLEDGED, ITEM_CANCELLED/HANDOVER_EXPIRED.
-- Branch sửa Task 2: RETURN_REQUESTED. Thu hồi: RETURN_SUBMITTED; Inventory xác nhận: RETURN_RECORDED.
-- Task 4 chưa freeze changeType mới; mock invalidation và reload, không hard-code tên event chưa có vào production.
+- Task 2: RETURN_REQUESTED. Thu hồi: RETURN_SUBMITTED; Inventory xác nhận: RETURN_RECORDED.
+- Task 4: RETURN_DISPUTED, RETURN_CONFIRMATION_OVERDUE, RETURN_RESOLVED. Đây là changeType trong hai typed event hiện có, không phải tên channel SignalR mới.
+- Admin ConfirmReceived có thể gửi RETURN_SUBMITTED và RETURN_RESOLVED với cùng version; coalesce refetch, không cần hiện hai toast giống nhau.
 
 Sau mutation reload detail. Khi reconnect/focus tab cũng reload; notification không có replay đảm bảo. So sánh Renter `version`, Supplier `orderVersion` theo đúng resource. Không dùng một global version cho nhiều SubOrder.
 
@@ -348,10 +466,18 @@ ProblemDetails business error hiện có dùng **title làm mã lỗi**, không 
 | Sai trạng thái handover | 409 INVALID_STATUS | Reload item |
 | Thời điểm trả tương lai | 400 Return.FutureTime | Sửa thời điểm |
 | Máy đã thu hồi | 409 Return.AlreadyReturned | Reload units; bỏ khỏi selection |
+| Issue nhắm unit ngoài request | 400 ReturnIssue.AssignmentNotInRequest | Reload request và sửa selection |
+| Issue nhắm unit đã xử lý | 409 ReturnIssue.UnitNotActionable | Reload; không cho báo lại trên unit đó |
+| Không còn unit actionable để báo issue | 409 ReturnIssue.NoActionableUnits | Hiển thị kết quả xử lý hiện tại |
+| Resolve unit ngoài request | 400 ReturnResolution.AssignmentNotInRequest | Sửa selection |
+| Resolve unit đã xử lý | 409 ReturnResolution.UnitNotActionable | Reload, không gửi quyết định thứ hai |
+| Inspection Admin không khớp assignmentIds | 400 ReturnResolution.UnitsMismatch | Sửa form trước submit |
+| DAMAGED thiếu mô tả/ảnh qua Supplier | 400 Return.InvalidEvidence | Yêu cầu bổ sung dữ liệu |
+| DAMAGED thiếu mô tả/ảnh qua Admin | 400 Return.DamagedDescriptionRequired / Return.DamagedMediaRequired | Yêu cầu bổ sung dữ liệu |
 | Hết phiên / sai quyền / không tìm thấy | 401 / 403 / 404 | Theo auth flow; không lộ dữ liệu item khác |
 | Media/dependency tạm lỗi | HTTP theo ProblemDetails, thường 503 | Giữ form/key; cho retry đúng operation |
 
-Lỗi Task 4 chưa freeze: mock dựa HTTP và thông điệp sản phẩm, không tự công bố error code BE. Với lỗi không nhận diện được, hiển thị thông điệp chung và traceId nếu có.
+Với lỗi không nhận diện được, hiển thị thông điệp chung và traceId nếu có. Validate decision bằng whitelist string `ConfirmReceived`/`RejectRequest`, luôn gửi units/media collections đúng kiểu; BE còn lỗi validation được ghi ở mục 11.
 
 ## 10. Bộ kịch bản mock FE cần có
 
@@ -374,11 +500,23 @@ Mock server giữ state theo item + assignment + request + idempotency key. Có 
 | R06 | A nhận DAMAGED thiếu mô tả/ảnh | Validation lỗi theo Task 3; không tạo record |
 | R07 | A nhận đủ; batch trước có damage + cọc | PENDING_SETTLEMENT, deadline +48h; chưa COMPLETED |
 | R08 | A nhận đủ toàn NORMAL hoặc damage không cọc | PENDING_SETTLEMENT, khấu trừ 0; chưa hoàn tất tài chính |
-| D01 | A/B report issue trên unit mở | DISPUTED; item/Inventory không đổi |
+| D01 | A/B report issue trên unit mở | Request/unit Disputed (PascalCase); item/Inventory không đổi |
 | D02 | Advance clock tới 24h; còn unit mở | Badge overdue; không auto-confirm |
 | D03 | Admin xác nhận u1, bác u2 | u1 Confirmed/ClosedAt; u2 Rejected/RejectedAt; giữ audit |
 | D04 | B tạo lại request cho u2 đã bị bác | Được nếu assignment chưa trả và không có request mở khác |
+| D05 | Partial confirm trong request disputed | Unit nhận thành Confirmed; unit disputed còn lại giữ Disputed |
+| D06 | Đúng deadline nhưng worker chưa chạy | isOverdue=true; overdueNotifiedAt=null; không auto-confirm |
+| D07 | Resolve cùng key/payload rồi replay | Trả snapshot cũ; không thêm resolution/ReturnRecord |
+| D08 | Supplier/Renter gọi Admin API | 403; không hiển thị dữ liệu quản trị |
+| D09 | GET Renter/Supplier sau Admin resolve | DecisionNote=null; không lộ ghi chú quản trị |
 | X01 | Mất mạng sau submit; retry key cũ | Trả cùng response, không duplicate |
 | X02 | Mất SignalR/reconnect, GET về chậm | Resync; response cũ không ghi đè version mới |
 
-Tiêu chí FE hoàn thành mock: đủ các màn hình/nhánh trên; phân biệt dữ liệu “B khai báo”, “A/Admin thực nhận”, “Inventory xác nhận”; phần Task 4 có nhãn contract dự kiến trong fixture và adapter. Trước kết nối staging, đối chiếu Swagger và trạng thái deploy của từng branch trong mục 1.
+Tiêu chí FE hoàn thành mock: đủ các màn hình/nhánh trên; phân biệt dữ liệu “B khai báo”, “A/Admin thực nhận”, “Inventory xác nhận”; dùng đúng case enum và tên field theo bản tích hợp. Trước kết nối staging, đối chiếu Swagger và phiên bản deploy trong mục 1.
+
+## 11. Điểm còn mở sau review ảnh hưởng cách FE tích hợp
+
+- Worker còn lỗi rollback khi nhiều request cùng order: trường hợp enqueue cảnh báo đầu lỗi, xử lý request sau thành công có thể lưu dấu đã cảnh báo sai. FE không dùng overdueNotifiedAt để kết luận người dùng đã nhận notification; badge dựa isOverdue từ GET. Mock luồng chuẩn vẫn giữ cảnh báo idempotent; lỗi này cần BE sửa, không mô phỏng như hành vi mong muốn.
+- Admin resolve thiếu guard decision không hợp lệ/null collections. Mock dữ liệu không hợp lệ nên trả 400 theo kỳ vọng; BE hiện có thể trả 500 ở các payload này. Không đổi thành success hoặc auto-retry bằng key mới. FE validation hỗ trợ UX, không thay thế bản sửa BE.
+- Admin/Supplier hiện còn hai đoạn workflow thu hồi riêng; BE sẽ cần hợp nhất. FE tiếp tục dùng hai contract đã ghi rõ, không dựa vào cấu trúc implementation.
+- Lỗi event Rental → Recommendation và exit code maintenance nằm ngoài flow HTTP FE. Không suy ra bản release đã đạt kiểm thử từ việc mock hoạt động; các vấn đề này vẫn đang chờ xử lý.
