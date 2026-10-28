@@ -104,13 +104,12 @@ Quy tắc:
 - Lỗi tạm thời (DB/Network) được retry bằng exponential backoff có jitter (1s đến 30s, tối đa 5 lần mỗi round, tiếp tục các round tiếp theo khi outage kéo dài; không chuyển DLQ do mất kết nối).
 - Trong thời gian retry wait, partition được pause và tiếp tục poll để duy trì heartbeat consumer group.
 
-## Valkey Snapshot Cache Worker
+## Valkey Projection Cache Worker
 
 - Chạy ngay khi khởi động rồi định kỳ mỗi 60 giây.
-- Đọc top 20 equipment types của user (theo trang) và top 100 listings toàn cầu (score DESC, UUID ASC).
-- Ghi snapshot JSON nguyên tử với TTL 300 giây. Lua script bảo đảm chỉ snapshot có `generatedAt >= existing generatedAt` mới được ghi đè.
+- Đọc top 20 equipment types của user (theo trang) và top 300 listings toàn cầu (score DESC, UUID DESC).
+- Xuất bản ranking lên Valkey dưới dạng ZSET với TTL 300 giây bằng Lua script nguyên tử kiểm soát lease token.
 - Valkey outage không làm gián đoạn API readiness hay luồng ingest Kafka.
-
 ## Build và Test
 
 ```bash

@@ -63,6 +63,9 @@
         "orderVersion": {
           "type": "integer",
           "minimum": 1
+        },
+        "completedAt": {
+          "$ref": "#/$defs/utcIso8601Timestamp"
         }
       }
     }
