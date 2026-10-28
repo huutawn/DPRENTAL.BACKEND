@@ -46,6 +46,7 @@ public static class KafkaContractSpec
         public const string RentalItemReturned = "RentalItemReturned";
         public const string RentalUnitsReturned = "RentalUnitsReturned";
         public const string RentalHandoverOverdue = "RentalHandoverOverdue";
+        public const string ReturnConfirmationOverdue = "ReturnConfirmationOverdue";
         public const string CartItemAdded = "CartItemAdded";
         public const string RentalItemPaid = "RentalItemPaid";
         public const string RentalItemCompleted = "RentalItemCompleted";

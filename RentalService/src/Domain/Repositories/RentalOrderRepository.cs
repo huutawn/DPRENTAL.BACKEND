@@ -704,6 +704,20 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<Guid>> GetReturnConfirmationOverdueOrderIdsAsync(
+        DateTimeOffset now, int batchSize, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.ReturnRequests
+            .AsNoTracking()
+            .Where(r => r.ConfirmationDeadlineAt <= now
+                     && r.Units.Any(u => u.ClosedAt == null && u.RejectedAt == null && u.OverdueNotifiedAt == null))
+            .Join(_dbContext.RentalItems, r => r.RentalItemId, i => i.Id, (r, i) => new { r, i.RentalOrderId })
+            .GroupBy(x => x.RentalOrderId)
+            .OrderBy(g => g.Min(x => x.r.ConfirmationDeadlineAt))
+            .Select(g => g.Key)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
     public async Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(
     DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
     {

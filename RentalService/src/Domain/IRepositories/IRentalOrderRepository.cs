@@ -42,6 +42,10 @@ public interface IRentalOrderRepository
         CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
 
+    Task<IReadOnlyList<Guid>> GetReturnConfirmationOverdueOrderIdsAsync(
+        DateTimeOffset now, int batchSize,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
     Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(
         DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());

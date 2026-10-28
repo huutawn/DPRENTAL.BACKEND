@@ -119,6 +119,11 @@ public interface IRentalEventProducer
         Guid? causationId = null,
         CancellationToken cancellationToken = default);
 
+    Task<Result<ProducerEnqueueResult>> EnqueueReturnConfirmationOverdueAsync(
+        ReturnConfirmationOverduePayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
     Task<Result<ProducerEnqueueResult>> EnqueueLatePaymentRefundRequestedAsync(
         LatePaymentRefundRequestedPayload payload,
         string? correlationId = null,
