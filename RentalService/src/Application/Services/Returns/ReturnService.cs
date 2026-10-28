@@ -103,6 +103,14 @@ public sealed partial class ReturnService(
             domainUnits,
             now, supplierId);
         if (recorded.IsFailure) return recorded.Error;
+        var returnedAssignmentIds = request.Units.Select(u => u.RentalUnitAssignmentId).ToHashSet();
+        foreach (var reqUnit in item.ReturnRequests.SelectMany(r => r.Units))
+        {
+            if (returnedAssignmentIds.Contains(reqUnit.RentalUnitAssignmentId) && !reqUnit.ClosedAt.HasValue)
+            {
+                reqUnit.SetClosedAt(now);
+            }
+        }
         RentalOrderStatusPolicy.Apply(order, now, key);
         order.RecordReadModelUpdate(now);
         var response = new RecordReturnResponse(recorded.Value.Id, now,
