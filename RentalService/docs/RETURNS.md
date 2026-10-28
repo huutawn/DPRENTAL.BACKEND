@@ -91,3 +91,80 @@ dotnet test RentalService.sln
 Return tests create isolated PostgreSQL databases and apply the actual migration chain.
 Coverage includes partial/final return, immutable evidence, authorization, idempotency, concurrent requests,
 Media failure/retry, transaction rollback, API routing and Swagger documentation.
+
+## Partial return requests lifecycle
+
+### 1. Overview and Endpoints
+
+The partial return flow allows renters to declare their intention to return specific equipment units before supplier pickup/handover, and enables suppliers to view those requests and atomically close them upon recording asset returns.
+
+- **Renter Order Detail**: `GET /api/v1/rental/orders/{orderId}`
+  - Item response includes `units`: array of units with `assignmentId`, `status`, `hasOpenReturnRequest`, and `canRequestReturn`. Internal IDs (`assetId`, `allocationId`, serials) are never exposed to renters.
+  - Item response includes `returnRequests`: array of return requests submitted on this item.
+- **Renter Return Request**: `POST /api/v1/rental/items/{itemId}/return-requests`
+  - Header `Idempotency-Key` (1–64 characters).
+  - Body contains `actualReturnAt`, optional `note`, and `units`: list of `rentalUnitAssignmentId` and `mediaIds`.
+  - Response: `ReturnRequestResponse` containing `returnRequestId`, `itemId`, `actualReturnAt`, `note`, `submittedAt`, and `units` (`rentalUnitAssignmentId`, `mediaIds`, `closedAt`).
+  - At creation time, `closedAt` is always `null`.
+- **Supplier SubOrder Detail**: `GET /api/v1/rental/supplier/sub-orders/{subOrderId}`
+  - Item response includes `returnRequests`: array of return requests submitted for the supplier's items.
+  - Isolated per supplier: suppliers only see return requests and items belonging to their suborder.
+- **Supplier Record Return**: `POST /api/v1/rental/items/{itemId}/returns`
+  - Unchanged endpoint contract. Atomically closes matching open request units upon persisting the `ReturnRecord`.
+
+### 2. Return Eligibility & Single Source of Truth
+
+Assignment return eligibility is governed by `ReturnEligibilityPolicy` in the Application layer, shared by both query mapping (`canRequestReturn`) and command validation (`CreateReturnRequestAsync`).
+
+An assignment is eligible (`canRequestReturn == true`) if and only if:
+1. The item status is `InRental`.
+2. The assignment status is `HandedOver` and associated with the item's `HandoverRecord`.
+3. The assignment has not yet been returned (`ReturnRecordId == null`).
+4. The assignment has no currently open return request unit (`ClosedAt == null`).
+
+### 3. Atomic Closing of Request Units on Supplier Return
+
+When a supplier successfully calls `POST /api/v1/rental/items/{itemId}/returns`:
+1. The `ReturnRecord` is created for the validated assignments.
+2. Open request units (`ClosedAt == null`) for the matching item and returned assignments are identified.
+3. `ClosedAt` is set to the current server timestamp (`timeProvider.GetUtcNow()`), **not** the self-reported `ActualReturnAt`.
+4. All updates (`ReturnRecord`, assignment status, `ClosedAt`, state transition, operation receipt, outbox) are saved and committed atomically within the same database transaction.
+5. If inventory command enqueue, event enqueue, or database `SaveChangesAsync` fails, the transaction is rolled back completely; neither `ReturnRecord` nor `ClosedAt` is persisted.
+
+**Constraints:**
+- Partial returns: Returning a subset of machines in a multi-unit request closes only the returned units; remaining units stay open.
+- Multiple requests: A single return call closes matching units across multiple requests.
+- Direct returns: Returning units without prior return requests is valid and succeeds normally.
+- Isolation: Never closes units of other items or assignments.
+
+### 4. ClosedAt Timing and Replay Snapshot Semantics
+
+- **Initial POST**: Returns `closedAt: null` for all units.
+- **GET Order / SubOrder Details**: Reflects the current database state (live `ClosedAt` timestamp once closed by supplier).
+- **Idempotent Replay**: Replaying `POST /return-requests` or `POST /returns` with the same key and payload returns the saved snapshot from `RentalOperationReceipt.ApiResponseJson`. It does not mutate data, does not change `ClosedAt`, and does not re-emit SignalR notifications or outbox events.
+- **Legacy Receipt Compatibility**: Older receipts in the database stored without `ClosedAt` deserialize with `ClosedAt = null`.
+
+### 5. Realtime Notifications
+
+- When a return request is successfully created and committed:
+  - Change type: `RETURN_REQUESTED` (`OrderChangeTypes.ReturnRequested`).
+  - Sent via `IOrderHubNotifier` to the renter (`NotifyRenterOrderChangedAsync`) and the suborder's supplier (`NotifySupplierSubOrderChangedAsync`).
+  - Sent strictly after transaction commit. Replay does not trigger notifications or increment order version.
+  - Notification failures are caught and logged; they do not cause a committed request to fail.
+- When a supplier records return:
+  - Existing `RETURN_SUBMITTED` notification is dispatched. Subsequent GET calls immediately reflect updated `ClosedAt` values.
+
+### 6. Maintenance & Legacy Data Reconciliation
+
+For databases where return requests were created before automatic closing was introduced, the maintenance tool reconciles unclosed request units idempotently:
+
+```powershell
+# Dry-run mode (default without --apply): counts unclosed units whose assignment already has a ReturnRecord
+dotnet run --project RentalService/src/Maintenance -- reconcile-return-requests
+
+# Apply mode: reconciles units in finite batches (100 per batch) with transaction per batch
+dotnet run --project RentalService/src/Maintenance -- reconcile-return-requests --apply
+```
+
+- **Logic**: Selects `ReturnRequestUnit` where `ClosedAt == null` and the assignment has a completed `ReturnRecord` on the same item. Sets `ClosedAt = ReturnRecord.SubmittedAt`.
+- **Safety**: Does not alter evidence, state transitions, or operation receipts. Re-running returns 0 records to change.
