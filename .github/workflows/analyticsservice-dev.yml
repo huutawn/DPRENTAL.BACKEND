@@ -1,10 +1,10 @@
-# Maintained on auth/develop-ci-cd; auth/develop intentionally omits this workflow.
-name: AuthService CI/CD (dev)
+# Maintained on analytic/develop-ci-cd; analytic/develop intentionally omits this workflow.
+name: AnalyticsService CI/CD (dev)
 
 on:
   push:
     branches:
-      - auth/develop-ci-cd
+      - analytic/develop-ci-cd
 
 permissions:
   contents: read
@@ -35,10 +35,10 @@ jobs:
         include:
           - name: runtime
             target: runtime
-            image_name: dprental-auth
+            image_name: dprental-analytics
           - name: migrator
             target: migrator
-            image_name: dprental-auth-migrator
+            image_name: dprental-analytics-migrator
     permissions:
       contents: read
       packages: write
@@ -72,7 +72,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish AuthService ${{ matrix.name }} image
+      - name: Publish AnalyticsService ${{ matrix.name }} image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -106,15 +106,15 @@ jobs:
           set -euo pipefail
           [[ "$IMAGE_NAMESPACE" =~ ^[a-z0-9][a-z0-9._-]*$ ]]
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          for image in dprental-auth dprental-auth-migrator; do
+          for image in dprental-analytics dprental-analytics-migrator; do
             timeout 60s docker manifest inspect "ghcr.io/$IMAGE_NAMESPACE/$image:$RELEASE_SHA" >/dev/null
             printf 'Readable image: %s\n' "$image"
           done
 
   deploy-dev:
-    name: Deploy authservice locally on Ubuntu VM
+    name: Deploy analyticsservice locally on Ubuntu VM
     needs: [publish, deployment-policy]
-    if: ${{ github.event_name == 'push' && github.repository == 'huutawn/DPRENTAL.BACKEND' && github.ref == 'refs/heads/auth/develop-ci-cd' && vars.DEV_DEPLOY_ENABLED == 'true' }}
+    if: ${{ github.event_name == 'push' && github.repository == 'huutawn/DPRENTAL.BACKEND' && github.ref == 'refs/heads/analytic/develop-ci-cd' && vars.ANALYTICS_DEPLOY_ENABLED == 'true' }}
     runs-on:
       - self-hosted
       - linux
@@ -140,4 +140,4 @@ jobs:
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test -n "$GHCR_USERNAME"
           test -n "$GHCR_TOKEN"
-          printf '%s\n' "$GHCR_USERNAME" "$GHCR_TOKEN" | sudo -n /usr/local/sbin/dprental-deploy auth "$RELEASE_SHA"
+          printf '%s\n' "$GHCR_USERNAME" "$GHCR_TOKEN" | sudo -n /usr/local/sbin/dprental-deploy analytics "$RELEASE_SHA"
