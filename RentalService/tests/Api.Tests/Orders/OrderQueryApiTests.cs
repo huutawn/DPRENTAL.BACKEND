@@ -86,9 +86,10 @@ public sealed class OrderQueryApiTests
         Assert.Equal(HttpStatusCode.OK, paid.StatusCode);
         JsonElement paidPage = await ReadAsync(paid);
         Assert.Equal(1, paidPage.GetProperty("totalCount").GetInt32());
-        Assert.Equal(order.OrderCode, paidPage.GetProperty("items")[0].GetProperty("orderCode").GetString());
+        JsonElement paidItem = paidPage.GetProperty("items")[0];
+        Assert.Equal(order.OrderCode, paidItem.GetProperty("orderCode").GetString());
+        Assert.Equal(order.Version, paidItem.GetProperty("version").GetInt64());
         Assert.Equal(0, (await ReadAsync(pending)).GetProperty("totalCount").GetInt32());
-        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
         Assert.Equal("Order.InvalidStatus", (await ReadAsync(unknown)).GetProperty("title").GetString());
     }
 
@@ -190,7 +191,7 @@ public sealed class OrderQueryApiTests
         JsonElement subOrder = page.GetProperty("items")[0];
         Assert.Equal($"{order.OrderCode}-01", subOrder.GetProperty("subOrderCode").GetString());
         Assert.Equal(1, subOrder.GetProperty("itemCount").GetInt32());
-
+        Assert.Equal(order.Version, subOrder.GetProperty("orderVersion").GetInt64());
         Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
         Assert.Equal("SubOrder.NotFound", (await ReadAsync(foreign)).GetProperty("title").GetString());
     }

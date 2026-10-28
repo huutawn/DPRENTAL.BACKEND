@@ -1,3 +1,6 @@
+using Dprental.RentalService.Api.Hubs.Security;
+using Dprental.RentalService.Application.Security;
+using Microsoft.Net.Http.Headers;
 using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Configuration;
@@ -61,6 +64,30 @@ public static class JwtAuthenticationExtensions
                     ClockSkew = TimeSpan.FromSeconds(30),
                     RequireSignedTokens = true,
                     RequireExpirationTime = true
+                };
+
+                bearerOptions.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = context =>
+                    {
+                        // Chỉ cho phép đọc cookie accessToken tại OrderHub và endpoint negotiate.
+                        if (OrderHubPathHelper.IsOrderHubPath(context.Request.Path))
+                        {
+                            // Authorization header có ưu tiên: nếu header đã có, không được fallback sang cookie.
+                            if (!context.Request.Headers.ContainsKey(HeaderNames.Authorization) &&
+                                string.IsNullOrWhiteSpace(context.Token))
+                            {
+                                if (context.Request.Cookies.TryGetValue(OrderHubSecurityConstants.AccessTokenCookieName, out string? cookieToken) &&
+                                    !string.IsNullOrWhiteSpace(cookieToken))
+                                {
+                                    context.Token = cookieToken;
+                                }
+                            }
+                        }
+
+                        // Tuyệt đối không đọc access_token từ query string cho Hub hoặc REST.
+                        return Task.CompletedTask;
+                    }
                 };
             });
 

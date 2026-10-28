@@ -267,6 +267,7 @@ public sealed class InventoryRentalCartReaderTests
             => AvailabilityHandler?.Invoke(request) ?? throw new NotSupportedException();
 
         public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationAsync(string allocationGroupId, ConfirmAllocationRequest request, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     private sealed class FakeHttpMessageHandler(System.Net.HttpStatusCode statusCode, string content) : System.Net.Http.HttpMessageHandler

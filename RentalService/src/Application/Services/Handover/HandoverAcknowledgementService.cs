@@ -9,13 +9,15 @@ using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Handover;
+using Dprental.RentalService.Application.Hubs;
 
 public sealed class HandoverAcknowledgementService(
     IRentalOrderRepository orderRepository,
     IOrderLockManager lockManager,
     IUnitOfWork unitOfWork,
     TimeProvider timeProvider,
-    ILogger<HandoverAcknowledgementService> logger) : IHandoverAcknowledgementService
+    ILogger<HandoverAcknowledgementService> logger,
+    IOrderHubNotifier? notifier = null) : IHandoverAcknowledgementService
 {
     public async Task<Result<AcknowledgeReceiptResponse>> AcknowledgeAsync(
         Guid itemId,
@@ -82,6 +84,8 @@ public sealed class HandoverAcknowledgementService(
             return result.Error;
         }
 
+        order.RecordReadModelUpdate(utcNow);
+
         try
         {
             await orderRepository.UpdateAsync(order, cancellationToken);
@@ -91,6 +95,34 @@ public sealed class HandoverAcknowledgementService(
         {
             unitOfWork.DiscardChanges();
             throw;
+        }
+
+        if (notifier != null)
+        {
+            await notifier.NotifyRenterOrderChangedAsync(
+                order.RenterId,
+                new RenterOrderChangedNotification(
+                    Guid.NewGuid(),
+                    order.Id,
+                    order.Version,
+                    OrderChangeTypes.HandoverAcknowledged,
+                    utcNow),
+                cancellationToken);
+
+            var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+            if (subOrder != null)
+            {
+                await notifier.NotifySupplierSubOrderChangedAsync(
+                    item.SupplierId,
+                    new SupplierSubOrderChangedNotification(
+                        Guid.NewGuid(),
+                        order.Id,
+                        subOrder.Id,
+                        order.Version,
+                        OrderChangeTypes.HandoverAcknowledged,
+                        utcNow),
+                    cancellationToken);
+            }
         }
 
         logger.LogInformation(

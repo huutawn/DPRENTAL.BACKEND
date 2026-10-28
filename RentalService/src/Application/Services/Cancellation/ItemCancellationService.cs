@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 #pragma warning disable CA1848, CA1873
 using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Cancellation;
@@ -37,6 +38,7 @@ public sealed class ItemCancellationService : IItemCancellationService
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ItemCancellationService> _logger;
     private readonly int _autoExpireGraceHours;
+    private readonly IOrderHubNotifier? _notifier;
     public ItemCancellationService(
         IRentalOrderRepository orderRepository,
         IOrderLockManager lockManager,
@@ -46,7 +48,8 @@ public sealed class ItemCancellationService : IItemCancellationService
         TimeProvider? timeProvider = null,
         ILogger<ItemCancellationService>? logger = null,
         IOptions<HandoverOverdueOptions>? handoverOptions = null,
-        IRentalEventProducer? rentalEvents = null)
+        IRentalEventProducer? rentalEvents = null,
+        IOrderHubNotifier? notifier = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _lockManager = lockManager ?? throw new ArgumentNullException(nameof(lockManager));
@@ -60,6 +63,7 @@ public sealed class ItemCancellationService : IItemCancellationService
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ItemCancellationService>.Instance;
         _autoExpireGraceHours = (handoverOptions?.Value ?? new HandoverOverdueOptions()).AutoExpireGraceHours;
+        _notifier = notifier;
     }
 
     public async Task<Result<CancelNotDeliveredResponse>> CancelByRenterAsync(
@@ -253,6 +257,38 @@ public sealed class ItemCancellationService : IItemCancellationService
             await _orderRepository.UpdateAsync(order, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
+
+            if (_notifier != null)
+            {
+                string changeType = order.Status == RentalOrderStatus.Cancelled
+                    ? OrderChangeTypes.OrderCancelled
+                    : OrderChangeTypes.ItemCancelled;
+
+                await _notifier.NotifyRenterOrderChangedAsync(
+                    order.RenterId,
+                    new RenterOrderChangedNotification(
+                        Guid.NewGuid(),
+                        order.Id,
+                        order.Version,
+                        changeType,
+                        utcNow),
+                    cancellationToken);
+
+                var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+                if (subOrder != null)
+                {
+                    await _notifier.NotifySupplierSubOrderChangedAsync(
+                        item.SupplierId,
+                        new SupplierSubOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            subOrder.Id,
+                            order.Version,
+                            changeType,
+                            utcNow),
+                        cancellationToken);
+                }
+            }
             return response;
         }
         catch
@@ -402,6 +438,38 @@ public sealed class ItemCancellationService : IItemCancellationService
             await _orderRepository.UpdateAsync(order, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
+
+            if (_notifier != null)
+            {
+                string changeType = order.Status == RentalOrderStatus.Expired
+                    ? OrderChangeTypes.OrderCancelled
+                    : OrderChangeTypes.HandoverExpired;
+
+                await _notifier.NotifyRenterOrderChangedAsync(
+                    order.RenterId,
+                    new RenterOrderChangedNotification(
+                        Guid.NewGuid(),
+                        order.Id,
+                        order.Version,
+                        changeType,
+                        utcNow),
+                    cancellationToken);
+
+                var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+                if (subOrder != null)
+                {
+                    await _notifier.NotifySupplierSubOrderChangedAsync(
+                        item.SupplierId,
+                        new SupplierSubOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            subOrder.Id,
+                            order.Version,
+                            changeType,
+                            utcNow),
+                        cancellationToken);
+                }
+            }
             return true;
         }
         catch

@@ -57,7 +57,7 @@ RentalService/src/Application/Kafka/
 - Khi nhận được xác nhận `InventoryAllocationCommandSucceeded` cho `ExtendHold`, hệ thống hoàn tất receipt và phát sự kiện `RentalSupplierConfirmationRequested` để supplier tiến hành xác nhận đơn con.
 
 ### 2.3. Supplier Decision & Handover
-- Supplier accept phát lệnh `ConfirmAllocation` qua Kafka. Khi Inventory xác nhận thành công, mục thuê chuyển sang `AwaitingHandover` và phát sự kiện `RentalItemConfirmed`.
+- Supplier accept lưu intent và operation key trước khi gọi HTTP `ConfirmAllocation` đến Inventory; không giữ database transaction trong cuộc gọi HTTP. Sau phản hồi thành công, `ApplyConfirmAllocationResultAsync` mở transaction để lưu trạng thái `AwaitingHandover`, transition, receipt thành công và `RentalItemConfirmed` outbox cùng nhau. Enqueue hoặc lưu thất bại thì rollback và bỏ thay đổi đang tracking; intent đã lưu vẫn còn để recovery/retry dùng lại operation key cũ. Trước khi đọc lại dưới order lock, bỏ snapshot tracking từ giai đoạn claim intent để tránh dùng version cũ khi có request đồng thời. Gửi lại cùng idempotency key trả response đã lưu, không tạo thêm transition/event.
 - Bàn giao thiết bị (`HandoverItem`): Lưu evidence immutable của supplier, ghi nhận biên nhận tác vụ `MarkAssetsHandedOver` và enqueue lệnh qua Kafka.
 - Trạng thái thiết bị chỉ chuyển sang `HandedOver` và mục thuê chuyển sang `InRental` khi nhận được sự kiện xác nhận thành công từ Inventory.
 

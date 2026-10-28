@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("RentalService.Application")]
 [assembly: InternalsVisibleTo("RentalService.Api.Tests")]
+[assembly: InternalsVisibleTo("ApiGateway.Tests")]
 
 namespace Dprental.RentalService.Domain;
 

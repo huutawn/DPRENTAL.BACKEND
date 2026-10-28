@@ -1,4 +1,5 @@
 #pragma warning disable CA1848, CA1873
+using Dprental.RentalService.Application.Hubs;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -45,6 +46,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
     private readonly ILogger<RentalOperationExecutor> _logger;
     private readonly string _rentalEventsTopic;
     private readonly IRentalEventProducer _rentalEvents;
+    private readonly IOrderHubNotifier? _notifier;
     public RentalOperationExecutor(
         IRentalOrderRepository orderRepository,
         IOperationReceiptRepository receiptRepository,
@@ -59,7 +61,8 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         ICheckoutInvoiceIssuer? invoiceIssuer = null,
         IRentalCheckoutOperationRepository? checkoutOperationRepo = null,
         TimeProvider? timeProvider = null,
-        IRentalEventProducer? rentalEvents = null)
+        IRentalEventProducer? rentalEvents = null,
+        IOrderHubNotifier? notifier = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _receiptRepository = receiptRepository ?? throw new ArgumentNullException(nameof(receiptRepository));
@@ -78,6 +81,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
             outboxRepository,
             Microsoft.Extensions.Options.Options.Create(new Dprental.RentalService.Application.Kafka.Configuration.KafkaOptions { RentalEventsTopic = _rentalEventsTopic }),
             _timeProvider);
+        _notifier = notifier;
     }
 
     public RentalOperationExecutor(
@@ -235,7 +239,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
                     {
                         return Error.Conflict("ITEM_IN_TERMINAL_STATE", $"Mục thuê đã ở trạng thái {item.Status}; không thể áp dụng accept.");
                     }
-                    var acceptResult = await ConfirmAllocationCoreAsync(order, item, receipt, receipt.OperationId, item.SupplierId, isReconciliation: true, cancellationToken);
+                    var acceptResult = await ConfirmAllocationCoreAsync(order, item, receipt, receipt.OperationId, cancellationToken);
                     return acceptResult.IsSuccess ? Result.Success() : acceptResult.Error;
                 }
 

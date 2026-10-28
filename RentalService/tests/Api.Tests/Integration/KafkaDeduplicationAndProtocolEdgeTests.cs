@@ -459,14 +459,14 @@ public sealed class KafkaDeduplicationAndProtocolEdgeTests
     {
         public Func<KafkaMessageEnvelope<InvoicePaidPayload>, Task<Result>>? Handler { get; set; }
 
-        public async Task<Result<bool>> ApplyInvoicePaidStagedAsync(RentalOrder order, KafkaMessageEnvelope<InvoicePaidPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default)
+        public async Task<Result<PaymentApplyResult>> ApplyInvoicePaidStagedAsync(RentalOrder order, KafkaMessageEnvelope<InvoicePaidPayload> envelope, RentalInboxMessage inboxMessage, CancellationToken cancellationToken = default)
         {
             if (Handler != null)
             {
                 var res = await Handler(envelope);
-                return res.IsFailure ? res.Error : Result.Success(true);
+                return res.IsFailure ? res.Error : Result.Success(PaymentApplyResult.Paid(PaymentNotificationMetadata.Empty));
             }
-            return Result.Success(true);
+            return Result.Success(PaymentApplyResult.Paid(PaymentNotificationMetadata.Empty));
         }
 
         public Task<Result> ProcessInvoicePaidAsync(KafkaMessageEnvelope<InvoicePaidPayload> envelope, CancellationToken cancellationToken = default) =>

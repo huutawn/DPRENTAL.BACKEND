@@ -96,6 +96,7 @@ public sealed record OrderSummaryItemResponse(
 /// <param name="PaymentDeadline">Hạn thanh toán.</param>
 /// <param name="CreatedAt">Thời điểm đặt hàng.</param>
 /// <param name="Items">Các dòng thiết bị trong đơn kèm thông tin nhận biết cơ bản.</param>
+/// <param name="Version">Phiên bản dữ liệu của đơn hàng cha, tăng khi có thay đổi nghiệp vụ.</param>
 public sealed record RenterOrderSummaryResponse(
     Guid OrderId,
     string OrderCode,
@@ -108,7 +109,8 @@ public sealed record RenterOrderSummaryResponse(
     int SubOrderCount,
     DateTimeOffset PaymentDeadline,
     DateTimeOffset CreatedAt,
-    IReadOnlyList<OrderSummaryItemResponse> Items)
+    IReadOnlyList<OrderSummaryItemResponse> Items,
+    long Version)
 {
     public RenterOrderSummaryResponse(
         Guid orderId,
@@ -121,8 +123,9 @@ public sealed record RenterOrderSummaryResponse(
         int itemCount,
         int subOrderCount,
         DateTimeOffset paymentDeadline,
-        DateTimeOffset createdAt)
-        : this(orderId, orderCode, status, currency, totalRentalAmount, totalDepositAmount, totalAmount, itemCount, subOrderCount, paymentDeadline, createdAt, [])
+        DateTimeOffset createdAt,
+        long version)
+        : this(orderId, orderCode, status, currency, totalRentalAmount, totalDepositAmount, totalAmount, itemCount, subOrderCount, paymentDeadline, createdAt, [], version)
     {
     }
 }
@@ -199,6 +202,7 @@ public sealed record RenterOrderDetailResponse(
 /// <param name="ItemCount">Số dòng thiết bị.</param>
 /// <param name="PaidAt">Thời điểm người thuê thanh toán.</param>
 /// <param name="CreatedAt">Thời điểm đặt hàng.</param>
+/// <param name="OrderVersion">Phiên bản dữ liệu của đơn hàng cha, tăng khi có thay đổi nghiệp vụ.</param>
 public sealed record SupplierSubOrderSummaryResponse(
     Guid SubOrderId,
     string SubOrderCode,
@@ -210,7 +214,8 @@ public sealed record SupplierSubOrderSummaryResponse(
     decimal TotalAmount,
     int ItemCount,
     DateTimeOffset? PaidAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    long OrderVersion);
 
 /// <summary>
 /// Chi tiết đơn con mà nhà cung cấp xem: chỉ thiết bị của mình, không có tổng tiền cả đơn hay tài khoản hoàn tiền.

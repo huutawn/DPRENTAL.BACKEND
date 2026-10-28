@@ -20,10 +20,12 @@ internal static class PaymentPublicationProofTestFixture
         return options;
     }
 
-    public static string Create(string envelopeJson, string topic = "payment.events.v1", string? messageKey = null)
+    public static string Create(string envelopeJson, string topic = "payment.events.v1", string? messageKey = null, DateTimeOffset? issuedAt = null)
     {
         using var envelope = JsonDocument.Parse(envelopeJson);
         var root = envelope.RootElement;
+        DateTimeOffset effectiveIssuedAt = issuedAt
+            ?? (root.TryGetProperty("occurredAt", out var occProp) && occProp.TryGetDateTimeOffset(out var occ) ? occ : DateTimeOffset.UtcNow);
         string signedBody = JsonSerializer.Serialize(new
         {
             schema = 1,
@@ -38,7 +40,7 @@ internal static class PaymentPublicationProofTestFixture
             messageKey = messageKey ?? root.GetProperty("aggregateId").GetString(),
             messageType = root.GetProperty("messageType").GetString(),
             payloadDigest = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(envelopeJson))),
-            issuedAt = DateTimeOffset.UtcNow
+            issuedAt = effectiveIssuedAt
         }, JsonOptions);
         byte[] signature = SigningKey.SignData(Encoding.UTF8.GetBytes("DPRENTAL:PUBLICATION:V1:" + signedBody),
             HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);

@@ -1,3 +1,4 @@
+using Dprental.RentalService.Api.Hubs.Extensions;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -28,6 +29,7 @@ builder.Services.AddHealthChecks()
         tags: ["ready"]);
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddOrderHub(builder.Configuration);
 builder.Services.AddRentalJwtAuthentication(builder.Configuration);
 builder.Services.AddScoped<IRentalCallerContext>(sp =>
 {
@@ -132,6 +134,7 @@ if (app.Environment.IsDevelopment())
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseMiddleware<InternalApiKeyMiddleware>();
+app.UseOrderHubOriginGuard();
 app.UseAuthentication();
 app.Use(async (context, next) =>
 {
@@ -170,6 +173,7 @@ HealthCheckOptions readinessOptions = new()
 app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
 
 app.MapControllers();
+app.MapOrderHub();
 
 app.Run();
 

@@ -17,6 +17,7 @@ namespace Dprental.RentalService.Api.Controllers;
 [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
 [Authorize]
 [Route("supplier/sub-orders")]
+[Route("~/rental/supplier/sub-orders")]
 public sealed class SupplierSubOrdersController(
     ISupplierSubOrderQueryService subOrders,
     ISupplierDecisionService decisions,

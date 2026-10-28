@@ -1,3 +1,5 @@
+using Dprental.RentalService.Application.DTOs.Payment;
+using Dprental.RentalService.Application.Hubs;
 #pragma warning disable CA1848, CA1873
 using System.Security.Cryptography;
 using System.Text;
@@ -47,6 +49,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
     private readonly IRentalCheckoutOperationRepository? _checkoutOperationRepo;
     private readonly IInventoryAllocationResultHandler _allocationResultHandler;
     private readonly InventoryReturnResultHandler? _inventoryReturnResultHandler;
+    private readonly IOrderHubNotifier? _notifier;
     [ActivatorUtilitiesConstructor]
     public PaymentEventsDispatcher(
         IInboxRepository inboxRepository,
@@ -62,7 +65,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         ILogger<PaymentEventsDispatcher>? logger = null,
         TimeProvider? timeProvider = null,
         IRentalSettledConsumer? rentalSettledConsumer = null,
-        InventoryReturnResultHandler? inventoryReturnResultHandler = null)
+        InventoryReturnResultHandler? inventoryReturnResultHandler = null,
+        IOrderHubNotifier? notifier = null)
     {
         _inboxRepository = inboxRepository ?? throw new ArgumentNullException(nameof(inboxRepository));
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
@@ -79,6 +83,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         _rentalSettledConsumer = rentalSettledConsumer ?? new Dprental.RentalService.Application.Services.Integration.RentalSettledConsumer(
             new RentalEventProducer(outboxWriter, Microsoft.Extensions.Options.Options.Create(_kafkaOptions), _timeProvider), _timeProvider);
         _inventoryReturnResultHandler = inventoryReturnResultHandler;
+        _notifier = notifier;
     }
 
     internal PaymentEventsDispatcher(
@@ -571,7 +576,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
             try
             {
-                Result allocResult;
+                Result<AllocationEventApplyResult> allocResult;
                 if (msg.MessageType is KafkaContractSpec.EventTypes.ReturnedUnitsApplied or KafkaContractSpec.EventTypes.ReturnedUnitsRejected)
                 {
                     if (_inventoryReturnResultHandler is null)
@@ -580,9 +585,10 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                         _unitOfWork.DiscardChanges();
                         return Error.Failure("RETURN_RESULT_HANDLER_NOT_CONFIGURED", "Inventory return result handler is required.");
                     }
-                    allocResult = msg.MessageType == KafkaContractSpec.EventTypes.ReturnedUnitsApplied
+                    var res = msg.MessageType == KafkaContractSpec.EventTypes.ReturnedUnitsApplied
                         ? await _inventoryReturnResultHandler.ApplyStagedAsync(msg.Payload, cancellationToken)
                         : await _inventoryReturnResultHandler.RejectStagedAsync(msg.Payload, cancellationToken);
+                    allocResult = res.IsFailure ? res.Error : Result.Success(AllocationEventApplyResult.NoChange());
                 }
                 else
                 {
@@ -601,6 +607,68 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                 await tx.CommitAsync(cancellationToken);
                 _logger.LogInformation("Successfully processed allocation inbox message {Id} ({Type}) for Order {OrderId}",
                     msg.Id, msg.MessageType, orderId);
+                if (_notifier != null && order != null && allocResult.Value.Metadata is { } allocMeta)
+                {
+                    try
+                    {
+                        if (allocMeta.RenterNotification is { } renterNote)
+                        {
+                            await _notifier.NotifyRenterOrderChangedAsync(order.RenterId, renterNote, cancellationToken);
+                        }
+
+                        foreach (var (supplierId, supplierNote) in allocMeta.SupplierNotifications)
+                        {
+                            await _notifier.NotifySupplierSubOrderChangedAsync(supplierId, supplierNote, cancellationToken);
+                        }
+                    }
+                    catch (Exception nex)
+                    {
+                        _logger.LogError(nex, "Error dispatching realtime notification for allocation event {MessageId}", msg.Id);
+                    }
+                }
+                if (_notifier != null && order != null && string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.ReturnedUnitsApplied, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(msg.Payload);
+                        if (doc.RootElement.TryGetProperty("payload", out var payloadElem))
+                        {
+                            Guid rentalItemId = payloadElem.TryGetProperty("rentalItemId", out var riProp) && riProp.TryGetGuid(out var ri) ? ri : Guid.Empty;
+                            var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
+                            if (item != null)
+                            {
+                                await _notifier.NotifyRenterOrderChangedAsync(
+                                    order.RenterId,
+                                    new RenterOrderChangedNotification(
+                                        Guid.NewGuid(),
+                                        order.Id,
+                                        order.Version,
+                                        OrderChangeTypes.ReturnRecorded,
+                                        utcNow),
+                                    cancellationToken);
+
+                                var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+                                if (subOrder != null)
+                                {
+                                    await _notifier.NotifySupplierSubOrderChangedAsync(
+                                        item.SupplierId,
+                                        new SupplierSubOrderChangedNotification(
+                                            Guid.NewGuid(),
+                                            order.Id,
+                                            subOrder.Id,
+                                            order.Version,
+                                            OrderChangeTypes.ReturnRecorded,
+                                            utcNow),
+                                        cancellationToken);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to emit ReturnRecorded notification for message {MessageId}", msg.Id);
+                    }
+                }
                 return Result.Success();
             }
             catch
@@ -700,9 +768,14 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                     return Error.Failure("DLQ_TRANSACTION_FAILED", tex.Message);
                 }
             }
-
-            var applyResult = await ApplyStagedEventAsync(msg, order!,
-                () => _paymentWorkflowService.ApplyInvoicePaidStagedAsync(order!, envelope!, msg, cancellationToken), cancellationToken);
+            PaymentApplyResult? paymentResult = null;
+            var applyResult = await ApplyStagedPaymentEventAsync(msg, order!,
+                async () =>
+                {
+                    var res = await _paymentWorkflowService.ApplyInvoicePaidStagedAsync(order!, envelope!, msg, cancellationToken);
+                    if (res.IsSuccess) paymentResult = res.Value;
+                    return res;
+                }, cancellationToken);
             if (applyResult.IsSuccess) return applyResult;
             result = applyResult.Error;
         }
@@ -813,6 +886,37 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                 await tx.CommitAsync(cancellationToken);
                 _logger.LogInformation("Successfully processed inbox message {Id} ({Type}) for Order {OrderId}",
                     msg.Id, msg.MessageType, order!.Id);
+
+                if (result.Value && _notifier != null)
+                {
+                    if (string.Equals(msg.MessageType, KafkaContractSpec.EventTypes.InvoicePaid, StringComparison.OrdinalIgnoreCase))
+                    {
+                        DateTimeOffset occurredAt = order!.PaymentConfirmedAt ?? utcNow;
+                        await _notifier.NotifyRenterOrderChangedAsync(
+                            order.RenterId,
+                            new RenterOrderChangedNotification(
+                                Guid.NewGuid(),
+                                order.Id,
+                                order.Version,
+                                OrderChangeTypes.PaymentConfirmed,
+                                occurredAt),
+                            cancellationToken);
+
+                        foreach (var subOrder in order.SubOrders)
+                        {
+                            await _notifier.NotifySupplierSubOrderChangedAsync(
+                                subOrder.SupplierId,
+                                new SupplierSubOrderChangedNotification(
+                                    Guid.NewGuid(),
+                                    order.Id,
+                                    subOrder.Id,
+                                    order.Version,
+                                    OrderChangeTypes.PaymentConfirmed,
+                                    occurredAt),
+                                cancellationToken);
+                        }
+                    }
+                }
                 return Result.Success();
             }
             catch (Exception ex)
@@ -952,6 +1056,54 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             throw;
         }
     }
+    private async Task<Result> ApplyStagedPaymentEventAsync(
+        RentalInboxMessage message,
+        RentalOrder order,
+        Func<Task<Result<PaymentApplyResult>>> apply,
+        CancellationToken cancellationToken)
+    {
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            Result<PaymentApplyResult> result = await apply();
+            if (result.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return result.Error;
+            }
+
+            DateTimeOffset now = _timeProvider.GetUtcNow();
+            message.MarkProcessed(now);
+            _inboxRepository.Update(message);
+            if (result.Value.Changed)
+            {
+                await _orderRepository.UpdateAsync(order, cancellationToken);
+            }
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+
+            if (_notifier != null && result.Value.Metadata is { } meta)
+            {
+                if (meta.RenterNotification is { } renterNote)
+                {
+                    await _notifier.NotifyRenterOrderChangedAsync(order.RenterId, renterNote, cancellationToken);
+                }
+
+                foreach (var (supplierId, supplierNote) in meta.SupplierNotifications)
+                {
+                    await _notifier.NotifySupplierSubOrderChangedAsync(supplierId, supplierNote, cancellationToken);
+                }
+            }
+            return Result.Success();
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
+            throw;
+        }
+    }
 
     private async Task<Result> ApplyStagedEventAsync(
         RentalInboxMessage message,
@@ -979,6 +1131,92 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             }
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
+
+            if (result.Value && _notifier != null)
+            {
+                if (string.Equals(message.MessageType, KafkaContractSpec.EventTypes.InvoicePaid, StringComparison.OrdinalIgnoreCase))
+                {
+                    DateTimeOffset occurredAt = order.PaymentConfirmedAt ?? now;
+                    await _notifier.NotifyRenterOrderChangedAsync(
+                        order.RenterId,
+                        new RenterOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            order.Version,
+                            OrderChangeTypes.PaymentConfirmed,
+                            occurredAt),
+                        cancellationToken);
+
+                    foreach (var subOrder in order.SubOrders)
+                    {
+                        await _notifier.NotifySupplierSubOrderChangedAsync(
+                            subOrder.SupplierId,
+                            new SupplierSubOrderChangedNotification(
+                                Guid.NewGuid(),
+                                order.Id,
+                                subOrder.Id,
+                                order.Version,
+                                OrderChangeTypes.PaymentConfirmed,
+                                occurredAt),
+                            cancellationToken);
+                    }
+                }
+                else if (string.Equals(message.MessageType, KafkaContractSpec.EventTypes.RefundCompleted, StringComparison.OrdinalIgnoreCase))
+                {
+                    await _notifier.NotifyRenterOrderChangedAsync(
+                        order.RenterId,
+                        new RenterOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            order.Version,
+                            OrderChangeTypes.RefundChanged,
+                            now),
+                        cancellationToken);
+                }
+                else if (string.Equals(message.MessageType, KafkaContractSpec.EventTypes.RentalSettled, StringComparison.OrdinalIgnoreCase))
+                {
+                    await _notifier.NotifyRenterOrderChangedAsync(
+                        order.RenterId,
+                        new RenterOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            order.Version,
+                            OrderChangeTypes.SettlementChanged,
+                            now),
+                        cancellationToken);
+
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(message.Payload);
+                        if (doc.RootElement.TryGetProperty("payload", out var payloadElem))
+                        {
+                            Guid rentalItemId = payloadElem.TryGetProperty("rentalItemId", out var riProp) && riProp.TryGetGuid(out var ri) ? ri : Guid.Empty;
+                            var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
+                            if (item != null)
+                            {
+                                var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+                                if (subOrder != null)
+                                {
+                                    await _notifier.NotifySupplierSubOrderChangedAsync(
+                                        item.SupplierId,
+                                        new SupplierSubOrderChangedNotification(
+                                            Guid.NewGuid(),
+                                            order.Id,
+                                            subOrder.Id,
+                                            order.Version,
+                                            OrderChangeTypes.SettlementChanged,
+                                            now),
+                                        cancellationToken);
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Safely ignored if parsing payload fails
+                    }
+                }
+            }
             return Result.Success();
         }
         catch

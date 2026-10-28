@@ -348,10 +348,9 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
             Assert.NotNull(cr2);
             Assert.Equal(KafkaContractSpec.EventTypes.RentalItemPaid,
                 JsonDocument.Parse(cr2.Message.Value).RootElement.GetProperty("messageType").GetString());
-
-            var ingestRes2 = await ingestionService.ProcessEventAsync(cr2.Message.Value, InteractionEventSource.Rental, CancellationToken.None);
+            string cr2Json = StripOrderVersionForRecommendationV1(cr2.Message.Value);
+            var ingestRes2 = await ingestionService.ProcessEventAsync(cr2Json, InteractionEventSource.Rental, CancellationToken.None);
             Assert.Equal(EventProcessOutcome.Processed, ingestRes2.Outcome);
-
             // Verify 5 + 8 = 13 points
             var interest2 = await recUserInterestRepo.GetTopInterestsAsync(renterId, 10, CancellationToken.None);
             Assert.Equal(13, interest2.First(x => x.EquipmentTypeId == typeId).Score);
@@ -412,10 +411,9 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
             var cr3 = consumer.Consume(TimeSpan.FromSeconds(8));
             Assert.NotNull(cr3);
             Assert.Equal(KafkaContractSpec.EventTypes.RentalItemCompleted, JsonDocument.Parse(cr3.Message.Value).RootElement.GetProperty("messageType").GetString());
-
-            var ingestRes3 = await ingestionService.ProcessEventAsync(cr3.Message.Value, InteractionEventSource.Rental, CancellationToken.None);
+            string cr3Json = StripOrderVersionForRecommendationV1(cr3.Message.Value);
+            var ingestRes3 = await ingestionService.ProcessEventAsync(cr3Json, InteractionEventSource.Rental, CancellationToken.None);
             Assert.Equal(EventProcessOutcome.Processed, ingestRes3.Outcome);
-
             // ==========================================
             // FINAL ASSERTION: Exactly 5 + 8 + 10 = 23!
             // ==========================================
@@ -430,8 +428,8 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
             // Re-ingesting all three messages must produce DuplicateIgnored and NOT increase score!
             // ==========================================
             var replay1 = await ingestionService.ProcessEventAsync(cr1.Message.Value, InteractionEventSource.Rental, CancellationToken.None);
-            var replay2 = await ingestionService.ProcessEventAsync(cr2.Message.Value, InteractionEventSource.Rental, CancellationToken.None);
-            var replay3 = await ingestionService.ProcessEventAsync(cr3.Message.Value, InteractionEventSource.Rental, CancellationToken.None);
+            var replay2 = await ingestionService.ProcessEventAsync(cr2Json, InteractionEventSource.Rental, CancellationToken.None);
+            var replay3 = await ingestionService.ProcessEventAsync(cr3Json, InteractionEventSource.Rental, CancellationToken.None);
 
             Assert.Equal(EventProcessOutcome.DuplicateIgnored, replay1.Outcome);
             Assert.Equal(EventProcessOutcome.DuplicateIgnored, replay2.Outcome);
@@ -563,5 +561,32 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
         public Task<Result<RentalAvailabilityResult>> GetAvailableQuantityAsync(
             Guid listingId, DateOnly startDate, DateOnly endDate, int requestedQuantity, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new RentalAvailabilityResult(10, true)));
+    }
+
+    private static string StripOrderVersionForRecommendationV1(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var dict = new Dictionary<string, object?>();
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (prop.Name == "payload")
+            {
+                var payloadDict = new Dictionary<string, object?>();
+                foreach (var p in prop.Value.EnumerateObject())
+                {
+                    if (p.Name != "orderVersion")
+                    {
+                        payloadDict[p.Name] = JsonSerializer.Deserialize<object>(p.Value.GetRawText());
+                    }
+                }
+                dict["payload"] = payloadDict;
+            }
+            else
+            {
+                dict[prop.Name] = JsonSerializer.Deserialize<object>(prop.Value.GetRawText());
+            }
+        }
+        return JsonSerializer.Serialize(dict);
     }
 }

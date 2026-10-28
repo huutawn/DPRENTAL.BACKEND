@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 #pragma warning disable CA1848, CA1873
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
@@ -27,6 +28,9 @@ public sealed partial class RentalOperationExecutor
     {
         await using var orderLock = await _lockManager.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(5), cancellationToken);
 
+        // A sub-order request persists its intents before releasing and reacquiring this lock.
+        // Reload the aggregate so a concurrent confirmation cannot leave stale tracked versions here.
+        _unitOfWork.DiscardChanges();
         var order = await _orderRepository.GetByIdWithDetailsAsync(orderId, cancellationToken);
         if (order == null) return Error.NotFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng.");
 
@@ -123,10 +127,8 @@ public sealed partial class RentalOperationExecutor
             receipt.MarkProcessing(utcNow);
         }
         // 6. Execute ConfirmAllocation core
-        string providerKey = receipt.InventoryOperationKey ?? ReadConfirmProviderKey(receipt) ??
-            ComputeOperationKey("ConfirmAllocation", $"{order.Id}:{item.Id}:{normalizedKey}");
-        receipt.SetInventoryOperationKey(providerKey);
-        return await ConfirmAllocationCoreAsync(order, item, receipt, providerKey, supplierId, isReconciliation: false, cancellationToken);
+        string providerKey = ComputeOperationKey("ConfirmAllocation", $"{order.Id}:{item.Id}:{normalizedKey}");
+        return await ConfirmAllocationCoreAsync(order, item, receipt, providerKey, cancellationToken);
     }
 
     /// <summary>
@@ -288,6 +290,34 @@ public sealed partial class RentalOperationExecutor
 
             await CommitLocalChangesAsync(order, cancellationToken);
             await tx.CommitAsync(cancellationToken);
+
+            if (_notifier != null)
+            {
+                await _notifier.NotifyRenterOrderChangedAsync(
+                    order.RenterId,
+                    new RenterOrderChangedNotification(
+                        Guid.NewGuid(),
+                        order.Id,
+                        order.Version,
+                        OrderChangeTypes.SupplierRejected,
+                        utcNow),
+                    cancellationToken);
+
+                var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == supplierId);
+                if (subOrder != null)
+                {
+                    await _notifier.NotifySupplierSubOrderChangedAsync(
+                        supplierId,
+                        new SupplierSubOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            subOrder.Id,
+                            order.Version,
+                            OrderChangeTypes.SupplierRejected,
+                            utcNow),
+                        cancellationToken);
+                }
+            }
             return response;
         }
         catch
@@ -382,77 +412,7 @@ public sealed partial class RentalOperationExecutor
             return Error.Conflict("ITEM_IN_TERMINAL_STATE", $"Mục thuê đã ở trạng thái {item.Status}; không thể khôi phục thành AwaitingHandover.");
         }
 
-        return await ConfirmAllocationCoreAsync(order, item, acceptReceipt, acceptOperationKey, item.SupplierId, isReconciliation: true, cancellationToken);
-    }
-
-    private async Task<Result<SupplierDecisionResponse>> ConfirmAllocationCoreAsync(
-        RentalOrder order,
-        RentalItem item,
-        RentalOperationReceipt receipt,
-        string operationKey,
-        Guid supplierId,
-        bool isReconciliation,
-        CancellationToken cancellationToken)
-    {
-        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-        await using var transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
-        receipt.BeginProviderAttempt(utcNow);
-        {
-            var confirmCmd = new ConfirmAllocationCommandPayload(order.Id, item.Id, operationKey);
-            var enqueueResult = await _inventoryCommands.EnqueueConfirmAllocationAsync(confirmCmd, correlationId: order.Id.ToString("D"), cancellationToken: cancellationToken);
-            if (enqueueResult.IsFailure)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                _unitOfWork.DiscardChanges();
-                return enqueueResult.Error;
-            }
-        }
-
-        receipt.MarkProcessing(utcNow);
-        await CommitLocalChangesAsync(order, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return BuildSupplierResponse(order, item);
-    }
-
-    private static Result ValidateAllocationResponse(RentalItem item, ConfirmAllocationResponse confirmData)
-    {
-        if (string.IsNullOrWhiteSpace(confirmData.ReceiptRef))
-        {
-            return Error.Unprocessable("INVALID_ALLOCATION", "ReceiptRef từ Inventory không được rỗng.");
-        }
-
-        if (!string.Equals(confirmData.AllocationGroupId, item.AllocationGroupId, StringComparison.OrdinalIgnoreCase))
-        {
-            return Error.Unprocessable("INVALID_ALLOCATION", "AllocationGroupId từ Inventory không khớp với đơn hàng.");
-        }
-
-        if (confirmData.Units == null || confirmData.Units.Count != item.UnitAssignments.Count)
-        {
-            return Error.Unprocessable("INVALID_ALLOCATION", "Số lượng units xác nhận không khớp với số lượng của đơn hàng.");
-        }
-
-        // All units must be distinct and confirmed
-        var confirmedUnitIds = confirmData.Units.Select(u => u.AllocationId).ToList();
-        if (confirmedUnitIds.Distinct().Count() != confirmedUnitIds.Count)
-        {
-            return Error.Unprocessable("INVALID_ALLOCATION", "Danh sách units từ Inventory có chứa AllocationId trùng lặp.");
-        }
-
-        foreach (var unit in item.UnitAssignments)
-        {
-            var match = confirmData.Units.FirstOrDefault(u => u.AllocationId == unit.AllocationId && u.AssetId == unit.AssetId);
-            if (match == null)
-            {
-                return Error.Unprocessable("INVALID_ALLOCATION", $"Unit assignment {unit.AllocationId} không tồn tại trong kết quả từ Inventory.");
-            }
-
-            if (!string.Equals(match.Status, "Confirmed", StringComparison.OrdinalIgnoreCase))
-            {
-                return Error.Unprocessable("INVALID_ALLOCATION", $"Trạng thái của unit {unit.AllocationId} không phải là Confirmed (nhận: {match.Status}).");
-            }
-        }
-
-        return Result.Success();
+        return await ConfirmAllocationCoreAsync(order, item, acceptReceipt, acceptOperationKey, cancellationToken);
     }
 
     /// <summary>Response API của supplier accept, lưu vào phiếu để gửi lại cùng khóa trả đúng kết quả đã chốt.</summary>

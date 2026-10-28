@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.Hubs;
 using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Application.Security;
@@ -186,6 +187,30 @@ public sealed partial class RentalOperationExecutor
 
             await CommitLocalChangesAsync(order, cancellationToken);
             await tx.CommitAsync(cancellationToken);
+
+            if (_notifier != null)
+            {
+                await _notifier.NotifyRenterOrderChangedAsync(
+                    order.RenterId,
+                    new RenterOrderChangedNotification(
+                        Guid.NewGuid(),
+                        order.Id,
+                        order.Version,
+                        OrderChangeTypes.SupplierRejected,
+                        utcNow),
+                    cancellationToken);
+
+                await _notifier.NotifySupplierSubOrderChangedAsync(
+                    supplierId,
+                    new SupplierSubOrderChangedNotification(
+                        Guid.NewGuid(),
+                        order.Id,
+                        subOrderId,
+                        order.Version,
+                        OrderChangeTypes.SupplierRejected,
+                        utcNow),
+                    cancellationToken);
+            }
             return Result.Success<IReadOnlyList<SupplierDecisionResponse>>(responses);
         }
         catch

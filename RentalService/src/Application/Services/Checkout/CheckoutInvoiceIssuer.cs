@@ -1,5 +1,6 @@
 using System.Text.Json;
 #pragma warning disable CA1848, CA1873
+using Dprental.RentalService.Application.Hubs;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.Errors;
@@ -24,14 +25,15 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<CheckoutInvoiceIssuer> _logger;
-
+    private readonly IOrderHubNotifier? _notifier;
     public CheckoutInvoiceIssuer(
         IPaymentRentalClient payment,
         IRentalOrderRepository orders,
         IRentalCheckoutOperationRepository checkoutOperations,
         IUnitOfWork unitOfWork,
         TimeProvider timeProvider,
-        ILogger<CheckoutInvoiceIssuer> logger)
+        ILogger<CheckoutInvoiceIssuer> logger,
+        IOrderHubNotifier? notifier = null)
     {
         _payment = payment ?? throw new ArgumentNullException(nameof(payment));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
@@ -39,6 +41,7 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _notifier = notifier;
     }
 
     public async Task<Result<CreateInvoiceResponse>> EnsureInvoiceAsync(RentalOrder order, CancellationToken cancellationToken = default)
@@ -128,6 +131,7 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
         {
             return CheckoutErrors.OrderExpired;
         }
+        bool attachedNewInvoice = false;
         if (string.IsNullOrWhiteSpace(order.InvoiceRef))
         {
             Result attached = order.AttachInvoice(invoice.InvoiceRef, completedAt);
@@ -136,12 +140,26 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
                 _logger.LogError("Không gắn được hóa đơn vào đơn {OrderCode}: {ErrorCode}.", order.OrderCode, attached.Error.Code);
                 return CheckoutErrors.InvoiceRejected;
             }
+            attachedNewInvoice = true;
         }
 
         var localResult = await CompleteInvoiceLocalAsync(order, completedAt, invoice, cancellationToken);
         if (localResult.IsFailure)
         {
             return localResult.Error;
+        }
+
+        if (attachedNewInvoice && _notifier != null)
+        {
+            await _notifier.NotifyRenterOrderChangedAsync(
+                order.RenterId,
+                new RenterOrderChangedNotification(
+                    Guid.NewGuid(),
+                    order.Id,
+                    order.Version,
+                    OrderChangeTypes.InvoiceAttached,
+                    completedAt),
+                cancellationToken);
         }
 
         if (!IsReady(invoice, order) &&
