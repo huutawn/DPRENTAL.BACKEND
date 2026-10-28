@@ -22,7 +22,7 @@ using Dprental.RentalService.Application.Kafka.Producers;
 
 namespace Dprental.RentalService.Application.Services.Returns;
 
-public sealed class ReturnService(
+public sealed partial class ReturnService(
     IRentalOrderRepository repository,
     IOrderLockManager locks,
     IUnitOfWork unitOfWork,

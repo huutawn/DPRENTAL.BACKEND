@@ -32,6 +32,8 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .Include(o => o.Items)
                 .ThenInclude(i => i.ReturnRecords)
             .Include(o => o.Items)
+                .ThenInclude(i => i.ReturnRequests).ThenInclude(r => r.Units)
+            .Include(o => o.Items)
                 .ThenInclude(i => i.DeductionProposal!)
                     .ThenInclude(p => p.Dispute)
             .Include(o => o.StateTransitions)
@@ -117,6 +119,14 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 entry.State = EntityState.Modified;
             }
             // Register new children before DetectChanges discovers their non-empty GUIDs.
+            foreach (var request in order.Items.SelectMany(i => i.ReturnRequests))
+            {
+                if (_dbContext.Entry(request).State == EntityState.Detached)
+                    _dbContext.Entry(request).State = EntityState.Added;
+                foreach (var unit in request.Units)
+                    if (_dbContext.Entry(unit).State == EntityState.Detached)
+                        _dbContext.Entry(unit).State = EntityState.Added;
+            }
             foreach (var record in order.Items.SelectMany(i => i.ReturnRecords))
             {
                 if (_dbContext.Entry(record).State == EntityState.Detached)

@@ -22,6 +22,8 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
     public DbSet<RentalTermsAcceptance> RentalTermsAcceptances => Set<RentalTermsAcceptance>();
     public DbSet<HandoverRecord> HandoverRecords => Set<HandoverRecord>();
     public DbSet<ReturnRecord> ReturnRecords => Set<ReturnRecord>();
+    public DbSet<ReturnRequest> ReturnRequests => Set<ReturnRequest>();
+    public DbSet<ReturnRequestUnit> ReturnRequestUnits => Set<ReturnRequestUnit>();
     public DbSet<DeductionProposal> DeductionProposals => Set<DeductionProposal>();
     public DbSet<Dispute> Disputes => Set<Dispute>();
     public DbSet<RentalOperationReceipt> RentalOperationReceipts => Set<RentalOperationReceipt>();
@@ -193,6 +195,24 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
         });
 
         // RentalUnitAssignment
+        modelBuilder.Entity<ReturnRequest>(b =>
+        {
+            b.Property(r => r.Id).ValueGeneratedNever();
+            b.HasOne(r => r.RentalItem).WithMany(i => i.ReturnRequests)
+                .HasForeignKey(r => r.RentalItemId).OnDelete(DeleteBehavior.Restrict);
+            b.HasMany(r => r.Units).WithOne(u => u.ReturnRequest)
+                .HasForeignKey(u => u.ReturnRequestId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ReturnRequestUnit>(b =>
+        {
+            b.Property(u => u.Id).ValueGeneratedNever();
+            b.Property(u => u.MediaIds).HasField("_mediaIds");
+            b.HasOne<RentalUnitAssignment>().WithMany().HasForeignKey(u => u.RentalUnitAssignmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(u => u.RentalUnitAssignmentId).IsUnique().HasFilter("\"ClosedAt\" IS NULL");
+        });
+
         modelBuilder.Entity<RentalUnitAssignment>(b =>
         {
             b.HasIndex(u => new { u.RentalItemId, u.AssetId })

@@ -147,6 +147,9 @@ public partial class RentalItem
     private readonly List<ReturnRecord> _returnRecords = [];
     public IReadOnlyCollection<ReturnRecord> ReturnRecords => _returnRecords.AsReadOnly();
 
+    private readonly List<ReturnRequest> _returnRequests = [];
+    public IReadOnlyCollection<ReturnRequest> ReturnRequests => _returnRequests.AsReadOnly();
+
     public DeductionProposal? DeductionProposal { get; private set; }
 
     private RentalItem()
@@ -223,6 +226,12 @@ public partial class RentalItem
         _returnRecords.Add(returnRecord);
     }
 
+    public void AddReturnRequest(ReturnRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _returnRequests.Add(request);
+    }
+
     public void SetDeductionProposal(DeductionProposal proposal)
     {
         ArgumentNullException.ThrowIfNull(proposal);
@@ -257,7 +266,6 @@ public partial class RentalItem
     public bool ContainsEvidenceMedia(Guid mediaId)
     {
         if (mediaId == Guid.Empty) return false;
-
         foreach (var unit in _unitAssignments)
         {
             if (unit.HandoverMediaIds.Contains(mediaId) ||
