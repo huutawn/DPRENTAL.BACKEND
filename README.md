@@ -116,3 +116,22 @@ Quy tắc:
 dotnet build RecommendationService.sln -c Release
 dotnet test RecommendationService.sln -c Release
 ```
+
+## CI/CD dev với self-hosted runner
+
+Workflow chỉ nhận push vào `recommendation/develop-ci-cd`. Build/publish vẫn chạy trên
+`ubuntu-24.04`, giữ nguyên Dockerfile, build context và toàn bộ targets/tag full SHA.
+CI kiểm thử script deployment trên runner hosted; job deploy chỉ được gửi tới
+`self-hosted, linux, x64, dprental-deploy` khi repository variable
+`DEV_DEPLOY_ENABLED=true` được bật theo phê duyệt Phase 3. Mặc định job deploy được skip.
+
+Deployment gọi entrypoint do root quản lý; không checkout shell để chạy bằng sudo,
+không dùng SSH trong pipeline. Shared release state được khóa bằng `flock`, sử dụng
+candidate, backup và phê duyệt có hạn theo SHA; chỉ ghi `release.env` sau health/smoke.
+
+Xem [hướng dẫn vận hành và recovery](docs/SELF_HOSTED_DEPLOYMENT.md) và
+[audit/validation](docs/CICD_AUDIT.md). Không cấp runner quyền Docker trực tiếp.
+
+```bash
+python3 -m unittest discover -s scripts/tests -p 'test_deploy*.py' -v
+```
