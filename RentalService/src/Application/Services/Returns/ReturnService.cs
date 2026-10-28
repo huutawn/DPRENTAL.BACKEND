@@ -135,36 +135,63 @@ public sealed partial class ReturnService(
                 unit.MediaIds, supplierId, mediaClient, isRequired: unit.Condition == UnitCondition.Damaged, ct: cancellationToken);
             if (evidence.IsFailure) return evidence.Error;
         }
-        var domainUnits = request.Units.Select(u => new ReturnUnitData(
-            u.RentalUnitAssignmentId, u.Condition, u.Description, u.MediaIds)).ToList();
         now = timeProvider.GetUtcNow();
         var previousStatus = item.Status;
-        var recorded = item.RecordAssetReturns(supplierId, request.ActualReturnAt, request.Note,
-            domainUnits,
-            now, supplierId);
-        if (recorded.IsFailure) return recorded.Error;
-        var returnedAssignmentIds = request.Units.Select(u => u.RentalUnitAssignmentId).ToHashSet();
-        foreach (var reqUnit in item.ReturnRequests.SelectMany(r => r.Units))
-        {
-            if (returnedAssignmentIds.Contains(reqUnit.RentalUnitAssignmentId) && !reqUnit.ClosedAt.HasValue)
-            {
-                reqUnit.SetClosedAt(now);
-            }
-        }
-        RentalOrderStatusPolicy.Apply(order, now, key);
-        order.RecordReadModelUpdate(now);
-        var response = new RecordReturnResponse(recorded.Value.Id, now,
-            item.UnitAssignments.Count(a => !a.ReturnRecordId.HasValue), item.Status, item.DeductionDeadline);
-        order.AddStateTransition(new RentalStateTransition(Guid.NewGuid(), order.Id, item.Id,
-            previousStatus.ToString(), item.Status.ToString(), "RecordReturn", supplierId, ActorRole.Supplier,
-            "Supplier recorded returned units", now, key));
-        order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id, key, "RecordReturn",
-            fingerprint, true, null, null, now, targetItemId: item.Id, payloadJson: payload,
-            apiResponseJson: JsonSerializer.Serialize(response)));
+
         await using var tx = await unitOfWork.BeginTransactionAsync(cancellationToken);
+        RecordReturnResponse response;
         try
         {
-            var returnCmd = ScheduleKafkaInventoryReturn(order, item, recorded.Value, now);
+            var record = new ReturnRecord(
+                Guid.NewGuid(),
+                item.Id,
+                request.ActualReturnAt.ToUniversalTime(),
+                request.Note,
+                supplierId,
+                now.ToUniversalTime());
+            item.AddReturnRecord(record);
+
+            foreach (var unit in request.Units)
+            {
+                var assignment = item.UnitAssignments.First(a => a.Id == unit.RentalUnitAssignmentId);
+                assignment.RecordReturn(record.Id, unit.Condition, unit.Description, unit.MediaIds, null, null);
+                record.AddAssignment(assignment);
+            }
+
+            var returnedAssignmentIds = request.Units.Select(u => u.RentalUnitAssignmentId).ToHashSet();
+            foreach (var reqUnit in item.ReturnRequests.SelectMany(r => r.Units))
+            {
+                if (returnedAssignmentIds.Contains(reqUnit.RentalUnitAssignmentId) && !reqUnit.ClosedAt.HasValue)
+                {
+                    reqUnit.SetClosedAt(now);
+                }
+            }
+
+            if (item.AreAllUnitsReturned)
+            {
+                var completedAt = now.ToUniversalTime();
+                if (item.HasDamagedUnits && item.DepositAmount > 0m)
+                {
+                    item.SetReturnsCompleted(completedAt, completedAt.AddHours(48), null);
+                }
+                else
+                {
+                    item.SetReturnsCompleted(completedAt, null, 0m);
+                }
+            }
+
+            RentalOrderStatusPolicy.Apply(order, now, key);
+            order.RecordReadModelUpdate(now);
+            response = new RecordReturnResponse(record.Id, now,
+                item.UnitAssignments.Count(a => !a.ReturnRecordId.HasValue), item.Status, item.DeductionDeadline);
+            order.AddStateTransition(new RentalStateTransition(Guid.NewGuid(), order.Id, item.Id,
+                previousStatus.ToString(), item.Status.ToString(), "RecordReturn", supplierId, ActorRole.Supplier,
+                "Supplier recorded returned units", now, key));
+            order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id, key, "RecordReturn",
+                fingerprint, true, null, null, now, targetItemId: item.Id, payloadJson: payload,
+                apiResponseJson: JsonSerializer.Serialize(response)));
+
+            var returnCmd = ScheduleKafkaInventoryReturn(order, item, record, now);
             var enqueueResult = await inventoryCommands.EnqueueApplyReturnedUnitsAsync(returnCmd, cancellationToken);
             if (enqueueResult.IsFailure)
             {
@@ -174,7 +201,7 @@ public sealed partial class ReturnService(
             }
 
             var returnedEvent = await rentalEvents.EnqueueRentalUnitsReturnedAsync(
-                new RentalUnitsReturnedPayload(order.Id, item.Id, recorded.Value.Id,
+                new RentalUnitsReturnedPayload(order.Id, item.Id, record.Id,
                     request.ActualReturnAt.ToUniversalTime(), now,
                     request.Units.Select(u => u.RentalUnitAssignmentId).ToArray(),
                     order.Version),

@@ -382,8 +382,7 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
 
             // Normal return transitions item to PendingSettlement with FinalDeductionAmount = 0
             var returnUnits = item.UnitAssignments.Select(u => new ReturnUnitData(u.Id, UnitCondition.Normal, "OK", [])).ToList();
-            var returnResult = item.RecordAssetReturns(supplierId, now, "Normal return", returnUnits, now, supplierId);
-            Assert.True(returnResult.IsSuccess, returnResult.Error?.Message);
+            ReturnTestDataSeeder.SeedReturn(item, supplierId, now, "Normal return", returnUnits, now, supplierId);
             var closureRes = item.ConfirmReturnedUnitClosure(item.UnitAssignments.First().Id, now, null, "CLOSURE-REF-1", now);
             Assert.True(closureRes.IsSuccess, closureRes.Error?.Message);
 

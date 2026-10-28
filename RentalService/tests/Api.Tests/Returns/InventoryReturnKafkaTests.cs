@@ -88,10 +88,9 @@ public sealed class InventoryReturnKafkaTests
         var order = ReturnTests.NewOrder(quantity: 1);
         var item = order.Items.Single();
         var unit = item.UnitAssignments.Single();
-        var record = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
+        var record = ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(unit.Id, UnitCondition.Normal, null, [])], Now, item.SupplierId);
-        Assert.True(record.IsSuccess);
-        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record.Value, Now);
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record, Now);
         string? topic = null;
         string? partition = null;
         var writer = new Mock<IKafkaOutboxWriter>();
@@ -121,11 +120,10 @@ public sealed class InventoryReturnKafkaTests
         var normal = item.UnitAssignments.First();
         var damaged = item.UnitAssignments.Skip(1).First();
         var unreturned = item.UnitAssignments.Last();
-        var record = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
+        var record = ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(normal.Id, UnitCondition.Normal, null, []),
              new ReturnUnitData(damaged.Id, UnitCondition.Damaged, "scratch", [])], Now, item.SupplierId);
-        Assert.True(record.IsSuccess);
-        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record.Value, Now);
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record, Now);
         Assert.Equal(2, command.Units.Count);
         Assert.DoesNotContain(command.Units, u => u.AllocationId == unreturned.AllocationId);
 
@@ -134,7 +132,7 @@ public sealed class InventoryReturnKafkaTests
             new AppliedReturnedUnitPayload(normal.AllocationId, normal.AssetId, "RELEASED", Now, null),
             new AppliedReturnedUnitPayload(damaged.AllocationId, damaged.AssetId, "MAINTENANCE", Now, "block-ref")
         };
-        var envelope = Envelope(order, item, record.Value.Id, command.OperationKey, units);
+        var envelope = Envelope(order, item, record.Id, command.OperationKey, units);
         var (handler, save, _) = Handler(order);
         var json = JsonSerializer.Serialize(envelope, JsonOptions);
 
@@ -154,11 +152,10 @@ public sealed class InventoryReturnKafkaTests
         var order = ReturnTests.NewOrder(quantity: 1);
         var item = order.Items.Single();
         var unit = item.UnitAssignments.Single();
-        var record = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
+        var record = ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "scratch", [])], Now, item.SupplierId);
-        Assert.True(record.IsSuccess);
-        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record.Value, Now);
-        var envelope = Envelope(order, item, record.Value.Id, command.OperationKey,
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record, Now);
+        var envelope = Envelope(order, item, record.Id, command.OperationKey,
             [new AppliedReturnedUnitPayload(unit.AllocationId, unit.AssetId, "AVAILABLE", Now, null)]);
         var (handler, save, _) = Handler(order);
 
@@ -174,11 +171,10 @@ public sealed class InventoryReturnKafkaTests
         var order = ReturnTests.NewOrder(quantity: 1);
         var item = order.Items.Single();
         var unit = item.UnitAssignments.Single();
-        var record = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
+        var record = ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(unit.Id, UnitCondition.Normal, null, [])], Now, item.SupplierId);
-        Assert.True(record.IsSuccess);
-        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record.Value, Now);
-        var envelope = Envelope(order, item, record.Value.Id, command.OperationKey,
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record, Now);
+        var envelope = Envelope(order, item, record.Id, command.OperationKey,
             [new AppliedReturnedUnitPayload(unit.AllocationId, unit.AssetId, "RELEASED", Now, null)]);
         var (handler, _, events) = Handler(order);
 

@@ -251,8 +251,7 @@ public sealed class VersionPersistenceRegressionTests
             handover.AddAssignment(u);
         }
         var unit = item.UnitAssignments.First();
-        var retResult = item.RecordAssetReturns(supplierId, FixedNow, null, [new ReturnUnitData(unit.Id, UnitCondition.Normal, null, [])], FixedNow, supplierId);
-        Assert.True(retResult.IsSuccess);
+        ReturnTestDataSeeder.SeedReturn(item, supplierId, FixedNow, null, [new ReturnUnitData(unit.Id, UnitCondition.Normal, null, [])], FixedNow, supplierId);
 
         // Finalize a deduction
         item.TryFinalizeZeroDeduction(FixedNow, "ded-zero");

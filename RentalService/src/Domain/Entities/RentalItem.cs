@@ -82,6 +82,14 @@ public partial class RentalItem
     public RentalItemStatus Status { get; private set; }
 
     internal void SetStatus(RentalItemStatus status) => Status = status;
+    internal void SetReturnsCompleted(DateTimeOffset completedAt, DateTimeOffset? deductionDeadline, decimal? finalDeductionAmount)
+    {
+        ReturnsCompletedAt = completedAt.ToUniversalTime();
+        Status = RentalItemStatus.PendingSettlement;
+        DeductionDeadline = deductionDeadline?.ToUniversalTime();
+        FinalDeductionAmount = finalDeductionAmount;
+    }
+
 
     [Required]
     [MaxLength(64)]

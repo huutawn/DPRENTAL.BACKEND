@@ -62,9 +62,8 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         var order = Returns.ReturnTests.NewOrder(1);
         var item = order.Items.Single();
         var unit = item.UnitAssignments.Single();
-        var returned = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
+        ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "Damage", [])], Now, item.SupplierId);
-        Assert.True(returned.IsSuccess);
         await using var db = NewDb();
         db.Add(order);
         await db.SaveChangesAsync();

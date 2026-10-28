@@ -1,3 +1,4 @@
+using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Settlement;
 using Dprental.RentalService.Application.Security;
@@ -108,8 +109,8 @@ public sealed class DeductionResponseServiceTests
         var order = Returns.ReturnTests.NewOrder(1);
         var item = order.Items.Single();
         var unit = item.UnitAssignments.Single();
-        Assert.True(item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
-            [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "Damaged", [])], Now, item.SupplierId).IsSuccess);
+        ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
+            [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "Damaged", [])], Now, item.SupplierId);
         Assert.True(item.SubmitDeduction(item.SupplierId, 100_000m, "Repair", [Guid.NewGuid()],
             [unit.AssetId], Now).IsSuccess);
         db.Add(order);

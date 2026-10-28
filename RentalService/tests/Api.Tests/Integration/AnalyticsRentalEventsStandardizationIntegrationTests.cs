@@ -272,9 +272,8 @@ public sealed class AnalyticsRentalEventsStandardizationIntegrationTests
             Assert.NotNull(returnOrder);
             var returningItem = returnOrder.Items.First();
             var unitData = new ReturnUnitData(returningItem.UnitAssignments.First().Id, UnitCondition.Normal, null, []);
-            var returnRecordRes = returningItem.RecordAssetReturns(supplierId, returnTime, null, [unitData], returnTime, supplierId);
-            Assert.True(returnRecordRes.IsSuccess);
-            verifyCtx4.ReturnRecords.Add(returnRecordRes.Value);
+            var returnRecord = ReturnTestDataSeeder.SeedReturn(returningItem, supplierId, returnTime, null, [unitData], returnTime, supplierId);
+            verifyCtx4.ReturnRecords.Add(returnRecord);
             RentalOrderStatusPolicy.Apply(returnOrder, returnTime, "op-return");
             returnOrder.RecordReadModelUpdate(returnTime);
             Assert.Equal(6, returnOrder.Version);
@@ -282,7 +281,7 @@ public sealed class AnalyticsRentalEventsStandardizationIntegrationTests
             {
                 var returnProducer = new RentalEventProducer(new KafkaOutboxWriter(new OutboxRepository(verifyCtx4)), kafkaOptions, clock);
                 var returnUnitsRes = await returnProducer.EnqueueRentalUnitsReturnedAsync(
-                    new Dprental.RentalService.Application.DTOs.Integration.RentalUnitsReturnedPayload(order.Id, returningItem.Id, returnRecordRes.Value.Id, returnTime, returnTime, [returningItem.UnitAssignments.First().Id], returnOrder.Version),
+                    new Dprental.RentalService.Application.DTOs.Integration.RentalUnitsReturnedPayload(order.Id, returningItem.Id, returnRecord.Id, returnTime, returnTime, [returningItem.UnitAssignments.First().Id], returnOrder.Version),
                     correlationId: "op-return");
                 Assert.True(returnUnitsRes.IsSuccess);
                 await verifyCtx4.SaveChangesAsync();

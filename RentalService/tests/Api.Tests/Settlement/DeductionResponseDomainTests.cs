@@ -1,3 +1,4 @@
+using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Xunit;
@@ -13,8 +14,8 @@ public sealed class DeductionResponseDomainTests
         var order = Returns.ReturnTests.NewOrder(1);
         var item = order.Items.Single();
         var unit = item.UnitAssignments.Single();
-        Assert.True(item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
-            [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "Damaged", [])], Now, item.SupplierId).IsSuccess);
+        ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
+            [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "Damaged", [])], Now, item.SupplierId);
         decimal amount = Math.Min(100_000m, item.DepositAmount);
         Assert.True(item.SubmitDeduction(item.SupplierId, amount, "Repair", [Guid.NewGuid()],
             [unit.AssetId], Now).IsSuccess);

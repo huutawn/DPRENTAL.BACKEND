@@ -310,4 +310,98 @@ public sealed class ReturnTests : IAsyncLifetime
         await using var check = NewDb();
         Assert.Equal(mediaId, (await check.RentalUnitAssignments.SingleAsync()).ReturnMediaIds.Single());
     }
+    [Fact]
+    public async Task AllNormalReturn_TransitionsToPendingSettlement_ZeroDeduction_NoDeadline()
+    {
+        var item = await SeedAsync(1);
+        var unit = item.UnitAssignments.Single();
+        var request = Request(unit.Id, UnitCondition.Normal);
+
+        await using var db = NewDb();
+        var result = await Service(db).RecordReturnAsync(item.Id, Caller(item.SupplierId), request, "op-normal-full");
+        Assert.True(result.IsSuccess, result.Error.Message);
+        Assert.Equal(RentalItemStatus.PendingSettlement, result.Value.Status);
+        Assert.Null(result.Value.DeductionDeadline);
+
+        await using var checkDb = NewDb();
+        var savedItem = await checkDb.RentalItems.SingleAsync(i => i.Id == item.Id);
+        Assert.Equal(RentalItemStatus.PendingSettlement, savedItem.Status);
+        Assert.Equal(0m, savedItem.FinalDeductionAmount);
+        Assert.Null(savedItem.DeductionDeadline);
+        Assert.NotNull(savedItem.ReturnsCompletedAt);
+    }
+
+    [Fact]
+    public async Task DamagedReturn_ZeroDeposit_NoDeadline_ZeroDeduction()
+    {
+        var order = NewOrder(1);
+        var item = order.Items.Single();
+        typeof(RentalItem).GetProperty(nameof(RentalItem.DepositAmount))!.SetValue(item, 0m);
+        await using (var seedDb = NewDb())
+        {
+            seedDb.Add(order);
+            await seedDb.SaveChangesAsync();
+        }
+
+        var mediaId = Guid.NewGuid();
+        var media = new Mock<IRentalMediaClient>();
+        media.Setup(m => m.VerifyMediaAsync(mediaId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new MediaVerifyDto(mediaId, item.SupplierId.ToString(), "Ready")));
+        media.Setup(m => m.GetMetadataAsync(mediaId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new MediaMetadataDto(mediaId, "Private", "Ready")));
+
+        var unit = item.UnitAssignments.Single();
+        var request = Request(unit.Id, UnitCondition.Damaged, [mediaId]);
+
+        await using (var db = NewDb())
+        {
+            var result = await Service(db, media.Object).RecordReturnAsync(item.Id, Caller(item.SupplierId), request, "op-damaged-nodeposit");
+            Assert.True(result.IsSuccess, result.Error.Message);
+            Assert.Equal(RentalItemStatus.PendingSettlement, result.Value.Status);
+            Assert.Null(result.Value.DeductionDeadline);
+        }
+
+        await using var checkDb = NewDb();
+        var savedItem = await checkDb.RentalItems.SingleAsync(i => i.Id == item.Id);
+        Assert.Equal(RentalItemStatus.PendingSettlement, savedItem.Status);
+        Assert.Equal(0m, savedItem.FinalDeductionAmount);
+        Assert.Null(savedItem.DeductionDeadline);
+        Assert.NotNull(savedItem.ReturnsCompletedAt);
+    }
+
+    [Fact]
+    public async Task InventoryEnqueueFailure_RollsBackAllChanges()
+    {
+        var item = await SeedAsync(1);
+        var unit = item.UnitAssignments.Single();
+        var request = Request(unit.Id, UnitCondition.Normal);
+
+        var mockInventoryProducer = new Mock<IInventoryCommandProducer>();
+        mockInventoryProducer.Setup(p => p.EnqueueApplyReturnedUnitsAsync(It.IsAny<ApplyReturnedUnitsCommandPayload>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Failure<ProducerEnqueueResult>(Error.ServiceUnavailable("INVENTORY_QUEUE_DOWN", "Queue down")));
+
+        await using (var db = NewDb())
+        {
+            var outbox = new OutboxRepository(db);
+            var service = new ReturnService(
+                new RentalOrderRepository(db),
+                new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
+                db,
+                Mock.Of<IRentalMediaClient>(),
+                _clock,
+                new RentalEventProducer(new KafkaOutboxWriter(outbox), Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), _clock),
+                Configuration(),
+                mockInventoryProducer.Object);
+
+            var result = await service.RecordReturnAsync(item.Id, Caller(item.SupplierId), request, "op-queue-fail");
+            Assert.False(result.IsSuccess);
+            Assert.Equal("INVENTORY_QUEUE_DOWN", result.Error.Code);
+        }
+
+        await using var checkDb = NewDb();
+        Assert.Empty(await checkDb.ReturnRecords.ToListAsync());
+        Assert.Empty(await checkDb.RentalOutboxMessages.ToListAsync());
+        Assert.False(await checkDb.RentalOperationReceipts.AnyAsync(r => r.OperationId == "op-queue-fail"));
+        Assert.All(await checkDb.RentalUnitAssignments.ToListAsync(), u => Assert.Null(u.ReturnRecordId));
+    }
 }
