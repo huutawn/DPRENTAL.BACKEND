@@ -47,9 +47,13 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
             segments[3].Equals("hubs", StringComparison.OrdinalIgnoreCase) &&
             segments[4].Equals("orders", StringComparison.OrdinalIgnoreCase);
 
-        if (isPaymentHub || isRentalOrderHub)
+        bool isAnalyticsHub = segments.Length >= 2 &&
+            segments[0].Equals("hubs", StringComparison.OrdinalIgnoreCase) &&
+            segments[1].Equals("analytics", StringComparison.OrdinalIgnoreCase);
+
+        if (isPaymentHub || isRentalOrderHub || isAnalyticsHub)
         {
-            string hubName = isRentalOrderHub ? "Rental Order Hub" : "Payment Hub";
+            string hubName = isRentalOrderHub ? "Rental Order Hub" : isAnalyticsHub ? "Analytics Hub" : "Payment Hub";
 
             if (context.User?.Identity?.IsAuthenticated != true)
             {
