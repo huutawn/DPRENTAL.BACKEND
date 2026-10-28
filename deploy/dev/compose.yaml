@@ -264,6 +264,45 @@ services:
     networks:
       - services
 
+  analytics-service:
+    image: ${ANALYTICS_SERVICE_IMAGE:?Set ANALYTICS_SERVICE_IMAGE in release.env}
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Staging}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      Authentication__Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
+      Authentication__Jwt__Audience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
+      Authentication__Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
+      Kafka__Enabled: "true"
+      Kafka__BootstrapServers: kafka:9092
+      Kafka__ProofIssuer: ${KAFKA_PROOF_ISSUER:-dprental-integrity-host}
+      Kafka__ProofEnvironment: ${KAFKA_PROOF_ENVIRONMENT:-staging}
+      Kafka__ProofPublicKeys__dev-payment-integrity-v1: ${PAYMENT_INTEGRITY_PUBLIC_KEY_BASE64:?Set PAYMENT_INTEGRITY_PUBLIC_KEY_BASE64 in .env}
+      AnalyticsHub__HubPath: /hubs/analytics
+      AnalyticsHub__AllowedOrigins__0: https://${DEV_APP_DOMAIN:?Set DEV_APP_DOMAIN in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - edge
+      - services
+
+  analytics-migrate:
+    image: ${ANALYTICS_MIGRATOR_IMAGE:?Set ANALYTICS_MIGRATOR_IMAGE in release.env}
+    profiles: [migration]
+    restart: "no"
+    environment:
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB in .env};Username=${POSTGRES_USER:?Set POSTGRES_USER in .env};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - services
   kafka:
     image: ${KAFKA_IMAGE:?Set KAFKA_IMAGE in .env}
     restart: unless-stopped

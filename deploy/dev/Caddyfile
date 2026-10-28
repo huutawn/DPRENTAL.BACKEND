@@ -20,8 +20,22 @@
 
 {$DEV_APP_DOMAIN} {
 	encode zstd gzip
-	reverse_proxy frontend:3000 {
-		header_up Host {http.request.host}
-		header_up X-Forwarded-Proto https
+
+	@signalrHubs {
+		path /hubs/payments /hubs/payments/* /hubs/analytics /hubs/analytics/*
+	}
+	handle @signalrHubs {
+		reverse_proxy gateway:8080 {
+			header_up Host {http.request.host}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {http.request.host}
+		}
+	}
+
+	handle {
+		reverse_proxy frontend:3000 {
+			header_up Host {http.request.host}
+			header_up X-Forwarded-Proto https
+		}
 	}
 }
