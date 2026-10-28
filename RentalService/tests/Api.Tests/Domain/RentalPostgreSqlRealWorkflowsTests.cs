@@ -144,7 +144,8 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
                 Assert.Contains("rental_checkout_operations", tables);
                 Assert.Contains("renter_addresses", tables);
                 Assert.Contains("renter_bank_accounts", tables);
-                Assert.Equal(18, tables.Count);
+                Assert.Contains("rental_refund_confirmations", tables);
+                Assert.Equal(19, tables.Count);
             }
         }
         finally

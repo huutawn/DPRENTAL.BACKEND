@@ -3,6 +3,7 @@ using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Orders;
 using Dprental.RentalService.Application.Errors;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
@@ -19,7 +20,6 @@ internal static class OrderQueryMapper
 {
     public const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
-    private const string RequestRefundAction = "RequestRefund";
 
     // Cùng cách checkout ghi tài khoản hoàn tiền vào RefundDestinationRef.
     private static readonly JsonSerializerOptions RefundAccountJsonOptions = new(JsonSerializerDefaults.Web);
@@ -174,24 +174,26 @@ internal static class OrderQueryMapper
             item.FinancialClosureConfirmedAt);
     }
 
-    /// <summary>Các dòng đã được yêu cầu PaymentService hoàn tiền (có receipt RequestRefund).</summary>
-    public static HashSet<Guid> RefundRequestedItemIds(RentalOrder order) => order.OperationReceipts
-        .Where(r => r.Action == RequestRefundAction && r.TargetItemId.HasValue)
-        .Select(r => r.TargetItemId!.Value)
-        .ToHashSet();
+    /// <summary>Khoản hoàn của từng dòng trong đơn đã nạp, theo <see cref="RentalRefundPolicy"/>.</summary>
+    public static Dictionary<Guid, RentalRefundLine> RefundLinesByItem(RentalOrder order) =>
+        RentalRefundPolicy.LinesOf(order, order.SubOrders.SelectMany(s => s.Items).Concat(order.Items))
+            .ToDictionary(l => l.Item.Id);
 
-    /// <summary>Có RefundRef là PaymentService đã hoàn xong; chỉ có yêu cầu là đang hoàn.</summary>
-    public static OrderItemRefundResponse ToRefund(RentalItem item, bool refundRequested)
-    {
-        if (!string.IsNullOrWhiteSpace(item.RefundRef))
-        {
-            return new OrderItemRefundResponse(OrderRefundState.Completed, item.RefundRef);
-        }
+    /// <summary>Có xác nhận chuyển khoản của Admin là đã hoàn; chỉ có khoản hoàn là đang chờ hoàn.</summary>
+    public static OrderItemRefundResponse ToRefund(RentalItem item, RentalRefundLine? line) => line is null
+        ? new OrderItemRefundResponse(OrderRefundState.None, item.RefundRef)
+        : new OrderItemRefundResponse(
+            line.Confirmation is null ? OrderRefundState.Processing : OrderRefundState.Completed,
+            item.RefundRef,
+            line.Kind,
+            line.RefundAmount,
+            line.Confirmation?.ConfirmedAt);
 
-        return new OrderItemRefundResponse(
-            refundRequested ? OrderRefundState.Processing : OrderRefundState.None,
-            null);
-    }
+    /// <summary>Không có khoản hoàn là None; còn khoản chưa chuyển khoản là Pending; mọi khoản đã chuyển là Refunded.</summary>
+    public static OrderRefundProgress ToRefundProgress(int refundCount, int pendingRefundCount) =>
+        refundCount == 0 ? OrderRefundProgress.None
+        : pendingRefundCount > 0 ? OrderRefundProgress.Pending
+        : OrderRefundProgress.Refunded;
 
     /// <summary>Trả trễ cũng có PaymentConfirmedAt nên phải xét cờ trả trễ trước.</summary>
     public static OrderPaymentState ToPaymentState(RentalOrder order)

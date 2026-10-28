@@ -125,6 +125,22 @@ internal static class OrderTestData
             status: RentalOperationReceipt.StatusPending,
             targetItemId: item.Id));
 
+    /// <summary>Admin đã chuyển khoản hoàn toàn bộ tiền thuê và cọc của dòng này cho người thuê.</summary>
+    public static void ConfirmRefundTransfer(RentalOrder order, RentalItem item, DateTimeOffset confirmedAt) =>
+        order.AddRefundConfirmation(new RentalRefundConfirmation(
+            Guid.NewGuid(),
+            order.Id,
+            item.Id,
+            RentalRefundKind.FullRefund,
+            item.RentalAmount + item.DepositAmount,
+            "VCB",
+            "0123456789",
+            "NGUYỄN VĂN AN",
+            $"FT-{item.Id:N}"[..24],
+            null,
+            Guid.NewGuid(),
+            confirmedAt));
+
     public static RentalCallerContext User(Guid userId) => RentalCallerContext.ForUser(userId);
 
     public static RentalCallerContext Service() => RentalCallerContext.ForService("inventory");

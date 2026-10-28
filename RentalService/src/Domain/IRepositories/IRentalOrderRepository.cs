@@ -71,10 +71,15 @@ public interface IRentalOrderRepository
     /// <summary>Đơn con theo mã, không kèm dòng; không theo dõi thay đổi.</summary>
     Task<RentalSubOrder?> GetSubOrderByIdAsync(Guid subOrderId, CancellationToken cancellationToken = default);
 
-    /// <summary>Một trang đơn của người thuê, mới nhất trước; <paramref name="status"/> rỗng là mọi trạng thái.</summary>
+    /// <summary>
+    /// Một trang đơn của người thuê, mới nhất trước; <paramref name="status"/> rỗng là mọi trạng thái.
+    /// <paramref name="refunded"/> lọc theo khoản hoàn (yêu cầu RequestRefund, hoặc SettleRental còn cọc để hoàn):
+    /// true là đơn có khoản hoàn và mọi khoản đã được xác nhận chuyển khoản; false là đơn còn khoản chờ hoàn; rỗng là không lọc.
+    /// </summary>
     Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(
         Guid renterId,
         RentalOrderStatus? status,
+        bool? refunded,
         int skip,
         int take,
         CancellationToken cancellationToken = default);

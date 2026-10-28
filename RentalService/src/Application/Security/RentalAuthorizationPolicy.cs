@@ -188,6 +188,16 @@ public static class RentalAuthorizationPolicy
             Error.Forbidden(ErrorCodes.Forbidden, "Chỉ quản trị viên mới được tra cứu mọi đơn thuê."));
 
     /// <summary>
+    /// Evaluates whether the caller may confirm a refund bank transfer to a renter.
+    /// Invariant: Only authenticated human administrators; service tokens are refused.
+    /// </summary>
+    public static Result AuthorizeAdminRefundConfirm(IRentalCallerContext caller) =>
+        RequireAdmin(
+            caller,
+            "Service token không được xác nhận hoàn tiền.",
+            Error.Forbidden(ErrorCodes.Forbidden, "Chỉ quản trị viên mới được xác nhận hoàn tiền."));
+
+    /// <summary>
     /// Evaluates whether the caller has authority to access private evidence media for a given rental item/order.
     /// Invariants:
     /// - Caller must be platform admin, the order's renter, or the item's supplier.

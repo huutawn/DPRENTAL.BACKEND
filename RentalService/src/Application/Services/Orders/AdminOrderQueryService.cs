@@ -4,6 +4,7 @@ using Dprental.RentalService.Application.DTOs.Orders;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.IServices.Orders;
 using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Services.Refunds;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
@@ -14,7 +15,8 @@ using Microsoft.Extensions.Logging;
 namespace Dprental.RentalService.Application.Services.Orders;
 
 /// <summary>
-/// Admin xem được mọi đơn; số tài khoản hoàn tiền vẫn bị che và mỗi lần xem chi tiết đều được ghi log.
+/// Admin xem được mọi đơn; tài khoản hoàn tiền ở phần đơn bị che, riêng mục Hoàn tiền hiện đủ số để Admin chuyển khoản.
+/// Mỗi lần xem chi tiết đều được ghi log.
 /// </summary>
 public sealed partial class AdminOrderQueryService(
     IRentalOrderRepository orders,
@@ -89,10 +91,10 @@ public sealed partial class AdminOrderQueryService(
         // Đơn chứa dữ liệu cá nhân của người thuê: ghi lại ai đã xem.
         LogAdminViewedOrder(logger, caller.UserId, order.Id, order.OrderCode);
 
-        HashSet<Guid> refundRequestedItemIds = OrderQueryMapper.RefundRequestedItemIds(order);
+        Dictionary<Guid, RentalRefundLine> refundLines = OrderQueryMapper.RefundLinesByItem(order);
         List<AdminSubOrderResponse> subOrders = order.SubOrders
             .OrderBy(s => s.SubOrderCode, StringComparer.Ordinal)
-            .Select(s => ToSubOrder(s, refundRequestedItemIds))
+            .Select(s => ToSubOrder(s, refundLines))
             .ToList();
         decimal totalRental = subOrders.Sum(s => s.TotalRentalAmount);
         decimal totalDeposit = subOrders.Sum(s => s.TotalDepositAmount);
@@ -135,7 +137,12 @@ public sealed partial class AdminOrderQueryService(
             totalRental + totalDeposit,
             subOrders,
             history,
-            order.Version);
+            order.Version,
+            refundLines.Values
+                .OrderBy(l => l.Request.CreatedAt)
+                .ThenBy(l => l.Request.Id)
+                .Select(l => AdminRefundMapper.ToOrderRefund(order, l))
+                .ToList());
     }
 
     private static Result<AdminOrderSearchCriteria> ToCriteria(AdminOrderSearchRequest request)
@@ -202,12 +209,12 @@ public sealed partial class AdminOrderQueryService(
             ? new string('*', accountNumber.Length)
             : new string('*', accountNumber.Length - VisibleAccountDigits) + accountNumber[^VisibleAccountDigits..];
 
-    private static AdminSubOrderResponse ToSubOrder(RentalSubOrder subOrder, HashSet<Guid> refundRequestedItemIds)
+    private static AdminSubOrderResponse ToSubOrder(RentalSubOrder subOrder, Dictionary<Guid, RentalRefundLine> refundLines)
     {
         List<AdminOrderItemResponse> items = subOrder.Items
             .OrderBy(i => i.ExpectedStartDate)
             .ThenBy(i => i.Id)
-            .Select(i => ToItem(i, refundRequestedItemIds.Contains(i.Id)))
+            .Select(i => ToItem(i, refundLines.GetValueOrDefault(i.Id)))
             .ToList();
         decimal rental = subOrder.Items.Sum(i => i.RentalAmount);
         decimal deposit = subOrder.Items.Sum(i => i.DepositAmount);
@@ -223,7 +230,7 @@ public sealed partial class AdminOrderQueryService(
             items);
     }
 
-    private static AdminOrderItemResponse ToItem(RentalItem item, bool refundRequested)
+    private static AdminOrderItemResponse ToItem(RentalItem item, RentalRefundLine? refundLine)
     {
         OrderItemResponse basics = OrderQueryMapper.ToItem(item);
 
@@ -248,7 +255,7 @@ public sealed partial class AdminOrderQueryService(
             item.SupplierDecisionBy,
             item.SupplierDecisionReason,
             item.SupplierDecisionNote,
-            OrderQueryMapper.ToRefund(item, refundRequested),
+            OrderQueryMapper.ToRefund(item, refundLine),
             item.SettlementRef,
             OrderQueryMapper.ToHandover(item),
             OrderQueryMapper.ToReturns(item),
