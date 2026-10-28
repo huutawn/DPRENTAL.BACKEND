@@ -87,19 +87,57 @@ public sealed partial class ReturnService(
             var saved = JsonSerializer.Deserialize<RecordReturnResponse>(receipt.ApiResponseJson);
             return saved is null ? Error.Failure("INVALID_RETURN_RECEIPT", "Stored response is unavailable.") : saved;
         }
-        var domainUnits = request.Units.Select(u => new ReturnUnitData(
-            u.RentalUnitAssignmentId, u.Condition, u.Description, u.MediaIds)).ToList();
-        var validation = item.ValidateAssetReturns(supplierId, request.ActualReturnAt, request.Note,
-            domainUnits, timeProvider.GetUtcNow(), supplierId);
-        if (validation.IsFailure) return validation.Error;
+        if (item.Status != RentalItemStatus.InRental)
+            return RentalErrors.InvalidItemStatusForReturn;
+        if (request.ActualReturnAt == default || request.Note?.Length > 2000)
+            return Error.Validation("Return.InvalidRequest", "Invalid return time or note.");
+        var now = timeProvider.GetUtcNow();
+        if (request.ActualReturnAt > now)
+            return RentalErrors.FutureReturnTimeNotAllowed;
+
+        if (request.Units.Select(u => u.RentalUnitAssignmentId).Distinct().Count() != request.Units.Count)
+            return Error.Validation("Return.InvalidUnits", "Specify distinct assignments to return.");
+
         foreach (var unit in request.Units)
         {
-            if (unit.MediaIds.Count == 0) continue;
+            var assignment = item.UnitAssignments.FirstOrDefault(a => a.Id == unit.RentalUnitAssignmentId);
+            if (assignment is null)
+                return RentalErrors.AssignmentNotFound;
+
+            var eligibility = ReturnEligibilityPolicy.ValidateAssignmentEligibleForReturn(item, assignment, request.ActualReturnAt);
+            if (eligibility.IsFailure)
+                return eligibility.Error;
+
+            if (!Enum.IsDefined(unit.Condition))
+                return Error.Validation("Return.InvalidEvidence", "Invalid condition, description or media IDs.");
+
+            if (unit.Description?.Length > 2000)
+                return Error.Validation("Return.InvalidEvidence", "Invalid condition, description or media IDs.");
+
+            if (unit.MediaIds.Count > 10 || unit.MediaIds.Contains(Guid.Empty) ||
+                unit.MediaIds.Distinct().Count() != unit.MediaIds.Count)
+                return Error.Validation("Return.InvalidEvidence", "Invalid condition, description or media IDs.");
+
+            if (unit.Condition == UnitCondition.Damaged)
+            {
+                if (string.IsNullOrWhiteSpace(unit.Description))
+                    return Error.Validation("Return.InvalidEvidence", "Damaged unit requires a description.");
+
+                if (unit.MediaIds.Count == 0)
+                    return Error.Validation("Return.InvalidEvidence", "Damaged unit requires at least one media evidence.");
+            }
+        }
+
+        foreach (var unit in request.Units)
+        {
+            if (unit.MediaIds.Count == 0 && unit.Condition != UnitCondition.Damaged) continue;
             var evidence = await RentalEvidenceValidator.ValidateAndVerifyEvidenceAsync(
-                unit.MediaIds, supplierId, mediaClient, ct: cancellationToken);
+                unit.MediaIds, supplierId, mediaClient, isRequired: unit.Condition == UnitCondition.Damaged, ct: cancellationToken);
             if (evidence.IsFailure) return evidence.Error;
         }
-        var now = timeProvider.GetUtcNow();
+        var domainUnits = request.Units.Select(u => new ReturnUnitData(
+            u.RentalUnitAssignmentId, u.Condition, u.Description, u.MediaIds)).ToList();
+        now = timeProvider.GetUtcNow();
         var previousStatus = item.Status;
         var recorded = item.RecordAssetReturns(supplierId, request.ActualReturnAt, request.Note,
             domainUnits,

@@ -42,11 +42,10 @@ public static class ReturnEligibilityPolicy
         return true;
     }
 
-    public static Result ValidateAssignmentForReturnRequest(
+    public static Result ValidateAssignmentEligibleForReturn(
         RentalItem item,
         RentalUnitAssignment assignment,
-        DateTimeOffset actualReturnAt,
-        IReadOnlySet<Guid> openRequestAssignmentIds)
+        DateTimeOffset actualReturnAt)
     {
         if (item.Status != RentalItemStatus.InRental)
             return RentalErrors.InvalidItemStatusForReturn;
@@ -57,6 +56,19 @@ public static class ReturnEligibilityPolicy
             return RentalErrors.AssetNotHandedOver(assignment.Id);
         if (actualReturnAt < item.HandoverRecord.ActualHandoverAt)
             return RentalErrors.InvalidReturnTimeBeforeHandover(assignment.Id);
+
+        return Result.Success();
+    }
+
+    public static Result ValidateAssignmentForReturnRequest(
+        RentalItem item,
+        RentalUnitAssignment assignment,
+        DateTimeOffset actualReturnAt,
+        IReadOnlySet<Guid> openRequestAssignmentIds)
+    {
+        var eligible = ValidateAssignmentEligibleForReturn(item, assignment, actualReturnAt);
+        if (eligible.IsFailure) return eligible.Error;
+
         if (openRequestAssignmentIds.Contains(assignment.Id))
             return Error.Conflict("RETURN_REQUEST_ALREADY_OPEN", "This unit already has an open return request.");
 

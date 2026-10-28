@@ -37,6 +37,8 @@ public sealed class ReturnQueryAndEligibilityTests
     {
         var (_, item, assignment, _) = CreateTestOrder(RentalItemStatus.AwaitingHandover);
         Assert.False(ReturnEligibilityPolicy.CanRequestReturn(item, assignment));
+        var valEligible = ReturnEligibilityPolicy.ValidateAssignmentEligibleForReturn(item, assignment, Now);
+        Assert.Equal(RentalErrors.InvalidItemStatusForReturn.Code, valEligible.Error.Code);
 
         var val = ReturnEligibilityPolicy.ValidateAssignmentForReturnRequest(
             item, assignment, Now, new HashSet<Guid>());
@@ -49,6 +51,8 @@ public sealed class ReturnQueryAndEligibilityTests
         var (_, item, assignment, _) = CreateTestOrder();
         typeof(RentalUnitAssignment).GetProperty(nameof(RentalUnitAssignment.Status))!.SetValue(assignment, RentalUnitAssignmentStatus.Assigned);
         Assert.False(ReturnEligibilityPolicy.CanRequestReturn(item, assignment));
+        var valEligible = ReturnEligibilityPolicy.ValidateAssignmentEligibleForReturn(item, assignment, Now);
+        Assert.Equal(RentalErrors.AssetNotHandedOver(assignment.Id).Code, valEligible.Error.Code);
 
         var val = ReturnEligibilityPolicy.ValidateAssignmentForReturnRequest(
             item, assignment, Now, new HashSet<Guid>());
@@ -62,6 +66,8 @@ public sealed class ReturnQueryAndEligibilityTests
         var returnRecId = Guid.NewGuid();
         typeof(RentalUnitAssignment).GetProperty(nameof(RentalUnitAssignment.ReturnRecordId))!.SetValue(assignment, returnRecId);
         Assert.False(ReturnEligibilityPolicy.CanRequestReturn(item, assignment));
+        var valEligible = ReturnEligibilityPolicy.ValidateAssignmentEligibleForReturn(item, assignment, Now);
+        Assert.Equal(RentalErrors.AssetAlreadyReturned(assignment.Id).Code, valEligible.Error.Code);
 
         var val = ReturnEligibilityPolicy.ValidateAssignmentForReturnRequest(
             item, assignment, Now, new HashSet<Guid>());
@@ -72,6 +78,10 @@ public sealed class ReturnQueryAndEligibilityTests
     public void CanRequestReturn_WhenReturnTimeBeforeHandover_ReturnsValidationError()
     {
         var (_, item, assignment, handover) = CreateTestOrder();
+        var valEligible = ReturnEligibilityPolicy.ValidateAssignmentEligibleForReturn(
+            item, assignment, handover.ActualHandoverAt.AddMinutes(-5));
+        Assert.Equal(RentalErrors.InvalidReturnTimeBeforeHandover(assignment.Id).Code, valEligible.Error.Code);
+
         var val = ReturnEligibilityPolicy.ValidateAssignmentForReturnRequest(
             item, assignment, handover.ActualHandoverAt.AddMinutes(-5), new HashSet<Guid>());
         Assert.Equal(RentalErrors.InvalidReturnTimeBeforeHandover(assignment.Id).Code, val.Error.Code);
