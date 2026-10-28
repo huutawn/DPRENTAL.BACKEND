@@ -387,10 +387,13 @@ public sealed class RentalRealtimeGatewayEndToEndTests
             int eventCount = 0;
             renterConn.On<RenterOrderChangedNotification>("RenterOrderChanged", n =>
             {
-                if (Interlocked.Increment(ref eventCount) == 1)
-                    firstPaidSignal.TrySetResult(n);
-                else
-                    secondEventSignal.TrySetResult(n);
+                if (n.ChangeType == OrderChangeTypes.PaymentConfirmed)
+                {
+                    if (Interlocked.Increment(ref eventCount) == 1)
+                        firstPaidSignal.TrySetResult(n);
+                    else
+                        secondEventSignal.TrySetResult(n);
+                }
             });
 
             await renterConn.StartAsync();
