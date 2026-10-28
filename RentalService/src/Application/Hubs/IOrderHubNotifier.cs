@@ -60,6 +60,7 @@ public static class OrderChangeTypes
     public const string SupplierConfirmationExpired = "SUPPLIER_CONFIRMATION_EXPIRED";
     public const string HandoverOverdue = "HANDOVER_OVERDUE";
     public const string HandoverExpired = "HANDOVER_EXPIRED";
+    public const string ReturnRequested = "RETURN_REQUESTED";
     public const string ReturnSubmitted = "RETURN_SUBMITTED";
     public const string ReturnRecorded = "RETURN_RECORDED";
     public const string SettlementChanged = "SETTLEMENT_CHANGED";

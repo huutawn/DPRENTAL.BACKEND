@@ -19,6 +19,7 @@ using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Hubs;
 using Dprental.RentalService.Application.Kafka.Producers;
+using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Returns;
 
@@ -31,7 +32,8 @@ public sealed partial class ReturnService(
     IRentalEventProducer rentalEvents,
     IConfiguration configuration,
     IInventoryCommandProducer inventoryCommands,
-    IOrderHubNotifier? notifier = null) : IReturnService
+    IOrderHubNotifier? notifier = null,
+    ILogger<ReturnService>? logger = null) : IReturnService
 {
 
     public async Task<Result<RecordReturnResponse>> RecordReturnAsync(Guid itemId, IRentalCallerContext caller,

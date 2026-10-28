@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Returns;
+using Dprental.RentalService.Application.Hubs;
+using Microsoft.Extensions.Logging;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Operations;
@@ -104,6 +106,45 @@ public sealed partial class ReturnService
             unitOfWork.DiscardChanges();
             throw;
         }
+
+        if (notifier != null)
+        {
+            try
+            {
+                await notifier.NotifyRenterOrderChangedAsync(
+                    order.RenterId,
+                    new RenterOrderChangedNotification(
+                        Guid.NewGuid(),
+                        order.Id,
+                        order.Version,
+                        OrderChangeTypes.ReturnRequested,
+                        now),
+                    cancellationToken);
+
+                var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+                if (subOrder != null)
+                {
+                    await notifier.NotifySupplierSubOrderChangedAsync(
+                        item.SupplierId,
+                        new SupplierSubOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            subOrder.Id,
+                            order.Version,
+                            OrderChangeTypes.ReturnRequested,
+                            now),
+                        cancellationToken);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                if (logger != null)
+                {
+                    LogReturnRequestedNotificationFailed(logger, ex, order.Id);
+                }
+            }
+        }
+
         return response;
     }
 
@@ -122,4 +163,7 @@ public sealed partial class ReturnService
         }
         return Result.Success();
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to send ReturnRequested notification for order {OrderId}")]
+    private static partial void LogReturnRequestedNotificationFailed(ILogger logger, Exception ex, Guid orderId);
 }
