@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -76,6 +77,7 @@ public sealed class HealthEndpointTests
             {
                 builder.UseEnvironment("Production");
                 builder.UseSetting("Kafka:Enabled", "false");
+                builder.ConfigureLogging(logging => logging.ClearProviders());
             });
 
         OptionsValidationException exception = Assert.Throws<OptionsValidationException>(() => factory.CreateClient());

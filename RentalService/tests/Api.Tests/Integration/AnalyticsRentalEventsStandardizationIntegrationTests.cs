@@ -54,7 +54,7 @@ public sealed class AnalyticsRentalEventsStandardizationIntegrationTests
         "quantity", "expectedStartDate", "expectedEndDate", "rentalAmount", "depositAmount", "totalRentalAmount", "totalDepositAmount", "totalPayableAmount",
         // Status & references
         "paymentDeadline", "createdAt", "decisionAt", "supplierConfirmationDeadline", "paidAmount", "paidAt", "invoiceRef", "paymentRef",
-        "expiredAt", "cancelledAt", "completedAt", "actualHandoverAt", "actualReturnAt", "submittedAt", "returnsCompletedAt", "overdueAt",
+        "expiredAt", "rejectedAt", "cancelledAt", "completedAt", "actualHandoverAt", "actualReturnAt", "submittedAt", "returnsCompletedAt", "overdueAt",
         "handoverRecordId", "returnRecordId", "assignmentIds", "inventoryConfirmationRef", "reason", "optionalNote", "role", "actorId", "refundAmount",
         "totalRefundAmount", "requestedAt"
     };
@@ -334,7 +334,7 @@ public sealed class AnalyticsRentalEventsStandardizationIntegrationTests
             {
                 var settleProducer = new RentalEventProducer(new KafkaOutboxWriter(new OutboxRepository(verifyCtx6)), kafkaOptions, clock);
                 var itemCompRes = await settleProducer.EnqueueRentalItemCompletedAsync(
-                    new RentalItemCompletedPayload(settleOrder.RenterId, settledItem.EquipmentListingId, settledItem.EquipmentTypeId, order.Id, settledItem.Id, settleOrder.Version));
+                    new RentalItemCompletedPayload(settleOrder.RenterId, settledItem.EquipmentListingId, settledItem.EquipmentTypeId, order.Id, settledItem.Id, settleOrder.Version, settleTime));
                 Assert.True(itemCompRes.IsSuccess);
 
                 var orderCompRes = await settleProducer.EnqueueRentalOrderCompletedAsync(
@@ -347,6 +347,7 @@ public sealed class AnalyticsRentalEventsStandardizationIntegrationTests
             var itemCompletedOutbox = await verifyCtx7.RentalOutboxMessages.SingleAsync(m => m.MessageType == KafkaContractSpec.EventTypes.RentalItemCompleted);
             using var itemCompDoc = JsonDocument.Parse(itemCompletedOutbox.Payload);
             Assert.Equal(8, itemCompDoc.RootElement.GetProperty("payload").GetProperty("orderVersion").GetInt64());
+            Assert.Equal(settleTime, itemCompDoc.RootElement.GetProperty("payload").GetProperty("completedAt").GetDateTimeOffset());
             AssertAllPropertiesAllowed(itemCompDoc.RootElement);
 
             var orderCompletedOutbox = await verifyCtx7.RentalOutboxMessages.SingleAsync(m => m.MessageType == KafkaContractSpec.EventTypes.RentalOrderCompleted);
@@ -417,12 +418,20 @@ public sealed class AnalyticsRentalEventsStandardizationIntegrationTests
             await using var verifyCtx = new RentalServiceDbContext(options);
             var reloadedOrder = await verifyCtx.RentalOrders.Include(o => o.Items).SingleAsync(o => o.Id == order.Id);
             Assert.Equal(2, reloadedOrder.Version); // Incremented once for the batch
+            Assert.Equal(RentalOrderStatus.Rejected, reloadedOrder.Status);
 
             var rejectMessages = await verifyCtx.RentalOutboxMessages
                 .Where(m => m.MessageType == KafkaContractSpec.EventTypes.RentalItemRejected)
                 .ToListAsync();
 
             Assert.Equal(2, rejectMessages.Count);
+            var orderRejected = await verifyCtx.RentalOutboxMessages.SingleAsync(
+                m => m.MessageType == KafkaContractSpec.EventTypes.RentalOrderRejected);
+            using (var doc = JsonDocument.Parse(orderRejected.Payload))
+            {
+                Assert.Equal(2, doc.RootElement.GetProperty("payload").GetProperty("orderVersion").GetInt64());
+                AssertAllPropertiesAllowed(doc.RootElement);
+            }
             foreach (var msg in rejectMessages)
             {
                 using var doc = JsonDocument.Parse(msg.Payload);
@@ -705,7 +714,7 @@ public sealed class AnalyticsRentalEventsStandardizationIntegrationTests
                     new RentalItemReturnedPayload(orderId, itemId, renterId, supplierId, listingId, 1, FixedNow, 6));
 
                 await producer.EnqueueRentalItemCompletedAsync(
-                    new RentalItemCompletedPayload(renterId, listingId, typeId, orderId, itemId, 7));
+                    new RentalItemCompletedPayload(renterId, listingId, typeId, orderId, itemId, 7, FixedNow));
 
                 await producer.EnqueueRentalOrderCompletedAsync(
                     new RentalOrderCompletedPayload(orderId, renterId, FixedNow, 7));

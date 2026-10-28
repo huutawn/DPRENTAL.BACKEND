@@ -109,16 +109,19 @@ public sealed class PaymentRentalContractAndEventsTests
                 new(itemId, 500_000m, 1_000_000m)
             ],
             Reason: "Supplier rejected rental item",
-            OperationKey: "op-refund-001");
+            OperationKey: "op-refund-001",
+            RefundKind: RentalRefundKinds.CancellationRefund);
 
         Assert.Equal(1_500_000m, request.TotalRefundAmount);
 
         string json = JsonSerializer.Serialize(request, JsonOptions);
         Assert.DoesNotContain("\"totalRefundAmount\":", json); // [JsonIgnore]
+        Assert.Contains("\"refundKind\":\"CancellationRefund\"", json);
 
         RequestRefundRequest? des = JsonSerializer.Deserialize<RequestRefundRequest>(json, JsonOptions);
         Assert.NotNull(des);
         Assert.Equal(1_500_000m, des.TotalRefundAmount);
+        Assert.Equal(RentalRefundKinds.CancellationRefund, des.RefundKind);
 
         RequestRefundResponse response = new(
             RefundRef: "REF-001",
@@ -368,11 +371,22 @@ public sealed class PaymentRentalContractAndEventsTests
             PaymentRef: "PAY-001",
             Items: [new(Guid.NewGuid(), 0m, 0m)],
             Reason: "Refund reason",
-            OperationKey: "op-ref");
+            OperationKey: "op-ref",
+            RefundKind: RentalRefundKinds.CancellationRefund);
 
         Result result = req.Validate();
         Assert.True(result.IsFailure);
         Assert.Equal("Payment.InvalidRefundAmount", result.Error.Code);
+    }
+
+    [Fact]
+    public void RequestRefundRequest_Validate_RejectsMissingOrUnknownRefundKind()
+    {
+        var request = new RequestRefundRequest(Guid.NewGuid(), "INV-001", "PAY-001",
+            [new RefundItemRequest(Guid.NewGuid(), 100m, 0m)], "Cancelled order", "refund-001", "Unknown");
+
+        Assert.Equal("Payment.InvalidRefundKind", request.Validate().Error.Code);
+        Assert.Equal("Payment.InvalidRefundKind", (request with { RefundKind = null! }).Validate().Error.Code);
     }
 
     [Fact]

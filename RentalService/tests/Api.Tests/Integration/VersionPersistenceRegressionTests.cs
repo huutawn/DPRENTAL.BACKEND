@@ -119,7 +119,7 @@ public sealed class VersionPersistenceRegressionTests
             createdAt: FixedNow,
             status: RentalOperationReceipt.StatusPending,
             targetItemId: itemId,
-            payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(orderId, "INV-001", "PAY-001", refundItems, "Reject reason", refundOpKey)));
+            payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(orderId, "INV-001", "PAY-001", refundItems, "Reject reason", refundOpKey, RentalRefundKinds.CancellationRefund)));
         order.AddOperationReceipt(refundReceipt);
 
         await using (var seedDb = CreateDbContext(dbName))
@@ -779,7 +779,7 @@ public sealed class VersionPersistenceRegressionTests
             createdAt: FixedNow,
             status: RentalOperationReceipt.StatusPending,
             targetItemId: itemId,
-            payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(orderId, "INV-FAIL-001", "PAY-FAIL-001", refundItems, "Reject reason", refundOpKey)));
+            payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(orderId, "INV-FAIL-001", "PAY-FAIL-001", refundItems, "Reject reason", refundOpKey, RentalRefundKinds.CancellationRefund)));
         order.AddOperationReceipt(refundReceipt);
 
         await using (var seedDb = CreateDbContext(dbName))

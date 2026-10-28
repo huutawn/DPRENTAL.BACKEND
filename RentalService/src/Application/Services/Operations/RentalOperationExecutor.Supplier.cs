@@ -288,6 +288,34 @@ public sealed partial class RentalOperationExecutor
                 }
             }
 
+            if (previousOrderStatus != RentalOrderStatus.Rejected && order.Status == RentalOrderStatus.Rejected)
+            {
+                var orderRejected = await _rentalEvents.EnqueueRentalOrderRejectedAsync(
+                    new RentalOrderRejectedPayload(order.Id, order.RenterId, utcNow, order.Version),
+                    correlationId: normalizedKey,
+                    cancellationToken: cancellationToken);
+                if (orderRejected.IsFailure)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    return orderRejected.Error;
+                }
+            }
+
+            if (previousOrderStatus != RentalOrderStatus.Expired && order.Status == RentalOrderStatus.Expired)
+            {
+                var orderExpired = await _rentalEvents.EnqueueRentalOrderExpiredAsync(
+                    new RentalOrderExpiredPayload(order.Id, order.RenterId, utcNow, KafkaContractSpec.ReasonCodes.SupplierConfirmationExpired, order.Version),
+                    correlationId: normalizedKey,
+                    cancellationToken: cancellationToken);
+                if (orderExpired.IsFailure)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    return orderExpired.Error;
+                }
+            }
+
             await CommitLocalChangesAsync(order, cancellationToken);
             await tx.CommitAsync(cancellationToken);
 
@@ -482,7 +510,7 @@ public sealed partial class RentalOperationExecutor
         if (refundReceipt == null)
         {
             var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
-            var refundReq = new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, reason, refundOpKey);
+            var refundReq = new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, reason, refundOpKey, RentalRefundKinds.CancellationRefund);
             var refundCmd = new RentalOperationCommand(
                 1,
                 "RequestRefund",
