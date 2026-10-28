@@ -150,7 +150,8 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
                 Assert.Contains("return_request_issue_units", tables);
                 Assert.Contains("return_request_resolutions", tables);
                 Assert.Contains("return_request_resolution_units", tables);
-                Assert.Equal(24, tables.Count);
+                Assert.Contains("rental_refund_confirmations", tables);
+                Assert.Equal(25, tables.Count);
             }
         }
         finally

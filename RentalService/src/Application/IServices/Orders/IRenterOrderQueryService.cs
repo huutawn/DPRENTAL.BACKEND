@@ -15,6 +15,7 @@ public interface IRenterOrderQueryService
         int pageSize,
         string? status,
         IRentalCallerContext caller,
+        string? refundState = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<RenterOrderDetailResponse>> GetMyOrderAsync(

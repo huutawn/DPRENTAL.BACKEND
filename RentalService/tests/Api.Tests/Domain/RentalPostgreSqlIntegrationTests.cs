@@ -121,7 +121,8 @@ public sealed class RentalPostgreSqlIntegrationTests
             Assert.Contains("return_request_issue_units", tables);
             Assert.Contains("return_request_resolutions", tables);
             Assert.Contains("return_request_resolution_units", tables);
-            Assert.Equal(24, tables.Count);
+            Assert.Contains("rental_refund_confirmations", tables);
+            Assert.Equal(25, tables.Count);
         }
         finally
         {
@@ -474,7 +475,7 @@ public sealed class RentalPostgreSqlIntegrationTests
                 var repo = new RentalOrderRepository(queryCtx);
 
                 // Renter query on PostgreSQL
-                var renterPage = await repo.GetRenterOrderPageAsync(renterId, null, 0, 10);
+                var renterPage = await repo.GetRenterOrderPageAsync(renterId, null, null, 0, 10);
                 Assert.Equal(1, renterPage.TotalCount);
                 var renterItem = Assert.Single(renterPage.Items);
                 Assert.Equal(order.Version, renterItem.Version);
@@ -488,7 +489,7 @@ public sealed class RentalPostgreSqlIntegrationTests
                 Assert.Equal(order.OrderCode, supplierItem.OrderCode);
 
                 // Empty page checks
-                var emptyRenter = await repo.GetRenterOrderPageAsync(Guid.NewGuid(), null, 0, 10);
+                var emptyRenter = await repo.GetRenterOrderPageAsync(Guid.NewGuid(), null, null, 0, 10);
                 Assert.Equal(0, emptyRenter.TotalCount);
                 Assert.Empty(emptyRenter.Items);
 

@@ -42,6 +42,7 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                     .ThenInclude(p => p.Dispute)
             .Include(o => o.StateTransitions)
             .Include(o => o.OperationReceipts)
+            .Include(o => o.RefundConfirmations)
             .FirstOrDefaultAsync(o => o.Id == id, cancellationToken);
     }
 
@@ -378,36 +379,61 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
     public async Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(
         Guid renterId,
         RentalOrderStatus? status,
+        bool? refunded,
         int skip,
         int take,
         CancellationToken cancellationToken = default)
     {
-        IQueryable<RentalOrder> query = _dbContext.RentalOrders
+        IQueryable<RentalOrder> orders = _dbContext.RentalOrders
             .AsNoTracking()
             .Where(o => o.RenterId == renterId);
         if (status.HasValue)
         {
-            query = query.Where(o => o.Status == status.Value);
+            orders = orders.Where(o => o.Status == status.Value);
+        }
+
+        // Khoản hoàn: yêu cầu RequestRefund của một dòng, hoặc SettleRental khi dòng còn cọc để hoàn sau khấu trừ;
+        // khoản chờ hoàn là khoản chưa có xác nhận chuyển khoản.
+        var query = orders.Select(o => new
+        {
+            Order = o,
+            RefundCount = o.OperationReceipts.Count(r => r.TargetItemId != null
+                && (r.Action == RequestRefundAction
+                    || (r.Action == RentalItem.SettleRentalAction
+                        && o.Items.Any(i => i.Id == r.TargetItemId && i.DepositAmount - (i.FinalDeductionAmount ?? 0m) > 0m)))),
+            PendingRefundCount = o.OperationReceipts.Count(r => r.TargetItemId != null
+                && (r.Action == RequestRefundAction
+                    || (r.Action == RentalItem.SettleRentalAction
+                        && o.Items.Any(i => i.Id == r.TargetItemId && i.DepositAmount - (i.FinalDeductionAmount ?? 0m) > 0m)))
+                && !o.RefundConfirmations.Any(c => c.RentalItemId == r.TargetItemId))
+        });
+        if (refunded == true)
+        {
+            query = query.Where(x => x.RefundCount > 0 && x.PendingRefundCount == 0);
+        }
+        else if (refunded == false)
+        {
+            query = query.Where(x => x.PendingRefundCount > 0);
         }
 
         int totalCount = await query.CountAsync(cancellationToken);
         List<RenterOrderSummaryRecord> items = await query
-            .OrderByDescending(o => o.CreatedAt)
-            .ThenBy(o => o.Id)
+            .OrderByDescending(x => x.Order.CreatedAt)
+            .ThenBy(x => x.Order.Id)
             .Skip(skip)
             .Take(take)
-            .Select(o => new RenterOrderSummaryRecord(
-                o.Id,
-                o.OrderCode,
-                o.Status,
-                o.Currency,
-                o.Items.Sum(i => i.RentalAmount),
-                o.Items.Sum(i => i.DepositAmount),
-                o.Items.Count,
-                o.SubOrders.Count,
-                o.PaymentDeadline,
-                o.CreatedAt,
-                o.Items
+            .Select(x => new RenterOrderSummaryRecord(
+                x.Order.Id,
+                x.Order.OrderCode,
+                x.Order.Status,
+                x.Order.Currency,
+                x.Order.Items.Sum(i => i.RentalAmount),
+                x.Order.Items.Sum(i => i.DepositAmount),
+                x.Order.Items.Count,
+                x.Order.SubOrders.Count,
+                x.Order.PaymentDeadline,
+                x.Order.CreatedAt,
+                x.Order.Items
                     .OrderBy(i => i.ExpectedStartDate)
                     .ThenBy(i => i.Id)
                     .Select(i => new OrderItemSummaryRecord(
@@ -424,7 +450,10 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                         i.ExpectedEndDate,
                         i.Status))
                     .ToList(),
-                o.Version))
+                x.Order.Version,
+                x.RefundCount,
+                x.PendingRefundCount,
+                x.Order.RefundConfirmations.Sum(c => c.RefundAmount)))
             .ToListAsync(cancellationToken);
 
         return new RecordPage<RenterOrderSummaryRecord>(items, totalCount);
@@ -435,7 +464,8 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
         Guid renterId,
         CancellationToken cancellationToken = default)
     {
-        // Chỉ lấy receipt RequestRefund để biết dòng nào đang được hoàn; các receipt khác mang JSON lớn và không cần ở đây.
+        // Chỉ lấy receipt yêu cầu hoàn (RequestRefund, SettleRental) để biết dòng nào cần hoàn;
+        // các receipt khác mang JSON lớn và không cần ở đây.
         return await _dbContext.RentalOrders
             .AsNoTracking()
             .AsSplitQuery()
@@ -465,7 +495,8 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .Include(o => o.SubOrders)
                 .ThenInclude(s => s.Items)
                     .ThenInclude(i => i.DeductionProposal)
-            .Include(o => o.OperationReceipts.Where(r => r.Action == RequestRefundAction))
+            .Include(o => o.OperationReceipts.Where(r => r.Action == RequestRefundAction || r.Action == RentalItem.SettleRentalAction))
+            .Include(o => o.RefundConfirmations)
             .FirstOrDefaultAsync(o => o.Id == orderId && o.RenterId == renterId, cancellationToken);
     }
 
@@ -649,7 +680,8 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 .ThenInclude(s => s.Items)
                     .ThenInclude(i => i.DeductionProposal)
             .Include(o => o.StateTransitions)
-            .Include(o => o.OperationReceipts.Where(r => r.Action == RequestRefundAction))
+            .Include(o => o.OperationReceipts.Where(r => r.Action == RequestRefundAction || r.Action == RentalItem.SettleRentalAction))
+            .Include(o => o.RefundConfirmations)
             .FirstOrDefaultAsync(o => o.Id == orderId, cancellationToken);
     }
 

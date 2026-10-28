@@ -39,7 +39,10 @@ public sealed record RenterOrderSummaryRecord(
     DateTimeOffset PaymentDeadline,
     DateTimeOffset CreatedAt,
     IReadOnlyList<OrderItemSummaryRecord> Items,
-    long Version)
+    long Version,
+    int RefundCount = 0,
+    int PendingRefundCount = 0,
+    decimal RefundedAmount = 0m)
 {
     public RenterOrderSummaryRecord(
         Guid orderId,

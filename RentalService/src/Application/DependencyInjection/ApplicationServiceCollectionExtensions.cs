@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.IServices.Addresses;
 using Dprental.RentalService.Application.IServices.BankAccounts;
+using Dprental.RentalService.Application.IServices.Refunds;
 using Dprental.RentalService.Application.IServices.Calendar;
 using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.IServices.Expiry;
@@ -21,6 +22,7 @@ using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Addresses;
 using Dprental.RentalService.Application.Services.BankAccounts;
+using Dprental.RentalService.Application.Services.Refunds;
 using Dprental.RentalService.Application.Services.Calendar;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Application.Services.Checkout;
@@ -92,6 +94,8 @@ public static class ApplicationServiceCollectionExtensions
 
         // Bank accounts
         services.AddScoped<IRenterBankAccountService, RenterBankAccountService>();
+        services.AddScoped<IAdminRefundQueryService, AdminRefundQueryService>();
+        services.AddScoped<IAdminRefundCommandService, AdminRefundCommandService>();
 
         // Operations
         services.AddScoped<IRentalOperationExecutor, RentalOperationExecutor>();

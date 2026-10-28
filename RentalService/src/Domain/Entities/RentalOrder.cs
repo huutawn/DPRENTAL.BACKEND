@@ -116,6 +116,9 @@ public class RentalOrder
     private readonly List<RentalOperationReceipt> _operationReceipts = [];
     public IReadOnlyCollection<RentalOperationReceipt> OperationReceipts => _operationReceipts.AsReadOnly();
 
+    private readonly List<RentalRefundConfirmation> _refundConfirmations = [];
+    public IReadOnlyCollection<RentalRefundConfirmation> RefundConfirmations => _refundConfirmations.AsReadOnly();
+
     private RentalOrder()
     {
     }
@@ -468,6 +471,13 @@ public class RentalOrder
     {
         ArgumentNullException.ThrowIfNull(receipt);
         _operationReceipts.Add(receipt);
+    }
+
+    /// <summary>Ghi xác nhận đã chuyển khoản hoàn tiền. Kiểm tra quyền, số tiền và trùng lặp nằm ở Application.</summary>
+    public void AddRefundConfirmation(RentalRefundConfirmation confirmation)
+    {
+        ArgumentNullException.ThrowIfNull(confirmation);
+        _refundConfirmations.Add(confirmation);
     }
 
     /// <summary>Gán ghi chú giao hàng mới (null là xóa). Kiểm tra quyền và thời điểm được sửa nằm ở Application.</summary>

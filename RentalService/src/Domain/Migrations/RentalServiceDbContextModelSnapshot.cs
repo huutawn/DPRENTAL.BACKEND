@@ -841,6 +841,64 @@ namespace RentalService.Domain.Migrations
                     b.ToTable("rental_outbox_messages", "rental");
                 });
 
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalRefundConfirmation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AccountHolderName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("AccountNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("BankCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("BankTransactionRef")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ConfirmedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<decimal>("RefundAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("RentalItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RentalOrderId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankTransactionRef")
+                        .IsUnique();
+
+                    b.HasIndex("RentalItemId")
+                        .IsUnique();
+
+                    b.HasIndex("RentalOrderId");
+
+                    b.ToTable("rental_refund_confirmations", "rental");
+                });
+
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalStateTransition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1409,6 +1467,23 @@ namespace RentalService.Domain.Migrations
                     b.Navigation("RentalOrder");
                 });
 
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalRefundConfirmation", b =>
+                {
+                    b.HasOne("Dprental.RentalService.Domain.Entities.RentalItem", null)
+                        .WithMany()
+                        .HasForeignKey("RentalItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.RentalService.Domain.Entities.RentalOrder", "RentalOrder")
+                        .WithMany("RefundConfirmations")
+                        .HasForeignKey("RentalOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("RentalOrder");
+                });
+
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalStateTransition", b =>
                 {
                     b.HasOne("Dprental.RentalService.Domain.Entities.RentalItem", "RentalItem")
@@ -1610,6 +1685,8 @@ namespace RentalService.Domain.Migrations
                     b.Navigation("Items");
 
                     b.Navigation("OperationReceipts");
+
+                    b.Navigation("RefundConfirmations");
 
                     b.Navigation("StateTransitions");
 
