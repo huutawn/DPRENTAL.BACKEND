@@ -89,6 +89,7 @@ public sealed class TransactionResolutionService(
 
             var outbox = PaymentOutboxFactory.CreateInvoicePaidOutboxMessage(
                 invoice, occurredAt: now, paidAt: bankTransaction.TransactionDate);
+            var analyticsOutbox = PaymentOutboxFactory.CreateInvoicePaidFinancialOutboxMessage(invoice, now);
 
             var prevInv = await invoiceRepository.GetLatestJournalEntryAsync(invoice.InvoiceRef, cancellationToken);
             long nextInvVersion = (prevInv?.Version ?? 0) + 1;
@@ -102,7 +103,8 @@ public sealed class TransactionResolutionService(
             {
                 OperationalSnapshotEngine.CreateInvoiceClaim(invoice),
                 OperationalSnapshotEngine.CreatePaymentTransactionClaim(bankTransaction),
-                OperationalSnapshotEngine.CreateOutboxClaim(outbox)
+                OperationalSnapshotEngine.CreateOutboxClaim(outbox),
+                OperationalSnapshotEngine.CreateOutboxClaim(analyticsOutbox)
             };
 
             var journal = JournalEntryFactory.CreateEntry(
@@ -136,7 +138,11 @@ public sealed class TransactionResolutionService(
                 rentalOrderId: invoice.RentalOrderId,
                 encryptor: encryptor);
 
-            await repository.SaveResolutionAsync(resolution, journal, outbox, cancellationToken);
+            var analyticsJournal = JournalEntryFactory.CreateAnalyticsLinkEntry(
+                journal, invoice, analyticsOutbox, claims, JournalConfirmationSources.Admin,
+                $"ADMIN:{adminId:D}", now, encryptor);
+            await repository.SaveResolutionAsync(resolution, journal, outbox, analyticsJournal,
+                analyticsOutbox, cancellationToken);
             await tx.CommitAsync(cancellationToken);
 
             // 7. Fire realtime notification after successful commit

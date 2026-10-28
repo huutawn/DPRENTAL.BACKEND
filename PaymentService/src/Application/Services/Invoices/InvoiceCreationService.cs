@@ -162,6 +162,9 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
             {
                 outbox = PaymentOutboxFactory.CreateInvoicePaidOutboxMessage(invoice, utcNow);
             }
+            OutboxMessage? analyticsOutbox = invoice.TotalAmount == 0m
+                ? PaymentOutboxFactory.CreateInvoicePaidFinancialOutboxMessage(invoice, utcNow)
+                : null;
 
             string? qrUrl = null;
             if (invoice.Status == InvoiceStatus.Pending && invoice.TotalAmount > 0m)
@@ -200,6 +203,14 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
             {
                 outbox.LinkAttestation(eventId, operationId);
             }
+            var claims = new List<CanonicalEntityClaim>
+            {
+                OperationalSnapshotEngine.CreateInvoiceClaim(invoice),
+                OperationalSnapshotEngine.CreateOperationReceiptClaim(receipt)
+            };
+            claims.AddRange(invoice.Items.Select(OperationalSnapshotEngine.CreateInvoiceItemClaim));
+            if (outbox is not null) claims.Add(OperationalSnapshotEngine.CreateOutboxClaim(outbox));
+            if (analyticsOutbox is not null) claims.Add(OperationalSnapshotEngine.CreateOutboxClaim(analyticsOutbox));
 
             var journalEntry = JournalEntryFactory.CreateEntry(
                 operationId: operationId,
@@ -224,13 +235,7 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
                     ["paymentDeadline"] = CanonicalJournalCodec.NormalizeTimestamp(invoice.PaymentDeadline)
                 },
                 snapshot: OperationalSnapshotEngine.CreateInvoiceSnapshot(invoice, invoice.Revision),
-                entityClaims: new List<CanonicalEntityClaim>
-                {
-                    OperationalSnapshotEngine.CreateInvoiceClaim(invoice),
-                    OperationalSnapshotEngine.CreateOperationReceiptClaim(receipt)
-                }.Concat(invoice.Items.Select(OperationalSnapshotEngine.CreateInvoiceItemClaim))
-                 .Concat(outbox != null ? [OperationalSnapshotEngine.CreateOutboxClaim(outbox)] : Enumerable.Empty<CanonicalEntityClaim>())
-                 .ToList(),
+                entityClaims: claims,
                 outboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(outbox?.Payload),
                 outboxMessageId: outbox?.MessageId,
                 paymentRef: invoice.PaymentRef,
@@ -238,10 +243,15 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
                 rentalOrderId: invoice.RentalOrderId,
                 encryptor: _encryptor);
 
+            TransactionJournalEntry? analyticsJournal = analyticsOutbox is null ? null
+                : JournalEntryFactory.CreateAnalyticsLinkEntry(journalEntry, invoice, analyticsOutbox,
+                    claims, JournalConfirmationSources.System, $"RENTER:{invoice.RenterId:D}", utcNow, _encryptor);
+
             await using var tx = await _repository.BeginTransactionAsync(ct);
             try
             {
-                await _repository.SaveNewInvoiceAsync(invoice, receipt, outbox, journalEntry, ct);
+                await _repository.SaveNewInvoiceAsync(invoice, receipt, outbox, journalEntry,
+                    analyticsOutbox, analyticsJournal, ct);
                 await tx.CommitAsync(ct);
                 if (_notifier is not null && invoice.TotalAmount == 0m)
                 {

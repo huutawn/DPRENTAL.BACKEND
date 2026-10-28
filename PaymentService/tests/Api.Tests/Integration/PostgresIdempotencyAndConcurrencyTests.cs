@@ -347,7 +347,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             Assert.Equal(InvoiceStatus.Paid, dbInvoice.Status);
             Assert.Equal(paidAtPlus7.ToUniversalTime(), dbInvoice.PaidAt);
 
-            var outbox = await ctx.OutboxMessages.AsNoTracking().SingleAsync(o => o.AggregateId == orderId.ToString("D"));
+            var outbox = await ctx.OutboxMessages.AsNoTracking().SingleAsync(o => o.AggregateId == orderId.ToString("D") && o.MessageType == "InvoicePaid");
             AssertValidInvoicePaidOutboxJson(outbox.Payload);
         }
         finally
@@ -473,7 +473,8 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             // Replay on already-PAID invoice (inv1) after deadline still succeeds idempotently
             var paidReplay = await processor1.ProcessAsync(vt1);
             Assert.True(paidReplay.IsSuccess);
-            Assert.Equal(1, await ctx.OutboxMessages.CountAsync(o => o.AggregateId == order1.ToString("D")));
+            Assert.Equal(1, await ctx.OutboxMessages.CountAsync(o => o.AggregateId == order1.ToString("D") && o.MessageType == "InvoicePaid"));
+            Assert.Equal(1, await ctx.OutboxMessages.CountAsync(o => o.AggregateId == order1.ToString("D") && o.MessageType == OutboxTopics.InvoicePaidFinancialMessageType));
         }
         finally
         {
@@ -640,10 +641,12 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
 
             // Verify outbox message against InvoicePaid v1 JSON Schema
             var outboxMessages = await ctx.OutboxMessages.Where(o => o.AggregateId == orderId.ToString("D")).ToListAsync();
-            Assert.Single(outboxMessages);
-            AssertValidInvoicePaidOutboxJson(outboxMessages[0].Payload);
+            Assert.Equal(2, outboxMessages.Count);
+            var rentalOutbox = Assert.Single(outboxMessages, o => o.MessageType == "InvoicePaid");
+            Assert.Single(outboxMessages, o => o.MessageType == OutboxTopics.InvoicePaidFinancialMessageType);
+            AssertValidInvoicePaidOutboxJson(rentalOutbox.Payload);
 
-            var envelope = JsonSerializer.Deserialize<PaymentEventEnvelope<InvoicePaidPayload>>(outboxMessages[0].Payload);
+            var envelope = JsonSerializer.Deserialize<PaymentEventEnvelope<InvoicePaidPayload>>(rentalOutbox.Payload);
             Assert.NotNull(envelope);
             Assert.Equal("InvoicePaid", envelope.MessageType);
             Assert.Equal("payment-service", envelope.Producer);
@@ -838,7 +841,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
 
             Assert.Equal(1, invoices.Count(i => i.Status == InvoiceStatus.Paid && i.PaymentRef == "SEPAY:5001"));
             Assert.Equal(1, invoices.Count(i => i.Status == InvoiceStatus.Pending && i.PaymentRef == null));
-            Assert.Equal(1, await verifyCtx.OutboxMessages.CountAsync());
+            Assert.Equal(2, await verifyCtx.OutboxMessages.CountAsync());
         }
         finally
         {
@@ -921,7 +924,7 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
     }
 
     [Fact]
-    public async Task RecordPayment_BlockedOnRowLockPastDeadline_PersistsExpiredWithoutPaymentRefOrOutbox()
+    public async Task RecordPayment_BlockedOnRowLockPastDeadline_OnTimeBankTransferRemainsPaid()
     {
         var (connString, dbName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
         try
@@ -989,16 +992,16 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             var payResult = await recordTask;
             Assert.True(payResult.IsSuccess);
 
-            // 5. Assert DB status EXPIRED, PaymentRef set, transaction is MANUAL_REFUND_REQUIRED, and 1 outbox message
+            // Bank paidAt remains authoritative even though the lock was released after the deadline.
             await using var verifyCtx = new PaymentServiceDbContext(options);
             var dbInvoice = await verifyCtx.Invoices.AsNoTracking().SingleAsync(i => i.InvoiceRef == invoiceRef);
-            Assert.Equal(InvoiceStatus.Expired, dbInvoice.Status);
+            Assert.Equal(InvoiceStatus.Paid, dbInvoice.Status);
             Assert.Equal("SEPAY:7001", dbInvoice.PaymentRef);
             Assert.Equal(validPaidAt, dbInvoice.PaidAt);
-            Assert.Equal(1, await verifyCtx.OutboxMessages.CountAsync(o => o.AggregateId == orderId.ToString("D")));
+            Assert.Equal(2, await verifyCtx.OutboxMessages.CountAsync(o => o.AggregateId == orderId.ToString("D")));
 
             var txRecord = await verifyCtx.PaymentTransactions.AsNoTracking().SingleAsync(t => t.ProviderTransactionId == "7001");
-            Assert.Equal(PaymentTransactionStatus.ManualRefundRequired, txRecord.Status);
+            Assert.Equal(PaymentTransactionStatus.Matched, txRecord.Status);
         }
         finally
         {
@@ -1080,14 +1083,14 @@ public sealed class PostgresIdempotencyAndConcurrencyTests
             var dbInvoice = await verifyCtx.Invoices.AsNoTracking().SingleAsync(i => i.InvoiceRef == invoiceRef);
             Assert.Equal(InvoiceStatus.Paid, dbInvoice.Status);
             Assert.Equal("SEPAY:8001", dbInvoice.PaymentRef);
-            Assert.Equal(1, await verifyCtx.OutboxMessages.CountAsync(o => o.AggregateId == orderId.ToString("D")));
+            Assert.Equal(2, await verifyCtx.OutboxMessages.CountAsync(o => o.AggregateId == orderId.ToString("D")));
 
             // 5. Advance time past deadline and replay payment: must still succeed without adding outbox
             fakeTime.Advance(TimeSpan.FromMinutes(30)); // now = startTime + 45m > deadline
             var replayProc = CreatePaymentProcessor(new EfInvoiceRepository(verifyCtx), fakeTime);
             var replayRes = await replayProc.ProcessAsync(vt8);
             Assert.True(replayRes.IsSuccess);
-            Assert.Equal(1, await verifyCtx.OutboxMessages.CountAsync(o => o.AggregateId == orderId.ToString("D")));
+            Assert.Equal(2, await verifyCtx.OutboxMessages.CountAsync(o => o.AggregateId == orderId.ToString("D")));
         }
         finally
         {

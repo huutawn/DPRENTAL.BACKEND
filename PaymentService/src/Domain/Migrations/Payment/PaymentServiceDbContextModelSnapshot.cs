@@ -105,11 +105,6 @@ namespace Dprental.PaymentService.Domain.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
-                    b.Property<int>("IntegritySnapshotVersion")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(1);
-
                     b.Property<DateTimeOffset?>("CancelledAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -123,6 +118,11 @@ namespace Dprental.PaymentService.Domain.Migrations
 
                     b.Property<DateTimeOffset?>("ExpiredAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("IntegritySnapshotVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
 
                     b.Property<string>("InvoiceRef")
                         .IsRequired()
@@ -335,6 +335,10 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Property<string>("ExternalTransferReference")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
+
+                    b.Property<string>("FinancialRefundKind")
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
 
                     b.Property<Guid>("InvoiceId")
                         .HasColumnType("uuid");
@@ -558,6 +562,13 @@ namespace Dprental.PaymentService.Domain.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bigint")
                         .HasDefaultValue(1L);
+
+                    b.Property<string>("Topic")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasDefaultValue("payment.events.v1");
 
                     b.HasKey("Id");
 

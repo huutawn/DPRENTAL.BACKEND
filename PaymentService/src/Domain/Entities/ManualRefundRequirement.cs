@@ -15,6 +15,7 @@ public sealed class ManualRefundRequirement
     public string Reason { get; private set; } = string.Empty;
     public string OperationKey { get; private set; } = string.Empty;
     public ManualRefundKind Kind { get; private set; }
+    public string? FinancialRefundKind { get; private set; }
     public decimal Amount { get; private set; }
     public ManualRefundStatus Status { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -29,7 +30,7 @@ public sealed class ManualRefundRequirement
 
     public static ManualRefundRequirement Create(Guid invoiceId, Guid renterId, string paymentRef,
         string operationKey, string reason, ManualRefundKind kind, Guid? settlementId,
-        IReadOnlyList<ManualRefundItem> items, DateTimeOffset now)
+        IReadOnlyList<ManualRefundItem> items, DateTimeOffset now, string financialRefundKind)
     {
         Guid id = Guid.NewGuid();
         foreach (var item in items) item.AssignRequirement(id);
@@ -43,6 +44,7 @@ public sealed class ManualRefundRequirement
             OperationKey = operationKey,
             Reason = reason,
             Kind = kind,
+            FinancialRefundKind = financialRefundKind,
             SettlementId = settlementId,
             RentalItemId = items.Count == 1 ? items[0].RentalItemId : null,
             Amount = items.Sum(x => x.RentalAmount + x.DepositAmount),

@@ -9,5 +9,7 @@ public interface ITransactionResolutionRepository
     Task<PaymentTransaction?> FindTransactionByIdAsync(Guid transactionId, CancellationToken cancellationToken = default);
     Task<PaymentTransactionResolution?> FindResolutionByOperationKeyAsync(string operationKey, CancellationToken cancellationToken = default);
     Task<bool> ExistsResolutionByTransactionIdAsync(Guid transactionId, CancellationToken cancellationToken = default);
-    Task SaveResolutionAsync(PaymentTransactionResolution resolution, TransactionJournalEntry journal, OutboxMessage outbox, CancellationToken cancellationToken = default);
+    Task SaveResolutionAsync(PaymentTransactionResolution resolution, TransactionJournalEntry journal,
+        OutboxMessage outbox, TransactionJournalEntry analyticsJournal, OutboxMessage analyticsOutbox,
+        CancellationToken cancellationToken = default);
 }

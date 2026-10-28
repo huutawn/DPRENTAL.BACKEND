@@ -1,6 +1,9 @@
 using Dprental.PaymentService.Application.DTOs.Payout;
 using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Common;
+using Dprental.PaymentService.Common.Cryptography;
+using Dprental.PaymentService.Application.Services.Integrity;
+using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.IRepositories;
 
 namespace Dprental.PaymentService.Application.Services;
@@ -13,8 +16,16 @@ public sealed class SupplierPayoutService : ISupplierPayoutService
     private const int MaxReason = 500;
 
     private readonly ISupplierPayoutRepository _repository;
+    private readonly IInvoiceRepository _invoices;
+    private readonly IPaymentDataEncryptor _encryptor;
 
-    public SupplierPayoutService(ISupplierPayoutRepository repository) => _repository = repository;
+    public SupplierPayoutService(ISupplierPayoutRepository repository, IInvoiceRepository invoices,
+        IPaymentDataEncryptor encryptor)
+    {
+        _repository = repository;
+        _invoices = invoices;
+        _encryptor = encryptor;
+    }
 
     public async Task<Result<CompleteSupplierPayoutResponse>> CompleteAsync(
         Guid payoutId, Guid adminId, CompleteSupplierPayoutRequest request, CancellationToken ct)
@@ -28,7 +39,31 @@ public sealed class SupplierPayoutService : ISupplierPayoutService
 
         var result = await _repository.CompleteAsync(new CompleteSupplierPayoutCommand(
             payoutId, adminId, request.OperationKey.Trim(),
-            request.ExternalTransferReference.Trim(), request.AuditReason.Trim()), ct);
+            request.ExternalTransferReference.Trim(), request.AuditReason.Trim()),
+            async (payout, now, token) =>
+            {
+                var message = PaymentOutboxFactory.CreateSupplierPayoutCompleted(payout);
+                var previous = await _invoices.GetLatestJournalEntryAsync(payout.PayoutRef, token);
+                Guid operationId = Guid.NewGuid();
+                Guid eventId = Guid.NewGuid();
+                message.LinkAttestation(eventId, operationId);
+                var journal = JournalEntryFactory.CreateEntry(operationId, payout.PayoutRef,
+                    JournalStreamTypes.SupplierPayout, (previous?.Version ?? 0) + 1,
+                    eventId, JournalEventTypes.SupplierPayoutCompleted, payout.Amount,
+                    payout.Currency, payout.Status, JournalConfirmationSources.Admin,
+                    $"ADMIN:{adminId:D}", now,
+                    previous?.EntryHash ?? CanonicalJournalHasher.GenesisHash, _encryptor,
+                    relatedEntities: new Dictionary<string, string?>
+                    {
+                        ["settlementId"] = payout.SettlementId.ToString("D"),
+                        ["rentalItemId"] = payout.RentalItemId.ToString("D"),
+                        ["supplierId"] = payout.SupplierId.ToString("D")
+                    },
+                    entityClaims: [OperationalSnapshotEngine.CreateOutboxClaim(message)],
+                    outboxDigest: CanonicalJournalHasher.ComputeOutboxDigest(message.Payload),
+                    outboxMessageId: message.MessageId, rentalItemId: payout.RentalItemId);
+                return new SupplierPayoutPublication(message, journal);
+            }, ct);
 
         if (!result.IsSuccess) return result.Error;
 

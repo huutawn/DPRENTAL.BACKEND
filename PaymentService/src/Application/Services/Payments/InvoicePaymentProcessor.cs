@@ -131,6 +131,9 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
             {
                 outbox.LinkAttestation(invoiceEventId ?? bankEventId, operationId);
             }
+            OutboxMessage? analyticsOutbox = classification.Status == PaymentTransactionStatus.Matched && invoiceToPersist is not null
+                ? PaymentOutboxFactory.CreateInvoicePaidFinancialOutboxMessage(invoiceToPersist, processingTimeUtc)
+                : null;
 
             string outboxDigest = CanonicalJournalHasher.ComputeOutboxDigest(outbox?.Payload);
             var claims = new List<CanonicalEntityClaim>
@@ -144,6 +147,10 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
             if (outbox is not null)
             {
                 claims.Add(OperationalSnapshotEngine.CreateOutboxClaim(outbox));
+            }
+            if (analyticsOutbox is not null)
+            {
+                claims.Add(OperationalSnapshotEngine.CreateOutboxClaim(analyticsOutbox));
             }
 
             var prevBank = await _repository.GetLatestJournalEntryAsync(paymentRef, cancellationToken);
@@ -186,6 +193,7 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
                 encryptor: _encryptor);
 
             TransactionJournalEntry? invoiceJournal = null;
+            TransactionJournalEntry? analyticsJournal = null;
             if (invoiceToPersist is not null)
             {
                 var prevInv = await _repository.GetLatestJournalEntryAsync(invoiceToPersist.InvoiceRef, cancellationToken);
@@ -222,9 +230,16 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
                     invoiceRef: invoiceToPersist.InvoiceRef,
                     rentalOrderId: invoiceToPersist.RentalOrderId,
                     encryptor: _encryptor);
+                if (analyticsOutbox is not null)
+                {
+                    analyticsJournal = JournalEntryFactory.CreateAnalyticsLinkEntry(
+                        invoiceJournal, invoiceToPersist, analyticsOutbox, claims,
+                        JournalConfirmationSources.Webhook, "WEBHOOK:SEPAY", processingTimeUtc, _encryptor);
+                }
             }
             // 8. Persist atomically and commit
-            await _repository.SavePaymentTransactionAsync(pt, invoiceToPersist, outbox, bankJournal, invoiceJournal, cancellationToken);
+            await _repository.SavePaymentTransactionAsync(pt, invoiceToPersist, outbox, bankJournal, invoiceJournal,
+                analyticsOutbox, analyticsJournal, cancellationToken);
             await tx.CommitAsync(cancellationToken);
             if (_notifier is not null && classification.Status == PaymentTransactionStatus.Matched && invoiceToPersist is not null && invoiceJournal is not null)
             {
@@ -369,15 +384,16 @@ public sealed class InvoicePaymentProcessor : IInvoicePaymentProcessor
             return new(PaymentTransactionStatus.ReviewRequired, PaymentTransactionReason.InvoiceAlreadyPaid);
         }
 
-        bool isLate = bankTimeUtc >= invoice.PaymentDeadline ||
-                      processingTimeUtc >= invoice.PaymentDeadline ||
-                      invoice.Status is InvoiceStatus.Expired or InvoiceStatus.Cancelled;
-
-        if (isLate)
+        if (bankTimeUtc >= invoice.PaymentDeadline)
         {
             return new(PaymentTransactionStatus.ManualRefundRequired, PaymentTransactionReason.LatePayment);
         }
 
+        if (invoice.Status is InvoiceStatus.Expired or InvoiceStatus.Cancelled)
+        {
+            return new(PaymentTransactionStatus.ReviewRequired, PaymentTransactionReason.OnTimePaymentInvoiceClosed);
+
+        }
         return new(PaymentTransactionStatus.Matched, PaymentTransactionReason.ExactMatch);
     }
 

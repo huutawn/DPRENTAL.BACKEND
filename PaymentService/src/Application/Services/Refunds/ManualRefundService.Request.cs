@@ -21,6 +21,7 @@ public sealed partial class ManualRefundService
             InvoiceRef = request.InvoiceRef.Trim(),
             PaymentRef = request.PaymentRef.Trim(),
             Reason = request.Reason.Trim(),
+            RefundKind = request.RefundKind.Trim(),
             Items = request.Items.OrderBy(x => x.RentalItemId).ToArray()
         };
         string fingerprint = CanonicalJournalHasher.ComputeOutboxDigest(JsonSerializer.Serialize(request));
@@ -41,6 +42,9 @@ public sealed partial class ManualRefundService
         if (invoice.RentalOrderId != request.RentalOrderId || invoice.PaymentRef != request.PaymentRef ||
             invoice.Status is not (InvoiceStatus.Paid or InvoiceStatus.Expired or InvoiceStatus.Cancelled))
             return Error.Conflict("Payment.RefundInvoiceMismatch", "Refund does not match the received payment.");
+        if (request.RefundKind == FinancialRefundKinds.LatePaymentRefund &&
+            (invoice.PaidAt is null || invoice.PaidAt < invoice.PaymentDeadline))
+            return Error.Conflict("Payment.RefundKindMismatch", "LatePaymentRefund requires a bank payment at or after the invoice deadline.");
         var required = new List<VerifiedWriteClaim> { SettlementService.ToWriteClaim(OperationalSnapshotEngine.CreateInvoiceClaim(invoice)) };
         var existing = await refunds.GetForInvoiceAsync(invoice.Id, ct);
         var lines = new List<ManualRefundItem>();
@@ -63,18 +67,28 @@ public sealed partial class ManualRefundService
         if (guard.IsFailure) return guard.Error;
         var now = clock.GetUtcNow();
         var refund = ManualRefundRequirement.Create(invoice.Id, invoice.RenterId, request.PaymentRef, request.OperationKey,
-            request.Reason, ManualRefundKind.RentalRefund, null, lines, now);
+            request.Reason, ManualRefundKind.RentalRefund, null, lines, now, request.RefundKind);
         await refunds.AddAsync(refund, ct);
         var response = new RequestRefundResponse(refund.RequirementRef, request.OperationKey, "Accepted", refund.Amount, invoice.Currency, false);
         var receipt = OperationReceipt.Create(request.OperationKey, "RequestRefund", fingerprint,
             JsonSerializer.Serialize(response), invoice.InvoiceRef, invoice.RentalOrderId, now);
+        var financialOutbox = PaymentOutboxFactory.CreateRefundRequestedFinancial(refund, invoice);
+        var claims = new List<CanonicalEntityClaim>
+        {
+            OperationalSnapshotEngine.CreateManualRefundClaim(refund),
+            OperationalSnapshotEngine.CreateOperationReceiptClaim(receipt),
+            OperationalSnapshotEngine.CreateOutboxClaim(financialOutbox)
+        };
         var journal = await JournalEntryFactory.CreateNextAsync(invoices, Guid.NewGuid(), refund.RequirementRef,
             JournalStreamTypes.ManualRefund, JournalEventTypes.RefundRequired, invoice, refund.Amount,
             "PENDING_MANUAL_REFUND", "rental-service", now,
-            [OperationalSnapshotEngine.CreateManualRefundClaim(refund), OperationalSnapshotEngine.CreateOperationReceiptClaim(receipt)],
+            claims,
             encryptor, null, ct);
+        var financialJournal = JournalEntryFactory.CreateLinkedFinancialEvent(journal,
+            JournalEventTypes.RefundRequestedFinancialLinked, invoice, refund.Amount,
+            "PENDING_MANUAL_REFUND", "rental-service", now, claims, encryptor, financialOutbox);
         if (clock.GetUtcNow() >= evidence.Value.ExpiresAt) return Error.Conflict("Payment.ReceiptExpired", "Receipt expired before commit.");
-        await invoices.SaveFinancialOperationAsync(receipt, [journal], [], ct);
+        await invoices.SaveFinancialOperationAsync(receipt, [journal, financialJournal], [financialOutbox], ct);
         await tx.CommitAsync(ct);
         return response;
     }

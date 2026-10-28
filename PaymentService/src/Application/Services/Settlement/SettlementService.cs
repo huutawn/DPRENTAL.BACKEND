@@ -84,18 +84,38 @@ public sealed class SettlementService(
         {
             var refund = ManualRefundRequirement.Create(invoice.Id, invoice.RenterId, invoice.PaymentRef!, amounts.OperationKey,
                 "RENTAL_DEPOSIT_REFUND", ManualRefundKind.SettlementDeposit, record.Id,
-                [ManualRefundItem.Create(item.RentalItemId, 0, amounts.DepositRefundDue)], now);
+                [ManualRefundItem.Create(item.RentalItemId, 0, amounts.DepositRefundDue)], now,
+                FinancialRefundKinds.SettlementDepositRefund);
             record.AssignRefundRequirement(refund);
             claims.Add(OperationalSnapshotEngine.CreateManualRefundClaim(refund));
-            journals.Add(await JournalEntryFactory.CreateNextAsync(invoices, operationId, refund.RequirementRef,
+            var refundRequested = PaymentOutboxFactory.CreateRefundRequestedFinancial(refund, invoice);
+            messages.Add(refundRequested);
+            claims.Add(OperationalSnapshotEngine.CreateOutboxClaim(refundRequested));
+            var refundJournal = await JournalEntryFactory.CreateNextAsync(invoices, operationId, refund.RequirementRef,
                 JournalStreamTypes.ManualRefund, JournalEventTypes.RefundRequired, invoice, refund.Amount,
-                "PENDING_MANUAL_REFUND", "rental-service", now, claims, encryptor, null, ct));
+                "PENDING_MANUAL_REFUND", "rental-service", now, claims, encryptor, null, ct);
+            journals.Add(refundJournal);
+            journals.Add(JournalEntryFactory.CreateLinkedFinancialEvent(refundJournal,
+                JournalEventTypes.RefundRequestedFinancialLinked, invoice, refund.Amount,
+                "PENDING_MANUAL_REFUND", "rental-service", now, claims, encryptor, refundRequested));
         }
-        else messages.Add(PaymentOutboxFactory.CreateRentalSettled(record, invoice, null, now));
-        journals.Add(await JournalEntryFactory.CreateNextAsync(invoices, operationId, record.SettlementRef,
+        else
+        {
+            messages.Add(PaymentOutboxFactory.CreateRentalSettled(record, invoice, null, now));
+            messages.Add(PaymentOutboxFactory.CreateRentalItemFinancialSettled(record, invoice));
+            claims.AddRange(messages.Select(OperationalSnapshotEngine.CreateOutboxClaim));
+        }
+        var settlementJournal = await JournalEntryFactory.CreateNextAsync(invoices, operationId, record.SettlementRef,
             JournalStreamTypes.RentalSettlement, JournalEventTypes.RentalSettled, invoice,
             invoice.Items.Single(x => x.RentalItemId == record.RentalItemId).TotalAmount, response.Status,
-            "rental-service", now, claims, encryptor, messages.FirstOrDefault(), ct));
+            "rental-service", now, claims, encryptor,
+            record.Status == SettlementState.Completed ? messages[0] : null, ct);
+        journals.Add(settlementJournal);
+        if (record.Status == SettlementState.Completed)
+            journals.Add(JournalEntryFactory.CreateLinkedFinancialEvent(settlementJournal,
+                JournalEventTypes.RentalItemFinancialSettledLinked, invoice,
+                record.RentalAmount + record.DepositAmount, "COMPLETED", "rental-service",
+                now, claims, encryptor, messages[1]));
         guarded = evidence.Value.Validate(clock.GetUtcNow(), ToWriteClaim(OperationalSnapshotEngine.CreateInvoiceClaim(invoice)),
             ToWriteClaim(OperationalSnapshotEngine.CreateInvoiceItemClaim(item)));
         if (guarded.IsFailure) return guarded.Error;
