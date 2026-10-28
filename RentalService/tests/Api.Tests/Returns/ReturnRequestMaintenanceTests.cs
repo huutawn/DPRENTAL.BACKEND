@@ -152,4 +152,37 @@ public sealed class ReturnRequestMaintenanceTests : IAsyncLifetime
 
         Assert.Equal(0, secondDryRunCount);
     }
+
+    [Fact]
+    public async Task Main_ReconcileCommand_ReturnsZeroExitCode_BothDryRunAndApply()
+    {
+        Environment.SetEnvironmentVariable("POSTGRES_CONNECTION_STRING", _connection);
+        try
+        {
+            int dryRunExit = await Dprental.RentalService.Maintenance.Program.Main(["reconcile-return-requests"]);
+            Assert.Equal(0, dryRunExit);
+
+            int applyExit = await Dprental.RentalService.Maintenance.Program.Main(["reconcile-return-requests", "--apply"]);
+            Assert.Equal(0, applyExit);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("POSTGRES_CONNECTION_STRING", null);
+        }
+    }
+
+    [Fact]
+    public async Task Main_DatabaseFailure_ReturnsNonZeroExitCode()
+    {
+        Environment.SetEnvironmentVariable("POSTGRES_CONNECTION_STRING", "Host=invalid-host-that-does-not-exist;Port=5433;Database=rentalservice;Username=postgres;Password=postgres;Timeout=1");
+        try
+        {
+            int failExit = await Dprental.RentalService.Maintenance.Program.Main(["reconcile-return-requests"]);
+            Assert.Equal(1, failExit);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("POSTGRES_CONNECTION_STRING", null);
+        }
+    }
 }

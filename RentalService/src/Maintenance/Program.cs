@@ -45,7 +45,17 @@ public static class Program
         }
         else if (command is "reconcile-return-requests" or "reconcile-returns")
         {
-            return await RunReconcileReturnRequestsAsync(optionsBuilder.Options, apply);
+            try
+            {
+                int count = await RunReconcileReturnRequestsAsync(optionsBuilder.Options, apply);
+                Console.WriteLine($"Reconciliation completed successfully: {count} record(s).");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Reconciliation failed: {ex.Message}");
+                return 1;
+            }
         }
         else if (command == "replay-outbox")
         {
