@@ -457,7 +457,7 @@ public sealed class SupplierDecisionAndHandoverNotificationTests
     }
 
     [Fact]
-    public async Task AcceptSubOrder_CommandAccepted_DoesNotEmitSupplierConfirmed()
+    public async Task AcceptSubOrder_InventoryUnavailable_DoesNotEmitSupplierConfirmed()
     {
         string dbName = Guid.NewGuid().ToString("N");
         await using var db = CreateDbContext(dbName);
@@ -487,15 +487,15 @@ public sealed class SupplierDecisionAndHandoverNotificationTests
         var eventProducer = new RentalEventProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
         var cmdProducer = new InventoryCommandProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
 
-        var mockInventory = new Mock<IInventoryRentalClient>();
-        mockInventory.Setup(m => m.ConfirmAllocationAsync(It.IsAny<string>(), It.IsAny<ConfirmAllocationRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string grp, ConfirmAllocationRequest req, CancellationToken _) =>
-                Result.Success(new ConfirmAllocationResponse("REC-CONF", grp, FixedNow, false,
-                    itemA.UnitAssignments.Select(u => new ConfirmedAllocationUnitDto(u.AllocationId, u.AssetId, "Confirmed")).ToList())));
+        var inventory = new Mock<IInventoryRentalClient>();
+        inventory.Setup(x => x.ConfirmAllocationAsync(
+                It.IsAny<string>(), It.IsAny<ConfirmAllocationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Failure<ConfirmAllocationResponse>(
+                Error.ServiceUnavailable("Inventory.Unavailable", "Inventory is unavailable.")));
 
         var executor = new RentalOperationExecutor(
             orders, receipts, outboxes, lockManager,
-            mockInventory.Object,
+            inventory.Object,
             new Mock<IPaymentRentalClient>().Object,
             cmdProducer, db,
             new ConfigurationBuilder().Build(),
@@ -504,11 +504,11 @@ public sealed class SupplierDecisionAndHandoverNotificationTests
 
         Guid subOrderAId = order.SubOrders.Single(s => s.SupplierId == supplierA).Id;
 
-        // Accept command enqueued -> command accepted is NOT completion
+        // An unavailable Inventory cannot confirm the allocation or notify clients.
         var acceptResult = await executor.ExecuteSubOrderAcceptAsync(
             orderId, subOrderAId, supplierA, "accept-idemp-1");
 
-        Assert.True(acceptResult.IsSuccess);
+        Assert.True(acceptResult.IsFailure);
 
         // Neither renter nor supplier should receive SUPPLIER_CONFIRMED yet
         Assert.Empty(notifier.RenterNotifications);

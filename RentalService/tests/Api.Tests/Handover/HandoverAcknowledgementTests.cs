@@ -335,4 +335,37 @@ public sealed class HandoverAcknowledgementTests
             Assert.Equal(versionBefore + 1, ord2!.Version);
         }
     }
+
+    [Fact]
+    public async Task ConcurrentAcknowledgements_BothSucceed_AndAuditRecordedOnlyOnce()
+    {
+        await SeedAsync(withHandover: true);
+
+        var lockManager = new FakeOrderLockManager();
+        var ctx1 = NewContext();
+        var ctx2 = NewContext();
+        var service1 = new HandoverAcknowledgementService(
+            new RentalOrderRepository(ctx1),
+            lockManager,
+            ctx1,
+            _clock,
+            NullLogger<HandoverAcknowledgementService>.Instance);
+        var service2 = new HandoverAcknowledgementService(
+            new RentalOrderRepository(ctx2),
+            lockManager,
+            ctx2,
+            _clock,
+            NullLogger<HandoverAcknowledgementService>.Instance);
+
+        var task1 = service1.AcknowledgeAsync(_item.Id, new AcknowledgeReceiptRequest("Note 1"), OrderTestData.User(_renterId));
+        var task2 = service2.AcknowledgeAsync(_item.Id, new AcknowledgeReceiptRequest("Note 2"), OrderTestData.User(_renterId));
+
+        var results = await Task.WhenAll(task1, task2);
+        Assert.All(results, r => Assert.True(r.IsSuccess));
+
+        await using var verifyContext = NewContext();
+        int transitionCount = await verifyContext.RentalStateTransitions
+            .CountAsync(t => t.RentalItemId == _item.Id && t.Action == "RenterAcknowledgeReceipt");
+        Assert.Equal(1, transitionCount);
+    }
 }

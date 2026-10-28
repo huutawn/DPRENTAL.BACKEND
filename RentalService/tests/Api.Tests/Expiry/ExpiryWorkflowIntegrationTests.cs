@@ -247,6 +247,9 @@ public sealed class ExpiryWorkflowIntegrationTests
 
         var outbox = await db.RentalOutboxMessages.FirstOrDefaultAsync(m => m.MessageType == "RentalItemExpired");
         Assert.NotNull(outbox);
+        var orderExpired = await db.RentalOutboxMessages.SingleAsync(m => m.MessageType == KafkaContractSpec.EventTypes.RentalOrderExpired);
+        using var doc = System.Text.Json.JsonDocument.Parse(orderExpired.Payload);
+        Assert.Equal(reloadedOrder.Version, doc.RootElement.GetProperty("payload").GetProperty("orderVersion").GetInt64());
     }
 
     [Fact]
@@ -331,7 +334,7 @@ public sealed class ExpiryWorkflowIntegrationTests
             createdAt: FixedNow,
             status: RentalOperationReceipt.StatusPending,
             targetItemId: item.Id,
-            payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(orderId, "INV-001", "PAY-001", refundItems, "Rejected", "refund:rejected:001")));
+            payloadJson: JsonSerializer.Serialize(new RequestRefundRequest(orderId, "INV-001", "PAY-001", refundItems, "Rejected", "refund:rejected:001", RentalRefundKinds.CancellationRefund)));
         order.AddOperationReceipt(refundReceipt);
 
         long initialVersion = order.Version;

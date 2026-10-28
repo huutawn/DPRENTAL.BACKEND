@@ -208,19 +208,30 @@ public sealed record RefundItemRequest(
     }
 }
 
+public static class RentalRefundKinds
+{
+    public const string CancellationRefund = "CancellationRefund";
+    public const string LatePaymentRefund = "LatePaymentRefund";
+}
+
 public sealed record RequestRefundRequest(
     [Required] Guid RentalOrderId,
     [Required][MaxLength(256)] string InvoiceRef,
     [Required][MaxLength(256)] string PaymentRef,
     [Required] IReadOnlyList<RefundItemRequest> Items,
     [Required][MaxLength(500)] string Reason,
-    [Required][MaxLength(64)] string OperationKey)
+    [Required][MaxLength(64)] string OperationKey,
+    [Required] string RefundKind)
 {
     [JsonIgnore]
     public decimal TotalRefundAmount => Items?.Sum(i => i.TotalRefundAmount) ?? 0m;
 
     public Result Validate()
     {
+        if (RefundKind is not (RentalRefundKinds.CancellationRefund or RentalRefundKinds.LatePaymentRefund))
+        {
+            return Error.Validation("Payment.InvalidRefundKind", "RefundKind phải là CancellationRefund hoặc LatePaymentRefund.");
+        }
         if (RentalOrderId == Guid.Empty)
         {
             return Error.Validation("Payment.InvalidId", "RentalOrderId phải là GUID hợp lệ.");

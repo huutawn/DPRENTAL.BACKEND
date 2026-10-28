@@ -78,11 +78,6 @@ public sealed class RentalSettledConsumer(
 
         if (!wasCompleted && isNowCompleted)
         {
-            if (!item.EquipmentTypeId.HasValue || item.EquipmentTypeId.Value == Guid.Empty)
-            {
-                return Error.Validation("INVALID_EQUIPMENT_TYPE_ID", $"EquipmentTypeId của rental item {item.Id} không hợp lệ.");
-            }
-
             var enqueueResult = await eventProducer.EnqueueRentalItemCompletedAsync(
                 new RentalItemCompletedPayload(
                     order.RenterId,
@@ -90,7 +85,8 @@ public sealed class RentalSettledConsumer(
                     item.EquipmentTypeId,
                     order.Id,
                     item.Id,
-                    order.Version),
+                    order.Version,
+                    payload.CompletedAt),
                 correlationId: envelope.CorrelationId,
                 causationId: envelope.MessageId,
                 cancellationToken: cancellationToken);
