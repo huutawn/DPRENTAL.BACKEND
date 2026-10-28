@@ -11,6 +11,7 @@ public static class JournalEventTypes
     public const string InvoicePaidFinancialLinked = "INVOICE_PAID_FINANCIAL_LINKED";
     public const string RentalItemFinancialSettledLinked = "RENTAL_ITEM_FINANCIAL_SETTLED_LINKED";
     public const string RefundCompletedFinancialLinked = "REFUND_COMPLETED_FINANCIAL_LINKED";
+    public const string RefundRequestedFinancialLinked = "REFUND_REQUESTED_FINANCIAL_LINKED";
     public const string SupplierPayoutCompleted = "SUPPLIER_PAYOUT_COMPLETED";
     public const string PaymentUnmatched = "PAYMENT_UNMATCHED";
     public const string RentalSettled = "RENTAL_SETTLED";

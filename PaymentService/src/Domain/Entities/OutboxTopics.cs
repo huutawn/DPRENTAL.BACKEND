@@ -10,6 +10,7 @@ public static class OutboxTopics
 
     public const string InvoicePaidFinancialMessageType = "InvoicePaidFinancial";
     public const string RentalItemFinancialSettledMessageType = "RentalItemFinancialSettled";
+    public const string RefundRequestedFinancialMessageType = "RefundRequestedFinancial";
     public const string RefundCompletedFinancialMessageType = "RefundCompletedFinancial";
     public const string SupplierPayoutCompletedMessageType = "SupplierPayoutCompleted";
 
@@ -23,7 +24,8 @@ public static class OutboxTopics
     public static string ResolveTopicForMessageType(string messageType) => messageType switch
     {
         InvoicePaidFinancialMessageType or RentalItemFinancialSettledMessageType or
-            RefundCompletedFinancialMessageType or SupplierPayoutCompletedMessageType => PaymentAnalyticsV1,
+            RefundRequestedFinancialMessageType or RefundCompletedFinancialMessageType or
+            SupplierPayoutCompletedMessageType => PaymentAnalyticsV1,
         _ => PaymentEventsV1
     };
 

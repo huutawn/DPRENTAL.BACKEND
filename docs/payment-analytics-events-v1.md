@@ -1,15 +1,16 @@
 # Payment financial events for Analytics (v1)
 
-Payment keeps `payment.events.v1` for Rental and publishes the four financial event types below to `payment.analytics.v1`. Each message uses the existing `PaymentEventEnvelope` and carries only Payment snapshots. Analytics deduplicates by `messageId` and never recalculates the platform fee.
+Payment keeps `payment.events.v1` for Rental and publishes the financial event types below to `payment.analytics.v1`. Each message uses the existing `PaymentEventEnvelope` and carries only Payment snapshots. Analytics deduplicates by `messageId` and never recalculates the platform fee.
 
 | Message type | Emission point | Stable identity |
 | --- | --- | --- |
 | `InvoicePaidFinancial` | Invoice becomes `PAID`. A late bank transaction emits this only when Rental's acceptance command commits. `paidAt` is bank time; envelope `occurredAt` is acceptance time. | Invoice ID + message type |
 | `RentalItemFinancialSettled` | Settlement reaches `COMPLETED` after all required deposit refunds are confirmed. | Settlement ID + message type |
+| `RefundRequestedFinancial` | A classified manual refund requirement is recorded, either by a Rental refund request or a settlement with deposit refund due. Analytics uses it for `PendingRefund`; it does not mean money was transferred. | Manual refund requirement ID + message type |
 | `RefundCompletedFinancial` | Admin confirms the actual manual bank refund. | Manual refund requirement ID + message type |
 | `SupplierPayoutCompleted` | Admin confirms the actual supplier transfer. | Supplier payout ID + message type |
 
-All four are written to Payment outbox in the same transaction as their financial state and linked to a transaction journal entry. IntegrityHost confirms the journal and signs a publication proof with audience `analytics-service` before the publisher sends to Kafka. The existing `payment.events.v1` route retains audience `rental-service`. Retrying a command with the same operation key or republishing an outbox row keeps the same logical message ID.
+All events are written to Payment outbox in the same transaction as their financial state and linked to a transaction journal entry. IntegrityHost confirms the journal and signs a publication proof with audience `analytics-service` before the publisher sends to Kafka. The existing `payment.events.v1` route retains audience `rental-service`. Retrying a command with the same operation key or republishing an outbox row keeps the same logical message ID.
 
 ## Rental refund request contract
 

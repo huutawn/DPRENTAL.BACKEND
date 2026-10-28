@@ -72,13 +72,23 @@ public sealed partial class ManualRefundService
         var response = new RequestRefundResponse(refund.RequirementRef, request.OperationKey, "Accepted", refund.Amount, invoice.Currency, false);
         var receipt = OperationReceipt.Create(request.OperationKey, "RequestRefund", fingerprint,
             JsonSerializer.Serialize(response), invoice.InvoiceRef, invoice.RentalOrderId, now);
+        var financialOutbox = PaymentOutboxFactory.CreateRefundRequestedFinancial(refund, invoice);
+        var claims = new List<CanonicalEntityClaim>
+        {
+            OperationalSnapshotEngine.CreateManualRefundClaim(refund),
+            OperationalSnapshotEngine.CreateOperationReceiptClaim(receipt),
+            OperationalSnapshotEngine.CreateOutboxClaim(financialOutbox)
+        };
         var journal = await JournalEntryFactory.CreateNextAsync(invoices, Guid.NewGuid(), refund.RequirementRef,
             JournalStreamTypes.ManualRefund, JournalEventTypes.RefundRequired, invoice, refund.Amount,
             "PENDING_MANUAL_REFUND", "rental-service", now,
-            [OperationalSnapshotEngine.CreateManualRefundClaim(refund), OperationalSnapshotEngine.CreateOperationReceiptClaim(receipt)],
+            claims,
             encryptor, null, ct);
+        var financialJournal = JournalEntryFactory.CreateLinkedFinancialEvent(journal,
+            JournalEventTypes.RefundRequestedFinancialLinked, invoice, refund.Amount,
+            "PENDING_MANUAL_REFUND", "rental-service", now, claims, encryptor, financialOutbox);
         if (clock.GetUtcNow() >= evidence.Value.ExpiresAt) return Error.Conflict("Payment.ReceiptExpired", "Receipt expired before commit.");
-        await invoices.SaveFinancialOperationAsync(receipt, [journal], [], ct);
+        await invoices.SaveFinancialOperationAsync(receipt, [journal, financialJournal], [financialOutbox], ct);
         await tx.CommitAsync(ct);
         return response;
     }

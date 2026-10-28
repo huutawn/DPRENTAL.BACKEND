@@ -30,7 +30,17 @@ public sealed class SettlementLedgerPersistenceTests
         Assert.Equal(70_000, refund.Amount); Assert.Equal(ManualRefundStatus.PendingManualRefund, refund.Status);
         Assert.Equal(record.RentalItemId, refund.RentalItemId); Assert.Single(refund.Items);
         Assert.Empty(await db.OutboxMessages.Where(x => x.MessageType == "RentalSettled").ToListAsync());
-        Assert.Equal(2, await db.TransactionJournals.CountAsync(x => x.StreamId == record.SettlementRef || x.StreamId == refund.RequirementRef));
+        var requested = await db.OutboxMessages.SingleAsync(x => x.MessageType == OutboxTopics.RefundRequestedFinancialMessageType);
+        Assert.Equal(OutboxTopics.PaymentAnalyticsV1, requested.Topic);
+        using (var json = JsonDocument.Parse(requested.Payload))
+        {
+            var payload = json.RootElement.GetProperty("payload");
+            Assert.Equal(refund.RequirementRef, payload.GetProperty("refundRef").GetString());
+            Assert.Equal(FinancialRefundKinds.SettlementDepositRefund, payload.GetProperty("refundKind").GetString());
+            Assert.Equal(70_000m, payload.GetProperty("amount").GetDecimal());
+            Assert.False(payload.TryGetProperty("accountNumber", out _));
+        }
+        Assert.Equal(3, await db.TransactionJournals.CountAsync(x => x.StreamId == record.SettlementRef || x.StreamId == refund.RequirementRef));
     }
 
     [Fact]
@@ -138,6 +148,13 @@ public sealed class SettlementLedgerPersistenceTests
             Assert.True(replay.Value.IsReplay);
             requirementId = await db.ManualRefundRequirements.Select(x => x.Id).SingleAsync();
             Assert.Empty(await db.OutboxMessages.Where(x => x.MessageType == OutboxTopics.RefundCompletedFinancialMessageType).ToListAsync());
+            var pending = await db.OutboxMessages.SingleAsync(x => x.MessageType == OutboxTopics.RefundRequestedFinancialMessageType);
+            Assert.Equal(OutboxTopics.PaymentAnalyticsV1, pending.Topic);
+            using var json = JsonDocument.Parse(pending.Payload);
+            var payload = json.RootElement.GetProperty("payload");
+            Assert.Equal(refundKind, payload.GetProperty("refundKind").GetString());
+            Assert.Equal(invoice.TotalAmount, payload.GetProperty("amount").GetDecimal());
+            Assert.False(payload.TryGetProperty("accountNumber", out _));
         }
         await h.ConfirmAsync();
         var completion = new CompleteManualRefundRequest("BANK-REFUND-123", Guid.NewGuid().ToString("N"), "Transfer confirmed");

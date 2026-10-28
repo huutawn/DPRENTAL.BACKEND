@@ -88,9 +88,16 @@ public sealed class SettlementService(
                 FinancialRefundKinds.SettlementDepositRefund);
             record.AssignRefundRequirement(refund);
             claims.Add(OperationalSnapshotEngine.CreateManualRefundClaim(refund));
-            journals.Add(await JournalEntryFactory.CreateNextAsync(invoices, operationId, refund.RequirementRef,
+            var refundRequested = PaymentOutboxFactory.CreateRefundRequestedFinancial(refund, invoice);
+            messages.Add(refundRequested);
+            claims.Add(OperationalSnapshotEngine.CreateOutboxClaim(refundRequested));
+            var refundJournal = await JournalEntryFactory.CreateNextAsync(invoices, operationId, refund.RequirementRef,
                 JournalStreamTypes.ManualRefund, JournalEventTypes.RefundRequired, invoice, refund.Amount,
-                "PENDING_MANUAL_REFUND", "rental-service", now, claims, encryptor, null, ct));
+                "PENDING_MANUAL_REFUND", "rental-service", now, claims, encryptor, null, ct);
+            journals.Add(refundJournal);
+            journals.Add(JournalEntryFactory.CreateLinkedFinancialEvent(refundJournal,
+                JournalEventTypes.RefundRequestedFinancialLinked, invoice, refund.Amount,
+                "PENDING_MANUAL_REFUND", "rental-service", now, claims, encryptor, refundRequested));
         }
         else
         {
@@ -101,7 +108,8 @@ public sealed class SettlementService(
         var settlementJournal = await JournalEntryFactory.CreateNextAsync(invoices, operationId, record.SettlementRef,
             JournalStreamTypes.RentalSettlement, JournalEventTypes.RentalSettled, invoice,
             invoice.Items.Single(x => x.RentalItemId == record.RentalItemId).TotalAmount, response.Status,
-            "rental-service", now, claims, encryptor, messages.FirstOrDefault(), ct);
+            "rental-service", now, claims, encryptor,
+            record.Status == SettlementState.Completed ? messages[0] : null, ct);
         journals.Add(settlementJournal);
         if (record.Status == SettlementState.Completed)
             journals.Add(JournalEntryFactory.CreateLinkedFinancialEvent(settlementJournal,
