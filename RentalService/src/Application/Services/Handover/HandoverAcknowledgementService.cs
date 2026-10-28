@@ -9,6 +9,7 @@ using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Handover;
+
 using Dprental.RentalService.Application.Hubs;
 
 public sealed class HandoverAcknowledgementService(

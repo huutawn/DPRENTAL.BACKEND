@@ -487,9 +487,15 @@ public sealed class SupplierDecisionAndHandoverNotificationTests
         var eventProducer = new RentalEventProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
         var cmdProducer = new InventoryCommandProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
 
+        var mockInventory = new Mock<IInventoryRentalClient>();
+        mockInventory.Setup(m => m.ConfirmAllocationAsync(It.IsAny<string>(), It.IsAny<ConfirmAllocationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string grp, ConfirmAllocationRequest req, CancellationToken _) =>
+                Result.Success(new ConfirmAllocationResponse("REC-CONF", grp, FixedNow, false,
+                    itemA.UnitAssignments.Select(u => new ConfirmedAllocationUnitDto(u.AllocationId, u.AssetId, "Confirmed")).ToList())));
+
         var executor = new RentalOperationExecutor(
             orders, receipts, outboxes, lockManager,
-            new Mock<IInventoryRentalClient>().Object,
+            mockInventory.Object,
             new Mock<IPaymentRentalClient>().Object,
             cmdProducer, db,
             new ConfigurationBuilder().Build(),
