@@ -59,6 +59,10 @@
         },
         "rentalItemId": {
           "$ref": "#/$defs/nonNilUuid"
+        },
+        "orderVersion": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     }

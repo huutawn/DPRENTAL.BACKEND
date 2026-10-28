@@ -186,4 +186,138 @@ public sealed class EventSchemaValidatorTests
         var result = _validator.Validate(json, InteractionEventSource.Inventory);
         Assert.Equal(EventValidationClassification.Invalid, result.Classification);
     }
+
+    [Fact]
+    public void RentalItemPaid_WithPositiveOrderVersion_IsValid()
+    {
+        string json = """
+        {
+            "messageId": "11111111-1111-4111-8111-111111111111",
+            "messageType": "RentalItemPaid",
+            "version": 1,
+            "producer": "RentalService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "22222222-2222-4222-8222-222222222222",
+                "equipmentListingId": "33333333-3333-4333-8333-333333333333",
+                "equipmentTypeId": "44444444-4444-4444-8444-444444444444",
+                "rentalOrderId": "55555555-5555-4555-8555-555555555555",
+                "rentalItemId": "66666666-6666-4666-8666-666666666666",
+                "orderVersion": 2
+            }
+        }
+        """;
+
+        var result = _validator.Validate(json, InteractionEventSource.Rental);
+        Assert.Equal(EventValidationClassification.Valid, result.Classification);
+        Assert.Null(result.ErrorReason);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void RentalItemPaid_WithNonPositiveOrderVersion_IsInvalid(long invalidVersion)
+    {
+        string json = $$"""
+        {
+            "messageId": "11111111-1111-4111-8111-111111111111",
+            "messageType": "RentalItemPaid",
+            "version": 1,
+            "producer": "RentalService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "22222222-2222-4222-8222-222222222222",
+                "equipmentListingId": "33333333-3333-4333-8333-333333333333",
+                "equipmentTypeId": "44444444-4444-4444-8444-444444444444",
+                "rentalOrderId": "55555555-5555-4555-8555-555555555555",
+                "rentalItemId": "66666666-6666-4666-8666-666666666666",
+                "orderVersion": {{invalidVersion}}
+            }
+        }
+        """;
+
+        var result = _validator.Validate(json, InteractionEventSource.Rental);
+        Assert.Equal(EventValidationClassification.Invalid, result.Classification);
+        Assert.NotNull(result.ErrorReason);
+    }
+
+    [Fact]
+    public void RentalItemCompleted_WithOrderVersionAndCompletedAt_IsValid()
+    {
+        string json = """
+        {
+            "messageId": "11111111-1111-4111-8111-111111111111",
+            "messageType": "RentalItemCompleted",
+            "version": 1,
+            "producer": "RentalService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "22222222-2222-4222-8222-222222222222",
+                "equipmentListingId": "33333333-3333-4333-8333-333333333333",
+                "equipmentTypeId": "44444444-4444-4444-8444-444444444444",
+                "rentalOrderId": "55555555-5555-4555-8555-555555555555",
+                "rentalItemId": "66666666-6666-4666-8666-666666666666",
+                "orderVersion": 5,
+                "completedAt": "2026-10-19T10:30:00Z"
+            }
+        }
+        """;
+
+        var result = _validator.Validate(json, InteractionEventSource.Rental);
+        Assert.Equal(EventValidationClassification.Valid, result.Classification);
+        Assert.Null(result.ErrorReason);
+    }
+
+    [Fact]
+    public void RentalItemCompleted_WithInvalidCompletedAt_IsInvalid()
+    {
+        string json = """
+        {
+            "messageId": "11111111-1111-4111-8111-111111111111",
+            "messageType": "RentalItemCompleted",
+            "version": 1,
+            "producer": "RentalService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "22222222-2222-4222-8222-222222222222",
+                "equipmentListingId": "33333333-3333-4333-8333-333333333333",
+                "equipmentTypeId": "44444444-4444-4444-8444-444444444444",
+                "rentalOrderId": "55555555-5555-4555-8555-555555555555",
+                "rentalItemId": "66666666-6666-4666-8666-666666666666",
+                "orderVersion": 5,
+                "completedAt": "not-a-timestamp"
+            }
+        }
+        """;
+
+        var result = _validator.Validate(json, InteractionEventSource.Rental);
+        Assert.Equal(EventValidationClassification.Invalid, result.Classification);
+        Assert.NotNull(result.ErrorReason);
+    }
+
+    [Fact]
+    public void RentalItemCompleted_WithArbitraryExtraField_IsInvalid()
+    {
+        string json = """
+        {
+            "messageId": "11111111-1111-4111-8111-111111111111",
+            "messageType": "RentalItemCompleted",
+            "version": 1,
+            "producer": "RentalService",
+            "occurredAt": "2026-10-19T10:00:00Z",
+            "payload": {
+                "userId": "22222222-2222-4222-8222-222222222222",
+                "equipmentListingId": "33333333-3333-4333-8333-333333333333",
+                "equipmentTypeId": "44444444-4444-4444-8444-444444444444",
+                "rentalOrderId": "55555555-5555-4555-8555-555555555555",
+                "rentalItemId": "66666666-6666-4666-8666-666666666666",
+                "unknownExtraField": "should-be-rejected"
+            }
+        }
+        """;
+
+        var result = _validator.Validate(json, InteractionEventSource.Rental);
+        Assert.Equal(EventValidationClassification.Invalid, result.Classification);
+        Assert.NotNull(result.ErrorReason);
+    }
 }
