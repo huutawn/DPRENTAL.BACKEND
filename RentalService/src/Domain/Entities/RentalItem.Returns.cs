@@ -8,9 +8,9 @@ public partial class RentalItem
 {
     public Result<ReturnRecord> RecordAssetReturns(
         Guid supplierId, DateTimeOffset actualReturnAt, string? note,
-        List<ReturnUnitData> unitsToReturn, DateTimeOffset submittedAt, Guid submittedById)
+        List<ReturnUnitData> unitsToReturn, DateTimeOffset submittedAt, Guid submittedById, bool isAdmin = false)
     {
-        var validation = ValidateAssetReturns(supplierId, actualReturnAt, note, unitsToReturn, submittedAt, submittedById);
+        var validation = ValidateAssetReturns(supplierId, actualReturnAt, note, unitsToReturn, submittedAt, submittedById, isAdmin);
         if (validation.IsFailure) return validation.Error;
         var record = new ReturnRecord(Guid.NewGuid(), Id, actualReturnAt.ToUniversalTime(), note,
             submittedById, submittedAt.ToUniversalTime());
@@ -39,11 +39,13 @@ public partial class RentalItem
     }
 
     public Result ValidateAssetReturns(Guid supplierId, DateTimeOffset actualReturnAt, string? note,
-        List<ReturnUnitData> unitsToReturn, DateTimeOffset submittedAt, Guid submittedById)
+        List<ReturnUnitData> unitsToReturn, DateTimeOffset submittedAt, Guid submittedById, bool isAdmin = false)
     {
-        if (supplierId == Guid.Empty || SupplierId != supplierId || submittedById != supplierId)
+        if (SupplierId != supplierId) return RentalErrors.UnauthorizedSupplier;
+        if (!isAdmin && (supplierId == Guid.Empty || submittedById != supplierId))
             return RentalErrors.UnauthorizedSupplier;
-        if (Status != RentalItemStatus.InRental) return RentalErrors.InvalidItemStatusForReturn;
+        if (isAdmin && submittedById == Guid.Empty)
+            return RentalErrors.UnauthorizedSupplier;
         if (unitsToReturn is null || unitsToReturn.Count == 0 || unitsToReturn.Any(u => u is null) ||
             unitsToReturn.Select(u => u.AssignmentId).Distinct().Count() != unitsToReturn.Count)
             return Error.Validation("Return.InvalidUnits", "Specify distinct assignments to return.");

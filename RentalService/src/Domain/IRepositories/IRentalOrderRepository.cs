@@ -46,10 +46,23 @@ public interface IRentalOrderRepository
         DateTimeOffset now, int batchSize,
         CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+
+    Task<RecordPage<AdminReturnRequestRecord>> SearchReturnRequestsForAdminAsync(
+        AdminReturnRequestSearchCriteria criteria,
+        DateTimeOffset now,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new RecordPage<AdminReturnRequestRecord>([], 0));
+
+    Task<(RentalOrder Order, RentalItem Item, ReturnRequest Request)?> GetReturnRequestAggregateAsync(
+        Guid returnRequestId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<(RentalOrder Order, RentalItem Item, ReturnRequest Request)?>(null);
+
     Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(
         DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
-
     Task<IReadOnlyList<Guid>> GetRenterResponseTimeoutItemIdsAsync(
     DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default);
 

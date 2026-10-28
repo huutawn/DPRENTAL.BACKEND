@@ -718,8 +718,104 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .Take(batchSize)
             .ToListAsync(cancellationToken);
     }
+
+    public async Task<RecordPage<AdminReturnRequestRecord>> SearchReturnRequestsForAdminAsync(
+        AdminReturnRequestSearchCriteria criteria,
+        DateTimeOffset now,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(criteria);
+
+        var query = _dbContext.ReturnRequests.AsNoTracking();
+
+        if (criteria.ItemId.HasValue)
+        {
+            query = query.Where(r => r.RentalItemId == criteria.ItemId.Value);
+        }
+
+        if (criteria.OrderId.HasValue)
+        {
+            query = query.Where(r => r.RentalItem!.RentalOrderId == criteria.OrderId.Value);
+        }
+
+        if (criteria.Disputed == true)
+        {
+            query = query.Where(r => r.Units.Any(u => u.ClosedAt == null && u.RejectedAt == null &&
+                r.Issues.Any(i => i.Units.Any(iu => iu.RentalUnitAssignmentId == u.RentalUnitAssignmentId))));
+        }
+        else if (criteria.Disputed == false)
+        {
+            query = query.Where(r => !r.Units.Any(u => u.ClosedAt == null && u.RejectedAt == null &&
+                r.Issues.Any(i => i.Units.Any(iu => iu.RentalUnitAssignmentId == u.RentalUnitAssignmentId))));
+        }
+
+        if (criteria.Overdue == true)
+        {
+            query = query.Where(r => r.ConfirmationDeadlineAt <= now &&
+                r.Units.Any(u => u.ClosedAt == null && u.RejectedAt == null));
+        }
+        else if (criteria.Overdue == false)
+        {
+            query = query.Where(r => r.ConfirmationDeadlineAt > now ||
+                !r.Units.Any(u => u.ClosedAt == null && u.RejectedAt == null));
+        }
+
+        int totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .OrderByDescending(r => r.SubmittedAt)
+            .ThenBy(r => r.Id)
+            .Skip(skip)
+            .Take(take)
+            .Select(r => new AdminReturnRequestRecord(
+                r.Id,
+                r.RentalItemId,
+                r.RentalItem!.RentalOrderId,
+                r.RentalItem.RentalOrder!.OrderCode,
+                r.RentalItem.RentalOrder.RenterId,
+                r.RentalItem.SupplierId,
+                r.SubmittedAt,
+                r.ConfirmationDeadlineAt,
+                r.Units.Select(u => new AdminReturnRequestUnitRecord(
+                    u.RentalUnitAssignmentId,
+                    u.ClosedAt,
+                    u.RejectedAt)).ToList(),
+                r.Issues.SelectMany(i => i.Units.Select(iu => iu.RentalUnitAssignmentId)).ToList()))
+            .ToListAsync(cancellationToken);
+
+        return new RecordPage<AdminReturnRequestRecord>(items, totalCount);
+    }
+
+    public async Task<(RentalOrder Order, RentalItem Item, ReturnRequest Request)?> GetReturnRequestAggregateAsync(
+        Guid returnRequestId,
+        CancellationToken cancellationToken = default)
+    {
+        var orderId = await _dbContext.ReturnRequests
+            .Where(r => r.Id == returnRequestId)
+            .Select(r => (Guid?)r.RentalItem!.RentalOrderId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (!orderId.HasValue) return null;
+
+        var order = await GetByIdWithDetailsAsync(orderId.Value, cancellationToken);
+        if (order is null) return null;
+
+        foreach (var item in order.Items)
+        {
+            var req = item.ReturnRequests.FirstOrDefault(r => r.Id == returnRequestId);
+            if (req != null)
+            {
+                return (order, item, req);
+            }
+        }
+
+        return null;
+    }
+
     public async Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(
-    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+        DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
     {
         return await _dbContext.RentalItems
             .AsNoTracking()

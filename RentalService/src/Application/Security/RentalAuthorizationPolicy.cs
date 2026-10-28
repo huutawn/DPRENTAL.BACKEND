@@ -167,6 +167,14 @@ public static class RentalAuthorizationPolicy
     public static Result AuthorizeDisputeResolution(IRentalCallerContext caller) =>
         RequireAdmin(caller, "Service token không được giải quyết khiếu nại.", RentalErrors.AdminOnlyResolution);
 
+    public static Result AuthorizeAdminReturnResolution(IRentalCallerContext caller) =>
+        RequireAdmin(caller, "Service token không được giải quyết yêu cầu trả máy.", RentalErrors.AdminOnlyReturnResolution);
+
+    public static Result AuthorizeAdminReturnQuery(IRentalCallerContext caller) =>
+        RequireAdmin(
+            caller,
+            "Service token không được tra cứu yêu cầu trả máy.",
+            Error.Forbidden(ErrorCodes.Forbidden, "Chỉ quản trị viên mới được tra cứu yêu cầu trả máy."));
     /// <summary>
     /// Evaluates whether the caller has authority to access admin supplier statistics.
     /// Invariant: Only authenticated human administrators can view supplier statistics.
