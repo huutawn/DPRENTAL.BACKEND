@@ -242,6 +242,8 @@ public static class RentalErrors
     public static readonly Error AdminOnlyResolution =
         Error.Forbidden("Dispute.AdminOnly", "Chỉ Admin mới có quyền giải quyết khiếu nại.");
 
+    public static readonly Error AdminOnlyReturnResolution =
+        Error.Forbidden("ReturnResolution.AdminOnly", "Chỉ quản trị viên mới có quyền giải quyết yêu cầu trả máy.");
     public static readonly Error ResolutionExceedsProposedAmount =
         Error.Validation("Dispute.ResolutionExceedsProposal", "Số tiền khấu trừ chốt không được vượt quá đề xuất của supplier.");
 

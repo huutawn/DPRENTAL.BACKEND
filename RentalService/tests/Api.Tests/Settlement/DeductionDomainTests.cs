@@ -1,3 +1,4 @@
+using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Xunit;
@@ -12,9 +13,8 @@ public sealed class DeductionDomainTests
     {
         var item = Returns.ReturnTests.NewOrder(1).Items.Single();
         var unit = item.UnitAssignments.Single();
-        var result = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
+        ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "Damaged", [])], Now, item.SupplierId);
-        Assert.True(result.IsSuccess);
         return item;
     }
 
@@ -73,9 +73,8 @@ public sealed class DeductionDomainTests
         var item = Returns.ReturnTests.NewOrder(1).Items.Single();
         typeof(RentalItem).GetProperty(nameof(RentalItem.DepositAmount))!.SetValue(item, 0m);
         var unit = item.UnitAssignments.Single();
-        var returned = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
+        ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "Damaged", [])], Now, item.SupplierId);
-        Assert.True(returned.IsSuccess);
         Assert.Null(item.DeductionDeadline);
         Assert.Equal(0m, item.FinalDeductionAmount);
         Assert.Equal(RentalItemStatus.PendingSettlement, item.Status);

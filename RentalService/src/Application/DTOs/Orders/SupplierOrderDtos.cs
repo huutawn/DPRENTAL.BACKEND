@@ -1,5 +1,5 @@
+using Dprental.RentalService.Application.DTOs.Returns;
 using Dprental.RentalService.Common.Enums;
-
 namespace Dprental.RentalService.Application.DTOs.Orders;
 
 /// <summary>
@@ -37,6 +37,7 @@ public sealed record SupplierUnitResponse(
 /// <param name="Returns">Các lần trả máy, cũ nhất trước.</param>
 /// <param name="Settlement">Quyết toán tiền cọc, rỗng khi chưa trả đủ máy.</param>
 /// <param name="Units">Các máy cụ thể đã gán cho dòng.</param>
+/// <param name="ReturnRequests">Danh sách các yêu cầu trả thiết bị trên dòng của nhà cung cấp.</param>
 /// <param name="PickupLocation">Địa chỉ kho nhận máy.</param>
 public sealed record SupplierOrderItemResponse(
     string Name,
@@ -57,4 +58,33 @@ public sealed record SupplierOrderItemResponse(
     IReadOnlyList<OrderReturnResponse> Returns,
     OrderSettlementResponse? Settlement,
     IReadOnlyList<SupplierUnitResponse> Units,
-    string? PickupLocation = null);
+    IReadOnlyList<ReturnRequestResponse> ReturnRequests,
+    string? PickupLocation = null)
+{
+    public SupplierOrderItemResponse(
+        string name,
+        int quantity,
+        DateOnly startDate,
+        DateOnly endDate,
+        Guid rentalItemId,
+        Guid equipmentListingId,
+        RentalItemStatus status,
+        int rentalDays,
+        decimal dailyRate,
+        decimal depositPerUnit,
+        decimal rentalAmount,
+        decimal depositAmount,
+        DateTimeOffset? supplierConfirmationDeadline,
+        DateTimeOffset? supplierDecisionAt,
+        OrderHandoverResponse? handover,
+        IReadOnlyList<OrderReturnResponse> returns,
+        OrderSettlementResponse? settlement,
+        IReadOnlyList<SupplierUnitResponse> units,
+        string? pickupLocation = null)
+        : this(name, quantity, startDate, endDate, rentalItemId, equipmentListingId, status,
+               rentalDays, dailyRate, depositPerUnit, rentalAmount, depositAmount,
+               supplierConfirmationDeadline, supplierDecisionAt, handover, returns, settlement,
+               units, [], pickupLocation)
+    {
+    }
+}

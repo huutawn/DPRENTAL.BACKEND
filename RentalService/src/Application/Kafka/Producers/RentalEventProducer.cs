@@ -585,6 +585,30 @@ public sealed class RentalEventProducer : IRentalEventProducer
         return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
     }
 
+    public async Task<Result<ProducerEnqueueResult>> EnqueueReturnConfirmationOverdueAsync(
+        ReturnConfirmationOverduePayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RentalItemId == Guid.Empty ||
+            payload.ReturnRequestId == Guid.Empty || payload.SupplierId == Guid.Empty || payload.RenterId == Guid.Empty ||
+            payload.OverdueAt == default || payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_PAYLOAD", "ReturnConfirmationOverdue payload is incomplete or invalid.");
+
+        string aggregateId = payload.RentalOrderId.ToString("D");
+        string logicalEntityId = correlationId ?? $"{payload.RentalOrderId:D}:{payload.ReturnRequestId:D}";
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.ReturnConfirmationOverdue,
+            logicalEntityId);
+        var envelope = new KafkaMessageEnvelope<ReturnConfirmationOverduePayload>(
+            messageId, KafkaContractSpec.EventTypes.ReturnConfirmationOverdue,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, payload.OverdueAt, correlationId, causationId, payload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
+
     public async Task<Result<ProducerEnqueueResult>> EnqueueLatePaymentRefundRequestedAsync(
         LatePaymentRefundRequestedPayload payload,
         string? correlationId = null,

@@ -128,6 +128,7 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
                 .OrderBy(u => u.Id)
                 .Select(u => new SupplierUnitResponse(u.Id, u.AssetId, u.Status, u.ReturnCondition))
                 .ToList(),
+            OrderQueryMapper.ToReturnRequests(item),
             basics.PickupLocation);
     }
 }

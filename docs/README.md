@@ -1,5 +1,10 @@
 # Tài liệu RentalService
 
+## Tài liệu tích hợp Frontend
+
+- [Luồng bàn giao, trả thiết bị, bất đồng và bộ kịch bản mock FE (Task 1–4)](rental-handover-return-fe-guide.md)
+- [SignalR realtime và resync](rental-realtime-client-integration.md)
+
 ## Ranh giới các lớp
 
 | Lớp | Trách nhiệm | Không được chứa |

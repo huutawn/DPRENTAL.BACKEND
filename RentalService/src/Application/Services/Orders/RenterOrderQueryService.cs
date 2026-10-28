@@ -179,7 +179,9 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             OrderQueryMapper.ToRefund(item, refundLine),
             OrderQueryMapper.ToHandover(item),
             OrderQueryMapper.ToReturns(item),
-            OrderQueryMapper.ToSettlement(item));
+            OrderQueryMapper.ToSettlement(item),
+            OrderQueryMapper.ToRenterUnits(item),
+            OrderQueryMapper.ToReturnRequests(item));
     }
 
     /// <summary>REFUNDED: mọi khoản đã chuyển khoản; PENDING: còn khoản chờ hoàn; rỗng là không lọc. NONE hay giá trị lạ là lỗi.</summary>

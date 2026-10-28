@@ -88,10 +88,9 @@ public sealed class InventoryReturnKafkaTests
         var order = ReturnTests.NewOrder(quantity: 1);
         var item = order.Items.Single();
         var unit = item.UnitAssignments.Single();
-        var record = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
+        var record = ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(unit.Id, UnitCondition.Normal, null, [])], Now, item.SupplierId);
-        Assert.True(record.IsSuccess);
-        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record.Value, Now);
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record, Now);
         string? topic = null;
         string? partition = null;
         var writer = new Mock<IKafkaOutboxWriter>();
@@ -121,11 +120,10 @@ public sealed class InventoryReturnKafkaTests
         var normal = item.UnitAssignments.First();
         var damaged = item.UnitAssignments.Skip(1).First();
         var unreturned = item.UnitAssignments.Last();
-        var record = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
+        var record = ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(normal.Id, UnitCondition.Normal, null, []),
              new ReturnUnitData(damaged.Id, UnitCondition.Damaged, "scratch", [])], Now, item.SupplierId);
-        Assert.True(record.IsSuccess);
-        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record.Value, Now);
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record, Now);
         Assert.Equal(2, command.Units.Count);
         Assert.DoesNotContain(command.Units, u => u.AllocationId == unreturned.AllocationId);
 
@@ -134,7 +132,7 @@ public sealed class InventoryReturnKafkaTests
             new AppliedReturnedUnitPayload(normal.AllocationId, normal.AssetId, "RELEASED", Now, null),
             new AppliedReturnedUnitPayload(damaged.AllocationId, damaged.AssetId, "MAINTENANCE", Now, "block-ref")
         };
-        var envelope = Envelope(order, item, record.Value.Id, command.OperationKey, units);
+        var envelope = Envelope(order, item, record.Id, command.OperationKey, units);
         var (handler, save, _) = Handler(order);
         var json = JsonSerializer.Serialize(envelope, JsonOptions);
 
@@ -154,11 +152,10 @@ public sealed class InventoryReturnKafkaTests
         var order = ReturnTests.NewOrder(quantity: 1);
         var item = order.Items.Single();
         var unit = item.UnitAssignments.Single();
-        var record = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
+        var record = ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "scratch", [])], Now, item.SupplierId);
-        Assert.True(record.IsSuccess);
-        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record.Value, Now);
-        var envelope = Envelope(order, item, record.Value.Id, command.OperationKey,
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record, Now);
+        var envelope = Envelope(order, item, record.Id, command.OperationKey,
             [new AppliedReturnedUnitPayload(unit.AllocationId, unit.AssetId, "AVAILABLE", Now, null)]);
         var (handler, save, _) = Handler(order);
 
@@ -174,11 +171,10 @@ public sealed class InventoryReturnKafkaTests
         var order = ReturnTests.NewOrder(quantity: 1);
         var item = order.Items.Single();
         var unit = item.UnitAssignments.Single();
-        var record = item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
+        var record = ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(unit.Id, UnitCondition.Normal, null, [])], Now, item.SupplierId);
-        Assert.True(record.IsSuccess);
-        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record.Value, Now);
-        var envelope = Envelope(order, item, record.Value.Id, command.OperationKey,
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record, Now);
+        var envelope = Envelope(order, item, record.Id, command.OperationKey,
             [new AppliedReturnedUnitPayload(unit.AllocationId, unit.AssetId, "RELEASED", Now, null)]);
         var (handler, _, events) = Handler(order);
 
@@ -189,6 +185,107 @@ public sealed class InventoryReturnKafkaTests
 
         Assert.True((await handler.ApplyStagedAsync(JsonSerializer.Serialize(envelope, JsonOptions))).IsSuccess);
         Assert.Single(events.ReturnedEvents);
+    }
+    [Fact]
+    public async Task DamagedResult_WithReleasedStatus_IsRejected_AllocationNotClosed()
+    {
+        var order = ReturnTests.NewOrder(quantity: 1);
+        var item = order.Items.Single();
+        var unit = item.UnitAssignments.Single();
+        var record = ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
+            [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "scratch", [])], Now, item.SupplierId);
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record, Now);
+
+        // Even if closedAt is set, if status is RELEASED instead of a protected state, DAMAGED unit must not be confirmed
+        var envelope = Envelope(order, item, record.Id, command.OperationKey,
+            [new AppliedReturnedUnitPayload(unit.AllocationId, unit.AssetId, "RELEASED", Now, "some-disposition")]);
+        var (handler, save, _) = Handler(order);
+
+        var result = await handler.ApplyStagedAsync(JsonSerializer.Serialize(envelope, JsonOptions));
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_INVENTORY_RESULT", result.Error.Code);
+        Assert.Equal(0, save());
+        Assert.Null(unit.AllocationClosedAt);
+    }
+
+    [Fact]
+    public async Task NormalResult_WithDamageDisposition_IsRejected()
+    {
+        var order = ReturnTests.NewOrder(quantity: 1);
+        var item = order.Items.Single();
+        var unit = item.UnitAssignments.Single();
+        var record = ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
+            [new ReturnUnitData(unit.Id, UnitCondition.Normal, null, [])], Now, item.SupplierId);
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record, Now);
+
+        var envelope = Envelope(order, item, record.Id, command.OperationKey,
+            [new AppliedReturnedUnitPayload(unit.AllocationId, unit.AssetId, "RELEASED", Now, "unexpected-disposition")]);
+        var (handler, _, _) = Handler(order);
+
+        var result = await handler.ApplyStagedAsync(JsonSerializer.Serialize(envelope, JsonOptions));
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_INVENTORY_RESULT", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task InventoryRejected_MarksReceiptFailed_RetainsReturnRecordAndClosedRequests()
+    {
+        var order = ReturnTests.NewOrder(quantity: 1);
+        var item = order.Items.Single();
+        var unit = item.UnitAssignments.Single();
+        var record = ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
+            [new ReturnUnitData(unit.Id, UnitCondition.Normal, null, [])], Now, item.SupplierId);
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record, Now);
+
+        var rejectPayload = new ReturnedUnitsRejectedPayload(
+            order.Id, item.Id, item.AllocationGroupId, record.Id, command.OperationKey,
+            "INVENTORY_ERROR", "Inventory rejected allocation closure");
+        var rejectEnvelope = new KafkaMessageEnvelope<ReturnedUnitsRejectedPayload>(
+            Guid.NewGuid(), KafkaContractSpec.EventTypes.ReturnedUnitsRejected, 1,
+            KafkaContractSpec.Producers.InventoryService, order.Id.ToString("D"), Now,
+            command.OperationKey, null, rejectPayload);
+
+        var (handler, _, _) = Handler(order);
+        var result = await handler.RejectStagedAsync(JsonSerializer.Serialize(rejectEnvelope, JsonOptions));
+        Assert.True(result.IsSuccess, result.Error?.Message);
+
+        // ReturnRecord is retained
+        Assert.Single(item.ReturnRecords);
+        // Allocation is NOT closed
+        Assert.Null(unit.AllocationClosedAt);
+        // Receipt is marked failed
+        var receipt = order.OperationReceipts.Single(r => r.Action == RentalItem.ApplyReturnedUnitsAction);
+        Assert.Equal(RentalOperationReceipt.StatusFailed, receipt.Status);
+        Assert.Equal("INVENTORY_ERROR", receipt.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ConflictTransitions_BetweenSuccessAndRejection_AreRejected()
+    {
+        var order = ReturnTests.NewOrder(quantity: 1);
+        var item = order.Items.Single();
+        var unit = item.UnitAssignments.Single();
+        var record = ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
+            [new ReturnUnitData(unit.Id, UnitCondition.Normal, null, [])], Now, item.SupplierId);
+        var command = ReturnService.ScheduleKafkaInventoryReturn(order, item, record, Now);
+
+        var successEnvelope = Envelope(order, item, record.Id, command.OperationKey,
+            [new AppliedReturnedUnitPayload(unit.AllocationId, unit.AssetId, "RELEASED", Now, null)]);
+        var (handler, _, _) = Handler(order);
+
+        Assert.True((await handler.ApplyStagedAsync(JsonSerializer.Serialize(successEnvelope, JsonOptions))).IsSuccess);
+
+        // Attempt rejection after success -> Conflict
+        var rejectPayload = new ReturnedUnitsRejectedPayload(
+            order.Id, item.Id, item.AllocationGroupId, record.Id, command.OperationKey,
+            "INVENTORY_ERROR", "Late rejection");
+        var rejectEnvelope = new KafkaMessageEnvelope<ReturnedUnitsRejectedPayload>(
+            Guid.NewGuid(), KafkaContractSpec.EventTypes.ReturnedUnitsRejected, 1,
+            KafkaContractSpec.Producers.InventoryService, order.Id.ToString("D"), Now,
+            command.OperationKey, null, rejectPayload);
+
+        var lateReject = await handler.RejectStagedAsync(JsonSerializer.Serialize(rejectEnvelope, JsonOptions));
+        Assert.Equal("INVENTORY_RESULT_CONFLICT", lateReject.Error.Code);
     }
 
     private static KafkaMessageEnvelope<ReturnedUnitsAppliedPayload> Envelope(RentalOrder order,
