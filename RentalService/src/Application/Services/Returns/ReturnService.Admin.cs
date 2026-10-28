@@ -136,6 +136,8 @@ public sealed partial class ReturnService
 
         if (request is null)
             return Error.Validation("ReturnResolution.InvalidRequest", "Request body is required.");
+        if (!Enum.IsDefined(request.Decision))
+            return Error.Validation("ReturnResolution.InvalidDecision", "Invalid return resolution decision.");
         if (string.IsNullOrWhiteSpace(request.DecisionNote) || request.DecisionNote.Trim().Length > 2000)
             return Error.Validation("ReturnResolution.InvalidNote", "Decision note is required and cannot exceed 2000 characters.");
         if (request.AssignmentIds is null || request.AssignmentIds.Count == 0)
@@ -146,25 +148,37 @@ public sealed partial class ReturnService
             return Error.Validation("ReturnResolution.DuplicateAssignmentIds", "Duplicate assignment IDs are not allowed.");
         if (request.ResolutionMediaIds != null && request.ResolutionMediaIds.Count > 10)
             return Error.Validation("ReturnResolution.TooManyMediaIds", "Maximum 10 resolution media IDs are allowed.");
+        if (request.ResolutionMediaIds != null && (request.ResolutionMediaIds.Contains(Guid.Empty) || request.ResolutionMediaIds.Distinct().Count() != request.ResolutionMediaIds.Count))
+            return Error.Validation("ReturnResolution.InvalidMediaIds", "Resolution media IDs must be non-empty and distinct.");
 
         if (request.Decision == ReturnResolutionDecision.ConfirmReceived)
         {
             if (!request.ActualReturnAt.HasValue || request.ActualReturnAt.Value == default)
                 return Error.Validation("ReturnResolution.InvalidActualReturnAt", "ActualReturnAt is required when confirming receipt.");
-            if (request.Units is null || request.Units.Count == 0)
-                return Error.Validation("ReturnResolution.InvalidUnits", "Units inspection details are required when confirming receipt.");
+            if (request.Units is null || request.Units.Count == 0 || request.Units.Any(u => u is null || u.MediaIds is null))
+                return Error.Validation("ReturnResolution.InvalidUnits", "Units inspection details and media collections are required when confirming receipt.");
 
-            var unitAssignIds = request.Units.Select(u => u.RentalUnitAssignmentId).ToHashSet();
-            if (unitAssignIds.Count != request.Units.Count || !unitAssignIds.SetEquals(request.AssignmentIds))
+            var unitAssignIds = request.Units.Select(u => u.RentalUnitAssignmentId).ToList();
+            if (unitAssignIds.Distinct().Count() != request.Units.Count || !unitAssignIds.ToHashSet().SetEquals(request.AssignmentIds))
                 return Error.Validation("ReturnResolution.UnitsMismatch", "Inspection units must match targeted AssignmentIds exactly.");
 
             foreach (var unit in request.Units)
             {
+                if (!Enum.IsDefined(unit.Condition))
+                    return Error.Validation("Return.InvalidEvidence", "Invalid condition, description or media IDs.");
+
+                if (unit.Description?.Length > 2000)
+                    return Error.Validation("Return.InvalidEvidence", "Invalid condition, description or media IDs.");
+
+                if (unit.MediaIds.Count > 10 || unit.MediaIds.Contains(Guid.Empty) ||
+                    unit.MediaIds.Distinct().Count() != unit.MediaIds.Count)
+                    return Error.Validation("Return.InvalidEvidence", "Invalid condition, description or media IDs.");
+
                 if (unit.Condition == UnitCondition.Damaged)
                 {
                     if (string.IsNullOrWhiteSpace(unit.Description))
                         return Error.Validation("Return.DamagedDescriptionRequired", "Description is required when unit condition is Damaged.");
-                    if (unit.MediaIds is null || unit.MediaIds.Count == 0)
+                    if (unit.MediaIds.Count == 0)
                         return Error.Validation("Return.DamagedMediaRequired", "Media evidence is required when unit condition is Damaged.");
                 }
             }
@@ -283,150 +297,44 @@ public sealed partial class ReturnService
             return response;
         }
 
-        // Decision == ConfirmReceived
-        bool kafkaEnabled = configuration.GetValue("Kafka:Enabled", true);
-        if (!kafkaEnabled)
-            return Error.ServiceUnavailable("KAFKA_UNAVAILABLE", "Kafka service is disabled or unavailable.");
-
-        foreach (var unit in request.Units!)
-        {
-            if (unit.MediaIds.Count == 0) continue;
-            var evidence = await RentalEvidenceValidator.ValidateAndVerifyEvidenceAsync(
-                unit.MediaIds, adminId, mediaClient, ct: cancellationToken);
-            if (evidence.IsFailure) return evidence.Error;
-        }
-
-        if (item.Status != RentalItemStatus.InRental)
-            return RentalErrors.InvalidItemStatusForReturn;
-        if (request.ActualReturnAt!.Value > now)
-            return RentalErrors.FutureReturnTimeNotAllowed;
-
-        foreach (var unit in request.Units)
-        {
-            var assignment = item.UnitAssignments.FirstOrDefault(a => a.Id == unit.RentalUnitAssignmentId);
-            if (assignment is null)
-                return RentalErrors.AssignmentNotFound;
-
-            var eligibility = ReturnEligibilityPolicy.ValidateAssignmentEligibleForReturn(item, assignment, request.ActualReturnAt.Value);
-            if (eligibility.IsFailure)
-                return eligibility.Error;
-
-            if (!Enum.IsDefined(unit.Condition))
-                return Error.Validation("Return.InvalidEvidence", "Invalid condition, description or media IDs.");
-
-            if (unit.Description?.Length > 2000)
-                return Error.Validation("Return.InvalidEvidence", "Invalid condition, description or media IDs.");
-
-            if (unit.MediaIds.Count > 10 || unit.MediaIds.Contains(Guid.Empty) ||
-                unit.MediaIds.Distinct().Count() != unit.MediaIds.Count)
-                return Error.Validation("Return.InvalidEvidence", "Invalid condition, description or media IDs.");
-        }
-
-        var previousStatus = item.Status;
-        var record = new ReturnRecord(
-            Guid.NewGuid(),
-            item.Id,
-            request.ActualReturnAt.Value.ToUniversalTime(),
+        // Decision == ConfirmReceived -> delegate to unified return workflow
+        var coreResult = await ExecuteReturnConfirmationCoreAsync(
+            order,
+            item,
+            request.ActualReturnAt!.Value,
             request.DecisionNote,
+            request.Units!,
             adminId,
-            now.ToUniversalTime());
-        item.AddReturnRecord(record);
-
-        foreach (var unit in request.Units)
-        {
-            var assignment = item.UnitAssignments.First(a => a.Id == unit.RentalUnitAssignmentId);
-            assignment.RecordReturn(record.Id, unit.Condition, unit.Description, unit.MediaIds, null, null);
-            record.AddAssignment(assignment);
-        }
-
-        foreach (var assignId in request.AssignmentIds)
-        {
-            reqUnitsByAssign[assignId].SetClosedAt(now);
-        }
-
-        if (item.AreAllUnitsReturned)
-        {
-            var completedAt = now.ToUniversalTime();
-            if (item.HasDamagedUnits && item.DepositAmount > 0m)
+            ActorRole.Admin,
+            key,
+            fingerprint,
+            payload,
+            AdminResolveReturnAction,
+            "AdminConfirmReceived",
+            "Admin confirmed returned units",
+            (rec, processedAt) =>
             {
-                item.SetReturnsCompleted(completedAt, completedAt.AddHours(48), null);
-            }
-            else
-            {
-                item.SetReturnsCompleted(completedAt, null, 0m);
-            }
-        }
-        var confirmResolution = new ReturnRequestResolution(
-            Guid.NewGuid(),
-            returnRequestId,
-            adminId,
-            ReturnResolutionDecision.ConfirmReceived,
-            request.DecisionNote.Trim(),
-            request.ResolutionMediaIds ?? [],
-            now,
-            request.AssignmentIds);
+                var confirmResolution = new ReturnRequestResolution(
+                    Guid.NewGuid(),
+                    returnRequestId,
+                    adminId,
+                    ReturnResolutionDecision.ConfirmReceived,
+                    request.DecisionNote.Trim(),
+                    request.ResolutionMediaIds ?? [],
+                    processedAt,
+                    request.AssignmentIds);
+                returnReq.AddResolution(confirmResolution);
+            },
+            (rec, processedAt) => JsonSerializer.Serialize(
+                OrderQueryMapper.ToReturnRequests(item, processedAt, includeAdminNotes: true)
+                    .First(r => r.ReturnRequestId == returnRequestId)),
+            [OrderChangeTypes.ReturnSubmitted, OrderChangeTypes.ReturnResolved],
+            cancellationToken);
 
-        returnReq.AddResolution(confirmResolution);
-
-        RentalOrderStatusPolicy.Apply(order, now, key);
-        order.RecordReadModelUpdate(now);
-
-        order.AddStateTransition(new RentalStateTransition(
-            Guid.NewGuid(), order.Id, item.Id, previousStatus.ToString(), item.Status.ToString(),
-            "AdminConfirmReceived", adminId, ActorRole.Admin,
-            "Admin confirmed returned units", now, key));
-
-        var confirmResponse = OrderQueryMapper.ToReturnRequests(item, now, includeAdminNotes: true)
+        if (coreResult.IsFailure) return coreResult.Error;
+        var (_, finishedAt) = coreResult.Value;
+        return OrderQueryMapper.ToReturnRequests(item, finishedAt, includeAdminNotes: true)
             .First(r => r.ReturnRequestId == returnRequestId);
-
-        order.AddOperationReceipt(new RentalOperationReceipt(
-            Guid.NewGuid(), order.Id, key, AdminResolveReturnAction,
-            fingerprint, true, null, null, now, targetItemId: item.Id, payloadJson: payload,
-            apiResponseJson: JsonSerializer.Serialize(confirmResponse)));
-
-        await using var tx = await unitOfWork.BeginTransactionAsync(cancellationToken);
-        try
-        {
-            var returnCmd = ScheduleKafkaInventoryReturn(order, item, record, now);
-            var enqueueResult = await inventoryCommands.EnqueueApplyReturnedUnitsAsync(returnCmd, cancellationToken);
-            if (enqueueResult.IsFailure)
-            {
-                await tx.RollbackAsync(cancellationToken);
-                unitOfWork.DiscardChanges();
-                return enqueueResult.Error;
-            }
-
-            var returnedEvent = await rentalEvents.EnqueueRentalUnitsReturnedAsync(
-                new RentalUnitsReturnedPayload(order.Id, item.Id, record.Id,
-                    request.ActualReturnAt.Value.ToUniversalTime(), now,
-                    request.Units.Select(u => u.RentalUnitAssignmentId).ToArray(),
-                    order.Version),
-                correlationId: key, cancellationToken: cancellationToken);
-            if (returnedEvent.IsFailure)
-            {
-                await tx.RollbackAsync(cancellationToken);
-                unitOfWork.DiscardChanges();
-                return returnedEvent.Error;
-            }
-
-            await repository.UpdateAsync(order, cancellationToken);
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-            await tx.CommitAsync(cancellationToken);
-        }
-        catch
-        {
-            await tx.RollbackAsync(cancellationToken);
-            unitOfWork.DiscardChanges();
-            throw;
-        }
-
-        if (notifier != null)
-        {
-            await NotifyParticipantsOrderChangedAsync(order, item, OrderChangeTypes.ReturnSubmitted, now, cancellationToken);
-            await NotifyParticipantsOrderChangedAsync(order, item, OrderChangeTypes.ReturnResolved, now, cancellationToken);
-        }
-
-        return confirmResponse;
     }
 
     private async Task NotifyParticipantsOrderChangedAsync(

@@ -447,4 +447,154 @@ public sealed class AdminReturnRequestResolutionTests : IAsyncLifetime
         Assert.Equal(order.Id, detailBody.OrderId);
         Assert.Equal(2, detailBody.InventoryUnits.Count);
     }
+
+    [Fact]
+    public async Task AdminResolveReturnRequest_InvalidDecision_FailsValidation()
+    {
+        var (order, item, returnReq) = await SeedOrderWithReturnRequestAsync(1);
+        var adminCaller = CreateAdminCaller();
+        var targetUnit = returnReq.Units.First();
+
+        await using var db = NewDb();
+        var service = CreateService(db);
+
+        var invalidDecisionReq = new AdminResolveReturnRequest(
+            (ReturnResolutionDecision)99,
+            "Invalid decision value",
+            [targetUnit.RentalUnitAssignmentId]);
+
+        var result = await service.ResolveReturnRequestAsync(item.Id, returnReq.Id, adminCaller, invalidDecisionReq, "invalid-decision-1");
+        Assert.True(result.IsFailure);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal("ReturnResolution.InvalidDecision", result.Error.Code);
+
+        var zeroDecisionReq = new AdminResolveReturnRequest(
+            (ReturnResolutionDecision)0,
+            "Zero decision value",
+            [targetUnit.RentalUnitAssignmentId]);
+
+        var resultZero = await service.ResolveReturnRequestAsync(item.Id, returnReq.Id, adminCaller, zeroDecisionReq, "invalid-decision-2");
+        Assert.True(resultZero.IsFailure);
+        Assert.Equal(ErrorType.Validation, resultZero.Error.Type);
+        Assert.Equal("ReturnResolution.InvalidDecision", resultZero.Error.Code);
+    }
+
+    [Fact]
+    public async Task AdminConfirmReceived_MissingOrEmptyActualReturnAt_FailsValidation()
+    {
+        var (order, item, returnReq) = await SeedOrderWithReturnRequestAsync(1);
+        var adminCaller = CreateAdminCaller();
+        var targetUnit = returnReq.Units.First();
+
+        await using var db = NewDb();
+        var service = CreateService(db);
+
+        var nullTimeReq = new AdminResolveReturnRequest(
+            ReturnResolutionDecision.ConfirmReceived,
+            "Confirmed without return time",
+            [targetUnit.RentalUnitAssignmentId],
+            ActualReturnAt: null,
+            Units: [new ReturnUnitRequest(targetUnit.RentalUnitAssignmentId, UnitCondition.Normal, null, [])]);
+
+        var resultNull = await service.ResolveReturnRequestAsync(item.Id, returnReq.Id, adminCaller, nullTimeReq, "missing-time-1");
+        Assert.True(resultNull.IsFailure);
+        Assert.Equal("ReturnResolution.InvalidActualReturnAt", resultNull.Error.Code);
+
+        var defaultTimeReq = new AdminResolveReturnRequest(
+            ReturnResolutionDecision.ConfirmReceived,
+            "Confirmed with default return time",
+            [targetUnit.RentalUnitAssignmentId],
+            ActualReturnAt: default(DateTimeOffset),
+            Units: [new ReturnUnitRequest(targetUnit.RentalUnitAssignmentId, UnitCondition.Normal, null, [])]);
+
+        var resultDefault = await service.ResolveReturnRequestAsync(item.Id, returnReq.Id, adminCaller, defaultTimeReq, "missing-time-2");
+        Assert.True(resultDefault.IsFailure);
+        Assert.Equal("ReturnResolution.InvalidActualReturnAt", resultDefault.Error.Code);
+    }
+
+    [Fact]
+    public async Task AdminConfirmReceived_NullOrEmptyUnits_OrUnitsContainingNullOrNullMedia_FailsValidation()
+    {
+        var (order, item, returnReq) = await SeedOrderWithReturnRequestAsync(1);
+        var adminCaller = CreateAdminCaller();
+        var targetUnit = returnReq.Units.First();
+
+        await using var db = NewDb();
+        var service = CreateService(db);
+
+        // Null units
+        var nullUnitsReq = new AdminResolveReturnRequest(
+            ReturnResolutionDecision.ConfirmReceived,
+            "Confirmed with null units",
+            [targetUnit.RentalUnitAssignmentId],
+            ActualReturnAt: Now.AddHours(-1),
+            Units: null);
+
+        var resNull = await service.ResolveReturnRequestAsync(item.Id, returnReq.Id, adminCaller, nullUnitsReq, "null-units");
+        Assert.True(resNull.IsFailure);
+        Assert.Equal("ReturnResolution.InvalidUnits", resNull.Error.Code);
+
+        // Empty units
+        var emptyUnitsReq = new AdminResolveReturnRequest(
+            ReturnResolutionDecision.ConfirmReceived,
+            "Confirmed with empty units",
+            [targetUnit.RentalUnitAssignmentId],
+            ActualReturnAt: Now.AddHours(-1),
+            Units: []);
+
+        var resEmpty = await service.ResolveReturnRequestAsync(item.Id, returnReq.Id, adminCaller, emptyUnitsReq, "empty-units");
+        Assert.True(resEmpty.IsFailure);
+        Assert.Equal("ReturnResolution.InvalidUnits", resEmpty.Error.Code);
+
+        // Unit with null MediaIds
+        var nullMediaReq = new AdminResolveReturnRequest(
+            ReturnResolutionDecision.ConfirmReceived,
+            "Confirmed with null media list in unit",
+            [targetUnit.RentalUnitAssignmentId],
+            ActualReturnAt: Now.AddHours(-1),
+            Units: [new ReturnUnitRequest(targetUnit.RentalUnitAssignmentId, UnitCondition.Normal, null, null!)]);
+
+        var resNullMedia = await service.ResolveReturnRequestAsync(item.Id, returnReq.Id, adminCaller, nullMediaReq, "null-media-list");
+        Assert.True(resNullMedia.IsFailure);
+        Assert.Equal("ReturnResolution.InvalidUnits", resNullMedia.Error.Code);
+    }
+
+    [Fact]
+    public async Task AdminConfirmReceived_UnitsMismatchWithAssignmentIds_FailsValidation()
+    {
+        var (order, item, returnReq) = await SeedOrderWithReturnRequestAsync(2);
+        var adminCaller = CreateAdminCaller();
+        var u1 = returnReq.Units.First().RentalUnitAssignmentId;
+        var u2 = returnReq.Units.Last().RentalUnitAssignmentId;
+
+        await using var db = NewDb();
+        var service = CreateService(db);
+
+        // AssignmentIds specifies u1, but Units specifies u2
+        var mismatchReq = new AdminResolveReturnRequest(
+            ReturnResolutionDecision.ConfirmReceived,
+            "Mismatched unit and assignment",
+            [u1],
+            ActualReturnAt: Now.AddHours(-1),
+            Units: [new ReturnUnitRequest(u2, UnitCondition.Normal, null, [])]);
+
+        var resMismatch = await service.ResolveReturnRequestAsync(item.Id, returnReq.Id, adminCaller, mismatchReq, "mismatch-1");
+        Assert.True(resMismatch.IsFailure);
+        Assert.Equal("ReturnResolution.UnitsMismatch", resMismatch.Error.Code);
+
+        // Duplicate assignment in Units
+        var dupUnitReq = new AdminResolveReturnRequest(
+            ReturnResolutionDecision.ConfirmReceived,
+            "Duplicate unit in units",
+            [u1],
+            ActualReturnAt: Now.AddHours(-1),
+            Units: [
+                new ReturnUnitRequest(u1, UnitCondition.Normal, null, []),
+                new ReturnUnitRequest(u1, UnitCondition.Normal, null, [])
+            ]);
+
+        var resDup = await service.ResolveReturnRequestAsync(item.Id, returnReq.Id, adminCaller, dupUnitReq, "mismatch-dup");
+        Assert.True(resDup.IsFailure);
+        Assert.Equal("ReturnResolution.UnitsMismatch", resDup.Error.Code);
+    }
 }
