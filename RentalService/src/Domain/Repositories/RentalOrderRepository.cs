@@ -430,6 +430,10 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                     .ThenInclude(i => i.ReturnRecords)
             .Include(o => o.SubOrders)
                 .ThenInclude(s => s.Items)
+                    .ThenInclude(i => i.ReturnRequests)
+                        .ThenInclude(r => r.Units)
+            .Include(o => o.SubOrders)
+                .ThenInclude(s => s.Items)
                     .ThenInclude(i => i.DeductionProposal)
             .Include(o => o.OperationReceipts.Where(r => r.Action == RequestRefundAction))
             .FirstOrDefaultAsync(o => o.Id == orderId && o.RenterId == renterId, cancellationToken);
@@ -484,6 +488,9 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 .ThenInclude(i => i.HandoverRecord)
             .Include(s => s.Items)
                 .ThenInclude(i => i.ReturnRecords)
+            .Include(s => s.Items)
+                .ThenInclude(i => i.ReturnRequests)
+                    .ThenInclude(r => r.Units)
             .Include(s => s.Items)
                 .ThenInclude(i => i.DeductionProposal)
             .FirstOrDefaultAsync(s => s.Id == subOrderId, cancellationToken);

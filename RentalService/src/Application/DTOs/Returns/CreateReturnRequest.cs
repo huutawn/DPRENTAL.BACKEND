@@ -4,5 +4,18 @@ public sealed record CreateReturnRequest(DateTimeOffset ActualReturnAt, string? 
 
 public sealed record ReturnRequestUnitDto(Guid RentalUnitAssignmentId, List<Guid>? MediaIds);
 
-public sealed record CreateReturnRequestResponse(Guid ReturnRequestId, Guid ItemId,
-    DateTimeOffset ActualReturnAt, string? Note, DateTimeOffset SubmittedAt, IReadOnlyList<ReturnRequestUnitDto> Units);
+public sealed record ReturnRequestUnitResponse(
+    Guid RentalUnitAssignmentId,
+    IReadOnlyList<Guid> MediaIds,
+    DateTimeOffset? ClosedAt = null)
+{
+    public Guid AssignmentId => RentalUnitAssignmentId;
+}
+
+public sealed record ReturnRequestResponse(
+    Guid ReturnRequestId,
+    Guid ItemId,
+    DateTimeOffset ActualReturnAt,
+    string? Note,
+    DateTimeOffset SubmittedAt,
+    IReadOnlyList<ReturnRequestUnitResponse> Units);

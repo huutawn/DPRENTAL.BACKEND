@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Returns;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Validation;
@@ -15,7 +16,7 @@ public sealed partial class ReturnService
     private const string RequestReturnAction = "RequestReturn";
     private static readonly JsonSerializerOptions ReceiptJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
-    public async Task<Result<CreateReturnRequestResponse>> CreateReturnRequestAsync(Guid itemId,
+    public async Task<Result<ReturnRequestResponse>> CreateReturnRequestAsync(Guid itemId,
         IRentalCallerContext caller, CreateReturnRequest request, string idempotencyKey,
         CancellationToken cancellationToken = default)
     {
@@ -60,7 +61,7 @@ public sealed partial class ReturnService
             if (receipt.Action != RequestReturnAction || receipt.TargetItemId != itemId || receipt.Fingerprint != fingerprint)
                 return Error.Conflict("IDEMPOTENCY_CONFLICT", "This key was used for another request.");
             var saved = string.IsNullOrWhiteSpace(receipt.ApiResponseJson) ? null :
-                JsonSerializer.Deserialize<CreateReturnRequestResponse>(receipt.ApiResponseJson, ReceiptJsonOptions);
+                JsonSerializer.Deserialize<ReturnRequestResponse>(receipt.ApiResponseJson, ReceiptJsonOptions);
             return saved is null ? Error.Failure("INVALID_RETURN_RECEIPT", "Stored response is unavailable.") : saved;
         }
 
@@ -78,9 +79,10 @@ public sealed partial class ReturnService
         var record = new ReturnRequest(requestId, itemId, request.ActualReturnAt.ToUniversalTime(),
             request.Note, order.RenterId, now, request.Units.Select(u =>
                 new ReturnRequestUnit(Guid.NewGuid(), requestId, u.RentalUnitAssignmentId, u.MediaIds ?? [])));
-        var response = new CreateReturnRequestResponse(record.Id, itemId, record.ActualReturnAt,
-            record.Note, record.SubmittedAt, record.Units.Select(u =>
-                new ReturnRequestUnitDto(u.RentalUnitAssignmentId, u.MediaIds.ToList())).ToArray());
+        var response = new ReturnRequestResponse(record.Id, itemId, record.ActualReturnAt,
+            record.Note, record.SubmittedAt, record.Units
+                .OrderBy(u => u.RentalUnitAssignmentId)
+                .Select(u => new ReturnRequestUnitResponse(u.RentalUnitAssignmentId, u.MediaIds, u.ClosedAt)).ToArray());
         item.AddReturnRequest(record);
         order.RecordReadModelUpdate(now);
         order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id, key, RequestReturnAction,
@@ -110,20 +112,13 @@ public sealed partial class ReturnService
         if (item.Status != RentalItemStatus.InRental) return RentalErrors.InvalidItemStatusForReturn;
         if (request.ActualReturnAt > now) return RentalErrors.FutureReturnTimeNotAllowed;
         var assignments = item.UnitAssignments.ToDictionary(u => u.Id);
-        var openUnits = item.ReturnRequests.SelectMany(r => r.Units).Where(u => !u.ClosedAt.HasValue)
-            .Select(u => u.RentalUnitAssignmentId).ToHashSet();
+        var openUnits = ReturnEligibilityPolicy.GetOpenReturnRequestAssignmentIds(item);
         foreach (var unit in request.Units!)
         {
             if (!assignments.TryGetValue(unit.RentalUnitAssignmentId, out var assignment))
                 return RentalErrors.AssignmentNotFound;
-            if (assignment.ReturnRecordId.HasValue) return RentalErrors.AssetAlreadyReturned(assignment.Id);
-            if (assignment.Status != RentalUnitAssignmentStatus.HandedOver || item.HandoverRecord is null ||
-                assignment.HandoverRecordId != item.HandoverRecord.Id)
-                return RentalErrors.AssetNotHandedOver(assignment.Id);
-            if (request.ActualReturnAt < item.HandoverRecord!.ActualHandoverAt)
-                return RentalErrors.InvalidReturnTimeBeforeHandover(assignment.Id);
-            if (openUnits.Contains(assignment.Id))
-                return Error.Conflict("RETURN_REQUEST_ALREADY_OPEN", "This unit already has an open return request.");
+            var validation = ReturnEligibilityPolicy.ValidateAssignmentForReturnRequest(item, assignment, request.ActualReturnAt, openUnits);
+            if (validation.IsFailure) return validation.Error;
         }
         return Result.Success();
     }

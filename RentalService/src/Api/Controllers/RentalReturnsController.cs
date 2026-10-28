@@ -14,7 +14,7 @@ public sealed class RentalReturnsController(IReturnService returns, IRentalCalle
 {
     /// <summary>Người thuê khai báo trả một hoặc nhiều máy; chưa xác nhận thu hồi hoặc giải phóng Inventory.</summary>
     [HttpPost("return-requests")]
-    [ProducesResponseType(typeof(CreateReturnRequestResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ReturnRequestResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
