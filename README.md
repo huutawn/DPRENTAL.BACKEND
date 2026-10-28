@@ -20,6 +20,11 @@ docs/                # Tài liệu kỹ thuật
 scripts/             # Scripts hỗ trợ và Git hooks
 ```
 
+## Tài liệu & Hợp đồng kỹ thuật
+
+- [Tài liệu kiến trúc AnalyticsService](docs/README.md)
+- [Contract KPI Analytics v1](docs/contracts/reporting-kpi-v1.md): Định nghĩa chuẩn 26 KPI báo cáo nền tảng, phân định 5 dòng tiền cốt lõi, quy chuẩn mốc thời gian Asia/Ho_Chi_Minh và hợp đồng dữ liệu với RentalService và PaymentService.
+
 ## Chạy hạ tầng cục bộ
 
 ```bash

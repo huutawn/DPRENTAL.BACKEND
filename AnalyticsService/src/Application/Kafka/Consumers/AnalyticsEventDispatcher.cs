@@ -27,9 +27,10 @@ public sealed partial class AnalyticsEventDispatcher : IAnalyticsEventDispatcher
     private readonly RentalOrderProjector _orders;
     private readonly RentalItemProjector _items;
     private readonly PaymentFinancialProjector _financial;
+    private readonly ReadModelChangeSet _changes;
+    private readonly IRentalFactRepository _rentalFacts;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<AnalyticsEventDispatcher> _logger;
-
     public AnalyticsEventDispatcher(
         IOptions<AnalyticsKafkaOptions> options,
         PaymentProofVerifier proofVerifier,
@@ -39,6 +40,8 @@ public sealed partial class AnalyticsEventDispatcher : IAnalyticsEventDispatcher
         RentalOrderProjector orders,
         RentalItemProjector items,
         PaymentFinancialProjector financial,
+        ReadModelChangeSet changes,
+        IRentalFactRepository rentalFacts,
         TimeProvider timeProvider,
         ILogger<AnalyticsEventDispatcher> logger)
     {
@@ -50,6 +53,8 @@ public sealed partial class AnalyticsEventDispatcher : IAnalyticsEventDispatcher
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _items = items ?? throw new ArgumentNullException(nameof(items));
         _financial = financial ?? throw new ArgumentNullException(nameof(financial));
+        _changes = changes ?? throw new ArgumentNullException(nameof(changes));
+        _rentalFacts = rentalFacts ?? throw new ArgumentNullException(nameof(rentalFacts));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -109,7 +114,8 @@ public sealed partial class AnalyticsEventDispatcher : IAnalyticsEventDispatcher
             return await DeadLetterAsync(record, envelope, projected.Error, cancellationToken);
         }
 
-        // Facts (projector đã sửa trong bộ nhớ) + inbox → một lần SaveChanges = một transaction
+        // Facts + inbox → một lần SaveChanges = một transaction. Resolve supplier trước khi commit.
+        await _changes.ResolveSuppliersAsync(_rentalFacts, cancellationToken);
         _processed.Add(new ProcessedRentalEvent { MessageId = envelope.MessageId, ProcessedAt = _timeProvider.GetUtcNow() });
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return new DispatchResult(DispatchOutcome.Processed, envelope.MessageType);
@@ -153,6 +159,7 @@ public sealed partial class AnalyticsEventDispatcher : IAnalyticsEventDispatcher
             return new DispatchResult(DispatchOutcome.Duplicate, envelope.MessageType);
         }
 
+        await _changes.ResolveSuppliersAsync(_rentalFacts, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return new DispatchResult(DispatchOutcome.Processed, envelope.MessageType);
     }

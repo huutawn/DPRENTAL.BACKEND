@@ -3,10 +3,10 @@ using Dprental.AnalyticsService.Application.Dashboard;
 using Dprental.AnalyticsService.Application.Dashboard.Revenue;
 using Dprental.AnalyticsService.Application.Events;
 using Dprental.AnalyticsService.Application.Kafka.Consumers;
+using Dprental.AnalyticsService.Common.Enums;
 using Dprental.AnalyticsService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
-
 namespace Dprental.AnalyticsService.Api.Tests.Integration;
 
 /// <summary>
@@ -150,12 +150,13 @@ public sealed class AnalyticsPostgreSqlTests
         }));
 
         await using AnalyticsServiceDbContext db = database.CreateContext();
-        RevenueAnalyticsResponse revenue = await new RevenueAnalyticsQueryService(db)
+        RevenueAnalyticsResponse revenue = await new RevenueAnalyticsQueryService(new PaymentFinancialEventRepository(db))
             .GetAsync(new DateOnly(2026, 11, 15), new DateOnly(2026, 11, 16), RevenueGranularity.Day);
         Assert.Equal(0m, revenue.Buckets.Single(b => b.PeriodStart == new DateOnly(2026, 11, 15)).PlatformRevenue);
         Assert.Equal(90_000m, revenue.Buckets.Single(b => b.PeriodStart == new DateOnly(2026, 11, 16)).PlatformRevenue);
 
-        OrdersResponse trend = await new OrderTrendQueryService(db, new DashboardQueryService(db))
+        var queryDashboard = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db));
+        OrdersResponse trend = await new OrderTrendQueryService(new RentalFactRepository(db), queryDashboard)
             .GetAsync(DashboardDateRange.Create(new DateOnly(2026, 11, 15), new DateOnly(2026, 11, 16)), CancellationToken.None);
         Assert.Equal(1, trend.Points.Single(p => p.Date == new DateOnly(2026, 11, 16)).Created);
         Assert.Equal(0, trend.Points.Single(p => p.Date == new DateOnly(2026, 11, 15)).Created);
@@ -164,9 +165,8 @@ public sealed class AnalyticsPostgreSqlTests
     private static async Task AssertOrderXDashboard(PostgresTestDatabase database)
     {
         await using AnalyticsServiceDbContext db = database.CreateContext();
-        DashboardQueryService dashboard = new(db);
-        OverviewResponse overview = await dashboard.OverviewAsync(Range, CancellationToken.None);
-
+        DashboardQueryService dashboard = new(new RentalFactRepository(db), new PaymentFinancialEventRepository(db));
+        OverviewResponse overview = await dashboard.OverviewAsync(Range, null, CancellationToken.None);
         Assert.Equal(new OrderMetrics(TotalOrders: 1, PaidOrders: 1, ActiveOrders: 0, CompletedOrders: 1,
             CancelledOrders: 0, ExpiredOrders: 0, RejectedItems: 1), overview.Orders);
         Assert.Equal(new FinancialMetrics(
@@ -178,8 +178,20 @@ public sealed class AnalyticsPostgreSqlTests
             RefundAmount: 26_000_000m,
             SupplierPayable: 810_000m,
             PayoutCompleted: 810_000m,
-            PendingRefund: 0m), overview.Financial);
-        Assert.Equal(new RentalMetrics(PaidItems: 2, RentedQuantity: 3, CompletedRentals: 1), overview.Rental);
+            PendingRefund: null), overview.Financial);
+
+        // REST call cho NCC A và NCC B: cô lập số liệu và phân quyền đúng
+        OverviewResponse overviewA = await dashboard.OverviewAsync(Range, SupplierA, CancellationToken.None);
+        Assert.Equal(900_000m, overviewA.Financial.GrossRentalValue);
+        Assert.Equal(3_000_000m, overviewA.Financial.DepositCollected);
+        Assert.Equal(810_000m, overviewA.Financial.PayoutCompleted);
+        Assert.Equal(1, overviewA.Rental.PaidItems);
+
+        OverviewResponse overviewB = await dashboard.OverviewAsync(Range, SupplierB, CancellationToken.None);
+        Assert.Equal(6_000_000m, overviewB.Financial.GrossRentalValue);
+        Assert.Equal(20_000_000m, overviewB.Financial.DepositCollected);
+        Assert.Equal(0m, overviewB.Financial.PayoutCompleted);
+        Assert.Equal(1, overviewB.Rental.PaidItems);
 
         SuppliersResponse suppliers = await dashboard.SuppliersAsync(Range, 1, 20, CancellationToken.None);
         SupplierMetrics a = suppliers.Items.Single(s => s.SupplierId == SupplierA);
@@ -189,6 +201,53 @@ public sealed class AnalyticsPostgreSqlTests
 
         EquipmentResponse equipment = await dashboard.EquipmentAsync(Range, 10, CancellationToken.None);
         Assert.Equal("Máy đầm cóc", equipment.TopEquipmentTypes[0].Name); // hòa 1 lượt → xét số máy đã giao (3 > 0)
+    }
+
+    [Fact]
+    public async Task PaymentBeforeRentalSnapshot_ThenSnapshot_AndRefundOnPostgres()
+    {
+        await using PostgresTestDatabase? database = await PostgresTestDatabase.CreateAsync();
+        if (database is null)
+        {
+            throw new InvalidOperationException("Thiếu biến môi trường ANALYTICS_TEST_POSTGRES để chạy kiểm thử trên PostgreSQL thật.");
+        }
+
+        using DispatcherHarness h = new(database.Options);
+
+        // 1. Payment arrives BEFORE rental snapshot on real PostgreSQL
+        var invoice = new
+        {
+            invoiceId = Guid.NewGuid(), invoiceRef = "INV-REAL-1", rentalOrderId = OrderX, renterId = Guid.NewGuid(),
+            rentalAmount = 6_900_000m, depositAmount = 23_000_000m, totalAmount = 29_900_000m, currency = "VND", paidAt = Nov10
+        };
+        DispatchResult payRes = await h.DispatchAsync(h.Payment(PaymentAnalyticsEventTypes.InvoicePaidFinancial, invoice));
+        Assert.Equal(DispatchOutcome.Processed, payRes.Outcome);
+        Assert.Empty(h.LastTouchedSuppliers); // Snapshot not present yet -> admin only
+
+        // 2. Rental snapshot arrives later with multi-suppliers
+        List<KafkaRecord> messages = OrderXMessages(h);
+        DispatchResult createRes = await h.DispatchAsync(messages[0]);
+        Assert.Equal(DispatchOutcome.Processed, createRes.Outcome);
+        Assert.Contains(SupplierA, h.LastTouchedSuppliers);
+        Assert.Contains(SupplierB, h.LastTouchedSuppliers);
+
+        // 3. Refund for item of Supplier B
+        DispatchResult refundRes = await h.DispatchAsync(h.Payment(PaymentAnalyticsEventTypes.RefundCompletedFinancial, new
+        {
+            refundId = Guid.NewGuid(), refundRef = "RF-REAL-B", rentalOrderId = OrderX, rentalItemId = ItemI2,
+            renterId = Guid.NewGuid(), refundKind = "SupplierRejection", amount = 26_000_000m, currency = "VND", completedAt = Nov11
+        }));
+        Assert.Equal(DispatchOutcome.Processed, refundRes.Outcome);
+        Assert.Equal([SupplierB], h.LastTouchedSuppliers);
+
+        // 4. Terminal order completion notifies both suppliers
+        DispatchResult orderCompRes = await h.DispatchAsync(h.Rental(RentalAnalyticsEventTypes.RentalOrderCompleted, new
+        {
+            rentalOrderId = OrderX, completedAt = Nov15, orderVersion = 10
+        }));
+        Assert.Equal(DispatchOutcome.Processed, orderCompRes.Outcome);
+        Assert.Contains(SupplierA, h.LastTouchedSuppliers);
+        Assert.Contains(SupplierB, h.LastTouchedSuppliers);
     }
 
     private static List<KafkaRecord> OrderXMessages(DispatcherHarness h)
@@ -234,6 +293,13 @@ public sealed class AnalyticsPostgreSqlTests
 
         return
         [
+            h.Payment(PaymentAnalyticsEventTypes.InvoicePaidFinancial, new
+            {
+                invoiceId = Guid.Parse("70000000-0000-0000-0000-000000000001"), invoiceRef = "INV-X",
+                rentalOrderId = OrderX, renterId = Guid.NewGuid(),
+                rentalAmount = 6_900_000m, depositAmount = 23_000_000m, totalAmount = 29_900_000m,
+                currency = "VND", paidAt = Nov10
+            }, Id(4)),
             h.Payment(PaymentAnalyticsEventTypes.RefundCompletedFinancial, new
             {
                 refundId = Guid.Parse("40000000-0000-0000-0000-000000000001"), refundRef = "RF-X-I2", rentalOrderId = OrderX,
@@ -249,7 +315,6 @@ public sealed class AnalyticsPostgreSqlTests
             }, Id(3))
         ];
     }
-
     private static object Settled(DateTimeOffset completedAt) => new
     {
         settlementId = Guid.Parse("60000000-0000-0000-0000-000000000001"), settlementRef = "ST-X-I1",

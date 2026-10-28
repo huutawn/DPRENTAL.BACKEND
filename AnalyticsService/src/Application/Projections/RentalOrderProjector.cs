@@ -57,7 +57,7 @@ public sealed class RentalOrderProjector
         RentalOrderFact order = await RentalFactRows.GetOrCreateOrderAsync(_repository, payload.RentalOrderId, cancellationToken);
         order.CreatedAt ??= payload.CreatedAt.ToUniversalTime();
         StatusGate.Apply(order, OrderStatuses.PendingPayment, payload.OrderVersion);
-
+        _changes.TrackOrder(payload.RentalOrderId);
         // 3. Dòng item: Created là nguồn snapshot chính thức nên ghi đè snapshot.
         //    Nếu RentalOrderPaid đã đến trước, item vào thẳng trạng thái đã trả tiền.
         string itemStatus = order.PaidAt is null ? ItemStatuses.PendingPayment : ItemStatuses.PendingSupplierConfirmation;
@@ -98,6 +98,7 @@ public sealed class RentalOrderProjector
             StatusGate.Apply(item, ItemStatuses.PendingSupplierConfirmation, payload.OrderVersion);
             _changes.TrackItem(item);
         }
+        _changes.TrackOrder(payload.RentalOrderId);
 
         return Result.Success();
     }
@@ -109,6 +110,7 @@ public sealed class RentalOrderProjector
         RentalOrderFact order = await RentalFactRows.GetOrCreateOrderAsync(_repository, payload.RentalOrderId, cancellationToken);
         order.CompletedAt ??= payload.CompletedAt.ToUniversalTime();
         StatusGate.Apply(order, OrderStatuses.Completed, payload.OrderVersion);
+        _changes.TrackOrder(payload.RentalOrderId);
         return Result.Success();
     }
 
@@ -119,6 +121,7 @@ public sealed class RentalOrderProjector
         RentalOrderFact order = await RentalFactRows.GetOrCreateOrderAsync(_repository, payload.RentalOrderId, cancellationToken);
         order.CancelledAt ??= payload.CancelledAt.ToUniversalTime();
         StatusGate.Apply(order, OrderStatuses.Cancelled, payload.OrderVersion);
+        _changes.TrackOrder(payload.RentalOrderId);
         return Result.Success();
     }
 
@@ -129,6 +132,7 @@ public sealed class RentalOrderProjector
         RentalOrderFact order = await RentalFactRows.GetOrCreateOrderAsync(_repository, payload.RentalOrderId, cancellationToken);
         order.ExpiredAt ??= payload.ExpiredAt.ToUniversalTime();
         StatusGate.Apply(order, OrderStatuses.Expired, payload.OrderVersion);
+        _changes.TrackOrder(payload.RentalOrderId);
         return Result.Success();
     }
 
@@ -139,6 +143,7 @@ public sealed class RentalOrderProjector
         RentalOrderFact order = await RentalFactRows.GetOrCreateOrderAsync(_repository, payload.RentalOrderId, cancellationToken);
         order.RejectedAt ??= payload.RejectedAt.ToUniversalTime();
         StatusGate.Apply(order, OrderStatuses.Rejected, payload.OrderVersion);
+        _changes.TrackOrder(payload.RentalOrderId);
         return Result.Success();
     }
 

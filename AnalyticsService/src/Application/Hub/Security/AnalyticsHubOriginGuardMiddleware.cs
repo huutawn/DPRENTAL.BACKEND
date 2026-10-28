@@ -28,19 +28,20 @@ public sealed partial class AnalyticsHubOriginGuardMiddleware
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (_options.AllowedOrigins.Length > 0
-            && context.Request.Path.StartsWithSegments(_options.HubPath, StringComparison.OrdinalIgnoreCase)
-            && context.Request.Headers.TryGetValue("Origin", out var originValues))
+        if (context.Request.Path.StartsWithSegments(_options.HubPath, StringComparison.OrdinalIgnoreCase))
         {
-            string origin = originValues.ToString().Trim().TrimEnd('/');
-            bool allowed = _options.AllowedOrigins.Any(candidate =>
-                string.Equals(candidate.Trim().TrimEnd('/'), origin, StringComparison.OrdinalIgnoreCase));
-
-            if (!allowed)
+            if (context.Request.Headers.TryGetValue("Origin", out var originValues))
             {
-                LogRejectedOrigin(_logger, origin);
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                return;
+                string origin = originValues.ToString().Trim().TrimEnd('/');
+                bool allowed = _options.AllowedOrigins.Any(candidate =>
+                    string.Equals(candidate.Trim().TrimEnd('/'), origin, StringComparison.OrdinalIgnoreCase));
+
+                if (!allowed)
+                {
+                    LogRejectedOrigin(_logger, origin);
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return;
+                }
             }
         }
 

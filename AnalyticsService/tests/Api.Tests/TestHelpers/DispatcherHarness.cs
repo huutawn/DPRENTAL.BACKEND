@@ -55,6 +55,8 @@ internal sealed class DispatcherHarness : IDisposable
             new RentalOrderProjector(rentalFacts, changes),
             new RentalItemProjector(rentalFacts, changes),
             new PaymentFinancialProjector(new PaymentFinancialEventRepository(context), changes),
+            changes,
+            rentalFacts,
             TimeProvider.System,
             NullLogger<AnalyticsEventDispatcher>.Instance);
 

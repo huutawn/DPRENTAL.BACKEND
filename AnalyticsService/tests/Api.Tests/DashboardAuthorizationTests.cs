@@ -12,6 +12,8 @@ public sealed class DashboardAuthorizationTests
     [InlineData("orders")]
     [InlineData("equipment")]
     [InlineData("suppliers")]
+    [InlineData("me/overview")]
+    [InlineData("me/revenue")]
     public async Task DashboardRoute_RejectsAnonymousCaller(string route)
     {
         using var factory = new WebApplicationFactory<Program>()

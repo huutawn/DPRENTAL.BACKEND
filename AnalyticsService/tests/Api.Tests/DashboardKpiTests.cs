@@ -15,9 +15,9 @@ public sealed class DashboardKpiTests
         await using var db = CreateDb();
         Seed(db);
         var range = DashboardDateRange.Create(new DateOnly(2026, 10, 26), new DateOnly(2026, 10, 26));
-        var service = new DashboardQueryService(db);
+        var service = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db));
 
-        OverviewResponse overview = await service.OverviewAsync(range, CancellationToken.None);
+        OverviewResponse overview = await service.OverviewAsync(range, null, CancellationToken.None);
 
         Assert.Equal(3, overview.Orders.TotalOrders);
         Assert.Equal(3, overview.Orders.PaidOrders);
@@ -38,8 +38,7 @@ public sealed class DashboardKpiTests
         await using var db = CreateDb();
         Guid supplierId = Seed(db);
         var range = DashboardDateRange.Create(new DateOnly(2026, 10, 26), new DateOnly(2026, 10, 26));
-        var service = new DashboardQueryService(db);
-
+        var service = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db));
         EquipmentResponse equipment = await service.EquipmentAsync(range, 10, CancellationToken.None);
         SuppliersResponse suppliers = await service.SuppliersAsync(range, 1, 10, CancellationToken.None);
 
@@ -104,6 +103,27 @@ public sealed class DashboardKpiTests
                 DepositAmount = 0
             });
         db.PaymentFinancialEvents.AddRange(
+            new PaymentFinancialEvent
+            {
+                MessageId = Guid.NewGuid(), MessageType = PaymentAnalyticsEventTypes.InvoicePaidFinancial,
+                LogicalEventId = "invoice-paid:1", AggregateId = firstOrderId.ToString(),
+                RentalOrderId = firstOrderId, RentalAmount = 1500, DepositAmount = 200, TotalAmount = 1700,
+                PaidAt = At(9), Currency = "VND"
+            },
+            new PaymentFinancialEvent
+            {
+                MessageId = Guid.NewGuid(), MessageType = PaymentAnalyticsEventTypes.InvoicePaidFinancial,
+                LogicalEventId = "invoice-paid:2", AggregateId = secondOrderId.ToString(),
+                RentalOrderId = secondOrderId, RentalAmount = 2000, DepositAmount = 300, TotalAmount = 2300,
+                PaidAt = At(10), Currency = "VND"
+            },
+            new PaymentFinancialEvent
+            {
+                MessageId = Guid.NewGuid(), MessageType = PaymentAnalyticsEventTypes.InvoicePaidFinancial,
+                LogicalEventId = "invoice-paid:3", AggregateId = rejectedOrderId.ToString(),
+                RentalOrderId = rejectedOrderId, RentalAmount = 0, DepositAmount = 0, TotalAmount = 0,
+                PaidAt = At(9), Currency = "VND"
+            },
             new PaymentFinancialEvent
             {
                 MessageId = Guid.NewGuid(), MessageType = PaymentAnalyticsEventTypes.RentalItemFinancialSettled,

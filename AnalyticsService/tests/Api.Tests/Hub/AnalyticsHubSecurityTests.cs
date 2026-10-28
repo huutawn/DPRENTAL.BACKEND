@@ -14,15 +14,17 @@ public sealed class AnalyticsHubSecurityTests
     [Fact]
     public void RealUserWithAudience_IsHubClient() => Assert.True(User(Audience).IsHubClient(Audience));
 
-    [Fact]
-    public void ServiceToken_IsNotHubClient_NorAdmin()
+    [Theory]
+    [InlineData("svc")]
+    [InlineData("SVC")]
+    [InlineData("Svc")]
+    public void ServiceToken_CaseInsensitive_IsNotHubClient_NorAdmin(string serviceClaim)
     {
-        ClaimsPrincipal service = User(Audience, new Claim("u", "svc"), new Claim("r", "adm"));
+        ClaimsPrincipal service = User(Audience, new Claim("u", serviceClaim), new Claim("r", "adm"));
 
         Assert.False(service.IsHubClient(Audience));
         Assert.False(service.IsPlatformAdmin());
     }
-
     [Fact]
     public void WrongAudience_IsNotHubClient() => Assert.False(User("payment-api").IsHubClient(Audience));
 
@@ -56,6 +58,49 @@ public sealed class AnalyticsHubSecurityTests
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Fact]
+    public async Task HubNegotiate_WithDisallowedOrigin_IsForbidden()
+    {
+        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder => builder.UseSetting(
+                "ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test"));
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Post, "/hubs/analytics/negotiate?negotiateVersion=1");
+        request.Headers.Add("Origin", "http://evil-attacker.com");
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task HubNegotiate_WithAllowedOrigin_PassesOriginCheckToAuth()
+    {
+        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder => builder.UseSetting(
+                "ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test"));
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Post, "/hubs/analytics/negotiate?negotiateVersion=1");
+        request.Headers.Add("Origin", "http://localhost:3000");
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        // Origin is allowed, so it passes origin guard and hits JWT auth -> 401
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public void AnalyticsHubOptions_RejectsEmptyOrWildcard()
+    {
+        var empty = new Dprental.AnalyticsService.Application.Hub.Options.AnalyticsHubOptions { AllowedOrigins = [] };
+        Assert.NotEmpty(empty.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(empty)));
+
+        var wildcard = new Dprental.AnalyticsService.Application.Hub.Options.AnalyticsHubOptions { AllowedOrigins = ["*"] };
+        Assert.NotEmpty(wildcard.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(wildcard)));
+
+        var valid = new Dprental.AnalyticsService.Application.Hub.Options.AnalyticsHubOptions { AllowedOrigins = ["http://localhost:3000"] };
+        Assert.Empty(valid.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(valid)));
+    }
     private static ClaimsPrincipal User(string audience, params Claim[] extra) =>
         new(new ClaimsIdentity([new Claim("aud", audience), new Claim("sub", UserId.ToString()), .. extra], "Bearer"));
 }

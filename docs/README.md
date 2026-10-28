@@ -36,3 +36,7 @@ Domain sở hữu repository contracts, EF Core DbContext và repository impleme
    ```
 
    Development lắng nghe tại `https://localhost:51309` và `http://localhost:41309`.
+
+## Hợp đồng dữ liệu & Báo cáo (Contracts)
+
+- [Contract KPI Analytics v1 (reporting-kpi-v1.md)](contracts/reporting-kpi-v1.md): Chuẩn hóa 26 KPI báo cáo nền tảng (Admin và Supplier), phân định 5 dòng tiền, quy chuẩn mốc thời gian Asia/Ho_Chi_Minh và hợp đồng dữ liệu giữa AnalyticsService, RentalService và PaymentService.

@@ -3,6 +3,7 @@ using Dprental.AnalyticsService.Application.Hub;
 using Dprental.AnalyticsService.Application.Hub.Contracts;
 using Dprental.AnalyticsService.Application.Kafka.Configuration;
 using Dprental.AnalyticsService.Application.Projections;
+using Dprental.AnalyticsService.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -68,7 +69,11 @@ public sealed partial class KafkaRecordProcessor
                     string scope = PaymentAnalyticsEventTypes.IsFinancial(result.MessageType)
                         ? AnalyticsDataScopes.Finance
                         : AnalyticsDataScopes.Rental;
-                    await _notifier.NotifyDataChangedAsync(scope, touchedSuppliers, cancellationToken);
+                    Result notifyResult = await _notifier.NotifyDataChangedAsync(scope, touchedSuppliers, cancellationToken);
+                    if (notifyResult.IsFailure)
+                    {
+                        LogNotificationFailed(_logger, notifyResult.Error.Code, notifyResult.Error.Message);
+                    }
                 }
 
                 return result;
@@ -82,4 +87,7 @@ public sealed partial class KafkaRecordProcessor
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Retrying {Topic}[{Partition}]@{Offset} in {DelayMs} ms")]
     private static partial void LogRetryScheduled(ILogger logger, string topic, int partition, long offset, double delayMs);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Realtime notification dispatch failed: {ErrorCode} - {ErrorMessage}. Continuing offset commit.")]
+    private static partial void LogNotificationFailed(ILogger logger, string errorCode, string errorMessage);
 }

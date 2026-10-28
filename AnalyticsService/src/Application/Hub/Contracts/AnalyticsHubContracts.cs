@@ -14,7 +14,7 @@ public static class AnalyticsDataScopes
 }
 
 /// <summary>Vỏ chung của tin SignalR (cùng dạng PaymentHubEnvelope); EventId để FE chống trùng.</summary>
-public sealed record AnalyticsHubEnvelope<TPayload>(Guid EventId, int Version, DateTimeOffset OccurredAt, TPayload Payload);
+public sealed record AnalyticsHubEnvelope<TData>(Guid EventId, int Version, DateTimeOffset OccurredAt, TData Data);
 
 /// <summary>Chỉ là tín hiệu. Không chứa con số: FE gọi lại API dashboard (có phân quyền) để lấy số.</summary>
-public sealed record AnalyticsDataChangedPayload(string Scope);
+public sealed record AnalyticsDataChangedData(string Scope);

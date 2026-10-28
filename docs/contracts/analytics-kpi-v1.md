@@ -2,18 +2,18 @@
 
 | Mục | Giá trị |
 | --- | --- |
-| Trạng thái | **PROPOSED**. Chuyển sang **FROZEN** khi Rental và Payment xác nhận mục 9 |
+| Trạng thái | **SUPERSEDED** — Tài liệu này đã được thống nhất và chuẩn hóa chính thức vào [Contract KPI Analytics v1 (reporting-kpi-v1.md)](reporting-kpi-v1.md). |
 | Jira | DPR-253 (contract) → DPR-258 (read model), thuộc epic DPR-254 |
 | Bên sở hữu | AnalyticsService |
-| Nguồn dữ liệu | RentalService (`rental.events.v1`), PaymentService (`payment.events.v1`) |
+| Nguồn dữ liệu | RentalService (`rental.events.v1`), PaymentService (`payment.analytics.v1`) |
 | Bên dùng | Dashboard Admin / Supplier (FE), QA, PO |
-
 ---
 
 ## 1. Mục tiêu và phạm vi
 
-Khóa **một ý nghĩa duy nhất** cho từng con số báo cáo, để Rental, Payment, Analytics và Dashboard không hiểu khác nhau.
+> **Lưu ý**: Tài liệu này đã được hợp nhất vào [reporting-kpi-v1.md](reporting-kpi-v1.md). Xem tài liệu đó làm hợp đồng KPI chính thức (Single Source of Truth) cho AnalyticsService.
 
+Khóa **một ý nghĩa duy nhất** cho từng con số báo cáo, để Rental, Payment, Analytics và Dashboard không hiểu khác nhau.
 **Trong phạm vi:**
 - Định nghĩa, công thức, nguồn chuẩn và mốc thời gian của từng KPI (mục 5).
 - Biểu đồ nào dùng ngày nào (mục 7).

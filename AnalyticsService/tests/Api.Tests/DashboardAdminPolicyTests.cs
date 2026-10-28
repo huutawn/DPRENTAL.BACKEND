@@ -28,4 +28,25 @@ public sealed class DashboardAdminPolicyTests
         var result = await auth.AuthorizeAsync(user, null, AnalyticsJwtAuthentication.AdminPolicy);
         Assert.Equal(allowed, result.Succeeded);
     }
+
+    [Theory]
+    [InlineData("11111111-1111-1111-1111-111111111111", null, true)]
+    [InlineData("11111111-1111-1111-1111-111111111111", "svc", false)]
+    [InlineData(null, null, false)]
+    [InlineData("not-a-guid", null, false)]
+    public async Task UserPolicy_OnlyAllowsHumanWithValidSub(string? sub, string? tokenUse, bool allowed)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAnalyticsSecurity(new ConfigurationBuilder().Build());
+        using var provider = services.BuildServiceProvider();
+        var claims = new List<Claim>();
+        if (sub is not null) claims.Add(new Claim("sub", sub));
+        if (tokenUse is not null) claims.Add(new Claim("u", tokenUse));
+        var user = new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+        var auth = provider.GetRequiredService<IAuthorizationService>();
+
+        var result = await auth.AuthorizeAsync(user, null, AnalyticsJwtAuthentication.UserPolicy);
+        Assert.Equal(allowed, result.Succeeded);
+    }
 }

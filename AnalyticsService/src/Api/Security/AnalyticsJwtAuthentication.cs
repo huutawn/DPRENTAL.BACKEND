@@ -16,8 +16,8 @@ namespace Dprental.AnalyticsService.Api.Security;
 public static class AnalyticsJwtAuthentication
 {
     public const string AdminPolicy = "AnalyticsAdmin";
+    public const string UserPolicy = "AnalyticsUser";
     private const string JwksHttpClientName = "analytics-auth-jwks";
-
     public static IServiceCollection AddAnalyticsSecurity(this IServiceCollection services, IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -49,7 +49,9 @@ public static class AnalyticsJwtAuthentication
                         // với Hub, lấy token từ cookie accessToken giống PaymentHub
                         OnMessageReceived = context =>
                         {
-                            if (string.IsNullOrWhiteSpace(context.Token)
+                            // Ưu tiên Authorization header; chỉ khi header không có mới lấy cookie trên Hub endpoint
+                            string? authHeader = context.Request.Headers.Authorization;
+                            if (string.IsNullOrWhiteSpace(authHeader)
                                 && context.Request.Path.StartsWithSegments(hubPath, StringComparison.OrdinalIgnoreCase)
                                 && context.Request.Cookies.TryGetValue(AnalyticsHubSecurityConstants.AccessTokenCookieName, out string? cookieToken)
                                 && !string.IsNullOrWhiteSpace(cookieToken))
@@ -78,10 +80,14 @@ public static class AnalyticsJwtAuthentication
                 });
 
         // Admin = người dùng thật có role admin; token service (u=svc) luôn bị từ chối
-        services.AddAuthorizationBuilder().AddPolicy(AdminPolicy, policy => policy
-            .RequireAuthenticatedUser()
-            .RequireAssertion(context => context.User.IsPlatformAdmin()));
-
+        // User = người dùng thật có sub hợp lệ; token service (u=svc) bị từ chối
+        services.AddAuthorizationBuilder()
+            .AddPolicy(AdminPolicy, policy => policy
+                .RequireAuthenticatedUser()
+                .RequireAssertion(context => context.User.IsPlatformAdmin()))
+            .AddPolicy(UserPolicy, policy => policy
+                .RequireAuthenticatedUser()
+                .RequireAssertion(context => !context.User.IsServiceToken() && context.User.TryGetSubjectUserId(out _)));
         return services;
     }
 }

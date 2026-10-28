@@ -1,3 +1,4 @@
+using Dprental.AnalyticsService.Common.Enums;
 using Dprental.AnalyticsService.Domain.Entities;
 
 namespace Dprental.AnalyticsService.Domain.IRepositories;
@@ -13,4 +14,28 @@ public interface IPaymentFinancialEventRepository
     Task<PaymentFinancialEvent?> FindByLogicalEventIdAsync(string logicalEventId, CancellationToken cancellationToken = default);
 
     void Add(PaymentFinancialEvent financialEvent);
+
+    Task<FinancialFactMetrics> GetFinancialMetricsAsync(
+        DateTimeOffset startUtc,
+        DateTimeOffset endUtc,
+        Guid? supplierId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyDictionary<DateOnly, decimal[]>> GetRevenueBucketsAsync(
+        DateTimeOffset startUtc,
+        DateTimeOffset endUtc,
+        RevenueGranularity granularity,
+        Guid? supplierId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Guid>> GetSupplierCandidatesAsync(
+        DateTimeOffset startUtc,
+        DateTimeOffset endUtc,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyDictionary<Guid, SupplierFinancialStatRow>> GetSupplierFinancialStatsAsync(
+        IReadOnlyCollection<Guid> supplierIds,
+        DateTimeOffset startUtc,
+        DateTimeOffset endUtc,
+        CancellationToken cancellationToken = default);
 }

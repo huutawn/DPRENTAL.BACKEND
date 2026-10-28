@@ -67,8 +67,9 @@ public sealed class PaymentIngestionTests
         Assert.Equal(DispatchOutcome.Duplicate, replay.Outcome);
         Assert.Equal(DispatchOutcome.Processed, completed.Outcome);
         await using AnalyticsServiceDbContext db = h.Read();
-        OverviewResponse overview = await new DashboardQueryService(db).OverviewAsync(
-            DashboardDateRange.Create(new DateOnly(2026, 11, 16), new DateOnly(2026, 11, 16)), CancellationToken.None);
+        var query = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db));
+        OverviewResponse overview = await query.OverviewAsync(
+            DashboardDateRange.Create(new DateOnly(2026, 11, 16), new DateOnly(2026, 11, 16)), null, CancellationToken.None);
         Assert.Equal(600m, overview.Financial.PendingRefund);
     }
 
@@ -227,4 +228,95 @@ public sealed class PaymentIngestionTests
         currency,
         completedAt = CompletedAt
     };
+
+    [Fact]
+    public async Task InvoicePaid_WhenItemsExist_ResolvesAndReportsSupplier()
+    {
+        using DispatcherHarness h = new();
+
+        // 1. Seed rental items first
+        await h.DispatchAsync(h.Rental(RentalAnalyticsEventTypes.RentalOrderCreated, new
+        {
+            rentalOrderId = OrderId,
+            currency = "VND",
+            createdAt = CompletedAt.AddDays(-1),
+            items = new[]
+            {
+                new { rentalItemId = ItemId, equipmentListingId = Guid.NewGuid(), supplierId = SupplierId, quantity = 1, rentalAmount = 1000m, depositAmount = 200m }
+            }
+        }));
+
+        // 2. Dispatch invoice paid -> should resolve supplier from order items
+        var invoice = new
+        {
+            invoiceId = Guid.NewGuid(), invoiceRef = "INV-1", rentalOrderId = OrderId, renterId = Guid.NewGuid(),
+            rentalAmount = 1000m, depositAmount = 200m, totalAmount = 1200m, currency = "VND", paidAt = CompletedAt
+        };
+        DispatchResult result = await h.DispatchAsync(h.Payment(PaymentAnalyticsEventTypes.InvoicePaidFinancial, invoice));
+
+        Assert.Equal(DispatchOutcome.Processed, result.Outcome);
+        Assert.Equal([SupplierId], h.LastTouchedSuppliers);
+    }
+
+    [Fact]
+    public async Task InvoicePaid_BeforeRentalSnapshot_NotifiesAdminOnly_ThenSnapshotNotifiesSupplier()
+    {
+        using DispatcherHarness h = new();
+
+        // 1. Payment arrives BEFORE rental snapshot
+        var invoice = new
+        {
+            invoiceId = Guid.NewGuid(), invoiceRef = "INV-1", rentalOrderId = OrderId, renterId = Guid.NewGuid(),
+            rentalAmount = 1000m, depositAmount = 200m, totalAmount = 1200m, currency = "VND", paidAt = CompletedAt
+        };
+        DispatchResult paymentResult = await h.DispatchAsync(h.Payment(PaymentAnalyticsEventTypes.InvoicePaidFinancial, invoice));
+        Assert.Equal(DispatchOutcome.Processed, paymentResult.Outcome);
+        Assert.Empty(h.LastTouchedSuppliers); // No supplier known yet -> only admin notified
+
+        // 2. Rental snapshot arrives later -> supplier known now
+        DispatchResult rentalResult = await h.DispatchAsync(h.Rental(RentalAnalyticsEventTypes.RentalOrderCreated, new
+        {
+            rentalOrderId = OrderId,
+            currency = "VND",
+            createdAt = CompletedAt.AddDays(-1),
+            items = new[]
+            {
+                new { rentalItemId = ItemId, equipmentListingId = Guid.NewGuid(), supplierId = SupplierId, quantity = 1, rentalAmount = 1000m, depositAmount = 200m }
+            }
+        }));
+        Assert.Equal(DispatchOutcome.Processed, rentalResult.Outcome);
+        Assert.Equal([SupplierId], h.LastTouchedSuppliers); // Supplier notified when their data appears!
+    }
+
+    [Fact]
+    public async Task OrderCompleted_ReportsAllSuppliersInOrder()
+    {
+        using DispatcherHarness h = new();
+        Guid supplier2 = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
+
+        // Seed order with 2 suppliers
+        await h.DispatchAsync(h.Rental(RentalAnalyticsEventTypes.RentalOrderCreated, new
+        {
+            rentalOrderId = OrderId,
+            currency = "VND",
+            createdAt = CompletedAt.AddDays(-2),
+            items = new[]
+            {
+                new { rentalItemId = ItemId, equipmentListingId = Guid.NewGuid(), supplierId = SupplierId, quantity = 1, rentalAmount = 1000m, depositAmount = 200m },
+                new { rentalItemId = Guid.NewGuid(), equipmentListingId = Guid.NewGuid(), supplierId = supplier2, quantity = 1, rentalAmount = 2000m, depositAmount = 400m }
+            }
+        }));
+
+        // Complete order -> both suppliers must be notified!
+        DispatchResult result = await h.DispatchAsync(h.Rental(RentalAnalyticsEventTypes.RentalOrderCompleted, new
+        {
+            rentalOrderId = OrderId,
+            completedAt = CompletedAt
+        }));
+
+        Assert.Equal(DispatchOutcome.Processed, result.Outcome);
+        Assert.Contains(SupplierId, h.LastTouchedSuppliers);
+        Assert.Contains(supplier2, h.LastTouchedSuppliers);
+        Assert.Equal(2, h.LastTouchedSuppliers.Count);
+    }
 }

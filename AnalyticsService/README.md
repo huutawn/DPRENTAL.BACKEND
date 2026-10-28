@@ -59,6 +59,6 @@ dotnet test AnalyticsService.sln
 
 Không đặt biến này thì các test đó tự bỏ qua; đặt mà không kết nối được thì test báo lỗi.
 
-## KPI chờ producer
+## Contract KPI chính thức
 
-Một số KPI trong `docs/contracts/analytics-kpi-v1.md` vẫn chờ producer bổ sung: trạng thái order `Rejected` và một số đường `Expired` từ Rental; `PendingRefundAmount` và phần tiền thuê riêng trong `GrossRentalValueRefunded` từ Payment. Dashboard không suy diễn các KPI đó từ dữ liệu khác.
+Hợp đồng KPI chính thức được chuẩn hóa tại [Contract KPI Analytics v1 (docs/contracts/reporting-kpi-v1.md)](../docs/contracts/reporting-kpi-v1.md). Nguồn tiền mặt, thanh toán và quyết toán lấy trực tiếp từ `payment.analytics.v1`; vòng đời đơn và thiết bị lấy từ `rental.events.v1`.

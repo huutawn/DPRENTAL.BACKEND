@@ -1,12 +1,10 @@
+using Dprental.AnalyticsService.Common.Enums;
+
 namespace Dprental.AnalyticsService.Application.Dashboard.Revenue;
 
-public enum RevenueGranularity
+public static class RevenueGranularityExport
 {
-    Day,
-    Week,
-    Month
 }
-
 public static class RevenueGranularityParser
 {
     public static bool TryParse(string? value, out RevenueGranularity granularity)

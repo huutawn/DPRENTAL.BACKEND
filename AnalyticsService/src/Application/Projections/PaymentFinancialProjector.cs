@@ -158,6 +158,14 @@ public sealed class PaymentFinancialProjector
         // 3. Ghi mới
         _repository.Add(row);
         _changes.TrackSupplier(row.SupplierId);
+        if (row.RentalItemId.HasValue)
+        {
+            _changes.TrackItem(row.RentalItemId.Value);
+        }
+        else if (row.RentalOrderId.HasValue)
+        {
+            _changes.TrackOrder(row.RentalOrderId.Value);
+        }
         return true;
     }
 

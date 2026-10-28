@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace Dprental.AnalyticsService.Application.Hub.Options;
 
 /// <summary>Cấu hình SignalR Hub (section "AnalyticsHub"), cùng bộ thông số với PaymentHubOptions.</summary>
-public sealed class AnalyticsHubOptions
+public sealed class AnalyticsHubOptions : IValidatableObject
 {
     public const string SectionName = "AnalyticsHub";
     public const string DefaultHubPath = "/hubs/analytics";
@@ -30,6 +30,38 @@ public sealed class AnalyticsHubOptions
 
     public bool EnableDetailedErrors { get; set; }
 
-    /// <summary>Domain FE được phép kết nối. Rỗng = không kiểm tra Origin (môi trường thật PHẢI điền).</summary>
+    /// <summary>Domain FE được phép kết nối. Bắt buộc chứa ít nhất một origin hợp lệ.</summary>
     public string[] AllowedOrigins { get; set; } = [];
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (AllowedOrigins is null || AllowedOrigins.Length == 0)
+        {
+            yield return new ValidationResult(
+                "AllowedOrigins must contain at least one valid frontend origin.",
+                [nameof(AllowedOrigins)]);
+            yield break;
+        }
+
+        foreach (var origin in AllowedOrigins)
+        {
+            if (string.IsNullOrWhiteSpace(origin))
+            {
+                yield return new ValidationResult("AllowedOrigins cannot contain empty or whitespace origins.", [nameof(AllowedOrigins)]);
+                continue;
+            }
+
+            if (origin.Trim() == "*")
+            {
+                yield return new ValidationResult("AllowedOrigins cannot contain wildcard '*'.", [nameof(AllowedOrigins)]);
+                continue;
+            }
+
+            if (!Uri.TryCreate(origin.Trim(), UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                yield return new ValidationResult($"Allowed origin '{origin}' is not a valid absolute HTTP/HTTPS URI.", [nameof(AllowedOrigins)]);
+            }
+        }
+    }
 }

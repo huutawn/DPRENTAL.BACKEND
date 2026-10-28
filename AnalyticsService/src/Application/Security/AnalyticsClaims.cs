@@ -14,7 +14,7 @@ public static class AnalyticsClaims
     public static bool IsServiceToken(this ClaimsPrincipal user)
     {
         ArgumentNullException.ThrowIfNull(user);
-        return string.Equals(user.FindFirst("u")?.Value, "svc", StringComparison.Ordinal);
+        return string.Equals(user.FindFirst("u")?.Value, "svc", StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool IsPlatformAdmin(this ClaimsPrincipal user)
@@ -22,7 +22,7 @@ public static class AnalyticsClaims
         ArgumentNullException.ThrowIfNull(user);
         return !user.IsServiceToken()
             && user.FindAll("r").Concat(user.FindAll("role"))
-                .Any(claim => AdminRoles.Contains(claim.Value, StringComparer.Ordinal));
+                .Any(claim => AdminRoles.Contains(claim.Value, StringComparer.OrdinalIgnoreCase));
     }
 
     public static bool HasAudience(this ClaimsPrincipal user, string audience)

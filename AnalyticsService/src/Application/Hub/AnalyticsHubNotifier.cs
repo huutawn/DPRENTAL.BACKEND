@@ -33,43 +33,79 @@ public sealed partial class AnalyticsHubNotifier : IAnalyticsHubNotifier
     public async Task<Result> NotifyDataChangedAsync(
         string scope, IReadOnlyCollection<Guid> supplierUserIds, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ArgumentException.ThrowIfNullOrWhiteSpace(scope);
         ArgumentNullException.ThrowIfNull(supplierUserIds);
+        AnalyticsHubEnvelope<AnalyticsDataChangedData> envelope =
+            new(Guid.NewGuid(), 1, _timeProvider.GetUtcNow(), new AnalyticsDataChangedData(scope));
 
-        AnalyticsHubEnvelope<AnalyticsDataChangedPayload> envelope =
-            new(Guid.NewGuid(), 1, _timeProvider.GetUtcNow(), new AnalyticsDataChangedPayload(scope));
+        bool adminFailed = false;
+        bool supplierFailed = false;
 
-        // Dừng khi ứng dụng tắt HOẶC quá SendTimeoutSeconds: gửi chậm không làm treo việc đọc Kafka
-        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(_options.SendTimeoutSeconds));
-
-        try
+        // 1. Gửi cho nhóm Admin với timeout riêng
+        using (var adminCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
-            await _hubContext.Clients.Group(AnalyticsHubSecurityConstants.AdminGroup)
-                .SendAsync(AnalyticsHubEventNames.DataChanged, envelope, timeout.Token);
-
-            // NCC chỉ nhận tin về dữ liệu của chính mình (ownership MVP: SupplierId = JWT.sub)
-            string[] suppliers = supplierUserIds.Where(id => id != Guid.Empty).Distinct().Select(id => id.ToString("D")).ToArray();
-            if (suppliers.Length > 0)
+            adminCts.CancelAfter(TimeSpan.FromSeconds(_options.SendTimeoutSeconds));
+            try
             {
-                await _hubContext.Clients.Users(suppliers)
-                    .SendAsync(AnalyticsHubEventNames.DataChanged, envelope, timeout.Token);
+                await _hubContext.Clients.Group(AnalyticsHubSecurityConstants.AdminGroup)
+                    .SendAsync(AnalyticsHubEventNames.DataChanged, envelope, adminCts.Token);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw; // Cancellation do shutdown tiếp tục truyền ra ngoài
+            }
+            catch (OperationCanceledException)
+            {
+                adminFailed = true;
+                LogSendFailed(_logger, null, scope, "Admins", "SendTimeout");
+            }
+            catch (Exception exception)
+            {
+                adminFailed = true;
+                LogSendFailed(_logger, exception, scope, "Admins", "DeliveryFailed");
+            }
+        }
 
-            return Result.Success();
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        // 2. Gửi cho các NCC với timeout riêng độc lập (lỗi admin không ngăn NCC, và ngược lại)
+        string[] suppliers = supplierUserIds.Where(id => id != Guid.Empty).Distinct().Select(id => id.ToString("D")).ToArray();
+        if (suppliers.Length > 0)
         {
-            LogSendFailed(_logger, null, scope);
-            return Result.Failure(Error.Failure("AnalyticsHub.SendTimeout", "SignalR send timed out."));
+            using (var supplierCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                supplierCts.CancelAfter(TimeSpan.FromSeconds(_options.SendTimeoutSeconds));
+                try
+                {
+                    await _hubContext.Clients.Users(suppliers)
+                        .SendAsync(AnalyticsHubEventNames.DataChanged, envelope, supplierCts.Token);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw; // Cancellation do shutdown tiếp tục truyền ra ngoài
+                }
+                catch (OperationCanceledException)
+                {
+                    supplierFailed = true;
+                    LogSendFailed(_logger, null, scope, "Suppliers", "SendTimeout");
+                }
+                catch (Exception exception)
+                {
+                    supplierFailed = true;
+                    LogSendFailed(_logger, exception, scope, "Suppliers", "DeliveryFailed");
+                }
+            }
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+
+        if (adminFailed || supplierFailed)
         {
-            LogSendFailed(_logger, exception, scope);
-            return Result.Failure(Error.Failure("AnalyticsHub.DeliveryFailed", "SignalR send failed."));
+            return Result.Failure(Error.Failure(
+                "AnalyticsHub.DeliveryFailed",
+                $"SignalR notification partially or fully failed (adminFailed: {adminFailed}, supplierFailed: {supplierFailed})."));
         }
+
+        return Result.Success();
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "AnalyticsHub notification for scope {Scope} was not delivered")]
-    private static partial void LogSendFailed(ILogger logger, Exception? exception, string scope);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "AnalyticsHub notification for scope {Scope} was not delivered to {RecipientGroup} due to {Reason}")]
+    private static partial void LogSendFailed(ILogger logger, Exception? exception, string scope, string recipientGroup, string reason);
 }
