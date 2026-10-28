@@ -128,6 +128,17 @@ public sealed record RentalHandoverOverduePayload(
     DateTimeOffset OverdueAt,
     long OrderVersion = 1);
 
+public sealed record ReturnConfirmationOverduePayload(
+    Guid RentalOrderId,
+    Guid RentalItemId,
+    Guid ReturnRequestId,
+    Guid SupplierId,
+    Guid RenterId,
+    DateTimeOffset ConfirmationDeadlineAt,
+    DateTimeOffset OverdueAt,
+    IReadOnlyList<Guid> OverdueAssignmentIds,
+    long OrderVersion = 1);
+
 public sealed record CartItemAddedPayload(
     [property: JsonPropertyName("userId")] Guid UserId,
     [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,

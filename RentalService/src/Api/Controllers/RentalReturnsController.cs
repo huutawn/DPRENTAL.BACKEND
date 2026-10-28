@@ -28,6 +28,47 @@ public sealed class RentalReturnsController(IReturnService returns, IRentalCalle
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
+    /// <summary>Renter hoặc Supplier báo issue trên một hoặc nhiều unit của return request.</summary>
+    [HttpPost("return-requests/{returnRequestId:guid}/report-issue")]
+    [ProducesResponseType(typeof(ReturnRequestResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> ReportReturnIssue(
+        Guid itemId,
+        Guid returnRequestId,
+        [FromBody] ReportReturnIssueRequest request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var result = await returns.ReportReturnIssueAsync(itemId, returnRequestId, caller, request, idempotencyKey ?? string.Empty, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Admin giải quyết yêu cầu trả máy: xác nhận thực nhận (ConfirmReceived) hoặc bác yêu cầu (RejectRequest).</summary>
+    [HttpPost("return-requests/{returnRequestId:guid}/resolve")]
+    [ProducesResponseType(typeof(ReturnRequestResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ResolveReturnRequest(
+        Guid itemId,
+        Guid returnRequestId,
+        [FromBody] AdminResolveReturnRequest request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var result = await returns.ResolveReturnRequestAsync(itemId, returnRequestId, caller, request, idempotencyKey ?? string.Empty, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
     /// <summary>Supplier ghi nhận thu hồi một hoặc nhiều máy đã bàn giao.</summary>
     [HttpPost("returns")]
     [ProducesResponseType(typeof(RecordReturnResponse), StatusCodes.Status200OK)]

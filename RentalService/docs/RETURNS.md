@@ -128,8 +128,7 @@ An assignment is eligible (`canRequestReturn == true`) if and only if:
 1. The item status is `InRental`.
 2. The assignment status is `HandedOver` and associated with the item's `HandoverRecord`.
 3. The assignment has not yet been returned (`ReturnRecordId == null`).
-4. The assignment has no currently open return request unit (`ClosedAt == null`).
-
+4. The assignment has no currently actionable return request unit (`ClosedAt == null && RejectedAt == null`).
 ### 3. Atomic Closing of Request Units on Supplier Return
 
 When a supplier successfully calls `POST /api/v1/rental/items/{itemId}/returns`:
@@ -174,5 +173,62 @@ dotnet run --project RentalService/src/Maintenance -- reconcile-return-requests
 dotnet run --project RentalService/src/Maintenance -- reconcile-return-requests --apply
 ```
 
-- **Logic**: Selects `ReturnRequestUnit` where `ClosedAt == null` and the assignment has a completed `ReturnRecord` on the same item. Sets `ClosedAt = ReturnRecord.SubmittedAt`.
+- **Logic**: Selects `ReturnRequestUnit` where `ClosedAt == null && RejectedAt == null` and the assignment has a completed `ReturnRecord` on the same item. Sets `ClosedAt = ReturnRecord.SubmittedAt`.
 - **Safety**: Does not alter evidence, state transitions, or operation receipts. Re-running returns 0 records to change.
+
+## Return disputes and manual resolution (Task 4)
+
+### 7. Reporting Return Issues
+
+- **Endpoint**: `POST /api/v1/rental/items/{itemId}/return-requests/{returnRequestId}/report-issue`
+- **Headers**: `Idempotency-Key` (required, 1–64 characters).
+- **Authorization**: Must be an authenticated human user who is either the order's renter or the item's supplier. Third parties receive 404 (IDOR isolation); service tokens receive 403 Forbidden.
+- **Payload**:
+  - `reason`: required, trimmed, max 500 characters.
+  - `note`: optional, max 2000 characters.
+  - `mediaIds`: optional array of up to 10 verified private media UUIDs uploaded by the caller.
+  - `assignmentIds`: optional array of assignment UUIDs belonging to the request. If omitted, applies to all currently actionable units in the request.
+- **Business Rules**:
+  - Any invalid unit or media in a batch fails the entire request (all-or-nothing).
+  - Does not create `ReturnRecord` or invoke Inventory commands.
+  - Transitions matching unit statuses to `Disputed` and the overall request status to `Disputed`.
+  - Reports are immutable audit records (`ReturnRequestIssue`); renter and supplier may each file distinct reports without overwriting each other's evidence.
+  - Replaying with the same key returns the stored snapshot from the receipt.
+
+### 8. Confirmation Overdue Tracking & Background Worker
+
+- **Confirmation Deadline**: `ConfirmationDeadlineAt = SubmittedAt + 24 hours`, persisted at request creation time.
+- **Overdue Condition**: When `now >= ConfirmationDeadlineAt`, any remaining actionable units (`ClosedAt == null && RejectedAt == null`) are considered overdue.
+- **Independence from Dispute**: `OverdueConfirmation` is an independent condition; disputed units still become overdue once the 24-hour deadline elapses.
+- **Background Worker**: `ReturnConfirmationOverdueWorker` runs every 60 seconds (batch size 100).
+  - Executes server-side query identifying orders with overdue, unflagged actionable units (`OverdueNotifiedAt == null`).
+  - Acquires order advisory lock, reloads aggregate, rechecks conditions.
+  - Sets `OverdueNotifiedAt = now`, increments order version once, and enqueues `ReturnConfirmationOverdue` event into the outbox within the same database transaction.
+  - If event enqueue fails, the transaction is rolled back and the flag is not persisted, allowing clean retry.
+  - Dispatches `RETURN_CONFIRMATION_OVERDUE` SignalR notifications to renter and supplier after commit.
+  - Invariant: Never auto-confirms returns, never alters `RentalItemStatus`, and never releases or blocks inventory.
+
+### 9. Audited Administrative Resolution & Integration with Task 3
+
+Administrative APIs require an Admin JWT (`admin`, `admin_platform`). Service tokens are refused.
+
+- **List Return Requests**: `GET /api/v1/rental/admin/return-requests`
+  - Supports pagination (`page`, `pageSize`) and filters: `disputed` (bool), `overdue` (bool), `itemId`, `orderId`.
+- **Detail Return Request**: `GET /api/v1/rental/admin/return-requests/{returnRequestId}`
+  - Includes request metadata, units with live statuses, issue reports, administrative decision history, and associated inventory tracking status.
+- **Resolve Return Request**: `POST /api/v1/rental/items/{itemId}/return-requests/{returnRequestId}/resolve`
+  - Header `Idempotency-Key` (required).
+  - Requires `decision` (`ConfirmReceived` or `RejectRequest`), `decisionNote` (required, max 2000 chars), `assignmentIds` (non-empty, actionable), and optional `resolutionMediaIds`.
+  - One decision per operation; mixed decisions are submitted via separate operations.
+  - **ConfirmReceived**:
+    - Executes the shared Task 3 application workflow, preserving the Admin actor identity (`submittedById = adminId`).
+    - Requires `actualReturnAt` and per-unit inspection (`ReturnUnitRequest`).
+    - Invariant: Units inspected as `DAMAGED` strictly require both a description and evidence photos.
+    - Atomically creates `ReturnRecord`, sets `ClosedAt = now`, closes allocations via `ApplyReturnedUnits` Kafka command, records `RentalUnitsReturned` event, updates item settlement state, and records resolution audit.
+  - **RejectRequest**:
+    - Sets `RejectedAt = now` on targeted units and persists resolution audit.
+    - Has zero Inventory or financial side effects (no `ReturnRecord`, no allocation command, no deposit deduction).
+    - Immediately frees the assignment in `ReturnEligibilityPolicy`, allowing the renter to submit a new return request if the assignment is still eligible.
+  - **Concurrency & Races**:
+    - All concurrent operations (issue reporting, supplier confirmation, overdue worker, admin resolution, and renter re-requests) serialize deterministically under PostgreSQL order advisory locks.
+    - Idempotent replays return saved receipt snapshots without duplicating records, decisions, or outbox messages.

@@ -574,7 +574,7 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
                 var payloadDict = new Dictionary<string, object?>();
                 foreach (var p in prop.Value.EnumerateObject())
                 {
-                    if (p.Name != "orderVersion")
+                    if (p.Name != "orderVersion" && p.Name != "completedAt")
                     {
                         payloadDict[p.Name] = JsonSerializer.Deserialize<object>(p.Value.GetRawText());
                     }

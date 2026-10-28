@@ -11,18 +11,20 @@ namespace Dprental.RentalService.Application.Policies;
 /// </summary>
 public static class ReturnEligibilityPolicy
 {
+    public static bool IsActionable(ReturnRequestUnit unit) => unit.IsActionable;
+
     public static bool HasOpenReturnRequest(RentalItem item, Guid assignmentId)
     {
         return item.ReturnRequests
             .SelectMany(r => r.Units)
-            .Any(u => u.RentalUnitAssignmentId == assignmentId && !u.ClosedAt.HasValue);
+            .Any(u => u.RentalUnitAssignmentId == assignmentId && u.IsActionable);
     }
 
     public static HashSet<Guid> GetOpenReturnRequestAssignmentIds(RentalItem item)
     {
         return item.ReturnRequests
             .SelectMany(r => r.Units)
-            .Where(u => !u.ClosedAt.HasValue)
+            .Where(u => u.IsActionable)
             .Select(u => u.RentalUnitAssignmentId)
             .ToHashSet();
     }

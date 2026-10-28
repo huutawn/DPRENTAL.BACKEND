@@ -168,24 +168,75 @@ internal static class OrderQueryMapper
             .ToList();
     }
 
-    public static IReadOnlyList<ReturnRequestResponse> ToReturnRequests(RentalItem item)
+    public static IReadOnlyList<ReturnRequestResponse> ToReturnRequests(RentalItem item, DateTimeOffset? now = null, bool includeAdminNotes = false)
     {
+        var current = now ?? DateTimeOffset.UtcNow;
         return item.ReturnRequests
             .OrderBy(r => r.SubmittedAt)
             .ThenBy(r => r.Id)
-            .Select(r => new ReturnRequestResponse(
-                r.Id,
-                r.RentalItemId,
-                r.ActualReturnAt,
-                r.Note,
-                r.SubmittedAt,
-                r.Units
+            .Select(r =>
+            {
+                var disputedAssignmentIds = ReturnRequestStatusPolicy.GetDisputedAssignmentIds(r);
+                var unitResponses = r.Units
                     .OrderBy(u => u.RentalUnitAssignmentId)
-                    .Select(u => new ReturnRequestUnitResponse(
-                        u.RentalUnitAssignmentId,
-                        u.MediaIds,
-                        u.ClosedAt))
-                    .ToList()))
+                    .Select(u =>
+                    {
+                        var uStatus = ReturnRequestStatusPolicy.GetUnitStatus(u, disputedAssignmentIds);
+                        var isUnitOverdue = ReturnRequestStatusPolicy.IsUnitOverdue(u, r.ConfirmationDeadlineAt, current);
+                        return new ReturnRequestUnitResponse(
+                            u.RentalUnitAssignmentId,
+                            u.MediaIds,
+                            u.ClosedAt,
+                            u.RejectedAt,
+                            uStatus,
+                            isUnitOverdue,
+                            u.OverdueNotifiedAt);
+                    })
+                    .ToList();
+
+                var reqStatus = ReturnRequestStatusPolicy.GetRequestStatus(unitResponses.Select(u => u.Status).ToList());
+                var isReqOverdue = ReturnRequestStatusPolicy.IsRequestOverdue(r, current);
+
+                var issues = r.Issues
+                    .OrderBy(i => i.ReportedAt)
+                    .Select(i => new ReturnRequestIssueResponse(
+                        i.Id,
+                        i.ReturnRequestId,
+                        i.ReporterId,
+                        i.ReporterRole,
+                        i.Reason,
+                        i.Note,
+                        i.MediaIds,
+                        i.ReportedAt,
+                        i.Units.Select(u => u.RentalUnitAssignmentId).ToList()))
+                    .ToList();
+
+                var resolutions = r.Resolutions
+                    .OrderBy(res => res.ResolvedAt)
+                    .Select(res => new ReturnRequestResolutionResponse(
+                        res.Id,
+                        res.ReturnRequestId,
+                        res.AdminId,
+                        res.Decision,
+                        includeAdminNotes ? res.DecisionNote : null,
+                        res.ResolutionMediaIds,
+                        res.ResolvedAt,
+                        res.Units.Select(u => u.RentalUnitAssignmentId).ToList()))
+                    .ToList();
+
+                return new ReturnRequestResponse(
+                    r.Id,
+                    r.RentalItemId,
+                    r.ActualReturnAt,
+                    r.Note,
+                    r.SubmittedAt,
+                    unitResponses,
+                    reqStatus,
+                    r.ConfirmationDeadlineAt,
+                    isReqOverdue,
+                    issues,
+                    resolutions);
+            })
             .ToList();
     }
 

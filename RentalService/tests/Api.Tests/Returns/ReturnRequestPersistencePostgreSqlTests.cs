@@ -224,6 +224,146 @@ public sealed class ReturnRequestPersistencePostgreSqlTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReturnRequestUnit_UniqueIndex_AllowsNewRequest_WhenPreviousRequestRejected()
+    {
+        var order = ReturnTests.NewOrder(2);
+        var item = order.Items.Single();
+        var assignment = item.UnitAssignments.First();
+
+        await using (var seedDb = NewDb())
+        {
+            seedDb.Add(order);
+            await seedDb.SaveChangesAsync();
+        }
+
+        Guid req1Id = Guid.NewGuid();
+        var unitReq1 = new ReturnRequestUnit(Guid.NewGuid(), req1Id, assignment.Id, []);
+        var req1 = new ReturnRequest(req1Id, item.Id, Now.AddHours(-2), "Req 1", order.RenterId, Now.AddHours(-2), [unitReq1]);
+
+        await using (var db = NewDb())
+        {
+            db.Add(req1);
+            await db.SaveChangesAsync();
+        }
+
+        // Reject unitReq1
+        await using (var rejectDb = NewDb())
+        {
+            var loadedUnit = await rejectDb.ReturnRequestUnits.SingleAsync(u => u.Id == unitReq1.Id);
+            loadedUnit.SetRejectedAt(Now.AddHours(-1));
+            await rejectDb.SaveChangesAsync();
+        }
+
+        // Now create a new request for the same assignment
+        Guid req2Id = Guid.NewGuid();
+        var unitReq2 = new ReturnRequestUnit(Guid.NewGuid(), req2Id, assignment.Id, []);
+        var req2 = new ReturnRequest(req2Id, item.Id, Now.AddMinutes(-10), "Req 2", order.RenterId, Now, [unitReq2]);
+
+        await using (var db2 = NewDb())
+        {
+            db2.Add(req2);
+            await db2.SaveChangesAsync();
+        }
+
+        await using (var verifyDb = NewDb())
+        {
+            var units = await verifyDb.ReturnRequestUnits
+                .Where(u => u.RentalUnitAssignmentId == assignment.Id)
+                .OrderBy(u => u.RejectedAt)
+                .ToListAsync();
+
+            Assert.Equal(2, units.Count);
+            Assert.Contains(units, u => u.RejectedAt != null);
+            Assert.Contains(units, u => u.RejectedAt == null && u.ClosedAt == null);
+        }
+    }
+
+    [Fact]
+    public async Task ReturnRequest_PersistsIssuesAndResolutions_WithAllRelations()
+    {
+        var order = ReturnTests.NewOrder(2);
+        var item = order.Items.Single();
+        var assignment1 = item.UnitAssignments.First();
+        var assignment2 = item.UnitAssignments.Last();
+
+        await using (var seedDb = NewDb())
+        {
+            seedDb.Add(order);
+            await seedDb.SaveChangesAsync();
+        }
+
+        Guid reqId = Guid.NewGuid();
+        var unitReq1 = new ReturnRequestUnit(Guid.NewGuid(), reqId, assignment1.Id, []);
+        var unitReq2 = new ReturnRequestUnit(Guid.NewGuid(), reqId, assignment2.Id, []);
+        var req = new ReturnRequest(reqId, item.Id, Now.AddHours(-2), "Req with issue", order.RenterId, Now.AddHours(-2), [unitReq1, unitReq2]);
+
+        Guid issueId = Guid.NewGuid();
+        Guid mediaId = Guid.NewGuid();
+        var issue = new ReturnRequestIssue(
+            issueId,
+            reqId,
+            order.RenterId,
+            ActorRole.Renter,
+            "Supplier not confirming receipt",
+            "Handed over at warehouse",
+            [mediaId],
+            Now.AddHours(-1),
+            [assignment1.Id]);
+        req.AddIssue(issue);
+
+        Guid resId = Guid.NewGuid();
+        Guid resMediaId = Guid.NewGuid();
+        var res = new ReturnRequestResolution(
+            resId,
+            reqId,
+            Guid.NewGuid(),
+            ReturnResolutionDecision.ConfirmReceived,
+            "Admin inspected and confirmed",
+            [resMediaId],
+            Now,
+            [assignment1.Id]);
+        req.AddResolution(res);
+
+        await using (var saveDb = NewDb())
+        {
+            var repo = new RentalOrderRepository(saveDb);
+            var loadedOrder = await repo.GetByIdWithDetailsAsync(order.Id);
+            Assert.NotNull(loadedOrder);
+            loadedOrder.Items.Single().AddReturnRequest(req);
+            await repo.UpdateAsync(loadedOrder);
+            await saveDb.SaveChangesAsync();
+        }
+
+        await using (var verifyDb = NewDb())
+        {
+            var repo = new RentalOrderRepository(verifyDb);
+            var reloadedOrder = await repo.GetByIdWithDetailsAsync(order.Id);
+            Assert.NotNull(reloadedOrder);
+            var reloadedReq = reloadedOrder.Items.Single().ReturnRequests.Single(r => r.Id == reqId);
+
+            Assert.Equal(req.ConfirmationDeadlineAt, reloadedReq.ConfirmationDeadlineAt);
+            Assert.Single(reloadedReq.Issues);
+            var reloadedIssue = reloadedReq.Issues.Single();
+            Assert.Equal(issueId, reloadedIssue.Id);
+            Assert.Equal("Supplier not confirming receipt", reloadedIssue.Reason);
+            Assert.Single(reloadedIssue.MediaIds);
+            Assert.Equal(mediaId, reloadedIssue.MediaIds[0]);
+            Assert.Single(reloadedIssue.Units);
+            Assert.Equal(assignment1.Id, reloadedIssue.Units.Single().RentalUnitAssignmentId);
+
+            Assert.Single(reloadedReq.Resolutions);
+            var reloadedRes = reloadedReq.Resolutions.Single();
+            Assert.Equal(resId, reloadedRes.Id);
+            Assert.Equal(ReturnResolutionDecision.ConfirmReceived, reloadedRes.Decision);
+            Assert.Equal("Admin inspected and confirmed", reloadedRes.DecisionNote);
+            Assert.Single(reloadedRes.ResolutionMediaIds);
+            Assert.Equal(resMediaId, reloadedRes.ResolutionMediaIds[0]);
+            Assert.Single(reloadedRes.Units);
+            Assert.Equal(assignment1.Id, reloadedRes.Units.Single().RentalUnitAssignmentId);
+        }
+    }
+
+    [Fact]
     public async Task ReturnRequest_DiscardChanges_RollsBackAllTrackedEntities()
     {
         var order = ReturnTests.NewOrder(2);
