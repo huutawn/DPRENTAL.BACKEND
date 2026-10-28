@@ -316,6 +316,57 @@ public sealed class HandoverEvidenceTests
     }
 
     [Fact]
+    public async Task InventoryConfirms_WhenEvidenceSnapshotIsCorrupted_RequiresManualReconciliation()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+        Assert.True((await Service().HandoverItemAsync(_item.Id, request, "corrupt-snap-1", OrderTestData.User(_binh))).IsSuccess);
+        InventoryCommand command = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver)).Single();
+
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            var receipt = await context.RentalOperationReceipts.SingleAsync(r => r.OperationId == "corrupt-snap-1");
+            typeof(RentalOperationReceipt).GetProperty(nameof(RentalOperationReceipt.PayloadJson))!.SetValue(receipt, "{\"corrupted\":true}");
+            await context.SaveChangesAsync();
+        }
+
+        Result replyResult = await _replies.SucceedAsync(command);
+        Assert.True(replyResult.IsSuccess);
+
+        await using (RentalServiceDbContext check = NewContext())
+        {
+            var receipt = await check.RentalOperationReceipts.SingleAsync(r => r.OperationId == "corrupt-snap-1");
+            Assert.Equal(RentalOperationReceipt.StatusManualReconciliationRequired, receipt.Status);
+            RentalItem item = await check.RentalItems.SingleAsync(i => i.Id == _item.Id);
+            Assert.Equal(RentalItemStatus.AwaitingHandover, item.Status);
+            Assert.Null(item.HandoverRecord);
+        }
+    }
+
+    [Fact]
+    public async Task InventoryConfirms_ConflictingTerminalResult_IsRejectedWithConflict()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+        Assert.True((await Service().HandoverItemAsync(_item.Id, request, "conflict-term-1", OrderTestData.User(_binh))).IsSuccess);
+        InventoryCommand command = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver)).Single();
+
+        Result firstSuccess = await _replies.SucceedAsync(command);
+        Assert.True(firstSuccess.IsSuccess);
+        // Send a contradictory result (rejection for already succeeded receipt)
+        _clock.UtcNow = _clock.UtcNow.AddSeconds(1);
+        Result secondConflict = await _replies.RejectAsync(command, "CONFLICT_ERROR", "Contradictory result");
+        Assert.True(secondConflict.IsSuccess);
+
+        await using (RentalServiceDbContext check = NewContext())
+        {
+            var lastMsg = await check.RentalInboxMessages.OrderByDescending(m => m.ReceivedAt).FirstAsync();
+            Assert.Equal(RentalInboxMessage.StatusDeadLettered, lastMsg.Status);
+            Assert.Contains("INVENTORY_RESULT_CONFLICT", lastMsg.ErrorMessage);
+        }
+    }
+
+    [Fact]
     public async Task Handover_WithActualHandoverAtInFuture_EvenSmallFraction_IsRejected()
     {
         await SeedAsync();

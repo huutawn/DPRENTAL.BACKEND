@@ -168,20 +168,6 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         {
             return Error.Validation("INVALID_HANDOVER_TIME", "Thời gian bàn giao thực tế không hợp lệ.");
         }
-        if (!request.Confirmed)
-        {
-            return Error.Validation("HANDOVER_NOT_CONFIRMED", "Supplier phải xác nhận đã bàn giao thiết bị cho người thuê.");
-        }
-
-        if (request.Units.Any(u => u.MediaIds == null || u.MediaIds.Count == 0))
-        {
-            return Error.Validation("MISSING_MEDIA", "Mỗi thiết bị bàn giao phải kèm bằng chứng hình ảnh.");
-        }
-
-        if (request.Units.Select(u => u.AssignmentId).Distinct().Count() != request.Units.Count)
-        {
-            return Error.Validation("INVALID_UNITS", "Danh sách thiết bị bàn giao có chứa AssignmentId trùng lặp.");
-        }
 
         Guid supplierId = supplier.Value;
         var orderId = await _orderRepository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
@@ -252,6 +238,21 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         {
             return Error.Validation("INVALID_HANDOVER_TIME", "Thời gian bàn giao thực tế không thể ở tương lai.");
         }
+        if (!request.Confirmed)
+        {
+            return Error.Validation("HANDOVER_NOT_CONFIRMED", "Supplier phải xác nhận đã bàn giao thiết bị cho người thuê.");
+        }
+
+        if (request.Units.Any(u => u.MediaIds == null || u.MediaIds.Count == 0))
+        {
+            return Error.Validation("MISSING_MEDIA", "Mỗi thiết bị bàn giao phải kèm bằng chứng hình ảnh.");
+        }
+
+        if (request.Units.Select(u => u.AssignmentId).Distinct().Count() != request.Units.Count)
+        {
+            return Error.Validation("INVALID_UNITS", "Danh sách thiết bị bàn giao có chứa AssignmentId trùng lặp.");
+        }
+
 
         if (item.UnitAssignments.Count != item.Quantity ||
             item.UnitAssignments.Any(a => a.AssetId == Guid.Empty || a.AllocationId == Guid.Empty) ||
