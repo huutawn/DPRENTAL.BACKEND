@@ -11,4 +11,8 @@ public interface IReturnService
 
     Task<Result<RecordReturnResponse>> RecordReturnAsync(Guid itemId, IRentalCallerContext caller,
         RecordReturnRequest request, string idempotencyKey, CancellationToken cancellationToken = default);
+
+    Task<Result<ReturnRequestResponse>> ReportReturnIssueAsync(Guid itemId, Guid returnRequestId,
+        IRentalCallerContext caller, ReportReturnIssueRequest request, string idempotencyKey,
+        CancellationToken cancellationToken = default);
 }

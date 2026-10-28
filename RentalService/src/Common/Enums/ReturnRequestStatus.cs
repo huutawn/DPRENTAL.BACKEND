@@ -1,5 +1,8 @@
+using System.Text.Json.Serialization;
+
 namespace Dprental.RentalService.Common.Enums;
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ReturnRequestStatus
 {
     PendingSupplierConfirmation = 0,
