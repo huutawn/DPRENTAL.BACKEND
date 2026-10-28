@@ -30,6 +30,7 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
     public DbSet<RentalCheckoutOperation> RentalCheckoutOperations => Set<RentalCheckoutOperation>();
     public DbSet<RenterAddress> RenterAddresses => Set<RenterAddress>();
     public DbSet<RenterBankAccount> RenterBankAccounts => Set<RenterBankAccount>();
+    public DbSet<RentalRefundConfirmation> RentalRefundConfirmations => Set<RentalRefundConfirmation>();
 
     public void DiscardChanges() => ChangeTracker.Clear();
 
@@ -130,6 +131,25 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
             b.HasMany(o => o.OperationReceipts)
                 .WithOne(r => r.RentalOrder)
                 .HasForeignKey(r => r.RentalOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            b.HasMany(o => o.RefundConfirmations)
+                .WithOne(c => c.RentalOrder)
+                .HasForeignKey(c => c.RentalOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Xác nhận đã chuyển khoản hoàn tiền: một xác nhận mỗi dòng thiết bị, mỗi mã giao dịch ngân hàng dùng một lần.
+        modelBuilder.Entity<RentalRefundConfirmation>(b =>
+        {
+            b.Property(c => c.Id).ValueGeneratedNever();
+            b.Property(c => c.RefundAmount).HasPrecision(18, 2);
+            b.HasIndex(c => c.RentalItemId).IsUnique();
+            b.HasIndex(c => c.BankTransactionRef).IsUnique();
+
+            b.HasOne<RentalItem>()
+                .WithMany()
+                .HasForeignKey(c => c.RentalItemId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

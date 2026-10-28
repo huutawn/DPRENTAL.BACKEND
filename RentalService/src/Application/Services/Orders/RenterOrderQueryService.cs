@@ -18,6 +18,7 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
         int pageSize,
         string? status,
         IRentalCallerContext caller,
+        string? refundState = null,
         CancellationToken cancellationToken = default)
     {
         Result<Guid> renter = OrderQueryMapper.RequirePersonalCaller(caller);
@@ -32,10 +33,17 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             return statusFilter.Error;
         }
 
+        Result<bool?> refundedFilter = ParseRefundFilter(refundState);
+        if (refundedFilter.IsFailure)
+        {
+            return refundedFilter.Error;
+        }
+
         (int normalizedPage, int normalizedPageSize) = OrderQueryMapper.NormalizePaging(page, pageSize);
         RecordPage<RenterOrderSummaryRecord> records = await orders.GetRenterOrderPageAsync(
             renter.Value,
             statusFilter.Value,
+            refundedFilter.Value,
             (normalizedPage - 1) * normalizedPageSize,
             normalizedPageSize,
             cancellationToken);
@@ -54,7 +62,9 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
                 r.PaymentDeadline,
                 r.CreatedAt,
                 r.Items.Select(OrderQueryMapper.ToSummaryItem).ToList(),
-                r.Version))
+                r.Version,
+                OrderQueryMapper.ToRefundProgress(r.RefundCount, r.PendingRefundCount),
+                r.RefundedAmount))
             .ToList();
 
         return OrderQueryMapper.ToPage(items, normalizedPage, normalizedPageSize, records.TotalCount);
@@ -84,11 +94,11 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             return OrderQueryErrors.OrderNotFound;
         }
 
-        HashSet<Guid> refundRequestedItemIds = OrderQueryMapper.RefundRequestedItemIds(order);
+        Dictionary<Guid, RentalRefundLine> refundLines = OrderQueryMapper.RefundLinesByItem(order);
 
         List<RenterSubOrderResponse> subOrders = order.SubOrders
             .OrderBy(s => s.SubOrderCode, StringComparer.Ordinal)
-            .Select(s => ToSubOrder(s, refundRequestedItemIds))
+            .Select(s => ToSubOrder(s, refundLines))
             .ToList();
         decimal totalRental = subOrders.Sum(s => s.TotalRentalAmount);
         decimal totalDeposit = subOrders.Sum(s => s.TotalDepositAmount);
@@ -109,15 +119,17 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             totalDeposit,
             totalRental + totalDeposit,
             subOrders,
-            order.Version);
+            order.Version,
+            OrderQueryMapper.ToRefundProgress(refundLines.Count, refundLines.Values.Count(l => l.Confirmation is null)),
+            refundLines.Values.Sum(l => l.Confirmation?.RefundAmount ?? 0m));
     }
 
-    private static RenterSubOrderResponse ToSubOrder(RentalSubOrder subOrder, HashSet<Guid> refundRequestedItemIds)
+    private static RenterSubOrderResponse ToSubOrder(RentalSubOrder subOrder, Dictionary<Guid, RentalRefundLine> refundLines)
     {
         List<RenterOrderItemResponse> items = subOrder.Items
             .OrderBy(i => i.ExpectedStartDate)
             .ThenBy(i => i.Id)
-            .Select(i => ToItem(i, refundRequestedItemIds.Contains(i.Id)))
+            .Select(i => ToItem(i, refundLines.GetValueOrDefault(i.Id)))
             .ToList();
         decimal rental = subOrder.Items.Sum(i => i.RentalAmount);
         decimal deposit = subOrder.Items.Sum(i => i.DepositAmount);
@@ -133,7 +145,7 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             items);
     }
 
-    private static RenterOrderItemResponse ToItem(RentalItem item, bool refundRequested)
+    private static RenterOrderItemResponse ToItem(RentalItem item, RentalRefundLine? refundLine)
     {
         OrderItemResponse basics = OrderQueryMapper.ToItem(item);
 
@@ -164,10 +176,22 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             item.SupplierConfirmationDeadline,
             item.SupplierDecisionAt,
             item.Status == RentalItemStatus.Rejected ? item.SupplierDecisionReason : null,
-            OrderQueryMapper.ToRefund(item, refundRequested),
+            OrderQueryMapper.ToRefund(item, refundLine),
             OrderQueryMapper.ToHandover(item),
             OrderQueryMapper.ToReturns(item),
             OrderQueryMapper.ToSettlement(item));
+    }
+
+    /// <summary>REFUNDED: mọi khoản đã chuyển khoản; PENDING: còn khoản chờ hoàn; rỗng là không lọc. NONE hay giá trị lạ là lỗi.</summary>
+    private static Result<bool?> ParseRefundFilter(string? refundState)
+    {
+        Result<OrderRefundProgress?> progress = OrderQueryMapper.ParseStatusFilter<OrderRefundProgress>(refundState);
+        if (progress.IsFailure || progress.Value == OrderRefundProgress.None)
+        {
+            return OrderQueryErrors.InvalidRefundState;
+        }
+
+        return Result.Success<bool?>(progress.Value is { } p ? p == OrderRefundProgress.Refunded : null);
     }
 
     /// <summary>Thông số được lưu dạng chuỗi JSON; trả ra dạng object. Chuỗi hỏng thì bỏ qua thay vì làm lỗi cả đơn.</summary>

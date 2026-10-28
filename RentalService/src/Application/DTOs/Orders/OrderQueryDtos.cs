@@ -97,6 +97,8 @@ public sealed record OrderSummaryItemResponse(
 /// <param name="CreatedAt">Thời điểm đặt hàng.</param>
 /// <param name="Items">Các dòng thiết bị trong đơn kèm thông tin nhận biết cơ bản.</param>
 /// <param name="Version">Phiên bản dữ liệu của đơn hàng cha, tăng khi có thay đổi nghiệp vụ.</param>
+/// <param name="RefundState">Không có khoản hoàn, đang chờ hoàn hay đã hoàn tiền.</param>
+/// <param name="RefundedAmount">Số tiền đã được chuyển khoản hoàn lại.</param>
 public sealed record RenterOrderSummaryResponse(
     Guid OrderId,
     string OrderCode,
@@ -110,7 +112,9 @@ public sealed record RenterOrderSummaryResponse(
     DateTimeOffset PaymentDeadline,
     DateTimeOffset CreatedAt,
     IReadOnlyList<OrderSummaryItemResponse> Items,
-    long Version)
+    long Version,
+    OrderRefundProgress RefundState = OrderRefundProgress.None,
+    decimal RefundedAmount = 0m)
 {
     public RenterOrderSummaryResponse(
         Guid orderId,
@@ -170,6 +174,8 @@ public sealed record RenterSubOrderResponse(
 /// <param name="TotalAmount">Tổng tiền phải trả.</param>
 /// <param name="SubOrders">Các đơn con, mỗi nhà cung cấp một đơn.</param>
 /// <param name="Version">Phiên bản dữ liệu của đơn hàng cha, tăng khi có thay đổi nghiệp vụ.</param>
+/// <param name="RefundState">Không có khoản hoàn, đang chờ hoàn hay đã hoàn tiền.</param>
+/// <param name="RefundedAmount">Số tiền đã được chuyển khoản hoàn lại.</param>
 public sealed record RenterOrderDetailResponse(
     Guid OrderId,
     string OrderCode,
@@ -186,7 +192,9 @@ public sealed record RenterOrderDetailResponse(
     decimal TotalDepositAmount,
     decimal TotalAmount,
     IReadOnlyList<RenterSubOrderResponse> SubOrders,
-    long Version);
+    long Version,
+    OrderRefundProgress RefundState = OrderRefundProgress.None,
+    decimal RefundedAmount = 0m);
 
 /// <summary>
 /// Một đơn con trong danh sách của nhà cung cấp.

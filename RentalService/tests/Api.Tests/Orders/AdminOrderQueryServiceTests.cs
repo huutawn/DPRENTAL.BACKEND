@@ -211,7 +211,10 @@ public sealed class AdminOrderQueryServiceTests
 
         List<AdminOrderItemResponse> lines = order.SubOrders.SelectMany(s => s.Items).ToList();
         AdminOrderItemResponse rammerLine = lines.Single(l => l.RentalItemId == rammer.Id);
-        Assert.Equal(new OrderItemRefundResponse(OrderRefundState.Completed, "REF-2026-000001"), rammerLine.Refund);
+        Assert.Equal(OrderRefundState.Completed, rammerLine.Refund.State);
+        Assert.Equal("REF-2026-000001", rammerLine.Refund.RefundRef);
+        Assert.Equal(RentalRefundKind.FullRefund, rammerLine.Refund.Kind);
+        Assert.Equal(rammer.RentalAmount + rammer.DepositAmount, rammerLine.Refund.RefundAmount);
         Assert.Equal(rammer.AllocationGroupId, rammerLine.AllocationGroupId);
         Assert.Equal("Máy đang bảo trì", rammerLine.SupplierDecisionReason);
         Assert.Equal(_binh, rammerLine.SupplierDecisionBy);
@@ -227,7 +230,9 @@ public sealed class AdminOrderQueryServiceTests
         Assert.Equal("Vỡ thùng trộn", damaged.ReturnNote);
         Assert.Equal(UnitCondition.Normal, damaged.HandoverCondition);
 
-        Assert.DoesNotContain("0123456789", JsonSerializer.Serialize(order), StringComparison.Ordinal);
+        // Phần đơn che số tài khoản; riêng mục Hoàn tiền hiện đủ số để Admin chuyển khoản.
+        Assert.DoesNotContain("0123456789", JsonSerializer.Serialize(order with { Refunds = [] }), StringComparison.Ordinal);
+        Assert.All(order.Refunds, r => Assert.Equal("0123456789", r.RefundAccount!.AccountNumber));
     }
 
     [Fact]
@@ -303,7 +308,9 @@ public sealed class AdminOrderQueryServiceTests
             OrderTestData.RequestRefund(_lifecycleOrder, rejected, now.AddHours(1));
         }
 
-        _lifecycleOrder.Items.Single(i => i.ListingTitleSnapshot == "Máy đầm cóc Mikasa").RecordRefund("REF-2026-000001");
+        RentalItem refundedRammer = _lifecycleOrder.Items.Single(i => i.ListingTitleSnapshot == "Máy đầm cóc Mikasa");
+        refundedRammer.RecordRefund("REF-2026-000001");
+        OrderTestData.ConfirmRefundTransfer(_lifecycleOrder, refundedRammer, now.AddDays(1));
 
         RentalItem mixers = _lifecycleOrder.Items.Single(i => i.SupplierId == _cuong);
         mixers.ApplySupplierAccept(_cuong, now.AddHours(1), "CONF-1", "accept-mixers");

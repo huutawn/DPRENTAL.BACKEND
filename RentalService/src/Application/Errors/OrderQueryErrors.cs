@@ -13,6 +13,9 @@ public static class OrderQueryErrors
     public static readonly Error InvalidStatus =
         Error.Validation("Order.InvalidStatus", "Trạng thái lọc không hợp lệ.");
 
+    public static readonly Error InvalidRefundState =
+        Error.Validation("Order.InvalidRefundState", "Tình trạng hoàn tiền lọc không hợp lệ; dùng PENDING hoặc REFUNDED.");
+
     public static readonly Error InvalidDateRange = Error.Validation(
         "Order.InvalidDateRange",
         "createdFrom và createdTo phải là thời điểm ISO 8601 có Z hoặc ±HH:mm, và createdFrom nhỏ hơn createdTo.");

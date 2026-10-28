@@ -29,11 +29,26 @@ public enum OrderRefundState
     /// <summary>Dòng không có khoản hoàn nào.</summary>
     None = 0,
 
-    /// <summary>Đã yêu cầu PaymentService hoàn tiền, chưa có xác nhận hoàn xong.</summary>
+    /// <summary>Dòng có khoản hoàn, chờ Admin chuyển khoản.</summary>
     Processing = 1,
 
-    /// <summary>PaymentService đã xác nhận hoàn xong.</summary>
+    /// <summary>Admin đã xác nhận chuyển khoản hoàn tiền.</summary>
     Completed = 2
+}
+
+/// <summary>
+/// Tình trạng hoàn tiền của cả đơn, tính từ các khoản hoàn của các dòng.
+/// </summary>
+public enum OrderRefundProgress
+{
+    /// <summary>Đơn không có khoản hoàn nào.</summary>
+    None = 0,
+
+    /// <summary>Còn khoản chờ Admin chuyển khoản.</summary>
+    Pending = 1,
+
+    /// <summary>Mọi khoản hoàn đã được chuyển khoản.</summary>
+    Refunded = 2
 }
 
 /// <summary>
@@ -76,10 +91,16 @@ public sealed record OrderListingSnapshotResponse(
 /// Tình trạng hoàn tiền của một dòng.
 /// </summary>
 /// <param name="State">Chưa có, đang hoàn hoặc đã hoàn.</param>
-/// <param name="RefundRef">Mã hoàn tiền bên PaymentService khi đã hoàn xong.</param>
+/// <param name="RefundRef">Mã hoàn tiền bên PaymentService, nếu Payment đã gửi về.</param>
+/// <param name="Kind">Hoàn toàn bộ tiền thuê và cọc, hay hoàn phần cọc còn lại; rỗng khi dòng không có khoản hoàn.</param>
+/// <param name="RefundAmount">Số tiền được hoàn; rỗng khi dòng không có khoản hoàn.</param>
+/// <param name="RefundedAt">Thời điểm Admin xác nhận đã chuyển khoản; rỗng khi chưa hoàn.</param>
 public sealed record OrderItemRefundResponse(
     OrderRefundState State,
-    string? RefundRef);
+    string? RefundRef,
+    RentalRefundKind? Kind = null,
+    decimal? RefundAmount = null,
+    DateTimeOffset? RefundedAt = null);
 
 /// <summary>
 /// Biên bản bàn giao của một dòng.

@@ -788,7 +788,7 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
         public Task<IReadOnlyList<Guid>> GetDisputedItemIdsAsync(int skip, int take, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(int batchSize, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<RentalSubOrder?> GetSubOrderByIdAsync(Guid subOrderId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(Guid renterId, RentalOrderStatus? status, int skip, int take, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<RecordPage<RenterOrderSummaryRecord>> GetRenterOrderPageAsync(Guid renterId, RentalOrderStatus? status, bool? refunded, int skip, int take, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<RentalOrder?> GetRenterOrderWithSubOrdersAsync(Guid orderId, Guid renterId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<RecordPage<SupplierSubOrderSummaryRecord>> GetPaidSubOrderPageForSupplierAsync(Guid supplierId, RentalItemStatus? itemStatus, int skip, int take, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<RecordPage<AdminOrderSummaryRecord>> SearchOrdersForAdminAsync(AdminOrderSearchCriteria criteria, int skip, int take, CancellationToken cancellationToken = default) => throw new NotImplementedException();
