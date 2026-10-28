@@ -31,54 +31,62 @@ The response contains `returnRecordId`, `submittedAt`, `remainingUnits`, `status
 Same key + same content replays the stored response (including after later state changes).
 Same key + different content returns 409. A previously returned unit cannot be overwritten with a new key.
 
-## Agreed lifecycle
+## Supplier Return Inspection & Confirmation
 
-- Partial returns keep the item `IN_RENTAL`.
-- The final return sets `ReturnsCompletedAt` to server time, not supplier-entered `ActualReturnAt`.
-- If any unit is damaged, the final return changes the item to `PENDING_SETTLEMENT` and starts 48 hours for the supplier proposal.
-- All-normal returns set final deduction to zero, but do not mark the item completed.
-- When the final unit is returned normally, the item moves to `PENDING_SETTLEMENT`;
-  financial completion still requires Payment confirmation.
-- Rental fees are unchanged; early return does not refund unused days.
-- Return record, assignment evidence, state history, operation receipt and outbox are committed atomically.
-- Requests serialize using the existing PostgreSQL order advisory lock.
+### 1. `actualReturnAt` Semantics
 
-## Media configuration
+- **Meaning**: The exact timestamp when the supplier physically received and inspected the units (`ActualReceivedAt`).
+- **Validation**:
+  - Cannot be `default`.
+  - Cannot be in the future relative to server time (`actualReturnAt <= now`).
+  - Cannot precede the handover timestamp of the item (`actualReturnAt >= HandoverRecord.ActualHandoverAt`).
+- **Distinct from `ReturnsCompletedAt`**:
+  - `actualReturnAt` is the physical return timestamp declared by the supplier.
+  - `ReturnsCompletedAt` is the authoritative server timestamp recorded when all units of an item have been received (`timeProvider.GetUtcNow()`). It anchors the 48-hour deduction window.
 
-Set `Services:Media:BaseUrl` to the Media service origin and store `MediaService:ApiKey` in user secrets/environment.
-Environment equivalents: `Services__Media__BaseUrl`, `MediaService__ApiKey`.
-Do not commit the API key. Verification uses the frozen `X-Api-Key` contract and the verify/metadata routes.
-The HTTP client uses a 10-second timeout, disables redirects through DI, forwards cancellation and never exposes raw upstream errors.
-No missing/unavailable Media configuration is treated as successful verification.
+### 2. Supplier Inspection & Evidence Validation (Application Layer)
 
-## Durable event and remaining workflows
+- Handled exclusively in `ReturnService.RecordReturnAsync`:
+  - Caller must be an authenticated User with Supplier role who owns the item (`RentalAuthorizationPolicy.AuthorizeSupplierCaller` and `AuthorizeSupplierItem`). Service tokens and Renters are forbidden.
+  - New commands are only accepted when the item is in `IN_RENTAL`.
+  - `Idempotency-Key` is required (1–64 characters).
+  - Each unit in the request must belong to the item, must be currently in `HandedOver` status, and must not have an existing `ReturnRecordId`.
+  - `Condition` must be either `NORMAL` or `DAMAGED`.
+  - **DAMAGED requirements**:
+    - `Description`: mandatory, cannot be empty or only whitespace (maximum 2,000 characters).
+    - `MediaIds`: mandatory, at least 1 and at most 10 valid media GUIDs.
+    - Verified via `MediaService` before opening the database transaction: must exist, be in `Ready` status, `Private` visibility, and uploaded by the calling supplier (`expectedUploaderId == supplierId`). Renter media cannot be substituted for supplier evidence.
+  - **NORMAL requirements**:
+    - Description and MediaIds are optional.
+    - If media IDs are provided, they are verified with the same uploader/ready/private rules.
+  - Entire batch is verified atomically before database changes. A single invalid unit fails the entire request.
 
-`RentalUnitsReturned` v1 uses the existing `RentalEventEnvelope` on `Kafka:RentalEventsTopic` (default `rental.events.v1`).
-Payload: `orderId`, `rentalItemId`, `returnRecordId`, `actualReturnAt`, `submittedAt`, `assignmentIds`.
-The payload carries no serial numbers or internal asset codes. Consumers must deduplicate by `messageId`.
-Outbox delivery confirms a recorded return, **not** successful Inventory release or Payment settlement.
+### 3. State & Financial Settlement Matrix
 
-Each return record now schedules durable Inventory operations. Normal units are closed
-separately. Damaged units must receive a successful `BlockDamagedAssets` receipt
-before their `MarkAssetsReturned` receipt can execute. A temporary Inventory failure
-keeps the operation pending for recovery; it does not undo the recorded return.
-The response is checked against every assigned allocation and asset before closure
-fields are saved. Partial returns do not close other assignments.
+| Return Scenario | Item Status | DeductionDeadline | FinalDeductionAmount |
+|---|---|---|---|
+| Remaining units unreturned | `IN_RENTAL` | Not opened (`null`) | Not decided (`null`) |
+| All units returned, ANY damaged across all batches, `DepositAmount > 0` | `PENDING_SETTLEMENT` | Server `ReturnsCompletedAt` + 48 hours | Not decided (`null`) |
+| All units returned, no damaged units | `PENDING_SETTLEMENT` | Not opened (`null`) | `0.00` |
+| All units returned, damaged units exist but `DepositAmount == 0` | `PENDING_SETTLEMENT` | Not opened (`null`) | `0.00` |
 
-Inventory's provider endpoints remain unimplemented/unconfirmed on the current
-Inventory branch. Rental-only tests use a fake client. Payment settlement and
-`RentalSettled` event handling belong to the settlement workflow and are still
-required before normal returns can become `COMPLETED` end-to-end.
-The proposed Kafka alternative for new returns is documented in
-`INVENTORY_RETURN_KAFKA_CONTRACT.md`. It is opt-in through
-`Rental:InventoryReturn:Transport=Kafka` after Inventory signs off the wire contract.
-The Development configuration sets `Rental:InventoryReturn:Enabled=false`, so the
-recovery worker leaves return and damage receipts pending while Inventory is absent.
-Set `Rental__InventoryReturn__Enabled=true` when a compatible Inventory provider
-is available; pending receipts are then eligible for replay. Production defaults
-to enabled.
-No migration is needed: existing return/evidence, receipt and outbox mappings are reused.
+- **Cross-batch Damage Evaluation**: Damage is evaluated across all units ever returned for the item (`HasDamagedUnits`), not only the final return batch.
+- **No Premature Completion**: Task 3 never transitions an item or order to `COMPLETED`. Items remain in `PENDING_SETTLEMENT` until downstream Inventory allocation closure and Payment settlement confirm.
+- **Replay Invariance**: Replaying a previously recorded return returns the stored response snapshot; it never extends deadlines or alters financial figures.
 
+### 4. Inventory Return Outcomes & Damage Protection
+
+Rental enqueues `ApplyReturnedUnits` via Kafka topic `inventory.allocation.commands.v1`:
+- **NORMAL units**: confirmed only when Inventory returns valid allocation, asset ID, and terminal closure status (`RELEASED` or `CLOSED`).
+- **DAMAGED units**: confirmed only when Inventory returns valid allocation, asset ID, `ReturnRecordId`, valid `AllocationClosedAt`, supported protection status (`MAINTENANCE`, `OUT_OF_SERVICE`, `BLOCKED`, `CALENDAR_BLOCKED`), and non-empty `DamageDispositionRef`. Merely closing the allocation is strictly insufficient to confirm damage protection.
+- **Batch Integrity**: All units in the result must match the command's units and identity (`orderId`, `itemId`, `allocationGroupId`, `returnRecordId`, `operationKey`). An invalid unit fails the entire incoming result batch atomically.
+- **Rejections (`ReturnedUnitsRejected`)**: Keep the recorded `ReturnRecord` and closed request units (as supplier physically received them); mark the operation receipt `Failed`. Allocations remain unclosed.
+- **Idempotency**: Duplicate valid results are no-ops; they do not increment version, emit duplicate events, or trigger redundant notifications.
+
+### 5. Verification Limits
+
+- In environments without a live `InventoryService` or `RecommendationService`, integration tests use mock replies and isolated PostgreSQL test databases (`PostgresTestDatabaseHelper`).
+- Mock replies prove RentalService state transitions, advisory locking, idempotency, and transactional outbox behavior. They do not prove that physical assets are blocked inside the external Inventory database engine.
 ## Verification
 
 Start the local PostgreSQL service (`docker compose up -d postgres`) and run:
