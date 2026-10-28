@@ -487,9 +487,17 @@ public sealed class SupplierDecisionAndHandoverNotificationTests
         var eventProducer = new RentalEventProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
         var cmdProducer = new InventoryCommandProducer(new KafkaOutboxWriter(outboxes), kafkaOptions, timeProvider);
 
+        var inventoryMock = new Mock<IInventoryRentalClient>();
+        inventoryMock.Setup(x => x.ConfirmAllocationAsync(It.IsAny<string>(), It.IsAny<ConfirmAllocationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new ConfirmAllocationResponse(
+                "REC-CONF",
+                itemA.AllocationGroupId,
+                FixedNow,
+                false,
+                [new(itemA.UnitAssignments.First().AllocationId, itemA.UnitAssignments.First().AssetId, "Confirmed")])));
         var executor = new RentalOperationExecutor(
             orders, receipts, outboxes, lockManager,
-            new Mock<IInventoryRentalClient>().Object,
+            inventoryMock.Object,
             new Mock<IPaymentRentalClient>().Object,
             cmdProducer, db,
             new ConfigurationBuilder().Build(),
@@ -502,7 +510,7 @@ public sealed class SupplierDecisionAndHandoverNotificationTests
         var acceptResult = await executor.ExecuteSubOrderAcceptAsync(
             orderId, subOrderAId, supplierA, "accept-idemp-1");
 
-        Assert.True(acceptResult.IsSuccess);
+        Assert.True(acceptResult.IsSuccess, acceptResult.IsFailure ? $"{acceptResult.Error.Code}: {acceptResult.Error.Message}" : "");
 
         // Neither renter nor supplier should receive SUPPLIER_CONFIRMED yet
         Assert.Empty(notifier.RenterNotifications);

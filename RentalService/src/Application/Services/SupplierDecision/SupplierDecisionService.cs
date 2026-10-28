@@ -168,6 +168,20 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         {
             return Error.Validation("INVALID_HANDOVER_TIME", "Thời gian bàn giao thực tế không hợp lệ.");
         }
+        if (!request.Confirmed)
+        {
+            return Error.Validation("HANDOVER_NOT_CONFIRMED", "Supplier phải xác nhận đã bàn giao thiết bị cho người thuê.");
+        }
+
+        if (request.Units.Any(u => u.MediaIds == null || u.MediaIds.Count == 0))
+        {
+            return Error.Validation("MISSING_MEDIA", "Mỗi thiết bị bàn giao phải kèm bằng chứng hình ảnh.");
+        }
+
+        if (request.Units.Select(u => u.AssignmentId).Distinct().Count() != request.Units.Count)
+        {
+            return Error.Validation("INVALID_UNITS", "Danh sách thiết bị bàn giao có chứa AssignmentId trùng lặp.");
+        }
 
         Guid supplierId = supplier.Value;
         var orderId = await _orderRepository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
@@ -182,29 +196,6 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             supplierId, order.Items.FirstOrDefault(i => i.Id == itemId));
         if (owned.IsFailure) return owned.Error;
         RentalItem item = owned.Value;
-
-        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-        if (request.ActualHandoverAt > utcNow.AddMinutes(5))
-        {
-            return Error.Validation("INVALID_HANDOVER_TIME", "Thời gian bàn giao thực tế không thể ở tương lai.");
-        }
-
-        if (request.Units.Count != item.UnitAssignments.Count ||
-            request.Units.Select(u => u.AssignmentId).Distinct().Count() != request.Units.Count ||
-            request.Units.Any(u => !item.UnitAssignments.Any(a => a.Id == u.AssignmentId)))
-        {
-            return Error.Validation("INVALID_UNITS", "Danh sách thiết bị bàn giao phải bao gồm đầy đủ và duy nhất các máy thuộc mục thuê.");
-        }
-
-        if (!request.Confirmed)
-        {
-            return Error.Validation("HANDOVER_NOT_CONFIRMED", "Supplier phải xác nhận đã bàn giao thiết bị cho người thuê.");
-        }
-
-        if (request.Units.Any(u => u.MediaIds == null || u.MediaIds.Count == 0))
-        {
-            return Error.Validation("MISSING_MEDIA", "Mỗi thiết bị bàn giao phải kèm bằng chứng hình ảnh.");
-        }
 
         string opKey = idempotencyKey.Trim();
         string fingerprint = RentalOperationExecutor.ComputeFingerprint(new
@@ -236,25 +227,45 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             return new HandoverItemResponse(item.HandoverRecord?.Id, request.ActualHandoverAt, existingReceipt.Status);
         }
 
+        if (order.OperationReceipts.Any(r =>
+                r.Action == "MarkAssetsHandedOver" &&
+                r.TargetItemId == item.Id &&
+                (r.Status == RentalOperationReceipt.StatusPending ||
+                 r.Status == RentalOperationReceipt.StatusProcessing ||
+                 r.Status == RentalOperationReceipt.StatusManualReconciliationRequired)))
+        {
+            return Error.Conflict("HANDOVER_IN_PROGRESS", "Yêu cầu bàn giao trước đó đang chờ Inventory xử lý hoặc đối soát.");
+        }
+
         if (item.Status != RentalItemStatus.AwaitingHandover)
         {
             return Error.Conflict("INVALID_STATUS", $"Mục thuê không ở trạng thái AwaitingHandover. Trạng thái hiện tại: {item.Status}.");
         }
 
+        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
         if (HandoverDeadlinePolicy.IsAutoExpireDue(item, utcNow, _autoExpireGraceHours))
         {
             return Error.Conflict("HANDOVER_DEADLINE_PASSED", "Đã hết hạn bàn giao; cần đối soát nếu thiết bị đã được giao thực tế.");
         }
 
-        // Một lệnh bàn giao đang chờ Inventory trả lời thì không gửi lệnh thứ hai song song.
-        if (order.OperationReceipts.Any(r =>
-                r.Action == "MarkAssetsHandedOver" &&
-                r.TargetItemId == item.Id &&
-                (r.Status == RentalOperationReceipt.StatusPending || r.Status == RentalOperationReceipt.StatusProcessing)))
+        if (request.ActualHandoverAt > utcNow)
         {
-            return Error.Conflict("HANDOVER_IN_PROGRESS", "Yêu cầu bàn giao trước đó đang chờ Inventory xử lý.");
+            return Error.Validation("INVALID_HANDOVER_TIME", "Thời gian bàn giao thực tế không thể ở tương lai.");
         }
 
+        if (item.UnitAssignments.Count != item.Quantity ||
+            item.UnitAssignments.Any(a => a.AssetId == Guid.Empty || a.AllocationId == Guid.Empty) ||
+            item.UnitAssignments.Select(a => a.AssetId).Distinct().Count() != item.Quantity ||
+            item.UnitAssignments.Select(a => a.AllocationId).Distinct().Count() != item.Quantity)
+        {
+            return Error.Validation("INVALID_ASSIGNMENTS", "Thông tin phân bổ thiết bị của mục thuê không hợp lệ hoặc chưa đủ số lượng.");
+        }
+
+        if (request.Units.Count != item.Quantity ||
+            request.Units.Any(u => item.UnitAssignments.All(a => a.Id != u.AssignmentId)))
+        {
+            return Error.Validation("INVALID_UNITS", "Danh sách thiết bị bàn giao phải bao gồm đầy đủ và duy nhất các máy thuộc mục thuê.");
+        }
         if (_mediaClient is null)
         {
             return Error.Failure("MEDIA_VERIFICATION_UNAVAILABLE", "Chưa xác minh được bằng chứng bàn giao.");

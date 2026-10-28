@@ -339,6 +339,7 @@ public sealed class OrderNotificationIntegrationTests
             new CheckoutPreparationService(
                 carts,
                 new RenterAddressRepository(db),
+                new RenterBankAccountRepository(db),
                 harness.Listings,
                 harness.Auth,
                 Options.Create(new RentalTermsOptions { CurrentVersion = "v1.0", DocumentRef = "terms", ContentHash = "hash" }),
