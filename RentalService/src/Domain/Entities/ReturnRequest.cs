@@ -15,14 +15,22 @@ public sealed class ReturnRequest
     public string? Note { get; private set; }
     public Guid SubmittedById { get; private set; }
     public DateTimeOffset SubmittedAt { get; private set; }
+    public DateTimeOffset ConfirmationDeadlineAt { get; private set; }
 
     private readonly List<ReturnRequestUnit> _units = [];
     public IReadOnlyCollection<ReturnRequestUnit> Units => _units.AsReadOnly();
 
+    private readonly List<ReturnRequestIssue> _issues = [];
+    public IReadOnlyCollection<ReturnRequestIssue> Issues => _issues.AsReadOnly();
+
+    private readonly List<ReturnRequestResolution> _resolutions = [];
+    public IReadOnlyCollection<ReturnRequestResolution> Resolutions => _resolutions.AsReadOnly();
+
     private ReturnRequest() { }
 
     public ReturnRequest(Guid id, Guid rentalItemId, DateTimeOffset actualReturnAt, string? note,
-        Guid submittedById, DateTimeOffset submittedAt, IEnumerable<ReturnRequestUnit> units)
+        Guid submittedById, DateTimeOffset submittedAt, IEnumerable<ReturnRequestUnit> units,
+        DateTimeOffset? confirmationDeadlineAt = null)
     {
         Id = id;
         RentalItemId = rentalItemId;
@@ -30,7 +38,20 @@ public sealed class ReturnRequest
         Note = note;
         SubmittedById = submittedById;
         SubmittedAt = submittedAt;
+        ConfirmationDeadlineAt = confirmationDeadlineAt ?? submittedAt.AddHours(24);
         _units.AddRange(units);
+    }
+
+    public void AddIssue(ReturnRequestIssue issue)
+    {
+        ArgumentNullException.ThrowIfNull(issue);
+        _issues.Add(issue);
+    }
+
+    public void AddResolution(ReturnRequestResolution resolution)
+    {
+        ArgumentNullException.ThrowIfNull(resolution);
+        _resolutions.Add(resolution);
     }
 }
 
@@ -43,18 +64,28 @@ public sealed class ReturnRequestUnit
     public ReturnRequest? ReturnRequest { get; private set; }
     public Guid RentalUnitAssignmentId { get; private set; }
     public DateTimeOffset? ClosedAt { get; private set; }
+    public DateTimeOffset? RejectedAt { get; private set; }
+    public DateTimeOffset? OverdueNotifiedAt { get; private set; }
     private readonly List<Guid> _mediaIds = [];
     public IReadOnlyList<Guid> MediaIds => _mediaIds.AsReadOnly();
 
+    public bool IsActionable => !ClosedAt.HasValue && !RejectedAt.HasValue;
+
     private ReturnRequestUnit() { }
 
-    public ReturnRequestUnit(Guid id, Guid returnRequestId, Guid rentalUnitAssignmentId, IEnumerable<Guid> mediaIds)
+    public ReturnRequestUnit(Guid id, Guid returnRequestId, Guid rentalUnitAssignmentId, IEnumerable<Guid> mediaIds,
+        DateTimeOffset? closedAt = null, DateTimeOffset? rejectedAt = null, DateTimeOffset? overdueNotifiedAt = null)
     {
         Id = id;
         ReturnRequestId = returnRequestId;
         RentalUnitAssignmentId = rentalUnitAssignmentId;
         _mediaIds.AddRange(mediaIds);
+        ClosedAt = closedAt;
+        RejectedAt = rejectedAt;
+        OverdueNotifiedAt = overdueNotifiedAt;
     }
 
     public void SetClosedAt(DateTimeOffset closedAt) => ClosedAt = closedAt;
+    public void SetRejectedAt(DateTimeOffset rejectedAt) => RejectedAt = rejectedAt;
+    public void SetOverdueNotifiedAt(DateTimeOffset notifiedAt) => OverdueNotifiedAt = notifiedAt;
 }

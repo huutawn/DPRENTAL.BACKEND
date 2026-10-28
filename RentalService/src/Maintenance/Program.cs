@@ -392,7 +392,7 @@ public static class Program
                                    join r in countDb.ReturnRequests on u.ReturnRequestId equals r.Id
                                    join a in countDb.RentalUnitAssignments on u.RentalUnitAssignmentId equals a.Id
                                    join ret in countDb.ReturnRecords on a.ReturnRecordId equals ret.Id
-                                   where u.ClosedAt == null
+                                   where u.ClosedAt == null && u.RejectedAt == null
                                          && a.RentalItemId == r.RentalItemId
                                          && ret.RentalItemId == r.RentalItemId
                                    select u.Id).CountAsync();
@@ -413,7 +413,7 @@ public static class Program
                                join r in db.ReturnRequests on u.ReturnRequestId equals r.Id
                                join a in db.RentalUnitAssignments on u.RentalUnitAssignmentId equals a.Id
                                join ret in db.ReturnRecords on a.ReturnRecordId equals ret.Id
-                               where u.ClosedAt == null
+                               where u.ClosedAt == null && u.RejectedAt == null
                                      && a.RentalItemId == r.RentalItemId
                                      && ret.RentalItemId == r.RentalItemId
                                orderby u.Id

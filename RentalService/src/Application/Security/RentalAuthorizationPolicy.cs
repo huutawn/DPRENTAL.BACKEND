@@ -209,12 +209,13 @@ public static class RentalAuthorizationPolicy
 
         bool isParticipant = user.Value == order.RenterId || user.Value == item.SupplierId || caller.IsAdmin();
         bool containsMedia = item.ContainsEvidenceMedia(mediaId) ||
-            item.ReturnRequests.SelectMany(r => r.Units).Any(u => u.MediaIds.Contains(mediaId));
+            item.ReturnRequests.SelectMany(r => r.Units).Any(u => u.MediaIds.Contains(mediaId)) ||
+            item.ReturnRequests.SelectMany(r => r.Issues).Any(i => i.MediaIds.Contains(mediaId)) ||
+            item.ReturnRequests.SelectMany(r => r.Resolutions).Any(res => res.ResolutionMediaIds.Contains(mediaId));
         if (!isParticipant || !containsMedia)
         {
             return Error.NotFound(ErrorCodes.EvidenceNotFound, "MediaId không thuộc bằng chứng của khoản thuê này.");
         }
-
         return Result.Success();
     }
 

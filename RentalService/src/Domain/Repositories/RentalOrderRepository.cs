@@ -34,6 +34,10 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .Include(o => o.Items)
                 .ThenInclude(i => i.ReturnRequests).ThenInclude(r => r.Units)
             .Include(o => o.Items)
+                .ThenInclude(i => i.ReturnRequests).ThenInclude(r => r.Issues).ThenInclude(issue => issue.Units)
+            .Include(o => o.Items)
+                .ThenInclude(i => i.ReturnRequests).ThenInclude(r => r.Resolutions).ThenInclude(res => res.Units)
+            .Include(o => o.Items)
                 .ThenInclude(i => i.DeductionProposal!)
                     .ThenInclude(p => p.Dispute)
             .Include(o => o.StateTransitions)
@@ -126,6 +130,22 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 foreach (var unit in request.Units)
                     if (_dbContext.Entry(unit).State == EntityState.Detached)
                         _dbContext.Entry(unit).State = EntityState.Added;
+                foreach (var issue in request.Issues)
+                {
+                    if (_dbContext.Entry(issue).State == EntityState.Detached)
+                        _dbContext.Entry(issue).State = EntityState.Added;
+                    foreach (var issueUnit in issue.Units)
+                        if (_dbContext.Entry(issueUnit).State == EntityState.Detached)
+                            _dbContext.Entry(issueUnit).State = EntityState.Added;
+                }
+                foreach (var resolution in request.Resolutions)
+                {
+                    if (_dbContext.Entry(resolution).State == EntityState.Detached)
+                        _dbContext.Entry(resolution).State = EntityState.Added;
+                    foreach (var resUnit in resolution.Units)
+                        if (_dbContext.Entry(resUnit).State == EntityState.Detached)
+                            _dbContext.Entry(resUnit).State = EntityState.Added;
+                }
             }
             foreach (var record in order.Items.SelectMany(i => i.ReturnRecords))
             {
@@ -434,6 +454,16 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                         .ThenInclude(r => r.Units)
             .Include(o => o.SubOrders)
                 .ThenInclude(s => s.Items)
+                    .ThenInclude(i => i.ReturnRequests)
+                        .ThenInclude(r => r.Issues)
+                            .ThenInclude(issue => issue.Units)
+            .Include(o => o.SubOrders)
+                .ThenInclude(s => s.Items)
+                    .ThenInclude(i => i.ReturnRequests)
+                        .ThenInclude(r => r.Resolutions)
+                            .ThenInclude(res => res.Units)
+            .Include(o => o.SubOrders)
+                .ThenInclude(s => s.Items)
                     .ThenInclude(i => i.DeductionProposal)
             .Include(o => o.OperationReceipts.Where(r => r.Action == RequestRefundAction))
             .FirstOrDefaultAsync(o => o.Id == orderId && o.RenterId == renterId, cancellationToken);
@@ -491,6 +521,14 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .Include(s => s.Items)
                 .ThenInclude(i => i.ReturnRequests)
                     .ThenInclude(r => r.Units)
+            .Include(s => s.Items)
+                .ThenInclude(i => i.ReturnRequests)
+                    .ThenInclude(r => r.Issues)
+                        .ThenInclude(issue => issue.Units)
+            .Include(s => s.Items)
+                .ThenInclude(i => i.ReturnRequests)
+                    .ThenInclude(r => r.Resolutions)
+                        .ThenInclude(res => res.Units)
             .Include(s => s.Items)
                 .ThenInclude(i => i.DeductionProposal)
             .FirstOrDefaultAsync(s => s.Id == subOrderId, cancellationToken);

@@ -108,7 +108,7 @@ public sealed partial class ReturnService(
         var returnedAssignmentIds = request.Units.Select(u => u.RentalUnitAssignmentId).ToHashSet();
         foreach (var reqUnit in item.ReturnRequests.SelectMany(r => r.Units))
         {
-            if (returnedAssignmentIds.Contains(reqUnit.RentalUnitAssignmentId) && !reqUnit.ClosedAt.HasValue)
+            if (returnedAssignmentIds.Contains(reqUnit.RentalUnitAssignmentId) && reqUnit.IsActionable)
             {
                 reqUnit.SetClosedAt(now);
             }

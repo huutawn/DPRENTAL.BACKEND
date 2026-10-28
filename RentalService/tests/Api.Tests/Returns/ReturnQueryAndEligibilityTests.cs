@@ -297,4 +297,74 @@ public sealed class ReturnQueryAndEligibilityTests
         using var strangerResp = await strangerSupplier.GetAsync($"/api/v1/rental/supplier/sub-orders/{subOrderId}");
         Assert.Equal(HttpStatusCode.NotFound, strangerResp.StatusCode);
     }
+
+    [Fact]
+    public void ReturnRequestStatusPolicy_DerivesStatusesAndOverdue_Correctly()
+    {
+        Guid assign1 = Guid.NewGuid();
+        Guid assign2 = Guid.NewGuid();
+        Guid reqId = Guid.NewGuid();
+
+        var u1 = new ReturnRequestUnit(Guid.NewGuid(), reqId, assign1, []);
+        var u2 = new ReturnRequestUnit(Guid.NewGuid(), reqId, assign2, []);
+
+        // Both actionable, no issues -> PendingSupplierConfirmation
+        HashSet<Guid> disputedIds = [];
+        Assert.Equal(ReturnRequestUnitStatus.PendingSupplierConfirmation, ReturnRequestStatusPolicy.GetUnitStatus(u1, disputedIds));
+        Assert.Equal(ReturnRequestUnitStatus.PendingSupplierConfirmation, ReturnRequestStatusPolicy.GetUnitStatus(u2, disputedIds));
+        Assert.Equal(ReturnRequestStatus.PendingSupplierConfirmation, ReturnRequestStatusPolicy.GetRequestStatus([
+            ReturnRequestUnitStatus.PendingSupplierConfirmation,
+            ReturnRequestUnitStatus.PendingSupplierConfirmation
+        ]));
+
+        // Issue reported on u1 -> u1 is Disputed, request is Disputed
+        disputedIds.Add(assign1);
+        Assert.Equal(ReturnRequestUnitStatus.Disputed, ReturnRequestStatusPolicy.GetUnitStatus(u1, disputedIds));
+        Assert.Equal(ReturnRequestStatus.Disputed, ReturnRequestStatusPolicy.GetRequestStatus([
+            ReturnRequestUnitStatus.Disputed,
+            ReturnRequestUnitStatus.PendingSupplierConfirmation
+        ]));
+
+        // u1 is Confirmed (ClosedAt set), u2 is Rejected (RejectedAt set)
+        u1.SetClosedAt(Now);
+        u2.SetRejectedAt(Now);
+        Assert.Equal(ReturnRequestUnitStatus.Confirmed, ReturnRequestStatusPolicy.GetUnitStatus(u1, disputedIds));
+        Assert.Equal(ReturnRequestUnitStatus.Rejected, ReturnRequestStatusPolicy.GetUnitStatus(u2, disputedIds));
+        Assert.Equal(ReturnRequestStatus.Resolved, ReturnRequestStatusPolicy.GetRequestStatus([
+            ReturnRequestUnitStatus.Confirmed,
+            ReturnRequestUnitStatus.Rejected
+        ]));
+
+        // All confirmed -> Confirmed
+        Assert.Equal(ReturnRequestStatus.Confirmed, ReturnRequestStatusPolicy.GetRequestStatus([
+            ReturnRequestUnitStatus.Confirmed,
+            ReturnRequestUnitStatus.Confirmed
+        ]));
+
+        // All rejected -> Rejected
+        Assert.Equal(ReturnRequestStatus.Rejected, ReturnRequestStatusPolicy.GetRequestStatus([
+            ReturnRequestUnitStatus.Rejected,
+            ReturnRequestUnitStatus.Rejected
+        ]));
+    }
+
+    [Fact]
+    public void ReturnEligibilityPolicy_RejectionFreesAssignmentForNewRequest()
+    {
+        var (_, item, assignment, _) = CreateTestOrder();
+        var reqUnit = new ReturnRequestUnit(Guid.NewGuid(), Guid.NewGuid(), assignment.Id, []);
+
+        var req = new ReturnRequest(Guid.NewGuid(), item.Id, Now.AddHours(-1), "Previous request",
+            Guid.NewGuid(), Now.AddHours(-1), [reqUnit]);
+        item.AddReturnRequest(req);
+
+        // When open, cannot request return
+        Assert.True(ReturnEligibilityPolicy.HasOpenReturnRequest(item, assignment.Id));
+        Assert.False(ReturnEligibilityPolicy.CanRequestReturn(item, assignment));
+
+        // Once rejected, can request return again!
+        reqUnit.SetRejectedAt(Now);
+        Assert.False(ReturnEligibilityPolicy.HasOpenReturnRequest(item, assignment.Id));
+        Assert.True(ReturnEligibilityPolicy.CanRequestReturn(item, assignment));
+    }
 }

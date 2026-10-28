@@ -81,10 +81,28 @@ public sealed partial class ReturnService
         var record = new ReturnRequest(requestId, itemId, request.ActualReturnAt.ToUniversalTime(),
             request.Note, order.RenterId, now, request.Units.Select(u =>
                 new ReturnRequestUnit(Guid.NewGuid(), requestId, u.RentalUnitAssignmentId, u.MediaIds ?? [])));
-        var response = new ReturnRequestResponse(record.Id, itemId, record.ActualReturnAt,
-            record.Note, record.SubmittedAt, record.Units
+        var response = new ReturnRequestResponse(
+            record.Id,
+            itemId,
+            record.ActualReturnAt,
+            record.Note,
+            record.SubmittedAt,
+            record.Units
                 .OrderBy(u => u.RentalUnitAssignmentId)
-                .Select(u => new ReturnRequestUnitResponse(u.RentalUnitAssignmentId, u.MediaIds, u.ClosedAt)).ToArray());
+                .Select(u => new ReturnRequestUnitResponse(
+                    u.RentalUnitAssignmentId,
+                    u.MediaIds,
+                    u.ClosedAt,
+                    u.RejectedAt,
+                    ReturnRequestUnitStatus.PendingSupplierConfirmation,
+                    false,
+                    u.OverdueNotifiedAt))
+                .ToArray(),
+            ReturnRequestStatus.PendingSupplierConfirmation,
+            record.ConfirmationDeadlineAt,
+            false,
+            [],
+            []);
         item.AddReturnRequest(record);
         order.RecordReadModelUpdate(now);
         order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id, key, RequestReturnAction,
