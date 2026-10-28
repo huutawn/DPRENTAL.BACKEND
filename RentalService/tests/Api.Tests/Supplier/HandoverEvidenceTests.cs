@@ -13,6 +13,7 @@ using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Repositories;
+using Dprental.RentalService.Domain.Errors;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -312,6 +313,159 @@ public sealed class HandoverEvidenceTests
             Assert.Equal(RentalItemStatus.Expired, item.Status);
             Assert.Null(item.HandoverRecord);
         }
+    }
+
+    [Fact]
+    public async Task InventoryConfirms_WhenEvidenceSnapshotIsCorrupted_RequiresManualReconciliation()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+        Assert.True((await Service().HandoverItemAsync(_item.Id, request, "corrupt-snap-1", OrderTestData.User(_binh))).IsSuccess);
+        InventoryCommand command = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver)).Single();
+
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            var receipt = await context.RentalOperationReceipts.SingleAsync(r => r.OperationId == "corrupt-snap-1");
+            typeof(RentalOperationReceipt).GetProperty(nameof(RentalOperationReceipt.PayloadJson))!.SetValue(receipt, "{\"corrupted\":true}");
+            await context.SaveChangesAsync();
+        }
+
+        Result replyResult = await _replies.SucceedAsync(command);
+        Assert.True(replyResult.IsSuccess);
+
+        await using (RentalServiceDbContext check = NewContext())
+        {
+            var receipt = await check.RentalOperationReceipts.SingleAsync(r => r.OperationId == "corrupt-snap-1");
+            Assert.Equal(RentalOperationReceipt.StatusManualReconciliationRequired, receipt.Status);
+            RentalItem item = await check.RentalItems.SingleAsync(i => i.Id == _item.Id);
+            Assert.Equal(RentalItemStatus.AwaitingHandover, item.Status);
+            Assert.Null(item.HandoverRecord);
+        }
+    }
+
+    [Fact]
+    public async Task InventoryConfirms_ConflictingTerminalResult_IsRejectedWithConflict()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+        Assert.True((await Service().HandoverItemAsync(_item.Id, request, "conflict-term-1", OrderTestData.User(_binh))).IsSuccess);
+        InventoryCommand command = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver)).Single();
+
+        Result firstSuccess = await _replies.SucceedAsync(command);
+        Assert.True(firstSuccess.IsSuccess);
+        // Send a contradictory result (rejection for already succeeded receipt)
+        _clock.UtcNow = _clock.UtcNow.AddSeconds(1);
+        Result secondConflict = await _replies.RejectAsync(command, "CONFLICT_ERROR", "Contradictory result");
+        Assert.True(secondConflict.IsSuccess);
+
+        await using (RentalServiceDbContext check = NewContext())
+        {
+            var lastMsg = await check.RentalInboxMessages.OrderByDescending(m => m.ReceivedAt).FirstAsync();
+            Assert.Equal(RentalInboxMessage.StatusDeadLettered, lastMsg.Status);
+            Assert.Contains("INVENTORY_RESULT_CONFLICT", lastMsg.ErrorMessage);
+        }
+    }
+
+    [Fact]
+    public async Task Handover_WithActualHandoverAtInFuture_EvenSmallFraction_IsRejected()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request() with { ActualHandoverAt = _clock.UtcNow.AddSeconds(1) };
+        Result<HandoverItemResponse> result = await Service().HandoverItemAsync(_item.Id, request, "future-1", OrderTestData.User(_binh));
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_HANDOVER_TIME", result.Error.Code);
+        Assert.Empty(await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver));
+    }
+
+    [Fact]
+    public async Task Handover_WithActualHandoverAtExactlyNow_IsAccepted()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request() with { ActualHandoverAt = _clock.UtcNow };
+        Result<HandoverItemResponse> result = await Service().HandoverItemAsync(_item.Id, request, "now-1", OrderTestData.User(_binh));
+        Assert.True(result.IsSuccess, result.Error?.Code);
+    }
+
+    [Fact]
+    public async Task Handover_WithDefaultHandoverAt_IsRejected()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request() with { ActualHandoverAt = default };
+        Result<HandoverItemResponse> result = await Service().HandoverItemAsync(_item.Id, request, "default-time", OrderTestData.User(_binh));
+        Assert.Equal("INVALID_HANDOVER_TIME", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Handover_WithWrongSupplier_IsRejectedAndNoReceiptCreated()
+    {
+        await SeedAsync();
+        Guid stranger = Guid.NewGuid();
+        Result<HandoverItemResponse> result = await Service().HandoverItemAsync(_item.Id, Request(), "stranger-1", OrderTestData.User(stranger));
+        Assert.Equal(RentalErrors.ItemNotFound.Code, result.Error.Code);
+        await using RentalServiceDbContext context = NewContext();
+        Assert.Empty(await context.RentalOperationReceipts.Where(r => r.Action == "MarkAssetsHandedOver").ToListAsync());
+    }
+
+    [Fact]
+    public async Task Handover_WhenInManualReconciliation_BlocksNewKeyWithHandoverInProgress()
+    {
+        await SeedAsync();
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            RentalOrder order = await context.RentalOrders.SingleAsync();
+            var receipt = RentalOperationReceipt.CreatePending(
+                Guid.NewGuid(), order.Id, "op-old", "MarkAssetsHandedOver", "fp",
+                _clock.UtcNow, _item.Id, "{}");
+            receipt.MarkManualReconciliationRequired(_clock.UtcNow, "Needs review");
+            order.AddOperationReceipt(receipt);
+            await context.SaveChangesAsync();
+        }
+
+        Result<HandoverItemResponse> result = await Service().HandoverItemAsync(_item.Id, Request(), "new-key", OrderTestData.User(_binh));
+        Assert.Equal("HANDOVER_IN_PROGRESS", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Handover_ReplaySucceededHandover_ReturnsExistingRecord()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+        Result<HandoverItemResponse> first = await Service().HandoverItemAsync(_item.Id, request, "replay-succ-1", OrderTestData.User(_binh));
+        Assert.True(first.IsSuccess);
+
+        await _replies.SucceedAllAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver);
+
+        Result<HandoverItemResponse> replay = await Service().HandoverItemAsync(_item.Id, request, "replay-succ-1", OrderTestData.User(_binh));
+        Assert.True(replay.IsSuccess);
+        Assert.NotNull(replay.Value.HandoverRecordId);
+        Assert.Equal(RentalOperationReceipt.StatusSucceeded, replay.Value.Status);
+    }
+
+    [Fact]
+    public async Task Handover_WhenUnitQuantityMappingIncomplete_IsRejected()
+    {
+        await SeedAsync();
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            RentalOrder order = await context.RentalOrders.Include(o => o.Items).ThenInclude(i => i.UnitAssignments).SingleAsync();
+            RentalItem item = order.Items.Single();
+            RentalUnitAssignment toRemove = item.UnitAssignments.First();
+            context.RentalUnitAssignments.Remove(toRemove);
+            await context.SaveChangesAsync();
+        }
+
+        Result<HandoverItemResponse> result = await Service().HandoverItemAsync(_item.Id, Request(), "incomp-1", OrderTestData.User(_binh));
+        Assert.Equal("INVALID_ASSIGNMENTS", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Handover_WhenRequestHasDuplicateAssignmentId_IsRejected()
+    {
+        await SeedAsync();
+        var firstUnit = Request().Units[0];
+        HandoverItemRequest request = Request() with { Units = [firstUnit, firstUnit] };
+        Result<HandoverItemResponse> result = await Service().HandoverItemAsync(_item.Id, request, "dup-unit", OrderTestData.User(_binh));
+        Assert.Equal("INVALID_UNITS", result.Error.Code);
     }
 
     private HandoverItemRequest Request(bool confirmed = true) => new(

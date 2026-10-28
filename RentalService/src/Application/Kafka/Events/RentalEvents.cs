@@ -88,6 +88,12 @@ public sealed record RentalOrderExpiredPayload(
     string Reason,
     long OrderVersion = 1);
 
+public sealed record RentalOrderRejectedPayload(
+    Guid RentalOrderId,
+    Guid RenterId,
+    DateTimeOffset RejectedAt,
+    long OrderVersion = 1);
+
 public sealed record LatePaymentRefundRequestedPayload(
     Guid RentalOrderId,
     Guid RenterId,
@@ -143,7 +149,8 @@ public sealed record RentalItemCompletedPayload(
     [property: JsonPropertyName("equipmentTypeId")] Guid? EquipmentTypeId,
     [property: JsonPropertyName("rentalOrderId")] Guid RentalOrderId,
     [property: JsonPropertyName("rentalItemId")] Guid RentalItemId,
-    [property: JsonPropertyName("orderVersion")] long OrderVersion = 1);
+    [property: JsonPropertyName("orderVersion")] long OrderVersion,
+    [property: JsonPropertyName("completedAt")] DateTimeOffset CompletedAt);
 
 public sealed record RentalItemHandoverCompletedPayload(
     Guid RentalOrderId, Guid RentalItemId, Guid RenterId, Guid SupplierId,

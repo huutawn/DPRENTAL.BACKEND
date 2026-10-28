@@ -30,9 +30,10 @@ public sealed class RentalOrdersController(
     /// <param name="page">Số thứ tự trang (mặc định 1).</param>
     /// <param name="pageSize">Số đơn mỗi trang (mặc định 20, tối đa 100).</param>
     /// <param name="status">Trạng thái đơn cần lọc, tùy chọn.</param>
+    /// <param name="refundState">Lọc theo hoàn tiền, tùy chọn: REFUNDED (đã hoàn tiền) hoặc PENDING (đang chờ hoàn); độc lập với status.</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     /// <response code="200">Lấy danh sách đơn thành công.</response>
-    /// <response code="400">Trạng thái lọc không hợp lệ (Order.InvalidStatus).</response>
+    /// <response code="400">Trạng thái lọc (Order.InvalidStatus) hoặc tình trạng hoàn tiền lọc (Order.InvalidRefundState) không hợp lệ.</response>
     /// <response code="401">Người dùng chưa được xác thực.</response>
     /// <response code="403">Người gọi không phải tài khoản cá nhân có quyền Renter.</response>
     /// <returns>Một trang đơn hàng của người thuê.</returns>
@@ -45,10 +46,11 @@ public sealed class RentalOrdersController(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         [FromQuery] string? status = null,
+        [FromQuery] string? refundState = null,
         CancellationToken cancellationToken = default)
     {
         Result<PagedResponse<RenterOrderSummaryResponse>> result =
-            await orders.GetMyOrdersAsync(page, pageSize, status, callerContext, cancellationToken);
+            await orders.GetMyOrdersAsync(page, pageSize, status, callerContext, refundState, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : this.ToProblem(result.Error);
     }
 

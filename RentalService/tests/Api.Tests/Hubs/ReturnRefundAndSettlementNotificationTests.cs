@@ -348,7 +348,7 @@ public sealed class ReturnRefundAndSettlementNotificationTests
         var refundReq = new RequestRefundRequest(
             orderId, "INV-PAID-01", "PAY-PAID-01",
             [new RefundItemRequest(itemA.Id, itemA.RentalAmount, itemA.DepositAmount)],
-            "Hết máy", opKey);
+            "Hết máy", opKey, RentalRefundKinds.CancellationRefund);
         string payloadJson = JsonSerializer.Serialize(new { providerRequestJson = JsonSerializer.Serialize(refundReq) });
         var refundReceipt = RentalOperationReceipt.CreatePending(
             Guid.NewGuid(), orderId, opKey, "RequestRefund", "fp-ref", FixedNow, itemA.Id, payloadJson);

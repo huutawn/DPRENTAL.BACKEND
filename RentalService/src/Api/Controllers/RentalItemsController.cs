@@ -40,11 +40,16 @@ public sealed class RentalItemsController : ControllerBase
     }
 
     /// <summary>
-    /// Supplier bàn giao thiết bị cho mục thuê (RentalItem).
+    /// Supplier gửi bằng chứng bàn giao thiết bị trực tiếp cho mục thuê (RentalItem).
+    /// Trả về HTTP 202 Accepted với trạng thái "Processing" khi bằng chứng đã được xác thực, snapshot được lưu
+    /// và lệnh MarkAssetsHandedOver được đưa vào hàng đợi gửi sang InventoryService.
+    /// Bàn giao chỉ chính thức thành công sau khi Inventory xác nhận qua Kafka event; lúc đó HandoverRecord
+    /// mới được tạo và mục thuê chuyển sang InRental.
+    /// Replay với cùng Idempotency-Key và payload trả lại trạng thái hiện có (Processing hoặc Succeeded kèm HandoverRecordId).
     /// </summary>
     /// <param name="itemId">Mã định danh mục thuê.</param>
-    /// <param name="request">Thời điểm bàn giao, ghi chú và tình trạng từng máy.</param>
-    /// <param name="idempotencyKey">Khóa chống trùng lặp gửi qua header HTTP (bắt buộc).</param>
+    /// <param name="request">Thời điểm bàn giao thực tế (không được ở tương lai), ghi chú và tình trạng cùng ảnh của từng máy.</param>
+    /// <param name="idempotencyKey">Khóa chống trùng lặp gửi qua header HTTP (bắt buộc, tối đa 64 ký tự).</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     [HttpPost("{itemId:guid}/handover")]
     [Consumes("application/json")]
@@ -76,6 +81,9 @@ public sealed class RentalItemsController : ControllerBase
 
     /// <summary>
     /// Người thuê (Renter) xác nhận đã nhận thiết bị ngoài công trường.
+    /// Yêu cầu mục thuê đã có HandoverRecord được tạo (sau khi Inventory xác nhận bàn giao).
+    /// Thao tác là idempotent: replay trả về thông tin xác nhận ban đầu mà không ghi đè ghi chú,
+    /// không thay đổi trạng thái item, không tăng version, không ghi thêm audit hay gửi notification lặp lại.
     /// </summary>
     /// <param name="itemId">Mã định danh mục thuê.</param>
     /// <param name="request">Ghi chú xác nhận của Người thuê (tùy chọn, tối đa 2000 ký tự).</param>
@@ -104,10 +112,14 @@ public sealed class RentalItemsController : ControllerBase
 
     /// <summary>
     /// Người thuê (Renter) chủ động hủy mục thuê do thiết bị không được bàn giao đến công trình.
+    /// Chỉ khả dụng từ 00:00 ngày D+1 theo giờ Việt Nam (sau ngày dự kiến bắt đầu thuê D)
+    /// khi mục thuê còn ở trạng thái AwaitingHandover và không có lệnh bàn giao nào đang chờ xử lý hoặc đối soát.
+    /// Khi hủy thành công, trả về HTTP 202 Accepted, chuyển mục thuê sang Cancelled,
+    /// lên lịch nhả allocation và hoàn lại 100% tiền thuê cùng tiền cọc trong một transaction duy nhất.
     /// </summary>
     /// <param name="itemId">Mã định danh mục thuê.</param>
     /// <param name="request">Lý do hủy từ người thuê (tùy chọn, tối đa 500 ký tự).</param>
-    /// <param name="idempotencyKey">Khóa chống trùng lặp gửi qua header HTTP (bắt buộc).</param>
+    /// <param name="idempotencyKey">Khóa chống trùng lặp gửi qua header HTTP (bắt buộc, tối đa 64 ký tự).</param>
     /// <param name="cancellationToken">Token hủy yêu cầu.</param>
     [HttpPost("{itemId:guid}/cancel-not-delivered")]
     [Consumes("application/json")]

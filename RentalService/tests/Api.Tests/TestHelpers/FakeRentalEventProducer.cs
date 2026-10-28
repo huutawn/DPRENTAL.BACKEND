@@ -8,6 +8,7 @@ namespace Dprental.RentalService.Api.Tests.TestHelpers;
 public sealed class FakeRentalEventProducer : IRentalEventProducer
 {
     public List<RentalItemReturnedPayload> ReturnedEvents { get; } = [];
+    public List<RentalItemCompletedPayload> CompletedEvents { get; } = [];
     public Task<Result<ProducerEnqueueResult>> EnqueueDomainEventAsync<TPayload>(string messageType,
         string logicalEntityId, string aggregateId, DateTimeOffset occurredAt, TPayload payload,
         string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
@@ -34,8 +35,11 @@ public sealed class FakeRentalEventProducer : IRentalEventProducer
         Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "RentalItemPaid", "topic", "key")));
 
     public Task<Result<ProducerEnqueueResult>> EnqueueRentalItemCompletedAsync(
-        RentalItemCompletedPayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "RentalItemCompleted", "topic", "key")));
+        RentalItemCompletedPayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default)
+    {
+        CompletedEvents.Add(payload);
+        return Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "RentalItemCompleted", "topic", "key")));
+    }
 
     public Task<Result<ProducerEnqueueResult>> EnqueueRentalItemReturnedAsync(
         RentalItemReturnedPayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default)
@@ -47,6 +51,10 @@ public sealed class FakeRentalEventProducer : IRentalEventProducer
     public Task<Result<ProducerEnqueueResult>> EnqueueRentalOrderExpiredAsync(
         RentalOrderExpiredPayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
         Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "RentalOrderExpired", "topic", "key")));
+
+    public Task<Result<ProducerEnqueueResult>> EnqueueRentalOrderRejectedAsync(
+        RentalOrderRejectedPayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "RentalOrderRejected", "topic", "key")));
 
     public Task<Result<ProducerEnqueueResult>> EnqueueRentalOrderCancelledAsync(
         RentalOrderCancelledPayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>

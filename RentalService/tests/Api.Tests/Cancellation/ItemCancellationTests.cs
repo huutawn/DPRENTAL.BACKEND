@@ -307,4 +307,70 @@ public sealed class ItemCancellationTests
         Assert.True(result.IsFailure);
         Assert.Equal(ErrorType.Forbidden, result.Error.Type);
     }
+
+    [Fact]
+    public async Task CancelByRenter_WhenHandoverRequiresManualReconciliation_IsBlockedWithHandoverInProgress()
+    {
+        await SeedAsync(RentalItemStatus.AwaitingHandover);
+
+        await using var context = NewContext();
+        var reconHandoverReceipt = new RentalOperationReceipt(
+            Guid.NewGuid(),
+            _order.Id,
+            "handover-op-key-recon",
+            "MarkAssetsHandedOver",
+            "fp-handover",
+            isSuccess: false,
+            errorCode: null,
+            errorMessage: null,
+            createdAt: _clock.GetUtcNow(),
+            status: RentalOperationReceipt.StatusManualReconciliationRequired,
+            targetItemId: _item.Id);
+        context.RentalOperationReceipts.Add(reconHandoverReceipt);
+        await context.SaveChangesAsync();
+
+        var service = CreateService(context);
+
+        var result = await service.CancelByRenterAsync(
+            _item.Id,
+            new CancelNotDeliveredRequest("Hủy khi đang đối soát"),
+            "idemp-key-handover-recon",
+            OrderTestData.User(_renterId));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("HANDOVER_IN_PROGRESS", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task CancelByRenter_WhenHandoverPreviouslyRejected_CanCancelSuccessfully()
+    {
+        await SeedAsync(RentalItemStatus.AwaitingHandover);
+
+        await using var context = NewContext();
+        var failedHandoverReceipt = new RentalOperationReceipt(
+            Guid.NewGuid(),
+            _order.Id,
+            "handover-op-key-failed",
+            "MarkAssetsHandedOver",
+            "fp-handover",
+            isSuccess: false,
+            errorCode: "ASSET_NOT_ALLOCATED",
+            errorMessage: "Inventory rejected",
+            createdAt: _clock.GetUtcNow().AddHours(-1),
+            status: RentalOperationReceipt.StatusFailed,
+            targetItemId: _item.Id);
+        context.RentalOperationReceipts.Add(failedHandoverReceipt);
+        await context.SaveChangesAsync();
+
+        var service = CreateService(context);
+
+        var result = await service.CancelByRenterAsync(
+            _item.Id,
+            new CancelNotDeliveredRequest("Hủy sau khi handover bị từ chối"),
+            "idemp-key-handover-failed-then-cancel",
+            OrderTestData.User(_renterId));
+
+        Assert.True(result.IsSuccess, result.Error?.Code);
+        Assert.Equal("Cancelled", result.Value.Status);
+    }
 }

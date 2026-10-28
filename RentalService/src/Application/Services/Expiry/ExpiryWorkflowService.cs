@@ -143,6 +143,7 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
             else
             {
                 string timeoutOpKey = RentalOperationExecutor.ComputeOperationKey("SupplierTimeout", $"{order.Id}:{item.Id}");
+                RentalOrderStatus previousOrderStatus = order.Status;
                 item.ApplySupplierTimeout(utcNow, timeoutOpKey);
                 RentalOrderStatusPolicy.Apply(order, utcNow, timeoutOpKey);
 
@@ -182,7 +183,7 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                 if (refundReceipt == null)
                 {
                     var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
-                    var refundReq = new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, "Supplier confirmation deadline expired", refundOpKey);
+                    var refundReq = new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, "Supplier confirmation deadline expired", refundOpKey, RentalRefundKinds.CancellationRefund);
                     var refundCmd = new RentalOperationCommand(
                         1,
                         "RequestRefund",
@@ -213,8 +214,6 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                 await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
                 try
                 {
-                    RentalOrderStatus previousOrderStatus = order.Status;
-                    RentalOrderStatusPolicy.Apply(order, utcNow, timeoutOpKey);
                     order.RecordReadModelUpdate(utcNow);
 
                     var expiredRes = await _rentalEvents.EnqueueRentalItemExpiredAsync(
@@ -239,6 +238,20 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                             await tx.RollbackAsync(cancellationToken);
                             _unitOfWork.DiscardChanges();
                             return orderCompletedRes.Error;
+                        }
+                    }
+
+                    if (previousOrderStatus != RentalOrderStatus.Expired && order.Status == RentalOrderStatus.Expired)
+                    {
+                        var orderExpired = await _rentalEvents.EnqueueRentalOrderExpiredAsync(
+                            new RentalOrderExpiredPayload(order.Id, order.RenterId, utcNow, KafkaContractSpec.ReasonCodes.SupplierConfirmationExpired, order.Version),
+                            correlationId: timeoutOpKey,
+                            cancellationToken: cancellationToken);
+                        if (orderExpired.IsFailure)
+                        {
+                            await tx.RollbackAsync(cancellationToken);
+                            _unitOfWork.DiscardChanges();
+                            return orderExpired.Error;
                         }
                     }
 

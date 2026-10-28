@@ -1,3 +1,4 @@
+using Dprental.RentalService.Application.DTOs.Refunds;
 using Dprental.RentalService.Common.Enums;
 
 namespace Dprental.RentalService.Application.DTOs.Orders;
@@ -253,6 +254,7 @@ public sealed record AdminStateTransitionResponse(
 /// <param name="SubOrders">Các đơn con.</param>
 /// <param name="History">Lịch sử trạng thái của đơn và các dòng, cũ nhất trước.</param>
 /// <param name="Version">Phiên bản dữ liệu của đơn hàng, tăng khi có thay đổi nghiệp vụ.</param>
+/// <param name="Refunds">Mục Hoàn tiền: các khoản hoàn cho người thuê kèm tài khoản đủ số và xác nhận chuyển khoản; chỉ Admin thấy.</param>
 public sealed record AdminOrderDetailResponse(
     Guid OrderId,
     string OrderCode,
@@ -272,4 +274,5 @@ public sealed record AdminOrderDetailResponse(
     decimal TotalAmount,
     IReadOnlyList<AdminSubOrderResponse> SubOrders,
     IReadOnlyList<AdminStateTransitionResponse> History,
-    long Version);
+    long Version,
+    IReadOnlyList<AdminOrderRefundResponse> Refunds);

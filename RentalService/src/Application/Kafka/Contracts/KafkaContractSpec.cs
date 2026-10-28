@@ -30,6 +30,7 @@ public static class KafkaContractSpec
         public const string RentalItemRejected = "RentalItemRejected";
         public const string RentalItemExpired = "RentalItemExpired";
         public const string RentalOrderExpired = "RentalOrderExpired";
+        public const string RentalOrderRejected = "RentalOrderRejected";
         public const string RentalOrderCancelled = "RentalOrderCancelled";
         public const string RentalOrderCompleted = "RentalOrderCompleted";
         public const string LatePaymentRefundRequested = "LatePaymentRefundRequested";

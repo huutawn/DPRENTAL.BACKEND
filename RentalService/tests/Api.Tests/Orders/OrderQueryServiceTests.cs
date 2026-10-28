@@ -268,8 +268,13 @@ public sealed class OrderQueryServiceTests
 
         Assert.Equal(RentalItemStatus.Rejected, excavatorLine.Status);
         Assert.Equal("Máy đang bảo trì", excavatorLine.RejectReason);
-        Assert.Equal(new OrderItemRefundResponse(OrderRefundState.Processing, null), excavatorLine.Refund);
-        Assert.Equal(new OrderItemRefundResponse(OrderRefundState.Completed, "REF-2026-000001"), rammerLine.Refund);
+        Assert.Equal(OrderRefundState.Processing, excavatorLine.Refund.State);
+        Assert.Equal(RentalRefundKind.FullRefund, excavatorLine.Refund.Kind);
+        Assert.Equal(excavator.RentalAmount + excavator.DepositAmount, excavatorLine.Refund.RefundAmount);
+        Assert.Null(excavatorLine.Refund.RefundedAt);
+        Assert.Equal(OrderRefundState.Completed, rammerLine.Refund.State);
+        Assert.Equal("REF-2026-000001", rammerLine.Refund.RefundRef);
+        Assert.Equal(OrderTestData.Now.AddDays(1), rammerLine.Refund.RefundedAt);
     }
 
     [Fact]
@@ -678,7 +683,9 @@ public sealed class OrderQueryServiceTests
             OrderTestData.RequestRefund(order, rejected, now.AddHours(1));
         }
 
-        order.Items.Single(i => i.ListingTitleSnapshot == "Máy đầm cóc Mikasa").RecordRefund("REF-2026-000001");
+        RentalItem refundedRammer = order.Items.Single(i => i.ListingTitleSnapshot == "Máy đầm cóc Mikasa");
+        refundedRammer.RecordRefund("REF-2026-000001");
+        OrderTestData.ConfirmRefundTransfer(order, refundedRammer, now.AddDays(1));
 
         RentalItem mixers = order.Items.Single(i => i.SupplierId == _cuong);
         mixers.ApplySupplierAccept(_cuong, now.AddHours(1), "CONF-1", "accept-mixers");

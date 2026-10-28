@@ -199,7 +199,8 @@ public sealed class OrderWorkflowAndVersionTests
             order.TotalPayableAmount,
             [],
             [],
-            order.Version);
+            order.Version,
+            []);
 
         string adminJson = JsonSerializer.Serialize(adminDetail, WebJson);
         using var adminDoc = JsonDocument.Parse(adminJson);

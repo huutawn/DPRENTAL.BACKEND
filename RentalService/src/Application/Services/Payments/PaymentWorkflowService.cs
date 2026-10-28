@@ -372,7 +372,10 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             if (existingRefund == null)
             {
                 var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
-                var refundReq = new RequestRefundRequest(order.Id, payload.InvoiceRef, payload.PaymentRef, refundItems, "Late payment arrived on terminal/expired order; 100% refund", refundKey);
+                string refundKind = payload.PaidAt >= order.PaymentDeadline
+                    ? RentalRefundKinds.LatePaymentRefund
+                    : RentalRefundKinds.CancellationRefund;
+                var refundReq = new RequestRefundRequest(order.Id, payload.InvoiceRef, payload.PaymentRef, refundItems, "Payment arrived on terminal/expired order; 100% refund", refundKey, refundKind);
                 var refundCmd = new RentalOperationCommand(
                     1,
                     "RequestRefund",

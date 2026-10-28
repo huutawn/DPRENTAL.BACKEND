@@ -1,15 +1,16 @@
 #pragma warning disable CA1848, CA1873
 using Dprental.RentalService.Application.DTOs.Handover;
+using Dprental.RentalService.Application.Hubs;
 using Dprental.RentalService.Application.IServices.Handover;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
+using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
 using Dprental.RentalService.Domain.IRepositories;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Handover;
-using Dprental.RentalService.Application.Hubs;
 
 public sealed class HandoverAcknowledgementService(
     IRentalOrderRepository orderRepository,
@@ -78,23 +79,44 @@ public sealed class HandoverAcknowledgementService(
         DateTimeOffset utcNow = timeProvider.GetUtcNow();
         string opKey = $"ack-{item.Id:N}";
 
-        var result = item.AcknowledgeReceipt(renterId, utcNow, request?.Note, opKey);
-        if (result.IsFailure)
-        {
-            return result.Error;
-        }
+        item.HandoverRecord.Acknowledge(renterId, utcNow, request?.Note);
+
+        order.AddStateTransition(new RentalStateTransition(
+            Guid.NewGuid(),
+            order.Id,
+            item.Id,
+            item.Status.ToString(),
+            item.Status.ToString(),
+            "RenterAcknowledgeReceipt",
+            renterId,
+            ActorRole.Renter,
+            "Renter acknowledged receipt of equipment",
+            utcNow,
+            opKey));
 
         order.RecordReadModelUpdate(utcNow);
+
+        IUnitOfWorkTransaction? tx = null;
+        if (!unitOfWork.HasActiveTransaction)
+        {
+            tx = await unitOfWork.BeginTransactionAsync(cancellationToken);
+        }
 
         try
         {
             await orderRepository.UpdateAsync(order, cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
+            if (tx != null) await tx.CommitAsync(cancellationToken);
         }
         catch
         {
+            if (tx != null) await tx.RollbackAsync(cancellationToken);
             unitOfWork.DiscardChanges();
             throw;
+        }
+        finally
+        {
+            if (tx != null) await tx.DisposeAsync();
         }
 
         if (notifier != null)
