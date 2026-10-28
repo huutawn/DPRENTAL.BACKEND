@@ -22,8 +22,8 @@ public sealed class RentalSettledConsumerTests
         var item = order.Items.Single();
         typeof(RentalItem).GetProperty(nameof(RentalItem.EquipmentTypeId))!.SetValue(item, null);
         var unit = item.UnitAssignments.Single();
-        Assert.True(item.RecordAssetReturns(item.SupplierId, Now.AddHours(-1), null,
-            [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "Damaged", [])], Now, item.SupplierId).IsSuccess);
+        ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
+            [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "Damaged", [])], Now, item.SupplierId);
         decimal amount = Math.Min(100_000m, item.DepositAmount);
         Assert.True(item.SubmitDeduction(item.SupplierId, amount, "Repair", [Guid.NewGuid()],
             [unit.AssetId], Now).IsSuccess);

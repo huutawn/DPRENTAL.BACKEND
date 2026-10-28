@@ -466,9 +466,8 @@ public sealed class RentalRefundPostgreSqlTests
                 ? new ReturnUnitData(u.Id, UnitCondition.Damaged, "Vỡ thùng trộn", [Guid.NewGuid()])
                 : new ReturnUnitData(u.Id, UnitCondition.Normal, null, []))
             .ToList();
-        Result<ReturnRecord> returned = item.RecordAssetReturns(
-            supplierId, orderedAt.AddDays(6), null, returns, orderedAt.AddDays(6), supplierId);
-        Assert.True(returned.IsSuccess, returned.IsFailure ? returned.Error.Message : null);
+        ReturnTestDataSeeder.SeedReturn(
+            item, supplierId, orderedAt.AddDays(6), null, returns, orderedAt.AddDays(6), supplierId);
 
         Result<DeductionProposal> proposal = item.SubmitDeduction(
             supplierId, deduction, "Vỡ thùng trộn", [Guid.NewGuid()], [units[^1].AssetId], orderedAt.AddDays(7));

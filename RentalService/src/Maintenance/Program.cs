@@ -43,6 +43,20 @@ public static class Program
         {
             return await RunBackfillAsync(optionsBuilder.Options, inventoryClient, apply);
         }
+        else if (command is "reconcile-return-requests" or "reconcile-returns")
+        {
+            try
+            {
+                int count = await RunReconcileReturnRequestsAsync(optionsBuilder.Options, apply);
+                Console.WriteLine($"Reconciliation completed successfully: {count} record(s).");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Reconciliation failed: {ex.Message}");
+                return 1;
+            }
+        }
         else if (command == "replay-outbox")
         {
             string? idArg = null;
@@ -86,6 +100,7 @@ public static class Program
         Console.WriteLine("RentalService Maintenance CLI");
         Console.WriteLine("Usage:");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- backfill-equipment-types [--apply]");
+        Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- reconcile-return-requests [--apply]");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- replay-outbox --message-id <Guid>");
     }
 
@@ -370,5 +385,75 @@ public static class Program
 
         Console.WriteLine($"Message '{messageId:D}' successfully reset to 'Pending' for replay at {nowUtc:O}.");
         return 0;
+    }
+    public static async Task<int> RunReconcileReturnRequestsAsync(
+        DbContextOptions<RentalServiceDbContext> dbOptions,
+        bool apply,
+        int batchSize = 100,
+        TextWriter? output = null)
+    {
+        output ??= Console.Out;
+        await output.WriteLineAsync($"=== Reconcile Return Requests (Mode: {(apply ? "APPLY" : "DRY-RUN")}) ===");
+
+        if (batchSize <= 0) batchSize = 100;
+
+        await using var countDb = new RentalServiceDbContext(dbOptions);
+        var eligibleCount = await (from u in countDb.ReturnRequestUnits
+                                   join r in countDb.ReturnRequests on u.ReturnRequestId equals r.Id
+                                   join a in countDb.RentalUnitAssignments on u.RentalUnitAssignmentId equals a.Id
+                                   join ret in countDb.ReturnRecords on a.ReturnRecordId equals ret.Id
+                                   where u.ClosedAt == null && u.RejectedAt == null
+                                         && a.RentalItemId == r.RentalItemId
+                                         && ret.RentalItemId == r.RentalItemId
+                                   select u.Id).CountAsync();
+
+        await output.WriteLineAsync($"Found {eligibleCount} unclosed return request unit(s) with completed return record(s).");
+
+        if (!apply)
+        {
+            await output.WriteLineAsync("Dry-run complete. No changes were made.");
+            return eligibleCount;
+        }
+
+        int totalUpdated = 0;
+        while (true)
+        {
+            await using var db = new RentalServiceDbContext(dbOptions);
+            var batch = await (from u in db.ReturnRequestUnits
+                               join r in db.ReturnRequests on u.ReturnRequestId equals r.Id
+                               join a in db.RentalUnitAssignments on u.RentalUnitAssignmentId equals a.Id
+                               join ret in db.ReturnRecords on a.ReturnRecordId equals ret.Id
+                               where u.ClosedAt == null && u.RejectedAt == null
+                                     && a.RentalItemId == r.RentalItemId
+                                     && ret.RentalItemId == r.RentalItemId
+                               orderby u.Id
+                               select new
+                               {
+                                   Unit = u,
+                                   ClosedAt = ret.SubmittedAt
+                               })
+                               .Take(batchSize)
+                               .ToListAsync();
+
+            if (batch.Count == 0)
+            {
+                break;
+            }
+
+            await using var tx = await db.Database.BeginTransactionAsync();
+            foreach (var item in batch)
+            {
+                item.Unit.SetClosedAt(item.ClosedAt);
+            }
+
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            totalUpdated += batch.Count;
+            await output.WriteLineAsync($"Processed batch: reconciled {batch.Count} unit(s). Total so far: {totalUpdated}");
+        }
+
+        await output.WriteLineAsync($"Reconciliation complete. Total updated: {totalUpdated} unit(s).");
+        return totalUpdated;
     }
 }

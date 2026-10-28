@@ -9,6 +9,7 @@ public sealed class FakeRentalEventProducer : IRentalEventProducer
 {
     public List<RentalItemReturnedPayload> ReturnedEvents { get; } = [];
     public List<RentalItemCompletedPayload> CompletedEvents { get; } = [];
+    public List<ReturnConfirmationOverduePayload> ReturnConfirmationOverdueEvents { get; } = [];
     public Task<Result<ProducerEnqueueResult>> EnqueueDomainEventAsync<TPayload>(string messageType,
         string logicalEntityId, string aggregateId, DateTimeOffset occurredAt, TPayload payload,
         string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
@@ -91,6 +92,13 @@ public sealed class FakeRentalEventProducer : IRentalEventProducer
     public Task<Result<ProducerEnqueueResult>> EnqueueRentalHandoverOverdueAsync(
         RentalHandoverOverduePayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
         Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "RentalHandoverOverdue", "topic", "key")));
+
+    public Task<Result<ProducerEnqueueResult>> EnqueueReturnConfirmationOverdueAsync(
+        ReturnConfirmationOverduePayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default)
+    {
+        ReturnConfirmationOverdueEvents.Add(payload);
+        return Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "ReturnConfirmationOverdue", "topic", "key")));
+    }
 
     public Task<Result<ProducerEnqueueResult>> EnqueueLatePaymentRefundRequestedAsync(
         LatePaymentRefundRequestedPayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>

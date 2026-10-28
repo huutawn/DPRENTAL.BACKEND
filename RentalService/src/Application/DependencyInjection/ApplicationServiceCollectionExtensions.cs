@@ -151,6 +151,9 @@ public static class ApplicationServiceCollectionExtensions
         // trong khối Background Workers:
         services.AddHostedService<DeductionDeadlineWorker>();
 
+        // Return Confirmation Overdue Worker
+        services.AddScoped<IReturnConfirmationOverdueService, ReturnConfirmationOverdueService>();
+        services.AddHostedService<ReturnConfirmationOverdueWorker>();
 
         return services;
     }

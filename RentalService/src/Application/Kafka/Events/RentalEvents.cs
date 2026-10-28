@@ -128,6 +128,17 @@ public sealed record RentalHandoverOverduePayload(
     DateTimeOffset OverdueAt,
     long OrderVersion = 1);
 
+public sealed record ReturnConfirmationOverduePayload(
+    Guid RentalOrderId,
+    Guid RentalItemId,
+    Guid ReturnRequestId,
+    Guid SupplierId,
+    Guid RenterId,
+    DateTimeOffset ConfirmationDeadlineAt,
+    DateTimeOffset OverdueAt,
+    IReadOnlyList<Guid> OverdueAssignmentIds,
+    long OrderVersion = 1);
+
 public sealed record CartItemAddedPayload(
     [property: JsonPropertyName("userId")] Guid UserId,
     [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,
@@ -150,7 +161,7 @@ public sealed record RentalItemCompletedPayload(
     [property: JsonPropertyName("rentalOrderId")] Guid RentalOrderId,
     [property: JsonPropertyName("rentalItemId")] Guid RentalItemId,
     [property: JsonPropertyName("orderVersion")] long OrderVersion,
-    [property: JsonPropertyName("completedAt")] DateTimeOffset CompletedAt);
+    [property: JsonPropertyName("completedAt"), JsonConverter(typeof(UtcIsoDateTimeOffsetConverter))] DateTimeOffset CompletedAt);
 
 public sealed record RentalItemHandoverCompletedPayload(
     Guid RentalOrderId, Guid RentalItemId, Guid RenterId, Guid SupplierId,

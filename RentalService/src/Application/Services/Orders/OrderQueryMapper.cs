@@ -2,6 +2,7 @@ using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Orders;
+using Dprental.RentalService.Application.DTOs.Returns;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
@@ -153,6 +154,91 @@ internal static class OrderQueryMapper
                 units.Count(u => u.ReturnCondition == UnitCondition.Damaged));
         })
         .ToList();
+    public static IReadOnlyList<RenterUnitResponse> ToRenterUnits(RentalItem item)
+    {
+        var openUnits = ReturnEligibilityPolicy.GetOpenReturnRequestAssignmentIds(item);
+        return item.UnitAssignments
+            .OrderBy(u => u.Id)
+            .Select(u => new RenterUnitResponse(
+                u.Id,
+                u.Status,
+                openUnits.Contains(u.Id),
+                ReturnEligibilityPolicy.CanRequestReturn(item, u, openUnits)))
+            .ToList();
+    }
+
+    public static IReadOnlyList<ReturnRequestResponse> ToReturnRequests(RentalItem item, DateTimeOffset? now = null, bool includeAdminNotes = false)
+    {
+        var current = now ?? DateTimeOffset.UtcNow;
+        return item.ReturnRequests
+            .OrderBy(r => r.SubmittedAt)
+            .ThenBy(r => r.Id)
+            .Select(r =>
+            {
+                var disputedAssignmentIds = ReturnRequestStatusPolicy.GetDisputedAssignmentIds(r);
+                var unitResponses = r.Units
+                    .OrderBy(u => u.RentalUnitAssignmentId)
+                    .Select(u =>
+                    {
+                        var uStatus = ReturnRequestStatusPolicy.GetUnitStatus(u, disputedAssignmentIds);
+                        var isUnitOverdue = ReturnRequestStatusPolicy.IsUnitOverdue(u, r.ConfirmationDeadlineAt, current);
+                        return new ReturnRequestUnitResponse(
+                            u.RentalUnitAssignmentId,
+                            u.MediaIds,
+                            u.ClosedAt,
+                            u.RejectedAt,
+                            uStatus,
+                            isUnitOverdue,
+                            u.OverdueNotifiedAt);
+                    })
+                    .ToList();
+
+                var reqStatus = ReturnRequestStatusPolicy.GetRequestStatus(unitResponses.Select(u => u.Status).ToList());
+                var isReqOverdue = ReturnRequestStatusPolicy.IsRequestOverdue(r, current);
+
+                var issues = r.Issues
+                    .OrderBy(i => i.ReportedAt)
+                    .Select(i => new ReturnRequestIssueResponse(
+                        i.Id,
+                        i.ReturnRequestId,
+                        i.ReporterId,
+                        i.ReporterRole,
+                        i.Reason,
+                        i.Note,
+                        i.MediaIds,
+                        i.ReportedAt,
+                        i.Units.Select(u => u.RentalUnitAssignmentId).ToList()))
+                    .ToList();
+
+                var resolutions = r.Resolutions
+                    .OrderBy(res => res.ResolvedAt)
+                    .Select(res => new ReturnRequestResolutionResponse(
+                        res.Id,
+                        res.ReturnRequestId,
+                        res.AdminId,
+                        res.Decision,
+                        includeAdminNotes ? res.DecisionNote : null,
+                        res.ResolutionMediaIds,
+                        res.ResolvedAt,
+                        res.Units.Select(u => u.RentalUnitAssignmentId).ToList()))
+                    .ToList();
+
+                return new ReturnRequestResponse(
+                    r.Id,
+                    r.RentalItemId,
+                    r.ActualReturnAt,
+                    r.Note,
+                    r.SubmittedAt,
+                    unitResponses,
+                    reqStatus,
+                    r.ConfirmationDeadlineAt,
+                    isReqOverdue,
+                    issues,
+                    resolutions);
+            })
+            .ToList();
+    }
+
 
     /// <summary>Rỗng khi chưa trả đủ máy và chưa có đề xuất khấu trừ.</summary>
     public static OrderSettlementResponse? ToSettlement(RentalItem item)

@@ -1223,6 +1223,176 @@ namespace RentalService.Domain.Migrations
                     b.ToTable("return_records", "rental");
                 });
 
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ActualReturnAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ConfirmationDeadlineAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("RentalItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SubmittedById")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConfirmationDeadlineAt");
+
+                    b.HasIndex("RentalItemId");
+
+                    b.ToTable("return_requests", "rental");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequestIssue", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.PrimitiveCollection<Guid[]>("MediaIds")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTimeOffset>("ReportedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ReporterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ReporterRole")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ReturnRequestId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReturnRequestId");
+
+                    b.ToTable("return_request_issues", "rental");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequestIssueUnit", b =>
+                {
+                    b.Property<Guid>("ReturnRequestIssueId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RentalUnitAssignmentId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("ReturnRequestIssueId", "RentalUnitAssignmentId");
+
+                    b.HasIndex("RentalUnitAssignmentId");
+
+                    b.ToTable("return_request_issue_units", "rental");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequestResolution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AdminId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Decision")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DecisionNote")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.PrimitiveCollection<Guid[]>("ResolutionMediaIds")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
+                    b.Property<DateTimeOffset>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ReturnRequestId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReturnRequestId");
+
+                    b.ToTable("return_request_resolutions", "rental");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequestResolutionUnit", b =>
+                {
+                    b.Property<Guid>("ReturnRequestResolutionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RentalUnitAssignmentId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("ReturnRequestResolutionId", "RentalUnitAssignmentId");
+
+                    b.HasIndex("RentalUnitAssignmentId");
+
+                    b.ToTable("return_request_resolution_units", "rental");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequestUnit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.PrimitiveCollection<Guid[]>("MediaIds")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
+                    b.Property<DateTimeOffset?>("OverdueNotifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("RejectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("RentalUnitAssignmentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ReturnRequestId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RentalUnitAssignmentId")
+                        .IsUnique()
+                        .HasFilter("\"ClosedAt\" IS NULL AND \"RejectedAt\" IS NULL");
+
+                    b.HasIndex("ReturnRequestId");
+
+                    b.HasIndex("ClosedAt", "RejectedAt", "OverdueNotifiedAt");
+
+                    b.ToTable("return_request_units", "rental");
+                });
+
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.DeductionProposal", b =>
                 {
                     b.HasOne("Dprental.RentalService.Domain.Entities.RentalItem", "RentalItem")
@@ -1396,6 +1566,90 @@ namespace RentalService.Domain.Migrations
                     b.Navigation("RentalItem");
                 });
 
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequest", b =>
+                {
+                    b.HasOne("Dprental.RentalService.Domain.Entities.RentalItem", "RentalItem")
+                        .WithMany("ReturnRequests")
+                        .HasForeignKey("RentalItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("RentalItem");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequestIssue", b =>
+                {
+                    b.HasOne("Dprental.RentalService.Domain.Entities.ReturnRequest", "ReturnRequest")
+                        .WithMany("Issues")
+                        .HasForeignKey("ReturnRequestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ReturnRequest");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequestIssueUnit", b =>
+                {
+                    b.HasOne("Dprental.RentalService.Domain.Entities.RentalUnitAssignment", null)
+                        .WithMany()
+                        .HasForeignKey("RentalUnitAssignmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.RentalService.Domain.Entities.ReturnRequestIssue", "ReturnRequestIssue")
+                        .WithMany("Units")
+                        .HasForeignKey("ReturnRequestIssueId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ReturnRequestIssue");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequestResolution", b =>
+                {
+                    b.HasOne("Dprental.RentalService.Domain.Entities.ReturnRequest", "ReturnRequest")
+                        .WithMany("Resolutions")
+                        .HasForeignKey("ReturnRequestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ReturnRequest");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequestResolutionUnit", b =>
+                {
+                    b.HasOne("Dprental.RentalService.Domain.Entities.RentalUnitAssignment", null)
+                        .WithMany()
+                        .HasForeignKey("RentalUnitAssignmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.RentalService.Domain.Entities.ReturnRequestResolution", "ReturnRequestResolution")
+                        .WithMany("Units")
+                        .HasForeignKey("ReturnRequestResolutionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ReturnRequestResolution");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequestUnit", b =>
+                {
+                    b.HasOne("Dprental.RentalService.Domain.Entities.RentalUnitAssignment", null)
+                        .WithMany()
+                        .HasForeignKey("RentalUnitAssignmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Dprental.RentalService.Domain.Entities.ReturnRequest", "ReturnRequest")
+                        .WithMany("Units")
+                        .HasForeignKey("ReturnRequestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ReturnRequest");
+                });
+
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.DeductionProposal", b =>
                 {
                     b.Navigation("Assignments");
@@ -1420,6 +1674,8 @@ namespace RentalService.Domain.Migrations
                     b.Navigation("HandoverRecord");
 
                     b.Navigation("ReturnRecords");
+
+                    b.Navigation("ReturnRequests");
 
                     b.Navigation("UnitAssignments");
                 });
@@ -1447,6 +1703,25 @@ namespace RentalService.Domain.Migrations
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRecord", b =>
                 {
                     b.Navigation("Assignments");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequest", b =>
+                {
+                    b.Navigation("Issues");
+
+                    b.Navigation("Resolutions");
+
+                    b.Navigation("Units");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequestIssue", b =>
+                {
+                    b.Navigation("Units");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.ReturnRequestResolution", b =>
+                {
+                    b.Navigation("Units");
                 });
 #pragma warning restore 612, 618
         }

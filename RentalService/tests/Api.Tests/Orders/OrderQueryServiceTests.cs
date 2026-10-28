@@ -1,3 +1,4 @@
+using Dprental.RentalService.Api.Tests.TestHelpers;
 using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Orders;
 using Dprental.RentalService.Application.Services.Orders;
@@ -692,7 +693,8 @@ public sealed class OrderQueryServiceTests
         OrderTestData.HandOver(mixers, now.AddDays(3), "Giao tại công trình");
 
         List<RentalUnitAssignment> units = mixers.UnitAssignments.ToList();
-        Result<ReturnRecord> returned = mixers.RecordAssetReturns(
+        ReturnTestDataSeeder.SeedReturn(
+            mixers,
             _cuong,
             now.AddDays(6),
             null,
@@ -702,7 +704,6 @@ public sealed class OrderQueryServiceTests
             ],
             now.AddDays(6),
             _cuong);
-        Assert.True(returned.IsSuccess, returned.IsFailure ? returned.Error.Message : null);
 
         Result<DeductionProposal> proposal = mixers.SubmitDeduction(
             _cuong, 1_500_000m, "Vỡ thùng trộn", [Guid.NewGuid()], [units[1].AssetId], now.AddDays(7));
