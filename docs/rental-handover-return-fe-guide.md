@@ -1,6 +1,6 @@
 # FE Guide — Bàn giao, yêu cầu trả, thu hồi và bất đồng
 
-Ngày đối chiếu: 28/10/2026. Bản tích hợp: `659efa41`, branch `rental/feat/handover-implementaion`. Đối tượng: FE Renter, Supplier, Admin và mock API.
+Ngày đối chiếu: 28/10/2026. Nền tích hợp Task 1–4: `659efa41`; bản sửa đã review: Rental `88b0035f`, Recommendation `0aa2a9a9`. Đối tượng: FE Renter, Supplier, Admin và mock API.
 
 ## 1. Phạm vi và mức độ sẵn sàng
 
@@ -13,7 +13,7 @@ Tài liệu nối bốn task thành một luồng sản phẩm. **Có code trên
 | Task 3: Supplier inspection và thu hồi | Đã merge tại `10e57a24` | Mock theo mục 7; DAMAGED đã bắt buộc mô tả + ảnh |
 | Task 4: report issue, deadline, Admin resolution | Đã merge tại `659efa41` | Route/DTO có implementation, mock theo mục 8 |
 
-Cả bốn task đã nằm trong bản tích hợp trên. FE cần xác nhận staging đang chạy cùng phiên bản và đã áp dụng migration return issues trước khi chuyển từ mock sang API thật. Các lỗi còn mở sau review được ghi tại mục 11; tài liệu không khẳng định bản tích hợp đã đạt mọi kiểm thử.
+Cả bốn task đã nằm trong bản tích hợp trên. FE cần xác nhận staging đã có bản sửa và áp dụng migration return issues trước khi chuyển từ mock sang API thật. Các lỗi review đã được sửa và kiểm tra lại; mục 11 ghi bằng chứng cùng giới hạn tích hợp còn áp dụng. Code đã merge không đồng nghĩa đã deploy.
 
 Nguồn nghiệp vụ: [Project Guide](PROJECT_GUIDE.md). Realtime: [hướng dẫn SignalR](rental-realtime-client-integration.md). Chi tiết backend: [Returns](../RentalService/docs/RETURNS.md).
 
@@ -472,12 +472,14 @@ ProblemDetails business error hiện có dùng **title làm mã lỗi**, không 
 | Resolve unit ngoài request | 400 ReturnResolution.AssignmentNotInRequest | Sửa selection |
 | Resolve unit đã xử lý | 409 ReturnResolution.UnitNotActionable | Reload, không gửi quyết định thứ hai |
 | Inspection Admin không khớp assignmentIds | 400 ReturnResolution.UnitsMismatch | Sửa form trước submit |
+| Decision Admin ngoài enum | 400 ReturnResolution.InvalidDecision | Chỉ gửi ConfirmReceived hoặc RejectRequest |
+| Inspection Admin null/rỗng hoặc chứa unit/media collection null | 400 ReturnResolution.InvalidUnits | Gửi danh sách unit hợp lệ; media không có phải là [] |
 | DAMAGED thiếu mô tả/ảnh qua Supplier | 400 Return.InvalidEvidence | Yêu cầu bổ sung dữ liệu |
 | DAMAGED thiếu mô tả/ảnh qua Admin | 400 Return.DamagedDescriptionRequired / Return.DamagedMediaRequired | Yêu cầu bổ sung dữ liệu |
 | Hết phiên / sai quyền / không tìm thấy | 401 / 403 / 404 | Theo auth flow; không lộ dữ liệu item khác |
 | Media/dependency tạm lỗi | HTTP theo ProblemDetails, thường 503 | Giữ form/key; cho retry đúng operation |
 
-Với lỗi không nhận diện được, hiển thị thông điệp chung và traceId nếu có. Validate decision bằng whitelist string `ConfirmReceived`/`RejectRequest`, luôn gửi units/media collections đúng kiểu; BE còn lỗi validation được ghi ở mục 11.
+Với lỗi không nhận diện được, hiển thị thông điệp chung và traceId nếu có. Validate decision bằng whitelist string `ConfirmReceived`/`RejectRequest`, luôn gửi units/media collections đúng kiểu. Backend đã bổ sung validation tương ứng; không retry payload lỗi bằng key mới.
 
 ## 10. Bộ kịch bản mock FE cần có
 
@@ -509,14 +511,17 @@ Mock server giữ state theo item + assignment + request + idempotency key. Có 
 | D07 | Resolve cùng key/payload rồi replay | Trả snapshot cũ; không thêm resolution/ReturnRecord |
 | D08 | Supplier/Renter gọi Admin API | 403; không hiển thị dữ liệu quản trị |
 | D09 | GET Renter/Supplier sau Admin resolve | DecisionNote=null; không lộ ghi chú quản trị |
+| D10 | Admin gửi decision ngoài enum hoặc inspection null | 400; không tạo resolution/ReturnRecord |
 | X01 | Mất mạng sau submit; retry key cũ | Trả cùng response, không duplicate |
 | X02 | Mất SignalR/reconnect, GET về chậm | Resync; response cũ không ghi đè version mới |
 
 Tiêu chí FE hoàn thành mock: đủ các màn hình/nhánh trên; phân biệt dữ liệu “B khai báo”, “A/Admin thực nhận”, “Inventory xác nhận”; dùng đúng case enum và tên field theo bản tích hợp. Trước kết nối staging, đối chiếu Swagger và phiên bản deploy trong mục 1.
 
-## 11. Điểm còn mở sau review ảnh hưởng cách FE tích hợp
+## 11. Kết quả review và giới hạn tích hợp
 
-- Worker còn lỗi rollback khi nhiều request cùng order: trường hợp enqueue cảnh báo đầu lỗi, xử lý request sau thành công có thể lưu dấu đã cảnh báo sai. FE không dùng overdueNotifiedAt để kết luận người dùng đã nhận notification; badge dựa isOverdue từ GET. Mock luồng chuẩn vẫn giữ cảnh báo idempotent; lỗi này cần BE sửa, không mô phỏng như hành vi mong muốn.
-- Admin resolve thiếu guard decision không hợp lệ/null collections. Mock dữ liệu không hợp lệ nên trả 400 theo kỳ vọng; BE hiện có thể trả 500 ở các payload này. Không đổi thành success hoặc auto-retry bằng key mới. FE validation hỗ trợ UX, không thay thế bản sửa BE.
-- Admin/Supplier hiện còn hai đoạn workflow thu hồi riêng; BE sẽ cần hợp nhất. FE tiếp tục dùng hai contract đã ghi rõ, không dựa vào cấu trúc implementation.
-- Lỗi event Rental → Recommendation và exit code maintenance nằm ngoài flow HTTP FE. Không suy ra bản release đã đạt kiểm thử từ việc mock hoạt động; các vấn đề này vẫn đang chờ xử lý.
+- Bản sửa Rental `88b0035f` đã kiểm tra lại: build không warning/error, 1.109 tests pass, format/diff check đạt. Recommendation `0aa2a9a9`: build Release không warning/error, 124 tests pass, format/diff check đạt. Đây là kết quả trên hai worktree tương ứng ngày 28/10/2026, không chứng minh mọi môi trường staging/production đã cập nhật.
+- Worker cảnh báo dùng một transaction cho toàn Order; enqueue lỗi rollback toàn bộ dấu cảnh báo/version/outbox. Admin validation đã chặn Decision ngoài enum và inspection không hợp lệ bằng 400. Supplier/Admin dùng chung workflow thu hồi; contract FE trong tài liệu giữ nguyên.
+- Recommendation đã nhận orderVersion/completedAt từ event Rental nguyên bản, không cần lọc payload trong test. Triển khai consumer tương thích trước producer; đây là yêu cầu vận hành, FE không gửi hoặc sửa Kafka message.
+- Notification vẫn best-effort: FE resync bằng GET sau reconnect/focus. OverdueNotifiedAt không bảo đảm người dùng đã nhận thông báo; badge dựa isOverdue từ GET.
+- ClosedAt chỉ chứng minh Rental đã ghi nhận thực nhận, không chứng minh Inventory đã đồng bộ. API Renter/Supplier chưa phân biệt Inventory pending với rejected; giữ nhãn “Đã ghi nhận thu hồi”.
+- Bàn giao/thu hồi không đồng nghĩa hoàn tiền hoặc tất toán xong. Chỉ hiển thị Completed/đã hoàn tiền khi API chính thức phản ánh kết quả tương ứng.
