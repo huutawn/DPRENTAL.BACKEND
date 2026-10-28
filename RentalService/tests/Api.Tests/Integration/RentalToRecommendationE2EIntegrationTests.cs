@@ -346,10 +346,15 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
 
             var cr2 = consumer.Consume(TimeSpan.FromSeconds(8));
             Assert.NotNull(cr2);
-            Assert.Equal(KafkaContractSpec.EventTypes.RentalItemPaid,
-                JsonDocument.Parse(cr2.Message.Value).RootElement.GetProperty("messageType").GetString());
-            string cr2Json = StripOrderVersionForRecommendationV1(cr2.Message.Value);
-            var ingestRes2 = await ingestionService.ProcessEventAsync(cr2Json, InteractionEventSource.Rental, CancellationToken.None);
+            using (var doc2 = JsonDocument.Parse(cr2.Message.Value))
+            {
+                var root2 = doc2.RootElement;
+                Assert.Equal(KafkaContractSpec.EventTypes.RentalItemPaid, root2.GetProperty("messageType").GetString());
+                var payload2 = root2.GetProperty("payload");
+                Assert.True(payload2.TryGetProperty("orderVersion", out var versionProp));
+                Assert.True(versionProp.GetInt64() >= 1);
+            }
+            var ingestRes2 = await ingestionService.ProcessEventAsync(cr2.Message.Value, InteractionEventSource.Rental, CancellationToken.None);
             Assert.Equal(EventProcessOutcome.Processed, ingestRes2.Outcome);
             // Verify 5 + 8 = 13 points
             var interest2 = await recUserInterestRepo.GetTopInterestsAsync(renterId, 10, CancellationToken.None);
@@ -409,9 +414,17 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
 
             var cr3 = consumer.Consume(TimeSpan.FromSeconds(8));
             Assert.NotNull(cr3);
-            Assert.Equal(KafkaContractSpec.EventTypes.RentalItemCompleted, JsonDocument.Parse(cr3.Message.Value).RootElement.GetProperty("messageType").GetString());
-            string cr3Json = StripOrderVersionForRecommendationV1(cr3.Message.Value);
-            var ingestRes3 = await ingestionService.ProcessEventAsync(cr3Json, InteractionEventSource.Rental, CancellationToken.None);
+            using (var doc3 = JsonDocument.Parse(cr3.Message.Value))
+            {
+                var root3 = doc3.RootElement;
+                Assert.Equal(KafkaContractSpec.EventTypes.RentalItemCompleted, root3.GetProperty("messageType").GetString());
+                var payload3 = root3.GetProperty("payload");
+                Assert.True(payload3.TryGetProperty("orderVersion", out var versionProp));
+                Assert.True(versionProp.GetInt64() >= 1);
+                Assert.True(payload3.TryGetProperty("completedAt", out var completedAtProp));
+                Assert.True(DateTimeOffset.TryParse(completedAtProp.GetString(), out _));
+            }
+            var ingestRes3 = await ingestionService.ProcessEventAsync(cr3.Message.Value, InteractionEventSource.Rental, CancellationToken.None);
             Assert.Equal(EventProcessOutcome.Processed, ingestRes3.Outcome);
             // ==========================================
             // FINAL ASSERTION: Exactly 5 + 8 + 10 = 23!
@@ -427,8 +440,8 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
             // Re-ingesting all three messages must produce DuplicateIgnored and NOT increase score!
             // ==========================================
             var replay1 = await ingestionService.ProcessEventAsync(cr1.Message.Value, InteractionEventSource.Rental, CancellationToken.None);
-            var replay2 = await ingestionService.ProcessEventAsync(cr2Json, InteractionEventSource.Rental, CancellationToken.None);
-            var replay3 = await ingestionService.ProcessEventAsync(cr3Json, InteractionEventSource.Rental, CancellationToken.None);
+            var replay2 = await ingestionService.ProcessEventAsync(cr2.Message.Value, InteractionEventSource.Rental, CancellationToken.None);
+            var replay3 = await ingestionService.ProcessEventAsync(cr3.Message.Value, InteractionEventSource.Rental, CancellationToken.None);
 
             Assert.Equal(EventProcessOutcome.DuplicateIgnored, replay1.Outcome);
             Assert.Equal(EventProcessOutcome.DuplicateIgnored, replay2.Outcome);
@@ -560,32 +573,5 @@ public sealed class RentalToRecommendationE2EIntegrationTests(ITestOutputHelper 
         public Task<Result<RentalAvailabilityResult>> GetAvailableQuantityAsync(
             Guid listingId, DateOnly startDate, DateOnly endDate, int requestedQuantity, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new RentalAvailabilityResult(10, true)));
-    }
-
-    private static string StripOrderVersionForRecommendationV1(string json)
-    {
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        var dict = new Dictionary<string, object?>();
-        foreach (var prop in root.EnumerateObject())
-        {
-            if (prop.Name == "payload")
-            {
-                var payloadDict = new Dictionary<string, object?>();
-                foreach (var p in prop.Value.EnumerateObject())
-                {
-                    if (p.Name != "orderVersion" && p.Name != "completedAt")
-                    {
-                        payloadDict[p.Name] = JsonSerializer.Deserialize<object>(p.Value.GetRawText());
-                    }
-                }
-                dict["payload"] = payloadDict;
-            }
-            else
-            {
-                dict[prop.Name] = JsonSerializer.Deserialize<object>(prop.Value.GetRawText());
-            }
-        }
-        return JsonSerializer.Serialize(dict);
     }
 }

@@ -161,7 +161,7 @@ public sealed record RentalItemCompletedPayload(
     [property: JsonPropertyName("rentalOrderId")] Guid RentalOrderId,
     [property: JsonPropertyName("rentalItemId")] Guid RentalItemId,
     [property: JsonPropertyName("orderVersion")] long OrderVersion,
-    [property: JsonPropertyName("completedAt")] DateTimeOffset CompletedAt);
+    [property: JsonPropertyName("completedAt"), JsonConverter(typeof(UtcIsoDateTimeOffsetConverter))] DateTimeOffset CompletedAt);
 
 public sealed record RentalItemHandoverCompletedPayload(
     Guid RentalOrderId, Guid RentalItemId, Guid RenterId, Guid SupplierId,
