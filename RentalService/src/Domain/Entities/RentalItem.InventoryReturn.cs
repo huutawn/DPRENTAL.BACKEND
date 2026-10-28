@@ -8,37 +8,29 @@ public partial class RentalItem
     public const string BlockDamagedAction = "BlockDamagedAssets";
     public const string ApplyReturnedUnitsAction = "ApplyReturnedUnits";
 
-    public Result ConfirmReturnedUnitClosure(Guid assignmentId, DateTimeOffset closedAt,
+    internal void SetInventoryClosure(string receiptRef, DateTimeOffset confirmedAt)
+    {
+        InventoryClosureRef = receiptRef;
+        InventoryClosureConfirmedAt = confirmedAt.ToUniversalTime();
+    }
+
+    internal Result ConfirmReturnedUnitClosure(Guid assignmentId, DateTimeOffset closedAt,
         string? dispositionRef, string receiptRef, DateTimeOffset confirmedAt)
     {
         var unit = _unitAssignments.FirstOrDefault(a => a.Id == assignmentId);
-        if (unit is null || unit.ReturnRecordId is null)
-            return Error.Validation("RETURN_ASSIGNMENT_NOT_FOUND", "Returned assignment was not found.");
-        if (closedAt == default || string.IsNullOrWhiteSpace(receiptRef))
-            return Error.Validation("INVALID_INVENTORY_CLOSURE", "Inventory closure is incomplete.");
-        if (unit.AllocationClosedAt.HasValue)
-            return unit.AllocationClosedAt == closedAt && unit.InventoryDispositionRef == dispositionRef
-                ? Result.Success()
-                : Error.Conflict("INVENTORY_CLOSURE_CONFLICT", "Assignment closure differs from the recorded result.");
-
+        if (unit is null) return Error.Validation("RETURN_ASSIGNMENT_NOT_FOUND", "Returned assignment was not found.");
         unit.RecordAllocationClosed(closedAt.ToUniversalTime(), dispositionRef);
         if (AreAllUnitsReturned && _unitAssignments.All(a => a.AllocationClosedAt.HasValue))
         {
-            InventoryClosureRef = receiptRef;
-            InventoryClosureConfirmedAt = confirmedAt.ToUniversalTime();
+            SetInventoryClosure(receiptRef, confirmedAt);
         }
         return Result.Success();
     }
 
-    public Result ConfirmDamagedUnitBlocked(Guid assignmentId, string dispositionRef)
+    internal Result ConfirmDamagedUnitBlocked(Guid assignmentId, string dispositionRef)
     {
         var unit = _unitAssignments.FirstOrDefault(a => a.Id == assignmentId);
-        if (unit is null || unit.Status != Common.Enums.RentalUnitAssignmentStatus.ReturnedDamaged)
-            return Error.Validation("DAMAGED_ASSIGNMENT_NOT_FOUND", "Damaged assignment was not found.");
-        if (string.IsNullOrWhiteSpace(dispositionRef))
-            return Error.Validation("INVALID_DAMAGE_DISPOSITION", "Inventory damage protection is missing.");
-        if (unit.InventoryDispositionRef is not null && unit.InventoryDispositionRef != dispositionRef)
-            return Error.Conflict("DAMAGE_DISPOSITION_CONFLICT", "Damage disposition differs from the recorded result.");
+        if (unit is null) return Error.Validation("DAMAGED_ASSIGNMENT_NOT_FOUND", "Damaged assignment was not found.");
         unit.RecordInventoryDisposition(dispositionRef);
         return Result.Success();
     }
