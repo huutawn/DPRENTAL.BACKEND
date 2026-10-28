@@ -2,7 +2,9 @@ using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Orders;
+using Dprental.RentalService.Application.DTOs.Returns;
 using Dprental.RentalService.Application.Errors;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
@@ -153,6 +155,40 @@ internal static class OrderQueryMapper
                 units.Count(u => u.ReturnCondition == UnitCondition.Damaged));
         })
         .ToList();
+    public static IReadOnlyList<RenterUnitResponse> ToRenterUnits(RentalItem item)
+    {
+        var openUnits = ReturnEligibilityPolicy.GetOpenReturnRequestAssignmentIds(item);
+        return item.UnitAssignments
+            .OrderBy(u => u.Id)
+            .Select(u => new RenterUnitResponse(
+                u.Id,
+                u.Status,
+                openUnits.Contains(u.Id),
+                ReturnEligibilityPolicy.CanRequestReturn(item, u, openUnits)))
+            .ToList();
+    }
+
+    public static IReadOnlyList<ReturnRequestResponse> ToReturnRequests(RentalItem item)
+    {
+        return item.ReturnRequests
+            .OrderBy(r => r.SubmittedAt)
+            .ThenBy(r => r.Id)
+            .Select(r => new ReturnRequestResponse(
+                r.Id,
+                r.RentalItemId,
+                r.ActualReturnAt,
+                r.Note,
+                r.SubmittedAt,
+                r.Units
+                    .OrderBy(u => u.RentalUnitAssignmentId)
+                    .Select(u => new ReturnRequestUnitResponse(
+                        u.RentalUnitAssignmentId,
+                        u.MediaIds,
+                        u.ClosedAt))
+                    .ToList()))
+            .ToList();
+    }
+
 
     /// <summary>Rỗng khi chưa trả đủ máy và chưa có đề xuất khấu trừ.</summary>
     public static OrderSettlementResponse? ToSettlement(RentalItem item)

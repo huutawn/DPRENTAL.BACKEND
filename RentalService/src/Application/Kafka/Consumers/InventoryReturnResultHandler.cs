@@ -62,7 +62,21 @@ public sealed class InventoryReturnResultHandler(
                 (requested.Condition == "NORMAL" && (assignment.ReturnCondition != Common.Enums.UnitCondition.Normal ||
                     returned.DamageDispositionRef is not null || returned.Status is not ("RELEASED" or "CLOSED"))) ||
                 requested.Condition is not ("NORMAL" or "DAMAGED"))
+            {
                 return Error.Validation("INVALID_INVENTORY_RESULT", "Inventory result has an invalid unit.");
+            }
+
+            if (assignment.AllocationClosedAt.HasValue &&
+                (assignment.AllocationClosedAt != returned.AllocationClosedAt || assignment.InventoryDispositionRef != returned.DamageDispositionRef))
+            {
+                return Error.Conflict("INVENTORY_CLOSURE_CONFLICT", "Assignment closure differs from the recorded result.");
+            }
+
+            if (assignment.ReturnCondition == Common.Enums.UnitCondition.Damaged &&
+                assignment.InventoryDispositionRef is not null && assignment.InventoryDispositionRef != returned.DamageDispositionRef)
+            {
+                return Error.Conflict("DAMAGE_DISPOSITION_CONFLICT", "Damage disposition differs from the recorded result.");
+            }
         }
 
         DateTimeOffset now = clock.GetUtcNow();
@@ -72,12 +86,14 @@ public sealed class InventoryReturnResultHandler(
             var assignment = item.UnitAssignments.Single(a => a.AllocationId == returned.AllocationId);
             if (assignment.ReturnCondition == Common.Enums.UnitCondition.Damaged)
             {
-                var blocked = item.ConfirmDamagedUnitBlocked(assignment.Id, returned.DamageDispositionRef!);
-                if (blocked.IsFailure) return blocked.Error;
+                assignment.RecordInventoryDisposition(returned.DamageDispositionRef!);
             }
-            var closed = item.ConfirmReturnedUnitClosure(assignment.Id, returned.AllocationClosedAt,
-                returned.DamageDispositionRef, result.ReceiptRef, now);
-            if (closed.IsFailure) return closed.Error;
+            assignment.RecordAllocationClosed(returned.AllocationClosedAt.ToUniversalTime(), returned.DamageDispositionRef);
+        }
+
+        if (item.AreAllUnitsReturned && item.UnitAssignments.All(a => a.AllocationClosedAt.HasValue))
+        {
+            item.SetInventoryClosure(result.ReceiptRef, now);
         }
 
         receipt.MarkSucceeded(now, null, JsonSerializer.Serialize(result, JsonOptions));

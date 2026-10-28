@@ -167,7 +167,9 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             OrderQueryMapper.ToRefund(item, refundRequested),
             OrderQueryMapper.ToHandover(item),
             OrderQueryMapper.ToReturns(item),
-            OrderQueryMapper.ToSettlement(item));
+            OrderQueryMapper.ToSettlement(item),
+            OrderQueryMapper.ToRenterUnits(item),
+            OrderQueryMapper.ToReturnRequests(item));
     }
 
     /// <summary>Thông số được lưu dạng chuỗi JSON; trả ra dạng object. Chuỗi hỏng thì bỏ qua thay vì làm lỗi cả đơn.</summary>

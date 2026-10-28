@@ -103,7 +103,7 @@ public sealed class ReturnRefundAndSettlementNotificationTests
         OrderTestData.HandOver(itemA, FixedNow.AddDays(-1));
         // Supplier records return
         var unitData = new ReturnUnitData(itemA.UnitAssignments.First().Id, UnitCondition.Normal, "OK", []);
-        var returnRec = itemA.RecordAssetReturns(supplierA, FixedNow, null, [unitData], FixedNow, supplierA).Value;
+        var returnRec = ReturnTestDataSeeder.SeedReturn(itemA, supplierA, FixedNow, null, [unitData], FixedNow, supplierA);
 
         // Pending ApplyReturnedUnits command receipt
         string opKey = $"return:{returnRec.Id:N}:apply";
@@ -194,7 +194,7 @@ public sealed class ReturnRefundAndSettlementNotificationTests
 
         OrderTestData.HandOver(itemA, FixedNow.AddDays(-1));
         var unitData = new ReturnUnitData(itemA.UnitAssignments.First().Id, UnitCondition.Damaged, "Trầy xước nặng", [Guid.NewGuid()]);
-        itemA.RecordAssetReturns(supplierA, FixedNow, null, [unitData], FixedNow, supplierA);
+        ReturnTestDataSeeder.SeedReturn(itemA, supplierA, FixedNow, null, [unitData], FixedNow, supplierA);
 
         await orders.CreateAsync(order);
         await db.SaveChangesAsync();
@@ -258,7 +258,7 @@ public sealed class ReturnRefundAndSettlementNotificationTests
 
         OrderTestData.HandOver(itemA, FixedNow.AddDays(-1));
         var unitData = new ReturnUnitData(itemA.UnitAssignments.First().Id, UnitCondition.Damaged, "Trầy", [Guid.NewGuid()]);
-        itemA.RecordAssetReturns(supplierA, FixedNow, null, [unitData], FixedNow, supplierA);
+        ReturnTestDataSeeder.SeedReturn(itemA, supplierA, FixedNow, null, [unitData], FixedNow, supplierA);
         itemA.SubmitDeduction(supplierA, 500_000m, "Trầy sơn", [Guid.NewGuid()], [itemA.UnitAssignments.First().AssetId], FixedNow);
 
         await orders.CreateAsync(order);
@@ -307,7 +307,7 @@ public sealed class ReturnRefundAndSettlementNotificationTests
         itemA.SetHandoverRecord(handoverRec);
         foreach (var u in itemA.UnitAssignments) u.RecordHandover(handoverRec.Id, UnitCondition.Normal, null, []);
         var unitData = new ReturnUnitData(itemA.UnitAssignments.First().Id, UnitCondition.Normal, "OK", []);
-        itemA.RecordAssetReturns(supplierA, FixedNow, null, [unitData], FixedNow, supplierA);
+        ReturnTestDataSeeder.SeedReturn(itemA, supplierA, FixedNow, null, [unitData], FixedNow, supplierA);
         itemA.ConfirmReturnedUnitClosure(itemA.UnitAssignments.First().Id, FixedNow, null, "REF-1", FixedNow);
         itemA.TryFinalizeZeroDeduction(FixedNow, "zero-op");
 
@@ -429,7 +429,7 @@ public sealed class ReturnRefundAndSettlementNotificationTests
         itemA.ApplySupplierAccept(supplierA, FixedNow, "conf-1", "conf-1");
         OrderTestData.HandOver(itemA, FixedNow.AddDays(-1));
         var unitData = new ReturnUnitData(itemA.UnitAssignments.First().Id, UnitCondition.Normal, "OK", []);
-        itemA.RecordAssetReturns(supplierA, FixedNow, null, [unitData], FixedNow, supplierA);
+        ReturnTestDataSeeder.SeedReturn(itemA, supplierA, FixedNow, null, [unitData], FixedNow, supplierA);
         itemA.ConfirmReturnedUnitClosure(itemA.UnitAssignments.First().Id, FixedNow, null, "REF-1", FixedNow);
         itemA.TryFinalizeZeroDeduction(FixedNow, "zero-op");
 
