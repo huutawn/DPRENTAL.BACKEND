@@ -9,6 +9,9 @@ namespace Dprental.RentalService.Application.Clients;
 /// </summary>
 public interface IPaymentRentalClient
 {
+    Task<Result<RentalRefundSyncResponse>> SynchronizeRefundAsync(
+        RentalRefundSyncRequest request, CancellationToken ct = default);
+
     /// <summary>
     /// Creates a payable invoice for a newly placed rental order.
     /// </summary>

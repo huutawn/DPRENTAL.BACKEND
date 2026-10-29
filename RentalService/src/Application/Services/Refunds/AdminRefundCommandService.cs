@@ -1,3 +1,6 @@
+using Dprental.RentalService.Application.Clients;
+using Dprental.RentalService.Application.DTOs.Orders;
+using Dprental.RentalService.Application.DTOs.Payment;
 using Dprental.RentalService.Application.DTOs.Refunds;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.Hubs;
@@ -12,11 +15,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Refunds;
 
-/// <summary>
-/// Admin chuyển khoản hoàn tiền cho người thuê rồi xác nhận ở Rental kèm mã giao dịch ngân hàng. Mỗi khoản hoàn chỉ
-/// xác nhận một lần; gửi lại cùng mã giao dịch trả kết quả đã lưu. Khóa theo đơn để hai Admin không cùng xác nhận một khoản.
-/// Số tiền và tài khoản nhận được chép vào xác nhận để đối soát sau này.
-/// </summary>
+/// <summary>Payment owns financial completion. Rental stores its verified confirmation for existing FE contracts.</summary>
 public sealed partial class AdminRefundCommandService(
     IRentalOrderRepository orders,
     IRentalRefundRepository refunds,
@@ -24,124 +23,108 @@ public sealed partial class AdminRefundCommandService(
     IUnitOfWork unitOfWork,
     TimeProvider timeProvider,
     ILogger<AdminRefundCommandService> logger,
+    IPaymentRentalClient payment,
     IOrderHubNotifier? notifier = null) : IAdminRefundCommandService
 {
     public const int MaxBankTransactionRefLength = 64;
     public const int MaxNoteLength = 500;
-
     private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(5);
 
     public async Task<Result<AdminOrderRefundResponse>> ConfirmTransferAsync(
-        Guid rentalItemId,
-        ConfirmRefundTransferRequest? request,
-        IRentalCallerContext caller,
+        Guid rentalItemId, ConfirmRefundTransferRequest? request, IRentalCallerContext caller,
         CancellationToken cancellationToken = default)
     {
         Result access = RentalAuthorizationPolicy.AuthorizeAdminRefundConfirm(caller);
-        if (access.IsFailure)
-        {
-            return access.Error;
-        }
-
-        string bankTransactionRef = request?.BankTransactionRef?.Trim() ?? string.Empty;
+        if (access.IsFailure) return access.Error;
+        string reference = request?.BankTransactionRef?.Trim() ?? string.Empty;
         string? note = string.IsNullOrWhiteSpace(request?.Note) ? null : request.Note.Trim();
-        if (bankTransactionRef.Length == 0)
-        {
-            return RentalRefundErrors.InvalidRequest("Thiếu mã giao dịch ngân hàng.");
-        }
+        if (reference.Length is 0 or > MaxBankTransactionRefLength || note?.Length > MaxNoteLength)
+            return RentalRefundErrors.InvalidRequest("Mã giao dịch bắt buộc, tối đa 64 ký tự; ghi chú tối đa 500 ký tự.");
+        var result = await SynchronizeAsync(rentalItemId, new(reference, note), caller.UserId, true, cancellationToken);
+        if (result.IsFailure) return result.Error;
+        return result.Value.Response is { } response
+            ? response : Error.Conflict("Refund.AwaitingPayment", "Payment chưa xác nhận hoàn tiền.");
+    }
 
-        if (bankTransactionRef.Length > MaxBankTransactionRefLength)
-        {
-            return RentalRefundErrors.InvalidRequest($"Mã giao dịch ngân hàng tối đa {MaxBankTransactionRefLength} ký tự.");
-        }
+    public async Task<Result<bool>> ReconcileAsync(Guid rentalItemId, bool apply,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await SynchronizeAsync(rentalItemId, null, null, apply, cancellationToken);
+        return result.IsFailure ? result.Error : result.Value.Changed;
+    }
 
-        if (note?.Length > MaxNoteLength)
-        {
-            return RentalRefundErrors.InvalidRequest($"Ghi chú tối đa {MaxNoteLength} ký tự.");
-        }
-
-        Guid? orderId = await orders.GetOrderIdByItemIdAsync(rentalItemId, cancellationToken);
-        if (!orderId.HasValue)
-        {
-            return RentalRefundErrors.NotFound;
-        }
-
+    private async Task<Result<(AdminOrderRefundResponse? Response, bool Changed)>> SynchronizeAsync(
+        Guid itemId, ConfirmRefundTransferRequest? request, Guid? adminId, bool apply, CancellationToken ct)
+    {
+        Guid? orderId = await orders.GetOrderIdByItemIdAsync(itemId, ct);
+        if (!orderId.HasValue) return RentalRefundErrors.NotFound;
         IAsyncDisposable orderLock;
-        try
-        {
-            orderLock = await locks.AcquireOrderLockAsync(orderId.Value, LockTimeout, cancellationToken);
-        }
-        catch (TimeoutException)
-        {
-            return RentalRefundErrors.Busy;
-        }
+        try { orderLock = await locks.AcquireOrderLockAsync(orderId.Value, LockTimeout, ct); }
+        catch (TimeoutException) { return RentalRefundErrors.Busy; }
 
         RentalOrder order;
-        RentalRefundLine confirmed;
+        RentalRefundLine line;
+        bool changed;
         await using (orderLock)
         {
-            RentalOrder? loaded = await orders.GetByIdWithDetailsAsync(orderId.Value, cancellationToken);
-            RentalRefundLine? line = loaded is null
-                ? null
-                : RentalRefundPolicy.LinesOf(loaded, loaded.Items).FirstOrDefault(l => l.Item.Id == rentalItemId);
-            if (loaded is null || line is null)
-            {
-                return RentalRefundErrors.NotFound;
-            }
-
-            if (line.Confirmation is { } existing)
-            {
-                return string.Equals(existing.BankTransactionRef, bankTransactionRef, StringComparison.Ordinal)
-                    ? AdminRefundMapper.ToOrderRefund(loaded, line)
-                    : RentalRefundErrors.AlreadyConfirmed;
-            }
-
-            if (await refunds.IsBankTransactionRefUsedAsync(bankTransactionRef, cancellationToken))
-            {
-                return RentalRefundErrors.DuplicateBankTransactionRef;
-            }
-
-            Guid adminId = caller.UserId!.Value;
-            DateTimeOffset utcNow = timeProvider.GetUtcNow();
-            var account = OrderQueryMapper.ParseRefundAccount(loaded.RefundDestinationRef);
-            RentalRefundConfirmation confirmation = new(
-                Guid.NewGuid(),
-                loaded.Id,
-                rentalItemId,
-                line.Kind,
-                line.RefundAmount,
-                account?.BankCode,
-                account?.AccountNumber,
-                account?.AccountHolderName,
-                bankTransactionRef,
-                note,
-                adminId,
-                utcNow);
-            loaded.AddRefundConfirmation(confirmation);
-            loaded.RecordReadModelUpdate(utcNow);
-
-            await orders.UpdateAsync(loaded, cancellationToken);
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-
-            LogRefundConfirmed(logger, adminId, line.RefundAmount, rentalItemId, loaded.Id);
+            var loaded = await orders.GetByIdWithDetailsAsync(orderId.Value, ct);
+            var found = loaded is null ? null : RentalRefundPolicy.LinesOf(loaded, loaded.Items)
+                .FirstOrDefault(x => x.Item.Id == itemId);
+            if (loaded is null || found is null) return RentalRefundErrors.NotFound;
             order = loaded;
-            confirmed = line with { Confirmation = confirmation };
-        }
+            line = found;
+            var existing = line.Confirmation;
+            if (request is not null && existing is not null && existing.BankTransactionRef != request.BankTransactionRef)
+                return RentalRefundErrors.AlreadyConfirmed;
+            if (existing is not null && existing.RefundAmount != line.RefundAmount)
+                return Error.Conflict("Refund.EvidenceMismatch", "Số tiền xác nhận cũ khác khoản hoàn; cần đối soát.");
+            string? reference = existing?.BankTransactionRef ?? request?.BankTransactionRef;
+            if (existing is null && reference is not null && await refunds.IsBankTransactionRefUsedAsync(reference, ct))
+                return RentalRefundErrors.DuplicateBankTransactionRef;
 
-        if (notifier is not null)
-        {
-            await notifier.NotifyRenterOrderChangedAsync(
-                order.RenterId,
-                new RenterOrderChangedNotification(
-                    Guid.NewGuid(),
-                    order.Id,
-                    order.Version,
-                    OrderChangeTypes.RefundChanged,
-                    confirmed.Confirmation!.ConfirmedAt),
-                cancellationToken);
+            // Only a session advisory lock is held here: no database transaction spans the HTTP call.
+            // No local success is written until Payment's authoritative workflow completes.
+            var synced = await payment.SynchronizeRefundAsync(new RentalRefundSyncRequest(
+                order.Id, itemId, line.Request.OperationId, line.RefundAmount,
+                apply ? reference : null,
+                existing?.ConfirmedBy ?? adminId,
+                existing?.ConfirmedAt ?? (adminId.HasValue ? timeProvider.GetUtcNow() : null),
+                existing?.Note ?? request?.Note), ct);
+            if (synced.IsFailure) return synced.Error;
+            var evidence = synced.Value;
+            changed = (existing is not null && !evidence.Completed) || (existing is null && evidence.Completed);
+            if (!evidence.Completed) return ((AdminOrderRefundResponse?)null, !apply && changed);
+            if (evidence.Amount != line.RefundAmount || string.IsNullOrWhiteSpace(evidence.BankTransactionRef) ||
+                evidence.BankTransactionRef.Length > MaxBankTransactionRefLength ||
+                evidence.ConfirmedBy is null || evidence.ConfirmedBy == Guid.Empty || evidence.ConfirmedAt is null ||
+                evidence.ConfirmedAt == default(DateTimeOffset) || evidence.ConfirmedAt > timeProvider.GetUtcNow() ||
+                (reference is not null && reference != evidence.BankTransactionRef) ||
+                (existing is not null && existing.RefundAmount != evidence.Amount))
+                return Error.Conflict("Refund.EvidenceMismatch", "Bằng chứng Payment không khớp khoản hoàn; cần đối soát.");
+            if (!apply) return ((AdminOrderRefundResponse?)null, changed);
+            changed = evidence.ConfirmationApplied;
+            if (existing is null)
+            {
+                if (await refunds.IsBankTransactionRefUsedAsync(evidence.BankTransactionRef, ct))
+                    return RentalRefundErrors.DuplicateBankTransactionRef;
+                var account = OrderQueryMapper.ParseRefundAccount(order.RefundDestinationRef);
+                var confirmation = new RentalRefundConfirmation(Guid.NewGuid(), order.Id, itemId, line.Kind,
+                    evidence.Amount, account?.BankCode, account?.AccountNumber, account?.AccountHolderName,
+                    evidence.BankTransactionRef, request?.Note, evidence.ConfirmedBy.Value, evidence.ConfirmedAt.Value);
+                order.AddRefundConfirmation(confirmation);
+                order.RecordReadModelUpdate(timeProvider.GetUtcNow());
+                await orders.UpdateAsync(order, ct);
+                await unitOfWork.SaveChangesAsync(ct);
+                line = line with { Confirmation = confirmation };
+                changed = true;
+                LogRefundConfirmed(logger, evidence.ConfirmedBy.Value, evidence.Amount, itemId, order.Id);
+            }
         }
-
-        return AdminRefundMapper.ToOrderRefund(order, confirmed);
+        if (changed && notifier is not null)
+            await notifier.NotifyRenterOrderChangedAsync(order.RenterId,
+                new RenterOrderChangedNotification(Guid.NewGuid(), order.Id, order.Version,
+                    OrderChangeTypes.RefundChanged, timeProvider.GetUtcNow()), ct);
+        return (AdminRefundMapper.ToOrderRefund(order, line), changed);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Admin {AdminId} confirmed refund transfer of {Amount} for rental item {RentalItemId} in order {OrderId}")]

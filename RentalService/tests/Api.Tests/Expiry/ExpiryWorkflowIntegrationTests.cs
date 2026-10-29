@@ -81,6 +81,10 @@ public sealed class ExpiryWorkflowIntegrationTests
 
     private sealed class StubPaymentClient : IPaymentRentalClient
     {
+        public Task<Result<RentalRefundSyncResponse>> SynchronizeRefundAsync(
+            RentalRefundSyncRequest request, CancellationToken ct = default) =>
+            throw new NotSupportedException("Refund synchronization is not used by this fixture.");
+
         public Func<CancelInvoiceRequest, Task<Result<CancelInvoiceResponse>>>? CancelHandler { get; set; }
 
         public Task<Result<CancelInvoiceResponse>> CancelInvoiceAsync(CancelInvoiceRequest request, CancellationToken ct = default) =>

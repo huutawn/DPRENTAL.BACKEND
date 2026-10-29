@@ -19,6 +19,9 @@ public interface IRentalRefundRepository
         int take,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<Guid>> GetReconciliationItemIdsAsync(Guid? after, int take,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Mã giao dịch ngân hàng đã được dùng cho một xác nhận chuyển khoản nào chưa.</summary>
     Task<bool> IsBankTransactionRefUsedAsync(string bankTransactionRef, CancellationToken cancellationToken = default);
 }

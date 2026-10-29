@@ -75,6 +75,19 @@ public sealed class RentalRefundRepository(RentalServiceDbContext dbContext) : I
         return new RecordPage<RefundQueueRecord>(items, totalCount);
     }
 
+    public async Task<IReadOnlyList<Guid>> GetReconciliationItemIdsAsync(Guid? after, int take,
+        CancellationToken cancellationToken = default) =>
+        await dbContext.RentalItems.AsNoTracking()
+            .Where(i => (!after.HasValue || i.Id.CompareTo(after.Value) > 0) &&
+                dbContext.RentalOperationReceipts.Any(r => r.TargetItemId == i.Id &&
+                    (r.Action == RequestRefundAction || (r.Action == RentalItem.SettleRentalAction &&
+                        i.DepositAmount - (i.FinalDeductionAmount ?? 0m) > 0m))) &&
+                (!dbContext.RentalRefundConfirmations.Any(c => c.RentalItemId == i.Id) ||
+                 (i.Status == Common.Enums.RentalItemStatus.PendingSettlement && i.FinancialClosureConfirmedAt == null) ||
+                 dbContext.RentalOperationReceipts.Any(r => r.TargetItemId == i.Id &&
+                     r.Action == RequestRefundAction && r.RefundCompletionJson == null)))
+            .OrderBy(i => i.Id).Take(take).Select(i => i.Id).ToListAsync(cancellationToken);
+
     public Task<bool> IsBankTransactionRefUsedAsync(string bankTransactionRef, CancellationToken cancellationToken = default) =>
         dbContext.RentalRefundConfirmations
             .AsNoTracking()

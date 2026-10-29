@@ -102,6 +102,11 @@ public sealed class HttpPaymentRentalClient : IPaymentRentalClient
             ct);
     }
 
+    public Task<Result<RentalRefundSyncResponse>> SynchronizeRefundAsync(
+        RentalRefundSyncRequest request, CancellationToken ct = default) =>
+        SendJsonAsync<RentalRefundSyncRequest, RentalRefundSyncResponse>(HttpMethod.Post,
+            "internal/rental-refunds/synchronize", request, PaymentContractSpec.ProposedScopes.WriteRefund, ct);
+
     private async Task<Result<TResponse>> SendJsonAsync<TRequest, TResponse>(
         HttpMethod method,
         string route,
