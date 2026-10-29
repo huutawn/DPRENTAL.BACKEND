@@ -99,6 +99,7 @@ public sealed record OrderSummaryItemResponse(
 /// <param name="Version">Phiên bản dữ liệu của đơn hàng cha, tăng khi có thay đổi nghiệp vụ.</param>
 /// <param name="RefundState">Không có khoản hoàn, đang chờ hoàn hay đã hoàn tiền.</param>
 /// <param name="RefundedAmount">Số tiền đã được chuyển khoản hoàn lại.</param>
+/// <param name="CanCancel">Người thuê còn hủy được đơn: chưa thanh toán, hoặc đã thanh toán mà chưa nhà cung cấp nào xác nhận.</param>
 public sealed record RenterOrderSummaryResponse(
     Guid OrderId,
     string OrderCode,
@@ -114,7 +115,8 @@ public sealed record RenterOrderSummaryResponse(
     IReadOnlyList<OrderSummaryItemResponse> Items,
     long Version,
     OrderRefundProgress RefundState = OrderRefundProgress.None,
-    decimal RefundedAmount = 0m)
+    decimal RefundedAmount = 0m,
+    bool CanCancel = false)
 {
     public RenterOrderSummaryResponse(
         Guid orderId,
@@ -176,6 +178,7 @@ public sealed record RenterSubOrderResponse(
 /// <param name="Version">Phiên bản dữ liệu của đơn hàng cha, tăng khi có thay đổi nghiệp vụ.</param>
 /// <param name="RefundState">Không có khoản hoàn, đang chờ hoàn hay đã hoàn tiền.</param>
 /// <param name="RefundedAmount">Số tiền đã được chuyển khoản hoàn lại.</param>
+/// <param name="CanCancel">Người thuê còn hủy được đơn: chưa thanh toán, hoặc đã thanh toán mà chưa nhà cung cấp nào xác nhận.</param>
 public sealed record RenterOrderDetailResponse(
     Guid OrderId,
     string OrderCode,
@@ -194,7 +197,8 @@ public sealed record RenterOrderDetailResponse(
     IReadOnlyList<RenterSubOrderResponse> SubOrders,
     long Version,
     OrderRefundProgress RefundState = OrderRefundProgress.None,
-    decimal RefundedAmount = 0m);
+    decimal RefundedAmount = 0m,
+    bool CanCancel = false);
 
 /// <summary>
 /// Một đơn con trong danh sách của nhà cung cấp.
