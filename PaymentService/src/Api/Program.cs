@@ -53,6 +53,15 @@ builder.Services.AddAuthorization(options =>
             ctx.User.HasScope("payment.settlement.write"));
     });
 
+    // Delegated admin evidence is accepted only from Rental's authenticated service identity.
+    options.AddPolicy("RentalRefundSyncPolicy", policy =>
+    {
+        policy.AddAuthenticationSchemes(PaymentServiceApiKeyDefaults.AuthenticationScheme);
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx => ctx.User.IsServiceToken() &&
+            ctx.User.HasClaim("client_id", "rental-service") && ctx.User.HasScope("payment.refund.write"));
+    });
+
     options.AddPolicy("RefundServicePolicy", policy =>
     {
         policy.AddAuthenticationSchemes(PaymentServiceApiKeyDefaults.AuthenticationScheme);

@@ -3,6 +3,7 @@ namespace Dprental.PaymentService.Domain.IRepositories;
 
 public interface IManualRefundRepository
 {
+    Task<ManualRefundRequirement?> FindByOperationKeyAsync(string operationKey, CancellationToken ct = default);
     Task<ManualRefundRequirement?> FindAsync(Guid id, CancellationToken ct = default);
     Task<ManualRefundRequirement?> FindWithRowLockAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<ManualRefundRequirement>> GetForInvoiceAsync(Guid invoiceId, CancellationToken ct = default);
