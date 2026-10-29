@@ -368,6 +368,17 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(3, scarce.AvailableQuantity);
     }
 
+    [Fact]
+    public async Task Prepare_WhenEveryRejectedLineIsOwnListing_ReturnsCannotRentOwnListing()
+    {
+        _inventory.Listings[_listingId] = Listing(_listingId) with { OwnerUserId = _renterId };
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
+
+        Assert.Equal(CheckoutErrors.CannotRentOwnListing, result.Error);
+        Assert.Equal(CheckoutLineIssueCode.OwnListing, Assert.Single(result.LineIssues).Code);
+    }
+
     [Theory]
     [InlineData(0, "VND")]
     [InlineData(500_000, "USD")]

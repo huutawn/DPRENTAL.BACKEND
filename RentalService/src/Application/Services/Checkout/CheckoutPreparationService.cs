@@ -194,7 +194,10 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 
         if (outcome.Issues.Count > 0)
         {
-            return CheckoutPreparationResult.LinesRejected(CheckoutErrors.ItemsUnavailable, outcome.Issues);
+            Error linesError = outcome.Issues.All(i => i.Code == CheckoutLineIssueCode.OwnListing)
+                ? CheckoutErrors.CannotRentOwnListing
+                : CheckoutErrors.ItemsUnavailable;
+            return CheckoutPreparationResult.LinesRejected(linesError, outcome.Issues);
         }
 
         CheckoutPlan plan = new(
