@@ -5,6 +5,7 @@ namespace Dprental.PaymentService.Application.IServices;
 
 public interface IManualRefundService
 {
+    Task<Result<RentalRefundSyncResponse>> SynchronizeRentalAsync(RentalRefundSyncRequest request, CancellationToken ct);
     Task<Result<RequestRefundResponse>> RequestAsync(RequestRefundRequest request, CancellationToken ct);
     Task<Result<ManualRefundDetails>> GetAsync(Guid id, CancellationToken ct);
     Task<Result<ManualRefundPage>> ListAsync(int status, Guid? cursor, int limit, CancellationToken ct);

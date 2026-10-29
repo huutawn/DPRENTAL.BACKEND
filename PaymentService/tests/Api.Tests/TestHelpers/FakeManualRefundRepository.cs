@@ -11,6 +11,9 @@ public sealed class FakeManualRefundRepository : IManualRefundRepository
 {
     private readonly List<ManualRefundRequirement> _refunds = [];
 
+    public Task<ManualRefundRequirement?> FindByOperationKeyAsync(string operationKey, CancellationToken ct = default) =>
+        Task.FromResult(_refunds.Find(r => r.OperationKey == operationKey));
+
     public Task<ManualRefundRequirement?> FindAsync(Guid id, CancellationToken ct = default) =>
         Task.FromResult(_refunds.Find(r => r.Id == id));
 

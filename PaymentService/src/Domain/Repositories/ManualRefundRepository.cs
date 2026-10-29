@@ -5,6 +5,10 @@ namespace Dprental.PaymentService.Domain.Repositories;
 
 public sealed class ManualRefundRepository(PaymentServiceDbContext db) : IManualRefundRepository
 {
+    public Task<ManualRefundRequirement?> FindByOperationKeyAsync(string operationKey, CancellationToken ct = default) =>
+        db.ManualRefundRequirements.AsNoTracking().Include(x => x.Items)
+            .SingleOrDefaultAsync(x => x.OperationKey == operationKey, ct);
+
     public Task<ManualRefundRequirement?> FindAsync(Guid id, CancellationToken ct = default) =>
         db.ManualRefundRequirements.AsNoTracking().Include(x => x.Items).SingleOrDefaultAsync(x => x.Id == id, ct);
 
