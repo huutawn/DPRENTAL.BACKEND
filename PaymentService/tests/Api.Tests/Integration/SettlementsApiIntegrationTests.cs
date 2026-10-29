@@ -109,6 +109,22 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         });
     }
 
+    [Fact]
+    public async Task Internal_refund_sync_rejects_users_and_requires_Rental_service_credential()
+    {
+        using var client = _factory.CreateClient();
+        var request = new RentalRefundSyncRequest(Guid.NewGuid(), Guid.NewGuid(), "missing-operation", 1000,
+            null, null, null, null);
+        const string path = "/internal/rental-refunds/synchronize";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync(path, request)).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("admin"));
+        // This internal endpoint authenticates only the Rental API-key scheme; a client JWT is not an identity here.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync(path, request)).StatusCode);
+        client.DefaultRequestHeaders.Authorization = null;
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync(path, request)).StatusCode);
+    }
+
     public async Task DisposeAsync()
     {
         _factory.Dispose();
