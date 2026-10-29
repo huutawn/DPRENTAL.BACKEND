@@ -4,6 +4,7 @@ using Dprental.AnalyticsService.Application.Dashboard.Revenue;
 using Dprental.AnalyticsService.Application.Events;
 using Dprental.AnalyticsService.Application.Kafka.Consumers;
 using Dprental.AnalyticsService.Common.Enums;
+using Dprental.AnalyticsService.Domain.Entities;
 using Dprental.AnalyticsService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -29,6 +30,64 @@ public sealed class AnalyticsPostgreSqlTests
     private static readonly DateTimeOffset Nov16 = new(2026, 11, 16, 3, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset Nov17 = new(2026, 11, 17, 3, 0, 0, TimeSpan.Zero);
     private static readonly DashboardDateRange Range = DashboardDateRange.Create(new DateOnly(2026, 11, 10), new DateOnly(2026, 11, 17));
+
+    [Theory]
+    [InlineData(false, false, 0, null)]
+    [InlineData(false, true, 200, null)]
+    [InlineData(true, false, 0, 500)]
+    [InlineData(true, true, 200, 300)]
+    [InlineData(true, true, 500, 0)]
+    [InlineData(true, true, 700, 0)]
+    public async Task Overview_PendingRefundOnPostgres(
+        bool hasRequest, bool hasCompletion, int completedAmount, int? expected)
+    {
+        await using PostgresTestDatabase database = await PostgresTestDatabase.CreateAsync()
+            ?? throw new InvalidOperationException("Thiếu ANALYTICS_TEST_POSTGRES để kiểm thử PostgreSQL thật.");
+        await using AnalyticsServiceDbContext db = database.CreateContext();
+
+        void Add(string type, string? reference, decimal? amount, string currency = "VND") =>
+            db.PaymentFinancialEvents.Add(new PaymentFinancialEvent
+            {
+                MessageId = Guid.NewGuid(),
+                LogicalEventId = Guid.NewGuid().ToString(),
+                AggregateId = OrderX.ToString(),
+                MessageType = type,
+                RefundRef = reference,
+                Amount = amount,
+                Currency = currency,
+                OccurredAt = Nov10.AddYears(-1),
+                RequestedAt = Nov10.AddYears(-1),
+                CompletedAt = Nov10.AddYears(-1)
+            });
+
+        if (hasRequest)
+        {
+            Add(PaymentAnalyticsEventTypes.RefundRequestedFinancial, "partial", 500m);
+        }
+        if (hasCompletion)
+        {
+            Add(PaymentAnalyticsEventTypes.RefundCompletedFinancial, "partial", completedAmount / 2m);
+            Add(PaymentAnalyticsEventTypes.RefundCompletedFinancial, "partial", completedAmount / 2m);
+        }
+
+        // Unmatched completions and invalid references/currencies must not change the balance.
+        Add(PaymentAnalyticsEventTypes.RefundCompletedFinancial, "unmatched", 900m);
+        Add(PaymentAnalyticsEventTypes.RefundRequestedFinancial, null, 900m);
+        Add(PaymentAnalyticsEventTypes.RefundRequestedFinancial, "foreign", 900m, "USD");
+        await db.SaveChangesAsync();
+        var service = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db));
+        OverviewResponse overview = await service.OverviewAsync(Range);
+        Assert.Equal(expected.HasValue ? (decimal?)expected.Value : null, overview.Financial.PendingRefund);
+
+        // Clamp each refund separately: an overpaid refund cannot cancel another pending refund.
+        Add(PaymentAnalyticsEventTypes.RefundRequestedFinancial, "overpaid", 100m);
+        Add(PaymentAnalyticsEventTypes.RefundCompletedFinancial, "overpaid", 1000m);
+        Add(PaymentAnalyticsEventTypes.RefundRequestedFinancial, "outstanding", 250m);
+        Add(PaymentAnalyticsEventTypes.RefundRequestedFinancial, "null-amount", null);
+        await db.SaveChangesAsync();
+        overview = await service.OverviewAsync(Range);
+        Assert.Equal((expected ?? 0) + 250m, overview.Financial.PendingRefund);
+    }
 
     [Fact]
     public async Task Migrations_CreateHardeningSchemaAndIndexes()

@@ -150,10 +150,11 @@ public sealed class PaymentFinancialEventRepository : IPaymentFinancialEventRepo
             .GroupBy(x => x.RefundRef!)
             .Select(g => new { RefundRef = g.Key, Amount = g.Sum(x => x.Amount ?? 0m) });
 
+        // Test the joined key: comparing the grouped projection itself to null cannot be translated inside SUM.
         var balances = from request in requested
                        join comp in completed on request.RefundRef equals comp.RefundRef into compGroup
                        from comp in compGroup.DefaultIfEmpty()
-                       select request.Amount - (comp == null ? 0m : comp.Amount);
+                       select request.Amount - (comp.RefundRef == null ? 0m : comp.Amount);
 
         return await balances.SumAsync(balance => balance > 0m ? balance : 0m, cancellationToken);
     }
