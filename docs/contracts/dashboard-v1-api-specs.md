@@ -23,12 +23,23 @@
 
 ---
 
+### 1.1. API Admin bổ sung đã có trên backend
+
+Ba API dưới đây mở rộng ngoài 5 endpoint REST tối thiểu của dashboard v1. FE chỉ cần gọi khi có biểu đồ/bảng tương ứng; không bắt buộc thêm vào màn hình tối giản.
+
+| Endpoint (GET) | Quyền | Dữ liệu hiển thị |
+|---|---|---|
+| `/api/v1/analytics/orders` | Admin | Biểu đồ số đơn tạo, thanh toán, hoàn tất, hủy, hết hạn theo ngày |
+| `/api/v1/analytics/equipment` | Admin | Top loại thiết bị, listing và hãng theo lượt thuê đã thanh toán |
+| `/api/v1/analytics/suppliers` | Admin | Bảng hiệu suất và tiền phải trả/đã chi của từng NCC |
+
 ## 2. Quy chuẩn Tham số Truy vấn & Hiển thị
 
 1. **Bộ lọc thời gian**:
    - `from`: Ngày bắt đầu theo định dạng `yyyy-MM-dd` (ví dụ `2026-10-01`).
-   - `to`: Ngày kết thúc theo định dạng `yyyy-MM-dd` (ví dụ `2026-10-05`), bao gồm cả hai đầu ngày. Khoảng cách giữa `from` và `to` tối đa 366 ngày.
-   - **Quy tắc mặc định 30 ngày**: Chỉ áp dụng khi người dùng **thiếu cả `from` và `to`**; Backend tự động lấy khoảng đóng [Hôm nay - 29 ngày, Hôm nay] theo múi giờ Việt Nam (`Asia/Ho_Chi_Minh` — UTC+7). Nếu chỉ truyền một trong hai, API sẽ trả về lỗi `400 INVALID_DATE_RANGE`.
+   - `to`: Ngày kết thúc theo định dạng `yyyy-MM-dd` (ví dụ `2026-10-05`), bao gồm cả hai đầu ngày. Khoảng lọc tối đa **366 ngày tính cả hai đầu**, tức `to - from <= 365 ngày`. Khoảng 367 ngày trả về `400 INVALID_DATE_RANGE`.
+   - **Quy tắc mặc định 30 ngày**: Áp dụng cho `/overview`, `/revenue`, `/me/overview`, `/me/revenue`. Chỉ áp dụng khi người dùng **thiếu cả `from` và `to`**; Backend tự động lấy khoảng đóng [Hôm nay - 29 ngày, Hôm nay] theo múi giờ Việt Nam (`Asia/Ho_Chi_Minh` — UTC+7). Nếu chỉ truyền một trong hai, API sẽ trả về lỗi `400 INVALID_DATE_RANGE`.
+   - Riêng `/orders`, `/equipment`, `/suppliers` bắt buộc truyền **đủ cả hai** `from`, `to`; thiếu một hoặc cả hai trả `400 INVALID_DATE_RANGE`. Inventory statistics không dùng bộ lọc ngày.
 2. **Đơn vị nhóm biểu đồ (`granularity`)**:
    - Giá trị: `day` (mặc định), `week` (bắt đầu từ thứ Hai), `month` (ngày 1 đầu tháng).
 3. **Quy tắc tiền tệ & hiển thị**:
@@ -308,6 +319,103 @@ const totalListings = Object.values(response.byEquipmentType || {})
 
 ---
 
+### 3.6. Admin — Biểu đồ đơn hàng
+
+- **Route**: `GET /api/v1/analytics/orders?from=2026-10-01&to=2026-10-02`
+- **Auth**: Bearer JWT Admin; anonymous trả 401, user không có quyền Admin trả 403.
+- **Query**: `from`, `to` bắt buộc; không có `granularity`, bucket luôn theo ngày Việt Nam. Ngày không có hoạt động được trả về với các số đếm bằng 0.
+
+```json
+{
+  "from": "2026-10-01",
+  "to": "2026-10-02",
+  "active": 3,
+  "points": [
+    { "date": "2026-10-01", "created": 5, "paid": 4, "completed": 1, "cancelled": 0, "expired": 1 },
+    { "date": "2026-10-02", "created": 0, "paid": 0, "completed": 0, "cancelled": 0, "expired": 0 }
+  ]
+}
+```
+
+- Trục X: `points[].date`; các đường/cột: `created`, `paid`, `completed`, `cancelled`, `expired` theo từng mốc nghiệp vụ Rental.
+- `active` là số đơn đã thanh toán và chưa kết thúc tại cuối ngày `to`, không phải tổng các bucket.
+- **Nguồn thanh toán hiện tại**: `points[].paid` dùng `PaidAt` của read model Rental; `orders.paidOrders` trong `/overview` dùng `InvoicePaidFinancial` của Payment. Không cam kết hai chỉ số bằng nhau khi hai nguồn chưa đồng bộ; FE không dùng chúng để đối soát thanh toán.
+
+### 3.7. Admin — Top thiết bị
+
+- **Route**: `GET /api/v1/analytics/equipment?from=2026-10-01&to=2026-10-05&limit=10`
+- **Auth**: Bearer JWT Admin (401/403 như mục 3.6).
+- **Query**: `from`, `to` bắt buộc; `limit` mặc định 10, từ 1 đến 100. Ngoài khoảng trả `400 INVALID_LIMIT`.
+- Mỗi mảng trả tối đa `limit` phần tử; ba mảng là ba cách nhóm cùng dữ liệu, không cộng tổng giữa các mảng.
+
+```json
+{
+  "from": "2026-10-01",
+  "to": "2026-10-05",
+  "topEquipmentTypes": [
+    { "id": "b1000000-0000-0000-0000-000000000001", "name": "Máy khoan", "rentalItemCount": 2, "rentedQuantity": 3, "grossRentalValue": 900000, "completedCount": 1 }
+  ],
+  "topListings": [],
+  "topBrands": []
+}
+```
+
+Mỗi phần tử trong cả ba mảng có cùng schema:
+
+| Trường | Ý nghĩa |
+|---|---|
+| `id` | UUID của loại/listing/hãng, có thể null khi thiếu snapshot |
+| `name` | Tên từ snapshot; nhóm thiếu thông tin có thể là `Không xác định` |
+| `rentalItemCount` | Số dòng thuê đã thanh toán, không nhân quantity |
+| `rentedQuantity` | Quantity đã bàn giao trước cuối ngày `to` |
+| `grossRentalValue` | Tiền thuê của các item được chọn; VND, không gồm cọc |
+| `completedCount` | Số item hoàn tất trước cuối ngày `to` |
+
+Tập item được chọn theo `PaidAt` của `InvoicePaidFinancial` trong kỳ, kết hợp snapshot Rental. Xếp theo số dòng thuê giảm dần, sau đó số lượng bàn giao giảm dần và Id. Có thể dùng biểu đồ thanh ngang theo `name` và `rentalItemCount`.
+
+### 3.8. Admin — Hiệu suất NCC
+
+- **Route**: `GET /api/v1/analytics/suppliers?from=2026-10-01&to=2026-10-05&page=1&pageSize=20`
+- **Auth**: Bearer JWT Admin (401/403 như mục 3.6).
+- **Query**: `from`, `to` bắt buộc; `page >= 1` (mặc định 1), `pageSize` từ 1 đến 100 (mặc định 20). Sai giới hạn hoặc offset vượt Int32 trả `400 INVALID_PAGINATION`.
+
+```json
+{
+  "from": "2026-10-01",
+  "to": "2026-10-05",
+  "page": 1,
+  "pageSize": 20,
+  "total": 1,
+  "items": [
+    {
+      "supplierId": "d1000000-0000-0000-0000-000000000001",
+      "totalRequests": 8,
+      "accepted": 6,
+      "rejected": 1,
+      "timeout": 1,
+      "completedRentals": 4,
+      "rentalValue": 14500000,
+      "supplierPayable": 13250000,
+      "payoutCompleted": 12000000
+    }
+  ]
+}
+```
+
+- `total` là tổng số NCC khớp dữ liệu trước phân trang; `items` có thể rỗng, thứ tự theo supplierId, không phải xếp hạng doanh thu. API không trả tên NCC.
+- `totalRequests` dùng ngày tạo đơn; `accepted`, `rejected`, `timeout`, `completedRentals` dùng mốc item; `rentalValue` dùng ngày thanh toán Payment kết hợp item Rental. Các số đếm không phải một cohort duy nhất để tính tỷ lệ trực tiếp.
+- `supplierPayable` và `payoutCompleted` lấy từ Payment theo mốc settlement/payout tương ứng, đơn vị VND; không yêu cầu bằng nhau trong cùng kỳ.
+- Giới hạn backend hiện tại: danh sách NCC ứng viên được gom vào bộ nhớ trước khi phân trang. Chưa có kết quả kiểm chứng tải lớn trong hợp đồng này.
+
+### 3.9. Quy tắc `pendingRefund` và lỗi bộ lọc
+
+- `/overview`: `financial.pendingRefund` là tổng số dư hoàn tiền chưa hoàn tất **hiện tại trên toàn bộ dữ liệu đã ingest**, không lọc theo `from/to`. Ghép theo `refundRef`, lấy số yêu cầu trừ số hoàn tất và chặn số dư âm về 0. Trả null khi chưa có yêu cầu hoàn tiền hợp lệ; có nguồn yêu cầu nhưng đã hoàn hết có thể trả 0.
+- `/me/overview`: `financial.pendingRefund` hiện luôn null; FE không coi null là 0 hay hiển thị như một số dư đã xác nhận.
+- Lỗi khoảng ngày dùng HTTP 400 với ProblemDetails có `title: "INVALID_DATE_RANGE"`; đây là trường `title`, không phải cam kết có trường JSON `code`.
+- Ví dụ giới hạn: `from=2026-01-01&to=2027-01-01` hợp lệ (366 ngày gồm hai đầu); `to=2027-01-02` trả 400.
+
+---
+
 ## 4. Đặc tả SignalR Hub & Realtime Streaming
 
 ### 4.1. Thông số & Địa chỉ Kết nối (Dev vs Local)
@@ -348,6 +456,8 @@ const connection = new signalR.HubConnectionBuilder()
 > - Không yêu cầu JavaScript đọc token nhạy cảm (`accessTokenFactory`).
 > - Kết nối tự động đóng khi JWT token hết hạn (`CloseOnAuthenticationExpiration = true`).
 
+> Mẫu trên chỉ khởi tạo connection; FE phải bổ sung handler, refresh session, xử lý 401/403 và polling theo mục 5.
+
 ### 4.3. Envelope Thông báo & Event Name
 - **Event Name**: `AnalyticsDataChanged`
 - **Contract Envelope**: Sử dụng trường `data` (không dùng `payload`).
@@ -367,6 +477,7 @@ const connection = new signalR.HubConnectionBuilder()
 
 > **QUY TẮC BẮT BUỘC CHO FRONTEND**:
 > - Khi nhận bất kỳ event `AnalyticsDataChanged` (dù `scope` là `Rental` hay `Finance`), Frontend **tải lại MỌI endpoint Analytics đang hiển thị trên màn hình hiện tại** và người dùng được phép gọi.
+> - Với ba API Admin bổ sung, reload `/orders`, `/equipment`, `/suppliers` nếu đang hiển thị, giữ nguyên `from`, `to`, `limit`, `page`, `pageSize`. Chúng dùng chung event và Hub hiện tại, không có event riêng cho từng API.
 > - **Lý do**: Snapshot Rental đến muộn (ví dụ `RentalOrderCreated` đến sau `InvoicePaidFinancial`) sẽ làm thay đổi số liệu tiền thuê của `/api/v1/analytics/me/revenue`, dù event phát ra mang scope `Rental`. Không cố gắng tối ưu theo bảng dependencies bộ phận.
 > - **Inventory độc lập**: Endpoint `/api/v1/inventory/equipment-listings/statistics` **KHÔNG** tải lại theo event SignalR của Analytics, mà chỉ tải khi mở trang và làm mới theo chu kỳ polling 60 giây.
 > - **Không lọc theo occurredAt**: `occurredAt` trong envelope chỉ là thời điểm gửi thông báo realtime, **không phải ngày nghiệp vụ của dữ liệu**. Không được so sánh `occurredAt` với khoảng ngày `[from, to]` đang xem để bỏ qua event.
@@ -441,5 +552,6 @@ const connection = new signalR.HubConnectionBuilder()
 
 ### Kịch bản 4: Admin Timeout Nhưng NCC Vẫn Nhận Tin
 - Backend gặp sự cố gửi nhóm Admin bị timeout (> 2s), nhưng gửi NCC vẫn hoàn tất độc lập.
+- Backend gửi Admin trước, sau đó gửi NCC với timeout riêng; lỗi Admin không bỏ qua lượt gửi NCC nhưng có thể làm NCC nhận chậm bằng thời gian chờ Admin.
 - **Kỳ vọng UI**:
   - Dashboard của NCC vẫn nhận được event `AnalyticsDataChanged` và cập nhật dữ liệu bình thường, không bị ảnh hưởng bởi lỗi của nhóm Admin.
