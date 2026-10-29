@@ -121,6 +121,10 @@ public sealed class PaymentWorkflowIntegrationTests
 
     private sealed class StubPaymentClient : IPaymentRentalClient
     {
+        public Task<Result<RentalRefundSyncResponse>> SynchronizeRefundAsync(
+            RentalRefundSyncRequest request, CancellationToken ct = default) =>
+            throw new NotSupportedException("Refund synchronization is not used by this fixture.");
+
         public Func<RequestRefundRequest, Task<Result<RequestRefundResponse>>>? RequestRefundHandler { get; set; }
 
         public Task<Result<RequestRefundResponse>> RequestRefundAsync(RequestRefundRequest request, CancellationToken ct = default) =>

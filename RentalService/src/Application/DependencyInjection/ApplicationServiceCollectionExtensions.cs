@@ -150,6 +150,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IDeductionResponseService, DeductionResponseService>();
         // trong khối Background Workers:
         services.AddHostedService<DeductionDeadlineWorker>();
+        services.AddHostedService<RefundReconciliationWorker>();
 
         // Return Confirmation Overdue Worker
         services.AddScoped<IReturnConfirmationOverdueService, ReturnConfirmationOverdueService>();

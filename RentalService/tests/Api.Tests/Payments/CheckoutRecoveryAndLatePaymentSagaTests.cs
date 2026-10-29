@@ -115,6 +115,10 @@ public sealed class CheckoutRecoveryAndLatePaymentSagaTests
 
     private sealed class TrackingPaymentClient : IPaymentRentalClient
     {
+        public Task<Result<RentalRefundSyncResponse>> SynchronizeRefundAsync(
+            RentalRefundSyncRequest request, CancellationToken ct = default) =>
+            throw new NotSupportedException("Refund synchronization is not used by this fixture.");
+
         public List<AcceptLatePaymentRequest> AcceptRequests { get; } = [];
         public bool ShouldRejectAccept { get; set; }
 

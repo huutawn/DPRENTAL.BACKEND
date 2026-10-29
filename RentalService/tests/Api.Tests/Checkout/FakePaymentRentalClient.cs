@@ -9,6 +9,15 @@ namespace Dprental.RentalService.Api.Tests.Checkout;
 /// </summary>
 internal sealed class FakePaymentRentalClient : IPaymentRentalClient
 {
+    public Func<RentalRefundSyncRequest, Result<RentalRefundSyncResponse>>? RefundSync { get; set; }
+    public List<RentalRefundSyncRequest> RefundSyncRequests { get; } = [];
+    public Task<Result<RentalRefundSyncResponse>> SynchronizeRefundAsync(
+        RentalRefundSyncRequest request, CancellationToken ct = default)
+    {
+        RefundSyncRequests.Add(request);
+        return Task.FromResult(RefundSync?.Invoke(request) ?? Result.Failure<RentalRefundSyncResponse>(Down));
+    }
+
     public static readonly Error Down = Error.ServiceUnavailable("Payment.Unavailable", "Payment không phản hồi.");
 
     private readonly Dictionary<string, CreateInvoiceResponse> _invoicesByOperationKey = [];

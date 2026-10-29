@@ -97,6 +97,10 @@ public sealed class RentalPostgreSqlRealWorkflowsTests
 
     private sealed class StubPaymentClient : IPaymentRentalClient
     {
+        public Task<Result<RentalRefundSyncResponse>> SynchronizeRefundAsync(
+            RentalRefundSyncRequest request, CancellationToken ct = default) =>
+            throw new NotSupportedException("Refund synchronization is not used by this fixture.");
+
         public Task<Result<RequestRefundResponse>> RequestRefundAsync(RequestRefundRequest request, CancellationToken ct = default) =>
             Task.FromResult(Result.Success(new RequestRefundResponse("REF-001", request.OperationKey, "Accepted", request.TotalRefundAmount, "VND", false)));
 

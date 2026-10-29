@@ -600,6 +600,10 @@ public sealed class ExtendHoldCallbackPostgreSqlTests
 
     private sealed class AcceptLatePaymentMockClient : IPaymentRentalClient
     {
+        public Task<Result<RentalRefundSyncResponse>> SynchronizeRefundAsync(
+            RentalRefundSyncRequest request, CancellationToken ct = default) =>
+            throw new NotSupportedException("Refund synchronization is not used by this fixture.");
+
         public bool Called { get; private set; }
         public Task<Result<CreateInvoiceResponse>> CreateInvoiceAsync(CreateInvoiceRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Result<CancelInvoiceResponse>> CancelInvoiceAsync(CancelInvoiceRequest request, CancellationToken ct = default) => throw new NotImplementedException();

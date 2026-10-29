@@ -9,6 +9,8 @@ namespace Dprental.RentalService.Application.IServices.Refunds;
 /// </summary>
 public interface IAdminRefundCommandService
 {
+    Task<Result<bool>> ReconcileAsync(Guid rentalItemId, bool apply, CancellationToken cancellationToken = default);
+
     Task<Result<AdminOrderRefundResponse>> ConfirmTransferAsync(
         Guid rentalItemId,
         ConfirmRefundTransferRequest? request,
