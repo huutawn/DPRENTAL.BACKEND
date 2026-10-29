@@ -11,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Dprental.RentalService.Maintenance;
 
-public static class Program
+public static partial class Program
 {
     public static async Task<int> Main(string[] args)
     {
@@ -29,6 +29,18 @@ public static class Program
                           ?? config["DATABASE_URL"]
                           ?? config["POSTGRES_CONNECTION_STRING"]
                           ?? "Host=localhost;Port=5433;Database=rentalservice;Username=postgres;Password=postgres";
+
+        if (command == "reconcile-refund-confirmations")
+        {
+            string? syncConnection = config.GetConnectionString("Postgres");
+            if (string.IsNullOrWhiteSpace(syncConnection)) syncConnection = connStr;
+            try { return await RunRefundReconciliationAsync(config, syncConnection, apply); }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"Refund reconciliation failed: {exception.GetType().Name}");
+                return 1;
+            }
+        }
 
         var optionsBuilder = new DbContextOptionsBuilder<RentalServiceDbContext>();
         optionsBuilder.UseNpgsql(connStr);
@@ -101,6 +113,7 @@ public static class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- backfill-equipment-types [--apply]");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- reconcile-return-requests [--apply]");
+        Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- reconcile-refund-confirmations [--apply]");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- replay-outbox --message-id <Guid>");
     }
 

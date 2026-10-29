@@ -22,7 +22,7 @@ namespace Dprental.RentalService.Api.Tests.Refunds;
 /// khấu trừ hoàn phần cọc còn lại. Admin xem menu và chi tiết đơn với tài khoản đủ số, xác nhận chuyển khoản;
 /// người thuê thấy đơn đã hoàn tiền.
 /// </summary>
-public sealed class RentalRefundPostgreSqlTests
+public sealed partial class RentalRefundPostgreSqlTests
 {
     private static readonly DateTimeOffset ConfirmedNow = OrderTestData.Now.AddDays(10);
 
@@ -328,6 +328,11 @@ public sealed class RentalRefundPostgreSqlTests
             context,
             new FixedTimeProvider(ConfirmedNow),
             NullLogger<AdminRefundCommandService>.Instance,
+            new Dprental.RentalService.Api.Tests.Checkout.FakePaymentRentalClient
+            {
+                RefundSync = r => new Dprental.RentalService.Application.DTOs.Payment.RentalRefundSyncResponse(
+                    true, r.Amount, r.BankTransactionRef, r.ConfirmedBy, r.ConfirmedAt)
+            },
             notifier);
         return await service.ConfirmTransferAsync(rentalItemId, request, caller);
     }

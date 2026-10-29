@@ -525,3 +525,11 @@ Tiêu chí FE hoàn thành mock: đủ các màn hình/nhánh trên; phân biệ
 - Notification vẫn best-effort: FE resync bằng GET sau reconnect/focus. OverdueNotifiedAt không bảo đảm người dùng đã nhận thông báo; badge dựa isOverdue từ GET.
 - ClosedAt chỉ chứng minh Rental đã ghi nhận thực nhận, không chứng minh Inventory đã đồng bộ. API Renter/Supplier chưa phân biệt Inventory pending với rejected; giữ nhãn “Đã ghi nhận thu hồi”.
 - Bàn giao/thu hồi không đồng nghĩa hoàn tiền hoặc tất toán xong. Chỉ hiển thị Completed/đã hoàn tiền khi API chính thức phản ánh kết quả tương ứng.
+
+## 12. Admin xác nhận hoàn tiền và quyết toán
+
+FE giữ nguyên API `POST /api/v1/rental/admin/refunds/{rentalItemId}/complete` với body `{ "bankTransactionRef": "...", "note": "..." }` và response hiện có. Không cần đổi sang Payment endpoint hoặc thêm operationKey vào DTO Rental; backend tự tạo khóa idempotency nội bộ theo khoản hoàn.
+
+Sau khi Admin thực hiện chuyển khoản và xác nhận, Rental kiểm tra với workflow Payment chính thức trước khi trả thành công. Timeout/503 không đồng nghĩa giao dịch chưa được ghi nhận: giữ form và mã giao dịch, retry cùng dữ liệu; không chuyển tiền lần nữa. Sau thành công, refetch cả danh sách hoàn tiền và chi tiết đơn. “Đã hoàn tiền” là kết quả khoản hoàn; item chỉ `COMPLETED` khi Rental nhận đủ xác nhận Inventory và tài chính. Callback có thể đến sau response HTTP.
+
+Các xác nhận cũ được backfill từ bằng chứng đã lưu, giữ actor/thời điểm/mã giao dịch cũ; không yêu cầu Admin chuyển hoặc xác nhận lại tiền. Chi tiết vận hành: [Refund reconciliation](REFUND_SETTLEMENT_RECONCILIATION.md).

@@ -203,6 +203,10 @@ public sealed class RentalOperationExecutorAdvancedTests
 
     private sealed class StubPaymentClient : IPaymentRentalClient
     {
+        public Task<Result<RentalRefundSyncResponse>> SynchronizeRefundAsync(
+            RentalRefundSyncRequest request, CancellationToken ct = default) =>
+            throw new NotSupportedException("Refund synchronization is not used by this fixture.");
+
         public Func<CancelInvoiceRequest, Task<Result<CancelInvoiceResponse>>>? CancelInvoiceHandler { get; set; }
 
         public Task<Result<RequestRefundResponse>> RequestRefundAsync(RequestRefundRequest request, CancellationToken ct = default) =>

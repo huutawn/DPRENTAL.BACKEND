@@ -701,6 +701,10 @@ public sealed class RentalLateRefundMigrationAndWorkflowPostgreSqlTests
 
     private sealed class SpyPaymentClient : IPaymentRentalClient
     {
+        public Task<Result<RentalRefundSyncResponse>> SynchronizeRefundAsync(
+            RentalRefundSyncRequest request, CancellationToken ct = default) =>
+            throw new NotSupportedException("Refund synchronization is not used by this fixture.");
+
         public int RequestRefundCalls { get; private set; }
 
         public Task<Result<CreateInvoiceResponse>> CreateInvoiceAsync(CreateInvoiceRequest request, CancellationToken ct = default) =>
