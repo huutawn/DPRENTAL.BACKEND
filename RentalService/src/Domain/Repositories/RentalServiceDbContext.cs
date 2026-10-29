@@ -22,6 +22,12 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
     public DbSet<RentalTermsAcceptance> RentalTermsAcceptances => Set<RentalTermsAcceptance>();
     public DbSet<HandoverRecord> HandoverRecords => Set<HandoverRecord>();
     public DbSet<ReturnRecord> ReturnRecords => Set<ReturnRecord>();
+    public DbSet<ReturnRequest> ReturnRequests => Set<ReturnRequest>();
+    public DbSet<ReturnRequestUnit> ReturnRequestUnits => Set<ReturnRequestUnit>();
+    public DbSet<ReturnRequestIssue> ReturnRequestIssues => Set<ReturnRequestIssue>();
+    public DbSet<ReturnRequestIssueUnit> ReturnRequestIssueUnits => Set<ReturnRequestIssueUnit>();
+    public DbSet<ReturnRequestResolution> ReturnRequestResolutions => Set<ReturnRequestResolution>();
+    public DbSet<ReturnRequestResolutionUnit> ReturnRequestResolutionUnits => Set<ReturnRequestResolutionUnit>();
     public DbSet<DeductionProposal> DeductionProposals => Set<DeductionProposal>();
     public DbSet<Dispute> Disputes => Set<Dispute>();
     public DbSet<RentalOperationReceipt> RentalOperationReceipts => Set<RentalOperationReceipt>();
@@ -213,6 +219,62 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
         });
 
         // RentalUnitAssignment
+        modelBuilder.Entity<ReturnRequest>(b =>
+        {
+            b.Property(r => r.Id).ValueGeneratedNever();
+            b.HasOne(r => r.RentalItem).WithMany(i => i.ReturnRequests)
+                .HasForeignKey(r => r.RentalItemId).OnDelete(DeleteBehavior.Restrict);
+            b.HasMany(r => r.Units).WithOne(u => u.ReturnRequest)
+                .HasForeignKey(u => u.ReturnRequestId).OnDelete(DeleteBehavior.Restrict);
+            b.HasMany(r => r.Issues).WithOne(i => i.ReturnRequest)
+                .HasForeignKey(i => i.ReturnRequestId).OnDelete(DeleteBehavior.Restrict);
+            b.HasMany(r => r.Resolutions).WithOne(res => res.ReturnRequest)
+                .HasForeignKey(res => res.ReturnRequestId).OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(r => r.ConfirmationDeadlineAt);
+        });
+
+        modelBuilder.Entity<ReturnRequestUnit>(b =>
+        {
+            b.Property(u => u.Id).ValueGeneratedNever();
+            b.Property(u => u.MediaIds).HasField("_mediaIds");
+            b.HasOne<RentalUnitAssignment>().WithMany().HasForeignKey(u => u.RentalUnitAssignmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(u => u.RentalUnitAssignmentId).IsUnique().HasFilter("\"ClosedAt\" IS NULL AND \"RejectedAt\" IS NULL");
+            b.HasIndex(u => new { u.ClosedAt, u.RejectedAt, u.OverdueNotifiedAt });
+        });
+
+        modelBuilder.Entity<ReturnRequestIssue>(b =>
+        {
+            b.Property(i => i.Id).ValueGeneratedNever();
+            b.Property(i => i.MediaIds).HasField("_mediaIds");
+            b.HasMany(i => i.Units).WithOne(u => u.ReturnRequestIssue)
+                .HasForeignKey(u => u.ReturnRequestIssueId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ReturnRequestIssueUnit>(b =>
+        {
+            b.HasKey(u => new { u.ReturnRequestIssueId, u.RentalUnitAssignmentId });
+            b.HasOne<RentalUnitAssignment>().WithMany().HasForeignKey(u => u.RentalUnitAssignmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(u => u.RentalUnitAssignmentId);
+        });
+
+        modelBuilder.Entity<ReturnRequestResolution>(b =>
+        {
+            b.Property(r => r.Id).ValueGeneratedNever();
+            b.Property(r => r.ResolutionMediaIds).HasField("_resolutionMediaIds");
+            b.HasMany(r => r.Units).WithOne(u => u.ReturnRequestResolution)
+                .HasForeignKey(u => u.ReturnRequestResolutionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ReturnRequestResolutionUnit>(b =>
+        {
+            b.HasKey(u => new { u.ReturnRequestResolutionId, u.RentalUnitAssignmentId });
+            b.HasOne<RentalUnitAssignment>().WithMany().HasForeignKey(u => u.RentalUnitAssignmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(u => u.RentalUnitAssignmentId);
+        });
+
         modelBuilder.Entity<RentalUnitAssignment>(b =>
         {
             b.HasIndex(u => new { u.RentalItemId, u.AssetId })

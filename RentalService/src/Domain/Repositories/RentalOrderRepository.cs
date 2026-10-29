@@ -32,6 +32,12 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .Include(o => o.Items)
                 .ThenInclude(i => i.ReturnRecords)
             .Include(o => o.Items)
+                .ThenInclude(i => i.ReturnRequests).ThenInclude(r => r.Units)
+            .Include(o => o.Items)
+                .ThenInclude(i => i.ReturnRequests).ThenInclude(r => r.Issues).ThenInclude(issue => issue.Units)
+            .Include(o => o.Items)
+                .ThenInclude(i => i.ReturnRequests).ThenInclude(r => r.Resolutions).ThenInclude(res => res.Units)
+            .Include(o => o.Items)
                 .ThenInclude(i => i.DeductionProposal!)
                     .ThenInclude(p => p.Dispute)
             .Include(o => o.StateTransitions)
@@ -118,6 +124,30 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 entry.State = EntityState.Modified;
             }
             // Register new children before DetectChanges discovers their non-empty GUIDs.
+            foreach (var request in order.Items.SelectMany(i => i.ReturnRequests))
+            {
+                if (_dbContext.Entry(request).State == EntityState.Detached)
+                    _dbContext.Entry(request).State = EntityState.Added;
+                foreach (var unit in request.Units)
+                    if (_dbContext.Entry(unit).State == EntityState.Detached)
+                        _dbContext.Entry(unit).State = EntityState.Added;
+                foreach (var issue in request.Issues)
+                {
+                    if (_dbContext.Entry(issue).State == EntityState.Detached)
+                        _dbContext.Entry(issue).State = EntityState.Added;
+                    foreach (var issueUnit in issue.Units)
+                        if (_dbContext.Entry(issueUnit).State == EntityState.Detached)
+                            _dbContext.Entry(issueUnit).State = EntityState.Added;
+                }
+                foreach (var resolution in request.Resolutions)
+                {
+                    if (_dbContext.Entry(resolution).State == EntityState.Detached)
+                        _dbContext.Entry(resolution).State = EntityState.Added;
+                    foreach (var resUnit in resolution.Units)
+                        if (_dbContext.Entry(resUnit).State == EntityState.Detached)
+                            _dbContext.Entry(resUnit).State = EntityState.Added;
+                }
+            }
             foreach (var record in order.Items.SelectMany(i => i.ReturnRecords))
             {
                 if (_dbContext.Entry(record).State == EntityState.Detached)
@@ -450,6 +480,20 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                     .ThenInclude(i => i.ReturnRecords)
             .Include(o => o.SubOrders)
                 .ThenInclude(s => s.Items)
+                    .ThenInclude(i => i.ReturnRequests)
+                        .ThenInclude(r => r.Units)
+            .Include(o => o.SubOrders)
+                .ThenInclude(s => s.Items)
+                    .ThenInclude(i => i.ReturnRequests)
+                        .ThenInclude(r => r.Issues)
+                            .ThenInclude(issue => issue.Units)
+            .Include(o => o.SubOrders)
+                .ThenInclude(s => s.Items)
+                    .ThenInclude(i => i.ReturnRequests)
+                        .ThenInclude(r => r.Resolutions)
+                            .ThenInclude(res => res.Units)
+            .Include(o => o.SubOrders)
+                .ThenInclude(s => s.Items)
                     .ThenInclude(i => i.DeductionProposal)
             .Include(o => o.OperationReceipts.Where(r => r.Action == RequestRefundAction || r.Action == RentalItem.SettleRentalAction))
             .Include(o => o.RefundConfirmations)
@@ -505,6 +549,17 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
                 .ThenInclude(i => i.HandoverRecord)
             .Include(s => s.Items)
                 .ThenInclude(i => i.ReturnRecords)
+            .Include(s => s.Items)
+                .ThenInclude(i => i.ReturnRequests)
+                    .ThenInclude(r => r.Units)
+            .Include(s => s.Items)
+                .ThenInclude(i => i.ReturnRequests)
+                    .ThenInclude(r => r.Issues)
+                        .ThenInclude(issue => issue.Units)
+            .Include(s => s.Items)
+                .ThenInclude(i => i.ReturnRequests)
+                    .ThenInclude(r => r.Resolutions)
+                        .ThenInclude(res => res.Units)
             .Include(s => s.Items)
                 .ThenInclude(i => i.DeductionProposal)
             .FirstOrDefaultAsync(s => s.Id == subOrderId, cancellationToken);
@@ -681,8 +736,118 @@ public sealed class RentalOrderRepository : IRentalOrderRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<Guid>> GetReturnConfirmationOverdueOrderIdsAsync(
+        DateTimeOffset now, int batchSize, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.ReturnRequests
+            .AsNoTracking()
+            .Where(r => r.ConfirmationDeadlineAt <= now
+                     && r.Units.Any(u => u.ClosedAt == null && u.RejectedAt == null && u.OverdueNotifiedAt == null))
+            .Join(_dbContext.RentalItems, r => r.RentalItemId, i => i.Id, (r, i) => new { r, i.RentalOrderId })
+            .GroupBy(x => x.RentalOrderId)
+            .OrderBy(g => g.Min(x => x.r.ConfirmationDeadlineAt))
+            .Select(g => g.Key)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<RecordPage<AdminReturnRequestRecord>> SearchReturnRequestsForAdminAsync(
+        AdminReturnRequestSearchCriteria criteria,
+        DateTimeOffset now,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(criteria);
+
+        var query = _dbContext.ReturnRequests.AsNoTracking();
+
+        if (criteria.ItemId.HasValue)
+        {
+            query = query.Where(r => r.RentalItemId == criteria.ItemId.Value);
+        }
+
+        if (criteria.OrderId.HasValue)
+        {
+            query = query.Where(r => r.RentalItem!.RentalOrderId == criteria.OrderId.Value);
+        }
+
+        if (criteria.Disputed == true)
+        {
+            query = query.Where(r => r.Units.Any(u => u.ClosedAt == null && u.RejectedAt == null &&
+                r.Issues.Any(i => i.Units.Any(iu => iu.RentalUnitAssignmentId == u.RentalUnitAssignmentId))));
+        }
+        else if (criteria.Disputed == false)
+        {
+            query = query.Where(r => !r.Units.Any(u => u.ClosedAt == null && u.RejectedAt == null &&
+                r.Issues.Any(i => i.Units.Any(iu => iu.RentalUnitAssignmentId == u.RentalUnitAssignmentId))));
+        }
+
+        if (criteria.Overdue == true)
+        {
+            query = query.Where(r => r.ConfirmationDeadlineAt <= now &&
+                r.Units.Any(u => u.ClosedAt == null && u.RejectedAt == null));
+        }
+        else if (criteria.Overdue == false)
+        {
+            query = query.Where(r => r.ConfirmationDeadlineAt > now ||
+                !r.Units.Any(u => u.ClosedAt == null && u.RejectedAt == null));
+        }
+
+        int totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .OrderByDescending(r => r.SubmittedAt)
+            .ThenBy(r => r.Id)
+            .Skip(skip)
+            .Take(take)
+            .Select(r => new AdminReturnRequestRecord(
+                r.Id,
+                r.RentalItemId,
+                r.RentalItem!.RentalOrderId,
+                r.RentalItem.RentalOrder!.OrderCode,
+                r.RentalItem.RentalOrder.RenterId,
+                r.RentalItem.SupplierId,
+                r.SubmittedAt,
+                r.ConfirmationDeadlineAt,
+                r.Units.Select(u => new AdminReturnRequestUnitRecord(
+                    u.RentalUnitAssignmentId,
+                    u.ClosedAt,
+                    u.RejectedAt)).ToList(),
+                r.Issues.SelectMany(i => i.Units.Select(iu => iu.RentalUnitAssignmentId)).ToList()))
+            .ToListAsync(cancellationToken);
+
+        return new RecordPage<AdminReturnRequestRecord>(items, totalCount);
+    }
+
+    public async Task<(RentalOrder Order, RentalItem Item, ReturnRequest Request)?> GetReturnRequestAggregateAsync(
+        Guid returnRequestId,
+        CancellationToken cancellationToken = default)
+    {
+        var orderId = await _dbContext.ReturnRequests
+            .Where(r => r.Id == returnRequestId)
+            .Select(r => (Guid?)r.RentalItem!.RentalOrderId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (!orderId.HasValue) return null;
+
+        var order = await GetByIdWithDetailsAsync(orderId.Value, cancellationToken);
+        if (order is null) return null;
+
+        foreach (var item in order.Items)
+        {
+            var req = item.ReturnRequests.FirstOrDefault(r => r.Id == returnRequestId);
+            if (req != null)
+            {
+                return (order, item, req);
+            }
+        }
+
+        return null;
+    }
+
     public async Task<IReadOnlyList<Guid>> GetDeductionTimeoutItemIdsAsync(
-    DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
+        DateTimeOffset utcNow, int batchSize, CancellationToken cancellationToken = default)
     {
         return await _dbContext.RentalItems
             .AsNoTracking()

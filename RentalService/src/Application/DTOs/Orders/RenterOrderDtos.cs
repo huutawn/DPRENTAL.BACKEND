@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Dprental.RentalService.Application.DTOs.Returns;
 using Dprental.RentalService.Common.Enums;
 
 namespace Dprental.RentalService.Application.DTOs.Orders;
@@ -175,6 +176,8 @@ public sealed record OrderSettlementResponse(
 /// <param name="Handover">Biên bản bàn giao, rỗng khi chưa giao.</param>
 /// <param name="Returns">Các lần trả máy, cũ nhất trước.</param>
 /// <param name="Settlement">Quyết toán tiền cọc, rỗng khi chưa trả đủ máy.</param>
+/// <param name="Units">Danh sách máy cụ thể của dòng kèm trạng thái yêu cầu trả.</param>
+/// <param name="ReturnRequests">Danh sách các yêu cầu trả thiết bị đã gửi.</param>
 public sealed record RenterOrderItemResponse(
     string Name,
     int Quantity,
@@ -195,4 +198,48 @@ public sealed record RenterOrderItemResponse(
     OrderItemRefundResponse Refund,
     OrderHandoverResponse? Handover,
     IReadOnlyList<OrderReturnResponse> Returns,
-    OrderSettlementResponse? Settlement);
+    OrderSettlementResponse? Settlement,
+    IReadOnlyList<RenterUnitResponse> Units,
+    IReadOnlyList<ReturnRequestResponse> ReturnRequests)
+{
+    public RenterOrderItemResponse(
+        string name,
+        int quantity,
+        DateOnly startDate,
+        DateOnly endDate,
+        Guid rentalItemId,
+        Guid equipmentListingId,
+        RentalItemStatus status,
+        OrderListingSnapshotResponse listing,
+        int rentalDays,
+        decimal dailyRate,
+        decimal depositPerUnit,
+        decimal rentalAmount,
+        decimal depositAmount,
+        DateTimeOffset? supplierConfirmationDeadline,
+        DateTimeOffset? supplierDecisionAt,
+        string? rejectReason,
+        OrderItemRefundResponse refund,
+        OrderHandoverResponse? handover,
+        IReadOnlyList<OrderReturnResponse> returns,
+        OrderSettlementResponse? settlement)
+        : this(name, quantity, startDate, endDate, rentalItemId, equipmentListingId, status, listing,
+               rentalDays, dailyRate, depositPerUnit, rentalAmount, depositAmount,
+               supplierConfirmationDeadline, supplierDecisionAt, rejectReason, refund, handover, returns, settlement,
+               [], [])
+    {
+    }
+}
+
+/// <summary>
+/// Máy cụ thể trong dòng đơn mà người thuê xem: đủ thông tin để chọn máy cần trả, không để lộ dữ liệu nội bộ.
+/// </summary>
+/// <param name="AssignmentId">Mã gán máy, gửi vào API POST return-requests.</param>
+/// <param name="Status">Trạng thái assignment hiện tại.</param>
+/// <param name="HasOpenReturnRequest">Có request unit chưa đóng hay không.</param>
+/// <param name="CanRequestReturn">Có được tạo yêu cầu trả mới tại thời điểm đọc hay không.</param>
+public sealed record RenterUnitResponse(
+    Guid AssignmentId,
+    RentalUnitAssignmentStatus Status,
+    bool HasOpenReturnRequest,
+    bool CanRequestReturn);

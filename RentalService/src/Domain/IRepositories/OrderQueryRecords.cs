@@ -129,3 +129,26 @@ public sealed record AdminOrderSummaryRecord(
     {
     }
 }
+
+public sealed record AdminReturnRequestSearchCriteria(
+    bool? Disputed = null,
+    bool? Overdue = null,
+    Guid? ItemId = null,
+    Guid? OrderId = null);
+
+public sealed record AdminReturnRequestUnitRecord(
+    Guid RentalUnitAssignmentId,
+    DateTimeOffset? ClosedAt,
+    DateTimeOffset? RejectedAt);
+
+public sealed record AdminReturnRequestRecord(
+    Guid ReturnRequestId,
+    Guid RentalItemId,
+    Guid OrderId,
+    string OrderCode,
+    Guid RenterId,
+    Guid SupplierId,
+    DateTimeOffset SubmittedAt,
+    DateTimeOffset ConfirmationDeadlineAt,
+    IReadOnlyList<AdminReturnRequestUnitRecord> Units,
+    IReadOnlyList<Guid> DisputedAssignmentIds);

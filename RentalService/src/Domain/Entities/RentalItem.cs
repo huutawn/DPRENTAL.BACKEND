@@ -82,6 +82,14 @@ public partial class RentalItem
     public RentalItemStatus Status { get; private set; }
 
     internal void SetStatus(RentalItemStatus status) => Status = status;
+    internal void SetReturnsCompleted(DateTimeOffset completedAt, DateTimeOffset? deductionDeadline, decimal? finalDeductionAmount)
+    {
+        ReturnsCompletedAt = completedAt.ToUniversalTime();
+        Status = RentalItemStatus.PendingSettlement;
+        DeductionDeadline = deductionDeadline?.ToUniversalTime();
+        FinalDeductionAmount = finalDeductionAmount;
+    }
+
 
     [Required]
     [MaxLength(64)]
@@ -146,6 +154,9 @@ public partial class RentalItem
 
     private readonly List<ReturnRecord> _returnRecords = [];
     public IReadOnlyCollection<ReturnRecord> ReturnRecords => _returnRecords.AsReadOnly();
+
+    private readonly List<ReturnRequest> _returnRequests = [];
+    public IReadOnlyCollection<ReturnRequest> ReturnRequests => _returnRequests.AsReadOnly();
 
     public DeductionProposal? DeductionProposal { get; private set; }
 
@@ -223,6 +234,12 @@ public partial class RentalItem
         _returnRecords.Add(returnRecord);
     }
 
+    public void AddReturnRequest(ReturnRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _returnRequests.Add(request);
+    }
+
     public void SetDeductionProposal(DeductionProposal proposal)
     {
         ArgumentNullException.ThrowIfNull(proposal);
@@ -257,7 +274,6 @@ public partial class RentalItem
     public bool ContainsEvidenceMedia(Guid mediaId)
     {
         if (mediaId == Guid.Empty) return false;
-
         foreach (var unit in _unitAssignments)
         {
             if (unit.HandoverMediaIds.Contains(mediaId) ||
