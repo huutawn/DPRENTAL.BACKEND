@@ -5,7 +5,11 @@ using Dprental.RentalService.Application.Kafka.Configuration;
 using Dprental.RentalService.Common;
 namespace Dprental.RentalService.Application.Kafka.Consumers;
 
-/// <summary>Verify durable event evidence without rejecting legitimate Kafka backlog on receipt TTL.</summary>
+/// <summary>Xác minh bằng chứng phát sự kiện Payment; không loại backlog hợp lệ chỉ vì bản tin đến trễ.</summary>
+/// <remarks>
+/// Kiểm tra chữ ký P-256, digest của JSON gốc và ràng buộc topic/key/issuer/environment/audience.
+/// Thiếu public key khi luân chuyển khóa là lỗi có thể retry; proof sai chữ ký hoặc sai ràng buộc là dữ liệu không hợp lệ.
+/// </remarks>
 public static class PaymentPublicationProofVerifier
 {
     public static Result Verify(string payload, string? proofJson, string? topic, string? key, KafkaOptions options, DateTimeOffset now)

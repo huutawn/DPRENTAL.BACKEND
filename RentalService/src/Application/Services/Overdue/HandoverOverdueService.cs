@@ -18,6 +18,10 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Services.Overdue;
 
+/// <remarks>
+/// Quét item AwaitingHandover theo mốc giờ Việt Nam: cảnh báo trước, tự hết hạn sau thời gian gia hạn.
+/// Đọc lại dưới order lock; tác vụ bàn giao đang chờ Inventory phải được đối soát trước khi hủy và hoàn tiền.
+/// </remarks>
 public sealed class HandoverOverdueService(
     IRentalOrderRepository orders,
     IOrderLockManager locks,

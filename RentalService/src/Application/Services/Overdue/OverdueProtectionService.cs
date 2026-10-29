@@ -13,6 +13,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Overdue;
 
+/// <remarks>
+/// Tìm thiết bị đã quá hạn thuê nhưng chưa trả, tạo receipt bảo vệ và giao executor gửi MarkAssetsOverdue.
+/// Việc xử lý giữ mục tiêu bảo vệ occupancy ở Inventory; không tự giải phóng thiết bị vì đã qua ngày kết thúc dự kiến.
+/// </remarks>
 public sealed class OverdueProtectionService(
     IRentalOrderRepository orders,
     IOrderLockManager locks,

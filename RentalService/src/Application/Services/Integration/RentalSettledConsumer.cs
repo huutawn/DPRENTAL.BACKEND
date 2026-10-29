@@ -12,6 +12,10 @@ using Dprental.RentalService.Domain.Entities;
 
 namespace Dprental.RentalService.Application.Services.Integration;
 
+/// <remarks>
+/// Áp dụng RentalSettled từ Payment vào order/item và receipt liên quan.
+/// Nhánh Staged để dispatcher commit kết quả nghiệp vụ cùng Inbox; nhận yêu cầu settlement chưa phải đã quyết toán.
+/// </remarks>
 public sealed class RentalSettledConsumer(
     IRentalEventProducer eventProducer,
     TimeProvider timeProvider) : IRentalSettledConsumer

@@ -24,6 +24,11 @@ using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 
+/// <remarks>
+/// Điểm vào cho quyết định supplier: xác thực caller, quyền sở hữu và dữ liệu trước khi gọi executor nhận/từ chối suborder.
+/// Luồng bàn giao khóa order, kiểm tra deadline và bằng chứng Media, lưu snapshot/receipt và lệnh Kafka.
+/// HandoverRecord và trạng thái InRental chỉ được chốt khi handler nhận Inventory xác nhận thành công.
+/// </remarks>
 public sealed class SupplierDecisionService : ISupplierDecisionService
 {
     private readonly IRentalOrderRepository _orderRepository;
@@ -80,7 +85,7 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
 
         Guid supplierId = supplier.Value;
 
-        // Lookup only the sub-order before lock using AsNoTracking
+        // Tra cứu suborder không tracking để kiểm tra sở hữu; executor sẽ xử lý dưới khóa order.
         Result<RentalSubOrder> owned = RentalAuthorizationPolicy.AuthorizeSupplierSubOrder(
             supplierId, await _orderRepository.GetSubOrderByIdAsync(subOrderId, cancellationToken));
         if (owned.IsFailure) return owned.Error;
@@ -121,7 +126,7 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
 
         Guid supplierId = supplier.Value;
 
-        // Lookup only the sub-order before lock using AsNoTracking
+        // Tra cứu suborder không tracking để kiểm tra sở hữu; executor sẽ xử lý dưới khóa order.
         Result<RentalSubOrder> owned = RentalAuthorizationPolicy.AuthorizeSupplierSubOrder(
             supplierId, await _orderRepository.GetSubOrderByIdAsync(subOrderId, cancellationToken));
         if (owned.IsFailure) return owned.Error;

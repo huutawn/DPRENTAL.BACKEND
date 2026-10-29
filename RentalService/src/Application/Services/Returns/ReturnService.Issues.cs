@@ -14,6 +14,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Returns;
 
+/// <remarks>
+/// Nhánh báo vấn đề với yêu cầu trả máy, dùng chung repository, khóa và notifier của ReturnService.
+/// Lưu diễn biến để xử lý tiếp; báo vấn đề không tự xác nhận máy đã trả hoặc cho phép Inventory cấp phát lại.
+/// </remarks>
 public sealed partial class ReturnService
 {
     private const string ReportReturnIssueAction = "ReportReturnIssue";

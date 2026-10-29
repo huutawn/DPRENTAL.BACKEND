@@ -29,6 +29,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Kafka.Consumers;
 
+/// <remarks>
+/// Được dispatcher gọi khi xử lý Inbox kết quả allocation. Đối chiếu command, operation key, order/item và receipt
+/// trước khi áp dụng xác nhận giữ lịch, nhận đơn, bàn giao, giải phóng hoặc bảo vệ quá hạn.
+/// Handler chuẩn bị thay đổi trong transaction của dispatcher; receipt và result event dùng để phân biệt đã gửi với đã xử lý.
+/// </remarks>
 public sealed class InventoryAllocationResultHandler : IInventoryAllocationResultHandler
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -72,6 +77,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         _paymentClient = paymentClient;
     }
 
+    // Đối chiếu kết quả với tác vụ đã lưu rồi phân nhánh theo CommandType.
+    // Dispatcher bao transaction và cập nhật Inbox; handler không tự commit offset Kafka.
     public async Task<Result<AllocationEventApplyResult>> HandleAllocationEventAsync(
         Guid orderId,
         RentalInboxMessage msg,
@@ -81,7 +88,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         using var doc = JsonDocument.Parse(msg.Payload);
         var root = doc.RootElement;
 
-        // Envelope validation
+        // Kiểm tra payload và định danh lệnh trước khi tìm receipt tương ứng.
         if (!root.TryGetProperty("payload", out var payloadElement))
         {
             return Error.Validation("INVALID_ENVELOPE", "Missing payload property in allocation event envelope.");
@@ -94,7 +101,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         if (payloadOrderId == Guid.Empty || payloadOrderId != orderId || rentalItemId == Guid.Empty || string.IsNullOrWhiteSpace(operationKey))
             return Error.Validation("INVENTORY_RESULT_IDENTITY_MISMATCH", "Inventory result identity does not match its Kafka aggregate.");
 
-        // Skip return events: Return consumer handles ReturnedUnitsApplied/Rejected
+        // Kết quả trả máy thuộc InventoryReturnResultHandler, không áp dụng như kết quả allocation thông thường.
         if (string.Equals(commandType, KafkaContractSpec.CommandTypes.ApplyReturnedUnits, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(commandType, "MarkAssetsReturned", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(commandType, "BlockDamagedAssets", StringComparison.OrdinalIgnoreCase))
@@ -116,7 +123,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             return Result.Success(AllocationEventApplyResult.NoChange());
         }
 
-        // For non-CreateHold commands, an existing order is required (except compensation release on failed/timed-out checkout)
+        // Các lệnh khác cần order đã tồn tại, trừ release bù trừ cho checkout lỗi/quá hạn chưa tạo order.
         if (order == null)
         {
             if (string.Equals(commandType, KafkaContractSpec.CommandTypes.ReleaseAllocation, StringComparison.OrdinalIgnoreCase) &&
@@ -248,7 +255,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             var item = order.Items.FirstOrDefault(i => i.Id == rentalItemId);
             if (item != null)
             {
-                // Invariant: Do not restore Rejected or Expired items!
+                // Không phục hồi item đã bị từ chối hoặc hết hạn khi nhận kết quả giữ chỗ muộn.
                 if (item.Status == RentalItemStatus.PendingSupplierConfirmation)
                 {
                     item.ApplySupplierAccept(item.SupplierId, utcNow, operationKey, operationKey);
@@ -508,7 +515,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 return Result.Success(AllocationEventApplyResult.NoChange());
             }
         }
-        // Terminal order must not be revived by callback.
+        // Kết quả trả về không được làm sống lại order đã kết thúc.
         if (order.Status is RentalOrderStatus.Cancelled or RentalOrderStatus.Expired)
         {
             await _orderRepository.UpdateAsync(order, cancellationToken);
@@ -516,8 +523,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             return Result.Success(AllocationEventApplyResult.NoChange());
         }
 
-        // For orders already Paid or advanced beyond Paid, normal hold callbacks just persist the receipt.
-        // Do not repeat payment transition, do not recalculate deadlines, do not advance version, and do not emit payment events.
+        // Order đã Paid hoặc đi tiếp thì kết quả hold thông thường chỉ cập nhật receipt.
+        // Không lặp chuyển trạng thái thanh toán, tính lại deadline, tăng version hoặc phát lại sự kiện thanh toán.
         if (order.Status != RentalOrderStatus.PendingPayment)
         {
             await _orderRepository.UpdateAsync(order, cancellationToken);

@@ -18,6 +18,10 @@ using Dprental.RentalService.Domain.IRepositories;
 
 namespace Dprental.RentalService.Application.Services.Settlement;
 
+/// <remarks>
+/// Nhận đề xuất khấu trừ của supplier, kiểm tra quyền và giới hạn tiền cọc; xử lý cả nhánh supplier quá hạn đề xuất.
+/// Khi đủ điều kiện quyết toán, lập lịch receipt cho executor gọi Payment; chưa trực tiếp chuyển tiền.
+/// </remarks>
 public sealed class DeductionService(
     IRentalOrderRepository orders, IOrderLockManager locks, IUnitOfWork unitOfWork,
     IRentalMediaClient media, TimeProvider clock, IOrderHubNotifier? notifier = null) : IDeductionService

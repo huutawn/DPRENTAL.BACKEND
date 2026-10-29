@@ -9,6 +9,10 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Kafka.Workers;
 
+/// <remarks>
+/// Luồng xử lý sau tiếp nhận: lấy tối đa 50 Inbox đến lịch retry → tạo scope riêng cho từng bản tin → gọi dispatcher.
+/// Worker này đọc database, không đọc broker và không commit offset Kafka. Dispatcher sở hữu khóa và transaction nghiệp vụ.
+/// </remarks>
 public sealed class InboxProcessingWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
@@ -75,6 +79,8 @@ public sealed class InboxProcessingWorker : BackgroundService
         _logger.LogInformation("InboxProcessingWorker stopping");
     }
 
+    // Đọc danh sách ứng viên bằng scope ngắn, sau đó mỗi message dùng scope riêng.
+    // Dispatcher kiểm tra lại dưới khóa nên danh sách này không phải quyền sở hữu độc quyền bản tin.
     public async Task<int> ProcessBatchAsync(CancellationToken cancellationToken)
     {
         if (!_kafkaOptions.Enabled)

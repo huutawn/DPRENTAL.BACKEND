@@ -13,6 +13,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Background;
 
+/// <remarks>
+/// Mỗi vòng thực hiện hai việc: xử lý checkout quá hạn, rồi tiếp tục operation đang chờ xử lý.
+/// Nhánh timeout lấy khóa renter rồi order, đọc lại operation và ghi trạng thái lỗi cùng release Outbox.
+/// Nhánh tiếp tục gọi CheckoutService.ContinueOperationAsync để dùng lại luồng điều phối chính.
+/// </remarks>
 public sealed class CheckoutTimeoutScannerWorker : BackgroundService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

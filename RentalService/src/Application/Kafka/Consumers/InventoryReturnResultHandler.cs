@@ -11,9 +11,14 @@ using Dprental.RentalService.Application.Kafka.Producers;
 namespace Dprental.RentalService.Application.Kafka.Consumers;
 
 /// <summary>
-/// Applies Inventory's confirmed return result; publishing the command alone never closes an assignment.
-/// Enforces terminal state invariants: once Succeeded or Failed, conflicting events are rejected and do not mutate data.
+/// Áp dụng xác nhận trả máy từ Inventory; chỉ phát lệnh không đủ để đóng assignment.
+/// Khi receipt đã Succeeded hoặc Failed, từ chối kết quả mâu thuẫn để không ghi đè kết quả đã chốt.
 /// </summary>
+/// <remarks>
+/// Được dispatcher gọi trong transaction xử lý Inbox sau khi có kết quả ApplyReturnedUnits từ Inventory.
+/// Đối chiếu từng allocation/asset/condition với lệnh gốc; máy hỏng phải có bằng chứng trạng thái được bảo vệ.
+/// Chỉ kết quả hợp lệ mới ghi đóng allocation và phát RentalItemReturned khi hoàn tất; kết quả mâu thuẫn bị từ chối.
+/// </remarks>
 public sealed class InventoryReturnResultHandler(
     IRentalOrderRepository orders,
     TimeProvider clock,
@@ -21,6 +26,8 @@ public sealed class InventoryReturnResultHandler(
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    // Áp dụng ReturnedUnitsApplied: xác minh mọi unit trước khi ghi kết quả đóng allocation.
+    // Chỉ khi các unit đã trả đều được Inventory xác nhận đóng mới ghi InventoryClosure và event hoàn tất trả.
     public async Task<Result> ApplyStagedAsync(string json, CancellationToken ct = default)
     {
         KafkaMessageEnvelope<ReturnedUnitsAppliedPayload>? envelope;
@@ -111,6 +118,8 @@ public sealed class InventoryReturnResultHandler(
         return Result.Success();
     }
 
+    // Áp dụng ReturnedUnitsRejected vào receipt tương ứng; không cho kết quả từ chối ghi đè tác vụ đã thành công.
+    // Bản tin lặp cùng lỗi được chấp nhận để việc nhận lại không tạo thay đổi mới.
     public async Task<Result> RejectStagedAsync(string json, CancellationToken ct = default)
     {
         KafkaMessageEnvelope<ReturnedUnitsRejectedPayload>? envelope;

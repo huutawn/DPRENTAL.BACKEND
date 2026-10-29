@@ -12,6 +12,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Operations;
 
+/// <remarks>
+/// Phần điều phối ExtendHold và ReleaseAllocation của cùng RentalOperationExecutor.
+/// Lệnh được ghi Outbox cùng receipt; kết quả thực tế được InventoryAllocationResultHandler áp dụng khi có sự kiện trả về.
+/// Không đồng nhất enqueue thành công với Inventory đã gia hạn hoặc giải phóng allocation.
+/// </remarks>
 public sealed partial class RentalOperationExecutor
 {
     public async Task<Result> ExecuteExtendHoldAsync(
@@ -47,7 +52,7 @@ public sealed partial class RentalOperationExecutor
 
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
 
-        // Check if deadline already passed
+        // Nếu đã hết hạn supplier xác nhận, chuyển sang nhánh bù trừ thay vì gia hạn hold.
         if (!item.SupplierConfirmationDeadline.HasValue || utcNow >= item.SupplierConfirmationDeadline.Value)
         {
             return await HandleHoldFailureAsync(order, item, receipt, "Deadline passed prior to extend hold", cancellationToken);
@@ -241,7 +246,7 @@ public sealed partial class RentalOperationExecutor
         order.RecordReadModelUpdate(utcNow);
         await CommitLocalChangesAsync(order, cancellationToken);
 
-        // Await release under the current lock!
+        // Ghi lệnh release khi vẫn đang giữ khóa order; trả về chưa có nghĩa Inventory đã giải phóng xong.
         await ReleaseAllocationInternalAsync(order, item, releaseReceipt, releaseKey, cancellationToken);
 
         return Result.Success();

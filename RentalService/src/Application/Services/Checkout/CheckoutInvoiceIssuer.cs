@@ -15,6 +15,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Checkout;
 
+/// <remarks>
+/// Đảm bảo hóa đơn của order bằng HTTP Payment với operation key ổn định theo order.
+/// Kiểm tra số tiền, tiền tệ và deadline của phản hồi trước khi lưu InvoiceRef/receipt; không kéo dài hạn thanh toán.
+/// Caller phải kết thúc transaction tạo order trước cuộc gọi mạng; dữ liệu hóa đơn được lưu sau khi Payment trả về.
+/// </remarks>
 public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
 {
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(300);
@@ -44,6 +49,8 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
         _notifier = notifier;
     }
 
+    // Tận dụng response đã lưu nếu còn hợp lệ; nếu cần thì gọi Payment cùng operation key.
+    // Chỉ retry ngắn với lỗi tạm thời và luôn kiểm tra lại deadline trước khi tiếp tục.
     public async Task<Result<CreateInvoiceResponse>> EnsureInvoiceAsync(RentalOrder order, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(order);

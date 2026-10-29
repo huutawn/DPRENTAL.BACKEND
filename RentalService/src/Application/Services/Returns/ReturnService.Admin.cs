@@ -18,6 +18,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Returns;
 
+/// <remarks>
+/// Nhánh Admin đọc và giải quyết yêu cầu trả có vấn đề. Kiểm tra quyền Admin trước khi truy vấn hoặc thay đổi.
+/// Khi quyết định cần ghi nhận trả thực tế, dùng chung ExecuteReturnConfirmationCoreAsync để giữ nhất quán bằng chứng và lệnh Inventory.
+/// </remarks>
 public sealed partial class ReturnService
 {
     private const string AdminResolveReturnAction = "AdminResolveReturnRequest";

@@ -23,6 +23,12 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Returns;
 
+/// <remarks>
+/// Luồng supplier ghi nhận trả máy: xác thực/quyền sở hữu → khóa order → kiểm tra idempotency và từng unit
+/// → xác minh bằng chứng Media → lưu ReturnRecord, receipt, lệnh ApplyReturnedUnits và event trong cùng transaction.
+/// Ghi nhận trả tại Rental chưa xác nhận allocation đã đóng; InventoryReturnResultHandler xử lý xác nhận riêng.
+/// Các file Requests, Issues và Admin là các nhánh của cùng ReturnService, dùng chung phần xác nhận trả.
+/// </remarks>
 public sealed partial class ReturnService(
     IRentalOrderRepository repository,
     IOrderLockManager locks,
@@ -36,6 +42,8 @@ public sealed partial class ReturnService(
     ILogger<ReturnService>? logger = null) : IReturnService
 {
 
+    // Supplier ghi biên bản nhận lại các unit; fingerprint chuẩn hóa thứ tự để nhận biết retry cùng nội dung.
+    // Response này xác nhận Rental đã ghi biên bản, chưa xác nhận Inventory đã đóng allocation.
     public async Task<Result<RecordReturnResponse>> RecordReturnAsync(Guid itemId, IRentalCallerContext caller,
         RecordReturnRequest request, string idempotencyKey, CancellationToken cancellationToken = default)
     {
@@ -258,6 +266,8 @@ public sealed partial class ReturnService(
             fingerprint, true, null, null, now, targetItemId: item.Id,
             payloadJson: payloadJson, apiResponseJson: apiResponseJson));
 
+        // Media đã được kiểm tra trước khi mở transaction. Từ đây lưu đồng thời biên bản,
+        // receipt, command ApplyReturnedUnits và event RentalUnitsReturned; lỗi enqueue phải rollback tất cả.
         await using var tx = await unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {

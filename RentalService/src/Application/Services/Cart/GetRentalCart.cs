@@ -10,6 +10,10 @@ using Dprental.RentalService.Domain.IRepositories;
 
 namespace Dprental.RentalService.Application.Services.Cart;
 
+/// <remarks>
+/// Luồng đọc giỏ: nạp giỏ hiện tại → đánh giá lại từng dòng bằng RentalCartItemEvaluator → dựng read model.
+/// Giá và khả dụng phản ánh dữ liệu Inventory tại lần đọc; checkout vẫn phải kiểm tra lại.
+/// </remarks>
 public sealed class GetRentalCart(
     IRentalCartRepository carts,
     RentalCartItemEvaluator evaluator)

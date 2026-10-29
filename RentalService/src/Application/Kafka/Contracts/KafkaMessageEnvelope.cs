@@ -3,9 +3,14 @@ using System.Text.Json.Serialization;
 namespace Dprental.RentalService.Application.Kafka.Contracts;
 
 /// <summary>
-/// Unified Kafka Message Envelope (Version 1).
-/// Canonical standard integration contract across Rental, Payment, and Inventory streaming.
+/// Vỏ bản tin Kafka phiên bản 1 dùng chung khi tích hợp Rental, Payment và Inventory.
+/// Payload chứa dữ liệu theo MessageType; metadata giúp định danh, định tuyến và lần ngược nguyên nhân.
 /// </summary>
+/// <remarks>
+/// MessageId nhận diện bản tin để chống xử lý trùng; AggregateId nhận diện order.
+/// CorrelationId liên kết các bước cùng luồng; CausationId trỏ message dẫn tới message hiện tại.
+/// Version là phiên bản envelope, khác orderVersion của dữ liệu nghiệp vụ trong payload.
+/// </remarks>
 public sealed record KafkaMessageEnvelope<TPayload>(
     [property: JsonPropertyName("messageId")] Guid MessageId,
     [property: JsonPropertyName("messageType")] string MessageType,

@@ -12,6 +12,10 @@ using Dprental.RentalService.Domain.Errors;
 
 namespace Dprental.RentalService.Application.Services.Settlement;
 
+/// <remarks>
+/// Phần Admin truy vấn và chốt tranh chấp khấu trừ của cùng DeductionResponseService.
+/// Quyết định Admin là đầu vào nghiệp vụ cho quyết toán; không đồng nghĩa Payment đã chuyển tiền.
+/// </remarks>
 public sealed partial class DeductionResponseService
 {
     public async Task<Result<ResolveDisputeResponse>> ResolveDisputeAsync(

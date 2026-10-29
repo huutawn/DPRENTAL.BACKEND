@@ -21,6 +21,11 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Services.Cancellation;
 
+/// <remarks>
+/// Hai điểm vào cùng xử lý item chưa bàn giao: renter yêu cầu hủy hoặc worker kết thúc khi quá hạn.
+/// Kiểm tra quyền/trạng thái và tác vụ bàn giao còn treo trước khi điều phối release, refund, receipt và event.
+/// Không được suy diễn máy chưa giao chỉ vì chưa nhận được phản hồi Inventory.
+/// </remarks>
 public sealed class ItemCancellationService : IItemCancellationService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

@@ -15,6 +15,10 @@ using Dprental.RentalService.Application.Policies;
 
 namespace Dprental.RentalService.Application.Services.Integration;
 
+/// <remarks>
+/// Áp dụng kết quả hoàn tiền do Payment phát: kiểm tra định danh và dữ liệu liên quan trước khi cập nhật Rental.
+/// Nhánh Staged tham gia transaction của dispatcher; không nhầm với thao tác gửi yêu cầu RequestRefund trước đó.
+/// </remarks>
 public sealed class RefundCompletedConsumer : IRefundCompletedConsumer
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

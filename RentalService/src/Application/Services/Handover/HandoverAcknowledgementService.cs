@@ -12,6 +12,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Handover;
 
+/// <remarks>
+/// Ghi nhận bằng chứng người thuê xác nhận đã nhận máy sau kiểm tra quyền và trạng thái.
+/// Đây là xác nhận bổ sung của renter; không thay thế lệnh bàn giao của supplier hoặc kết quả Inventory.
+/// </remarks>
 public sealed class HandoverAcknowledgementService(
     IRentalOrderRepository orderRepository,
     IOrderLockManager lockManager,

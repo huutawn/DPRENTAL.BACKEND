@@ -15,6 +15,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Operations;
 
+/// <remarks>
+/// Các nhánh tác vụ Payment của cùng executor: hủy invoice, yêu cầu hoàn tiền, hết hạn thanh toán và tạo invoice.
+/// Dùng receipt/operation key để theo dõi lần gọi HTTP và phục hồi khi gián đoạn.
+/// Payment chấp nhận yêu cầu hoàn tiền chưa phải bằng chứng tiền đã hoàn; sự kiện RefundCompleted cập nhật kết quả sau đó.
+/// </remarks>
 public sealed partial class RentalOperationExecutor
 {
     public async Task<Result> ExecuteCancelInvoiceAsync(

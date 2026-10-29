@@ -8,6 +8,10 @@ namespace Dprental.RentalService.Application.Policies;
 /// Nhà cung cấp chỉ xem được đơn sau khi người thuê đã thanh toán đúng hạn (PaymentConfirmedAt != null)
 /// và đơn không rơi vào trường hợp hoàn tiền do thanh toán trễ (!LatePaymentRefundRequired).
 /// </summary>
+/// <remarks>
+/// Kiểm tra điều kiện thanh toán để hiển thị cho supplier, dùng trong các luồng đọc/thông báo.
+/// Vẫn phải lọc/kiểm tra đúng SupplierId; đủ điều kiện hiển thị không có nghĩa mọi supplier đều được xem.
+/// </remarks>
 public static class SupplierOrderVisibilityPolicy
 {
     public static bool CanSupplierView(DateTimeOffset? paymentConfirmedAt, bool latePaymentRefundRequired)

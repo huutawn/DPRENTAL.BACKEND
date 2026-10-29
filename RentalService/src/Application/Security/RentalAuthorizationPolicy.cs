@@ -5,8 +5,8 @@ using Dprental.RentalService.Domain.Errors;
 namespace Dprental.RentalService.Application.Security;
 
 /// <summary>
-/// Frozen business authorization rules for RentalService operations.
-/// Enforces resource-level ownership, profile completion, and role boundaries.
+/// Các quy tắc phân quyền nghiệp vụ cho RentalService.
+/// Kiểm tra quyền sở hữu tài nguyên, điều kiện hồ sơ và giới hạn theo vai trò.
 /// </summary>
 /// <remarks>
 /// Đây là nơi duy nhất quyết định ai được làm gì: controller và service không tự so sánh RenterId/SupplierId.
@@ -40,8 +40,7 @@ public static class RentalAuthorizationPolicy
 
 
     /// <summary>
-    /// Evaluates read access to a RentalOrder.
-    /// Allowed if caller is platform admin or the renter who placed the order; anyone else gets Order.NotFound.
+    /// Cho phép Admin hoặc renter đặt đơn đọc RentalOrder; người khác nhận Order.NotFound để chống dò ID.
     /// </summary>
     public static Result AuthorizeOrderRead(IRentalCallerContext caller, RentalOrder order)
     {
@@ -60,8 +59,8 @@ public static class RentalAuthorizationPolicy
     }
 
     /// <summary>
-    /// Evaluates whether the caller can perform renter-scoped actions on an order (e.g. acknowledge handover, dispute deduction, cancel).
-    /// Anyone but the renter who placed the order gets Order.NotFound.
+    /// Kiểm tra thao tác của renter trên đơn, như xác nhận nhận máy, tranh chấp khấu trừ hoặc hủy.
+    /// Chỉ renter đặt đơn được thực hiện; người khác nhận Order.NotFound.
     /// </summary>
     public static Result AuthorizeRenterAction(IRentalCallerContext caller, RentalOrder order)
     {
@@ -75,8 +74,8 @@ public static class RentalAuthorizationPolicy
     }
 
     /// <summary>
-    /// Evaluates whether the caller can perform supplier-scoped actions on a RentalItem (accept, reject, handover, return, propose deduction).
-    /// Anyone but the item's supplier gets RentalItem.NotFound.
+    /// Kiểm tra quyền supplier nhận/từ chối, bàn giao, nhận trả hoặc đề xuất khấu trừ trên item.
+    /// Người không sở hữu item nhận RentalItem.NotFound.
     /// </summary>
     public static Result AuthorizeSupplierAction(IRentalCallerContext caller, RentalItem item)
     {
@@ -161,8 +160,7 @@ public static class RentalAuthorizationPolicy
     }
 
     /// <summary>
-    /// Evaluates whether the caller has authority to resolve a dispute.
-    /// Invariant: Only platform or system admins can resolve disputes.
+    /// Chỉ Admin hệ thống/nền tảng được chốt tranh chấp.
     /// </summary>
     public static Result AuthorizeDisputeResolution(IRentalCallerContext caller) =>
         RequireAdmin(caller, "Service token không được giải quyết khiếu nại.", RentalErrors.AdminOnlyResolution);
@@ -176,8 +174,7 @@ public static class RentalAuthorizationPolicy
             "Service token không được tra cứu yêu cầu trả máy.",
             Error.Forbidden(ErrorCodes.Forbidden, "Chỉ quản trị viên mới được tra cứu yêu cầu trả máy."));
     /// <summary>
-    /// Evaluates whether the caller has authority to access admin supplier statistics.
-    /// Invariant: Only authenticated human administrators can view supplier statistics.
+    /// Chỉ Admin cá nhân đã đăng nhập được đọc thống kê supplier; từ chối token service.
     /// </summary>
     public static Result AuthorizeAdminStatisticsRead(IRentalCallerContext caller) =>
         RequireAdmin(
@@ -186,8 +183,7 @@ public static class RentalAuthorizationPolicy
             Error.Forbidden(ErrorCodes.Forbidden, "Chỉ quản trị viên mới có quyền xem thống kê của supplier."));
 
     /// <summary>
-    /// Evaluates whether the caller may search and read any rental order, including internal references.
-    /// Invariant: Only authenticated human administrators; service tokens are refused.
+    /// Chỉ Admin cá nhân đã đăng nhập được tìm/đọc mọi đơn và tham chiếu nội bộ; từ chối token service.
     /// </summary>
     public static Result AuthorizeAdminOrderRead(IRentalCallerContext caller) =>
         RequireAdmin(
@@ -196,8 +192,7 @@ public static class RentalAuthorizationPolicy
             Error.Forbidden(ErrorCodes.Forbidden, "Chỉ quản trị viên mới được tra cứu mọi đơn thuê."));
 
     /// <summary>
-    /// Evaluates whether the caller may confirm a refund bank transfer to a renter.
-    /// Invariant: Only authenticated human administrators; service tokens are refused.
+    /// Chỉ Admin cá nhân đã đăng nhập được xác nhận chuyển khoản hoàn tiền; từ chối token service.
     /// </summary>
     public static Result AuthorizeAdminRefundConfirm(IRentalCallerContext caller) =>
         RequireAdmin(
@@ -206,12 +201,10 @@ public static class RentalAuthorizationPolicy
             Error.Forbidden(ErrorCodes.Forbidden, "Chỉ quản trị viên mới được xác nhận hoàn tiền."));
 
     /// <summary>
-    /// Evaluates whether the caller has authority to access private evidence media for a given rental item/order.
-    /// Invariants:
-    /// - Caller must be platform admin, the order's renter, or the item's supplier.
-    /// - Service tokens are not permitted to access private user evidence.
-    /// - MediaId must be present in the item's recorded evidence collections (handover, returns, deductions, or dispute).
-    /// A stranger gets the same Media.EvidenceNotFound as an unrelated media id, so evidence ids cannot be probed.
+    /// Kiểm tra quyền đọc bằng chứng riêng tư của order/item.
+    /// Caller phải là Admin, renter của order hoặc supplier của item; không cho token service truy cập.
+    /// MediaId phải thuộc bằng chứng đã ghi của bàn giao, trả máy, khấu trừ hoặc tranh chấp.
+    /// Người ngoài và MediaId không liên quan cùng nhận Media.EvidenceNotFound để chống dò ID.
     /// </summary>
     public static Result AuthorizeEvidenceRead(
         IRentalCallerContext caller,

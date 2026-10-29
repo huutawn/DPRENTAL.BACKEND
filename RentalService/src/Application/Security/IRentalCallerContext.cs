@@ -1,63 +1,62 @@
 namespace Dprental.RentalService.Application.Security;
 
 /// <summary>
-/// Frozen caller identity context for RentalService operations.
-/// Decouples use cases and controllers from ASP.NET Core HttpContext / ClaimsPrincipal,
-/// enabling independent unit and contract testing across services.
+/// Contract danh tính người gọi cho các use case của RentalService.
+/// Use case lấy danh tính và quyền qua context thay vì tự đọc HttpContext hoặc ClaimsPrincipal;
+/// có thể truyền context kiểm thử mà không cần tạo request HTTP.
 /// </summary>
 public interface IRentalCallerContext
 {
     /// <summary>
-    /// Indicates whether the current caller has a verified, valid authenticated identity.
+    /// Cho biết caller hiện có danh tính đã được xác thực hợp lệ hay chưa.
     /// </summary>
     bool IsAuthenticated { get; }
 
     /// <summary>
-    /// Indicates whether the caller is a background service / worker rather than an interactive user.
-    /// In DPRental Auth, service tokens carry a UUID in 'sub' and 'u=svc'.
+    /// Phân biệt caller dùng token service với người dùng cá nhân.
+    /// Theo contract Auth, token service có sub là UUID và u=svc; worker tự chạy không mặc nhiên có token này.
     /// </summary>
     bool IsService { get; }
 
     /// <summary>
-    /// Unique interactive user ID (from JWT 'sub' claim).
-    /// Strictly null when unauthenticated or when the caller is a service token ('u=svc').
+    /// ID người dùng cá nhân lấy từ claim sub.
+    /// Luôn null nếu chưa xác thực hoặc là token service (u=svc), tránh service giả danh renter/supplier.
     /// </summary>
     Guid? UserId { get; }
 
     /// <summary>
-    /// Preferred username or service identifier.
+    /// Tên người dùng hoặc định danh service theo claims.
     /// </summary>
     string? Username { get; }
 
     /// <summary>
-    /// Profile completion flag (from JWT 'pc' claim).
-    /// Per DPRental Auth contract, must be boolean true to be eligible for checkout.
-    /// Always false for service tokens.
+    /// Cờ hoàn tất hồ sơ từ claim pc; theo contract Auth phải là boolean true để đủ điều kiện checkout.
+    /// Luôn false đối với token service.
     /// </summary>
     bool IsProfileCompleted { get; }
 
     /// <summary>
-    /// Assigned immutable roles (from JWT 'r' claim), including normalized aliases.
+    /// Tập vai trò bất biến từ claim r, bao gồm các alias đã chuẩn hóa.
     /// </summary>
     IReadOnlySet<string> Roles { get; }
 
     /// <summary>
-    /// Assigned immutable permissions (from JWT 'p' claim).
+    /// Tập quyền bất biến từ claim p.
     /// </summary>
     IReadOnlySet<string> Permissions { get; }
 
     /// <summary>
-    /// Checks whether the caller has the specified role (matching canonical name or alias).
+    /// Kiểm tra vai trò theo tên chính thức hoặc alias đã chuẩn hóa.
     /// </summary>
     bool HasRole(string role);
 
     /// <summary>
-    /// Checks whether the caller has the specified permission.
+    /// Kiểm tra caller có quyền được chỉ định hay không.
     /// </summary>
     bool HasPermission(string permission);
 
     /// <summary>
-    /// Checks whether the caller has platform or system admin privileges (admin, adm, admin_platform, adp).
+    /// Kiểm tra quyền Admin hệ thống/nền tảng theo các tên admin, adm, admin_platform hoặc adp.
     /// </summary>
     bool IsAdmin();
 }

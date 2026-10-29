@@ -44,12 +44,13 @@ RentalService/src/Application/Kafka/
 
 ## 2. Kiến trúc Pipeline và Luồng Kafka
 
-### 2.1. Checkout bất đồng bộ (202 Accepted + Polling)
-- API `POST /api/v1/rental/checkout` trả về HTTP `202 Accepted` kèm `statusUrl` (`/api/v1/rental/checkout/operations/{operationId}`).
-- Các lệnh `CreateHold` được enqueue bền vững vào Outbox (`rental_outbox_messages`) tới topic `inventory.allocation.commands.v1`.
-- Worker xuất bản Outbox gửi lệnh tới broker; `InventoryAllocationResultHandler` xử lý kết quả:
-  - **All-or-nothing**: Nếu tất cả các dòng giữ lịch thành công, hệ thống tạo đơn hàng nguyên tử, tạo hóa đơn qua HTTP với PaymentService, và đánh dấu thao tác thành công.
-  - Nếu có bất kỳ dòng nào thất bại hoặc quá hạn 30 phút: thao tác thất bại và tự động enqueue lệnh bù trừ `ReleaseAllocation` qua Kafka cho toàn bộ các dòng đã giữ.
+### 2.1. Checkout và polling theo implementation hiện tại
+- `CheckoutService.SubmitAsync` khóa renter, kiểm tra idempotency rồi gọi `CheckoutPreparationService` để kiểm tra dữ liệu và dựng snapshot.
+- Operation lưu order/item ID dự kiến và deadline trước bước giữ chỗ. `ExecuteOrchestrationAsync` gọi **HTTP `CreateHold`** tuần tự cho từng dòng chưa giữ thành công và lưu tiến độ; không giữ transaction database trong lúc gọi Inventory.
+- Khi tất cả các dòng đã `Held`, một transaction lưu order, assignments, `RentalOrderCreated` vào Outbox và receipt `CreateInvoice`. Sau commit, `CheckoutInvoiceIssuer` gọi **HTTP Payment** để tạo/lấy lại hóa đơn với operation key ổn định.
+- Nếu chưa đủ dữ liệu để trả kết quả cuối, client theo dõi `/api/v1/rental/checkout/operations/{operationId}`. Operation tạo order thành công chưa đồng nghĩa đã có invoice hoặc đã sẵn sàng thanh toán.
+- Khi nhánh lỗi dứt khoát cần bù trừ, `StageCheckoutReleasesAsync` ghi lệnh `ReleaseAllocation` cho các dòng đã giữ vào Outbox. Enqueue chưa chứng minh Inventory đã giải phóng allocation.
+- Contract Kafka `CreateHold` vẫn có consumer/producer phục vụ các nhánh giữ chỗ và phục hồi; không dùng sự tồn tại của contract để kết luận checkout HTTP hiện gửi mọi hold qua Kafka.
 
 ### 2.2. Payment Confirmation & Supplier Confirmation
 - `PaymentService` phát sự kiện `InvoicePaid` tới topic `payment.events.v1` với partition key bằng `RentalOrderId`.
@@ -105,12 +106,40 @@ Mọi message (cả Event và Command) đều được bao gói bằng một đ�
 
 | Direction | Read/query | Command/mutation | Canonical transport |
 |---|---|---|---|
-| Rental → Inventory | Listing snapshot, availability | CreateHold, ExtendHold, ConfirmAllocation, ReleaseAllocation, MarkAssetsHandedOver, ApplyReturnedUnits | HTTP read; Kafka command |
+| Rental → Inventory | Listing snapshot, availability | Checkout CreateHold; supplier accept ConfirmAllocation | HTTP trong các luồng hiện tại |
+| Rental → Inventory | — | ExtendHold, ReleaseAllocation, MarkAssetsHandedOver, ApplyReturnedUnits, MarkAssetsOverdue; CreateHold/ConfirmAllocation khi được nhánh tương ứng enqueue | Kafka command qua Outbox; phải lần caller cụ thể |
 | Inventory → Rental | Allocation command result; returned units applied/rejected | Result events | Kafka |
 | Rental → Payment | CreateInvoice, CancelInvoice, RequestRefund, SettleRental | HTTP command |
 | Payment → Rental | InvoicePaid, RefundCompleted, RentalSettled | Kafka event |
 
-`PaymentCommandProducer` and `payment.commands.v1` were removed. `RentalService` is the only Rental producer identity. Paid and completed recommendation signals use `renterId`, `quantity`, and payload `occurredAt`; schemas accept either the historical `userId` shape or current `renterId` shape, never both. Drain the old consumer group and audit pending messages before switching it; preserve current offsets, do not reset offsets, and do not replay historical events for Recommendation. These messages must not contain `SerialNumber`, `AssetCode`, `DeliveryAddress`, or `RefundAccount`.
+`PaymentCommandProducer` và `payment.commands.v1` đã được loại bỏ. Danh tính producer của Rental là `RentalService`. Tín hiệu đã thanh toán/hoàn tất phục vụ Recommendation dùng `renterId`, `quantity` và `occurredAt` trong payload; schema chấp nhận dạng lịch sử `userId` hoặc dạng hiện tại `renterId`, không đồng thời cả hai. Trước khi chuyển consumer group, xử lý hết backlog của group cũ và kiểm tra bản tin còn chờ; giữ offsets, không reset hoặc phát lại sự kiện lịch sử cho Recommendation. Không đưa `SerialNumber`, `AssetCode`, `DeliveryAddress` hoặc `RefundAccount` vào các sự kiện này.
+
+### 4.2.1. Đọc luồng gửi và nhận theo thứ tự
+
+```text
+Application Service / executor
+  → producer dựng envelope theo contract
+  → KafkaOutboxWriter ghi Outbox trong transaction của use case
+  → commit database
+  → OutboxPublisherWorker claim một bản tin bằng lease
+  → KafkaProducerTransport gửi broker
+  → broker xác nhận Persisted
+  → publisher đánh dấu Outbox Published
+
+Broker (Payment hoặc Inventory)
+  → KafkaPaymentEventsConsumerWorker nhận bản tin
+  → PaymentEventsDispatcher.ReceiveMessageAsync kiểm tra và lưu Inbox/DLQ
+  → consumer commit offset khi tiếp nhận an toàn
+  → InboxProcessingWorker lấy Inbox đến lịch xử lý
+  → PaymentEventsDispatcher.ProcessInboxMessageAsync lấy khóa và đọc lại
+  → handler nghiệp vụ chuẩn bị thay đổi
+  → commit trạng thái + Inbox Processed + Outbox phát sinh
+  → thông báo realtime ở các nhánh có hỗ trợ sau commit
+```
+
+Ba loại bản ghi có vai trò riêng: **Outbox** giữ ý định gửi; **Inbox** giữ sự kiện đã nhận để chống xử lý trùng và retry; **operation receipt** giữ tiến độ/kết quả một tác vụ nghiệp vụ. `Published` chỉ là broker đã xác nhận bản tin, còn `InboxStored` chỉ là Rental đã nhận an toàn. Cả hai đều không thay cho kết quả thực thi Inventory hoặc xác nhận dòng tiền Payment.
+
+Nếu broker đã nhận nhưng publisher dừng trước khi lưu `Published`, bản tin có thể được gửi lại. Nếu đã lưu Inbox nhưng commit offset lỗi, broker có thể giao lại. Vì vậy MessageId, so sánh nội dung và operation key vẫn cần thiết dù producer bật idempotence.
 
 ### 4.3. Xuất bản tin (Outbox Publisher Worker)
 - **Cấu hình Confluent**: `EnableIdempotence = true`, `Acks = Acks.All`, `MessageSendMaxRetries = 3`, `RetryBackoffMs = 100`.
@@ -123,6 +152,7 @@ Mọi message (cả Event và Command) đều được bao gói bằng một đ�
 ### 4.4. Tiêu thụ bản tin (Payment Events Consumer Worker)
 - **Tắt auto commit**: `EnableAutoCommit = false`, `EnableAutoOffsetStore = false`.
 - **Chỉ commit khi an toàn**: Offset chỉ được commit sau khi `RentalInboxMessage` hoặc DLQ đã được lưu bền vững vào PostgreSQL, hoặc khi xác nhận duplicate thành công.
+- **Loại sự kiện không hỗ trợ**: Sau kiểm tra envelope và định danh cơ bản, dispatcher có thể trả `Ignored`; consumer cũng commit offset cho kết quả này. Không nhầm với lỗi lưu trữ, vốn phải trả Failure để retry.
 - **Không skip lỗi**: Nếu xảy ra lỗi lưu trữ database (kết nối, deadlock), worker thử lại bản ghi đang giữ; tuyệt đối không đọc tiếp và không commit vượt qua bản ghi lỗi.
 - **Deduplication Canonical JSON**: So sánh toàn bộ nội dung JSON sau khi canonical hóa (sắp xếp object properties theo bảng chữ cái Ordinal, giữ nguyên thứ tự phần tử array). Với Inbox cũ, deserialize và so sánh từ payload đã lưu.
 - **DLQ an toàn**: Bản tin lỗi schema/conflict được đưa vào DLQ (`payment.events.v1.dlq`) với ID tất định từ `(topic, partition, offset)`. Lỗi ghi DLQ không bị swallow mà được trả về để retry.
@@ -132,7 +162,7 @@ Mọi message (cả Event và Command) đều được bao gói bằng một đ�
 ## 5. Chuẩn hóa Rental Events phục vụ Analytics (`rental.events.v1`)
 
 ### 5.1. Semantics về Định danh, Phiên bản và Deduplication
-- **Deduplication**: Consumer Analytics bắt buộc dedupe bằng `messageId` (UUID v5 tất định từ `(producer, messageType, logicalEntityId)`). Replay nghiệp vụ không tạo `messageId` mới; publisher retry gửi lại nguyên message đã lưu trong Outbox mà không dựng lại payload/version từ trạng thái mới.
+- **Deduplication**: Consumer Analytics bắt buộc dedupe bằng `messageId` (GUID tất định từ 16 byte đầu của SHA-256 trên `(producer, messageType, logicalEntityId)`, theo `OutboxMessageIdGenerator`). Replay nghiệp vụ không tạo `messageId` mới; publisher retry gửi lại nguyên message đã lưu trong Outbox mà không dựng lại payload/version từ trạng thái mới.
 - **Thứ tự thay đổi qua `orderVersion`**:
   - `orderVersion` là số nguyên dương bắt buộc phản ánh `RentalOrder.Version` sau khi thay đổi nghiệp vụ và rollup hoàn tất trong cùng transaction.
   - `orderVersion` dùng để nhận biết thứ tự các thay đổi theo từng đơn hàng (`RentalOrderId`), có thể có khoảng nhảy (do các thay đổi nội bộ hoặc thao tác không phát event ra ngoài).
@@ -313,6 +343,8 @@ Trước khi producer mới được triển khai, các consumer (Recommendation
 
 Kafka bị **tắt mặc định** khi chưa được cấu hình (`Enabled = false`).
 Khi bật (`Enabled = true`), nếu thiếu `BootstrapServers` hoặc các thông số topics/timeouts bị sai, ứng dụng sẽ **báo lỗi ngay lúc startup (`OptionsValidationException`)**, không âm thầm vô hiệu hóa worker.
+
+`KafkaOptionsValidator` còn yêu cầu ít nhất một public key Payment proof P-256 hợp lệ trong `PaymentProofPublicKeys`. Cấu hình ví dụ bên dưới chỉ minh họa broker/topic/timeout; phải bổ sung key thực tế và issuer/environment khớp bên phát proof trước khi bật. Không tự tạo key tùy ý chỉ để vượt kiểm tra startup.
 
 ### Cấu hình mẫu trong `appsettings.json` hoặc Environment Variables:
 

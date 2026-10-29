@@ -46,21 +46,26 @@ using Dprental.RentalService.Application.Services.Settlement;
 
 namespace Dprental.RentalService.Application.DependencyInjection;
 
+/// <remarks>
+/// Bản đồ ghép Application: đăng ký use case scoped, client HTTP, executor, Kafka và worker theo lịch.
+/// Service scoped dùng repository/unit of work trong scope; hosted worker phải tạo scope khi xử lý.
+/// Program bổ sung context người gọi, JWT và notifier của API; không lấy service scoped làm trạng thái dùng chung của worker.
+/// </remarks>
 public static class ApplicationServiceCollectionExtensions
 {
     public static IServiceCollection AddRentalServiceApplication(this IServiceCollection services, IConfiguration? configuration = null)
     {
-        // Cart Evaluator, Use Cases & Read Models
+        // Giỏ: evaluator dùng chung quy tắc, use case ghi và read model đọc.
         services.AddScoped<RentalCartItemEvaluator>();
         services.AddScoped<RentalCartUseCases>();
         services.AddScoped<GetRentalCart>();
-        // Cart Policy & Adapter
+        // Giới hạn kỳ thuê và adapter đọc listing/availability từ Inventory.
         services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
         services.AddScoped<InventoryRentalCartReader>();
         services.AddScoped<IRentalListingReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
         services.AddScoped<IRentalAvailabilityReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
 
-        // External Clients
+        // Client HTTP gọi service ngoài; tắt tự chuyển hướng ở các đăng ký này.
         services.AddHttpClient<IRentalMediaClient, HttpRentalMediaClient>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IPaymentRentalClient, HttpPaymentRentalClient>()
@@ -70,73 +75,73 @@ public static class ApplicationServiceCollectionExtensions
         services.AddHttpClient<IAuthRentalClient, HttpAuthRentalClient>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 
-        // Checkout
+        // Checkout chia thành chuẩn bị, điều phối, ghi đơn và tạo hóa đơn.
         services.AddScoped<ICheckoutPreparationService, CheckoutPreparationService>();
         services.AddScoped<ICheckoutOrderWriter, CheckoutOrderWriter>();
         services.AddScoped<ICheckoutInvoiceIssuer, CheckoutInvoiceIssuer>();
         services.AddScoped<ICheckoutService, CheckoutService>();
 
-        // Orders
+        // Truy vấn/thao tác đơn theo quyền renter, supplier hoặc Admin.
         services.AddScoped<IRenterOrderQueryService, RenterOrderQueryService>();
         services.AddScoped<IRenterOrderCancellationService, RenterOrderCancellationService>();
         services.AddScoped<ISupplierSubOrderQueryService, SupplierSubOrderQueryService>();
         services.AddScoped<IAdminOrderQueryService, AdminOrderQueryService>();
         services.AddScoped<IRenterDeliveryNoteService, RenterDeliveryNoteService>();
 
-        // Returns
+        // Trả máy: request, vấn đề, Admin xử lý và ghi nhận trả dùng cùng ReturnService.
         services.AddScoped<IReturnService, ReturnService>();
 
-        // Calendar
+        // Truy vấn lịch thuê cá nhân.
         services.AddScoped<IRentalCalendarService, RentalCalendarService>();
 
-        // Addresses
+        // Sổ địa chỉ giao hàng của renter.
         services.AddScoped<IRenterAddressService, RenterAddressService>();
 
-        // Bank accounts
+        // Sổ tài khoản hoàn tiền của renter và hàng đợi hoàn tiền cho Admin.
         services.AddScoped<IRenterBankAccountService, RenterBankAccountService>();
         services.AddScoped<IAdminRefundQueryService, AdminRefundQueryService>();
         services.AddScoped<IAdminRefundCommandService, AdminRefundCommandService>();
 
-        // Operations
+        // Executor điều phối receipt, side effect và recovery của các use case.
         services.AddScoped<IRentalOperationExecutor, RentalOperationExecutor>();
 
-        // Payments
+        // Áp dụng sự kiện thanh toán vào nghiệp vụ Rental.
         services.AddScoped<IPaymentWorkflowService, PaymentWorkflowService>();
 
-        // Supplier Decision & Statistics
+        // Supplier quyết định đơn con; Admin truy vấn thống kê xác nhận.
         services.AddScoped<ISupplierDecisionService, SupplierDecisionService>();
         services.AddScoped<ISupplierStatisticsService, SupplierStatisticsService>();
 
-        // Handover Acknowledgement & Item Cancellation
+        // Renter xác nhận nhận máy hoặc yêu cầu hủy item chưa bàn giao.
         services.AddScoped<IHandoverAcknowledgementService, HandoverAcknowledgementService>();
         services.AddScoped<IItemCancellationService, ItemCancellationService>();
 
-        // Expiry
+        // Service kiểm tra và xử lý các mốc hết hạn thanh toán/supplier.
         services.AddScoped<IExpiryWorkflowService, ExpiryWorkflowService>();
 
-        // Integration
+        // Handler áp dụng kết quả hoàn tiền và quyết toán từ Payment.
         services.AddScoped<IRefundCompletedConsumer, RefundCompletedConsumer>();
         services.AddScoped<IRentalSettledConsumer, RentalSettledConsumer>();
 
-        // Kafka subsystem (producers, consumers, workers, options)
+        // Đăng ký pipeline Kafka: options, producers, dispatcher và ba worker Inbox/Outbox/broker.
         services.AddKafka(configuration ?? new ConfigurationBuilder().Build());
 
-        // Non-Kafka Background Workers
+        // Worker theo lịch: tạo scope và kích hoạt service/executor; không phải consumer Kafka.
         services.AddHostedService<OperationRecoveryWorker>();
         services.AddHostedService<ExpiryScannerWorker>();
         services.AddHostedService<OverdueProtectionWorker>();
         services.AddHostedService<CheckoutTimeoutScannerWorker>();
 
-        // Observability & TimeProvider
+        // Metrics dùng chung và nguồn thời gian được inject cho nghiệp vụ/worker.
         services.AddSingleton<RentalMetrics>();
         services.AddSingleton(TimeProvider.System);
 
-        // Overdue protection
+        // Cấu hình và service bảo vệ thiết bị thuê quá hạn.
         services.AddOptions<OverdueProtectionOptions>()
             .BindConfiguration(OverdueProtectionOptions.SectionName);
         services.AddScoped<IOverdueProtectionService, OverdueProtectionService>();
 
-        // Handover Overdue & Auto-Cancellation
+        // Quét bàn giao quá hạn; kiểm tra giới hạn giờ gia hạn ngay lúc startup.
         services.AddOptions<HandoverOverdueOptions>()
             .BindConfiguration(HandoverOverdueOptions.SectionName)
             .Validate(o => o.AutoExpireGraceHours is >= 1 and <= 168,
@@ -145,14 +150,14 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IHandoverOverdueService, HandoverOverdueService>();
         services.AddHostedService<HandoverOverdueWorker>();
 
-        // Settlement
+        // Đề xuất, phản hồi và giải quyết tranh chấp khấu trừ để lập lịch quyết toán.
         services.AddScoped<IDeductionService, DeductionService>();
         services.AddScoped<IDeductionResponseService, DeductionResponseService>();
-        // trong khối Background Workers:
+        // Worker lần lượt xử lý deadline khấu trừ và lập lịch quyết toán.
         services.AddHostedService<DeductionDeadlineWorker>();
         services.AddHostedService<RefundReconciliationWorker>();
 
-        // Return Confirmation Overdue Worker
+        // Worker kích hoạt xử lý yêu cầu trả máy quá hạn xác nhận.
         services.AddScoped<IReturnConfirmationOverdueService, ReturnConfirmationOverdueService>();
         services.AddHostedService<ReturnConfirmationOverdueWorker>();
 

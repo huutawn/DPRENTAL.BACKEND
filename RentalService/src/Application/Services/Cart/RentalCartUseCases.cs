@@ -13,6 +13,10 @@ using Dprental.RentalService.Domain.IRepositories;
 
 namespace Dprental.RentalService.Application.Services.Cart;
 
+/// <remarks>
+/// Luồng ghi giỏ: nhận danh tính và dữ liệu dòng thuê → đánh giá bằng RentalCartItemEvaluator → lưu qua repository.
+/// Giỏ chỉ thể hiện ý định thuê; thêm/sửa giỏ chưa giữ allocation và chưa chốt giá của đơn hàng.
+/// </remarks>
 public sealed class RentalCartUseCases(
     IRentalCartRepository carts,
     RentalCartItemEvaluator evaluator,

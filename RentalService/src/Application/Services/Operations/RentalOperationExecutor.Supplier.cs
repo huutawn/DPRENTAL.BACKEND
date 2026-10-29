@@ -17,6 +17,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Operations;
 
+/// <remarks>
+/// Xử lý nhận/từ chối item và đối soát supplier accept trong cùng executor.
+/// Accept lưu intent trước khi xác nhận allocation; reject điều phối lịch release/refund và event.
+/// Order lock và fingerprint ngăn quyết định đồng thời hoặc dùng cùng idempotency key với nội dung khác.
+/// </remarks>
 public sealed partial class RentalOperationExecutor
 {
     public async Task<Result<SupplierDecisionResponse>> ExecuteSupplierAcceptAsync(

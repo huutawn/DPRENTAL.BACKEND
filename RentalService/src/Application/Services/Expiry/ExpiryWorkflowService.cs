@@ -19,6 +19,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Expiry;
 
+/// <remarks>
+/// Worker gọi các hàm quét timeout; từng order/item được đọc lại dưới khóa trước khi xử lý.
+/// Tách hết hạn thanh toán khỏi hết hạn supplier xác nhận; điều phối side effect qua executor và receipt.
+/// </remarks>
 public sealed class ExpiryWorkflowService : IExpiryWorkflowService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

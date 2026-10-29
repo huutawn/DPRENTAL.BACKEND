@@ -22,6 +22,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Dprental.RentalService.Application.Services.Checkout;
 
+/// <remarks>
+/// Điểm điều phối checkout: khóa renter → kiểm tra idempotency → chuẩn bị snapshot → lưu operation → giữ lịch qua HTTP Inventory.
+/// Khi đủ các dòng: lưu order, assignments, Outbox RentalOrderCreated và receipt tạo invoice trong cùng transaction.
+/// Sau commit mới gọi HTTP Payment và thông báo realtime. Operation tạo đơn thành công vẫn có thể đang chờ invoice.
+/// Khi giữ lịch thất bại dứt khoát, xếp lệnh ReleaseAllocation vào Outbox để bù trừ; chưa coi là đã nhả máy.
+/// </remarks>
 public sealed class CheckoutService : ICheckoutService
 {
     private static readonly TimeSpan BudgetDuration = TimeSpan.FromSeconds(20);
@@ -78,6 +84,8 @@ public sealed class CheckoutService : ICheckoutService
         _notifier = notifier;
     }
 
+    // Điểm vào gửi đơn: cùng renter + idempotency key phải tiếp tục/replay operation cũ.
+    // Kiểm tra replay trước khi đọc giỏ vì lần chạy trước có thể đã tạo đơn hoặc thay đổi giỏ.
     public async Task<CheckoutSubmitResult> SubmitAsync(
         CheckoutRenterContext renter,
         CheckoutRequest request,
@@ -182,7 +190,8 @@ public sealed class CheckoutService : ICheckoutService
                             Status: "Pending");
                     }).ToList();
 
-                    // Lưu operation, request fingerprint, order/item IDs, snapshot và deadline trước HTTP call đầu tiên
+                    // Lưu operation, fingerprint, order/item ID, snapshot và deadline trước lời gọi HTTP giữ chỗ đầu tiên.
+                    // Lần tiếp tục dùng lại các định danh này để Inventory nhận biết cùng yêu cầu.
                     var checkoutOp = new RentalCheckoutOperation(
                         operationId: operationId,
                         renterUserId: renter.RenterId,
@@ -206,6 +215,8 @@ public sealed class CheckoutService : ICheckoutService
         }
     }
 
+    // Tiếp tục operation đã lưu: lấy khóa theo cùng thứ tự renter rồi order, đọc lại và chạy phần còn thiếu.
+    // Không tạo checkout mới hoặc đổi deadline để xử lý lại một lần gửi đơn.
     public async Task<CheckoutSubmitResult> ContinueOperationAsync(
         string operationId,
         CancellationToken cancellationToken = default)
@@ -318,7 +329,8 @@ public sealed class CheckoutService : ICheckoutService
     {
         var utcNow = _timeProvider.GetUtcNow();
 
-        // 1. HTTP Inventory: hold từng dòng tuần tự
+        // 1. Gọi HTTP Inventory giữ từng dòng tuần tự, bỏ qua dòng đã Held trong operation.
+        // Không giữ transaction database trong lúc chờ mạng; kết quả mỗi dòng được lưu để tiếp tục sau gián đoạn.
         for (int i = 0; i < plan.Lines.Count; i++)
         {
             var line = plan.Lines[i];
@@ -656,6 +668,8 @@ public sealed class CheckoutService : ICheckoutService
         return CheckoutResponse.From(order, isReplay, paymentInfo);
     }
 
+    // Điểm polling của client: kiểm tra quyền renter trước khi trả trạng thái.
+    // Operation Succeeded là đã tạo được order; ReadyForPayment còn phụ thuộc invoice và deadline.
     public async Task<Result<CheckoutOperationStatusResponse>> GetOperationStatusAsync(
         string operationId,
         Guid renterUserId,
@@ -765,6 +779,8 @@ public sealed class CheckoutService : ICheckoutService
             ReadyForPayment: false);
     }
 
+    // Bù trừ khi checkout không hoàn tất: ghi ReleaseAllocation vào Outbox trong transaction của caller.
+    // Khóa lệnh ổn định giúp retry không tạo thêm tác vụ release; Inventory sẽ xác nhận kết quả về sau.
     private async Task<Result> StageCheckoutReleasesAsync(
         Guid orderId,
         IEnumerable<Guid> rentalItemIds,

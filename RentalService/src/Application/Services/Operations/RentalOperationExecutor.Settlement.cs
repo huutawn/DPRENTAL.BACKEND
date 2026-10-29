@@ -8,6 +8,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Operations;
 
+/// <remarks>
+/// Thực thi receipt quyết toán qua Payment sau khi đủ điều kiện nghiệp vụ.
+/// Phản hồi nhận yêu cầu và sự kiện RentalSettled là hai mốc khác nhau; consumer tích hợp áp dụng kết quả quyết toán.
+/// </remarks>
 public sealed partial class RentalOperationExecutor
 {
     internal static T? ReadStoredProviderRequest<T>(string? payloadJson) where T : class

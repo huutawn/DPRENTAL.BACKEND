@@ -21,6 +21,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Payments;
 
+/// <remarks>
+/// Nhận InvoicePaid sau bước kiểm tra bản tin: đối chiếu invoice, renter, số tiền và payment reference.
+/// Phân biệt thời điểm trả tiền PaidAt với thời điểm nhận message; chọn nhánh xác nhận, phục hồi hold hoặc hoàn tiền.
+/// Hàm có tên Staged chỉ chuẩn bị thay đổi nghiệp vụ; dispatcher sở hữu transaction cùng Inbox và Outbox.
+/// </remarks>
 public sealed class PaymentWorkflowService : IPaymentWorkflowService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -72,6 +77,8 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         _notifier = notifier;
     }
 
+    // Chuẩn bị nhánh nghiệp vụ cho InvoicePaid trong transaction do dispatcher quản lý.
+    // Không đánh dấu Inbox Processed ở đây; caller phải commit cùng toàn bộ thay đổi và Outbox phát sinh.
     public async Task<Result<PaymentApplyResult>> ApplyInvoicePaidStagedAsync(
         RentalOrder order,
         KafkaMessageEnvelope<InvoicePaidPayload> envelope,
@@ -84,7 +91,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         var payload = envelope.Payload;
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
 
-        // Invoice must be already attached to Order
+        // Invoice phải đã được gắn vào order; sự kiện đến sớm được giữ lại để retry sau.
         if (string.IsNullOrWhiteSpace(order.InvoiceRef))
         {
             return Error.Failure("INVOICE_NOT_ATTACHED", "Đơn hàng chưa được gắn mã invoice từ Checkout; giữ event để retry.");
@@ -95,7 +102,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             return Error.Conflict("INVOICE_MISMATCH", $"InvoiceRef ({payload.InvoiceRef}) không khớp với đơn hàng ({order.InvoiceRef}).");
         }
 
-        // Validate snapshot matching
+        // Đối chiếu renter, tiền tệ và tổng tiền với snapshot của order trước khi ghi nhận thanh toán.
         if (order.RenterId != payload.RenterId)
         {
             return Error.Validation("RENTER_MISMATCH", "RenterId trong sự kiện thanh toán không khớp với đơn hàng.");
@@ -111,7 +118,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             return Error.Validation("AMOUNT_MISMATCH", $"Số tiền thanh toán ({payload.PaidAmount}) không khớp với tổng tiền đơn hàng ({order.TotalPayableAmount}).");
         }
 
-        // Payment identity check
+        // Cùng PaymentRef là replay; PaymentRef khác trên đơn đã nhận tiền là conflict.
         if (!string.IsNullOrWhiteSpace(order.PaymentRef))
         {
             if (string.Equals(order.PaymentRef, payload.PaymentRef, StringComparison.OrdinalIgnoreCase))
@@ -121,7 +128,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             return Error.Conflict("PAYMENT_REF_CONFLICT", "Đơn hàng đã được thanh toán với mã tham chiếu thanh toán khác.");
         }
 
-        // 1. Actively cancelled order
+        // 1. Đơn đã chủ động hủy: lập lịch hoàn toàn bộ thay vì khôi phục đơn.
         if (order.Status == RentalOrderStatus.Cancelled)
         {
             _logger.LogWarning("Payment arrived for cancelled Order {OrderId}. Staging full refund.", order.Id);
@@ -132,7 +139,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             return Result.Success(PaymentApplyResult.RefundRequired(refundMeta));
         }
 
-        // 2. Calculate recovery cutoff
+        // 2. Tính hạn phục hồi bằng mốc sớm nhất của cửa sổ thanh toán, hạn supplier và ngày bắt đầu thuê.
         DateTimeOffset paymentCutoff = order.PaymentDeadline.AddMinutes(15);
         DateTimeOffset supplierCutoff = order.Items
             .Where(i => i.SupplierConfirmationDeadline.HasValue)
@@ -145,7 +152,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
         DateTimeOffset cutoff = paymentCutoff < supplierCutoff ? paymentCutoff : supplierCutoff;
         cutoff = cutoff < startOfDayCutoff ? cutoff : startOfDayCutoff;
 
-        // 3. Determine if hold is still active
+        // 3. Phân loại thanh toán và kiểm tra hold để chọn gia hạn, giữ lại hoặc bù trừ/hoàn tiền.
         bool isLatePayment = string.Equals(payload.PaymentDisposition, "LATE_REQUIRES_REFUND", StringComparison.OrdinalIgnoreCase) ||
                              order.Status == RentalOrderStatus.Expired ||
                              payload.PaidAt >= order.PaymentDeadline;
@@ -512,9 +519,6 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                 throw;
             }
         }
-
-        // Direct invocation/tests outside lock executes hold/cleanup
-
 
         return Result.Success();
     }

@@ -17,6 +17,10 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Services.Checkout;
 
+/// <remarks>
+/// Bước chuẩn bị trước khi giữ lịch: kiểm tra thông tin renter, điều khoản, địa chỉ và tài khoản hoàn tiền;
+/// đọc lại listing/giá và kiểm tra khả dụng để dựng CheckoutPlan. Thành công ở đây chưa tạo order hoặc giữ máy.
+/// </remarks>
 public sealed class CheckoutPreparationService : ICheckoutPreparationService
 {
     private readonly IRentalCartRepository _carts;

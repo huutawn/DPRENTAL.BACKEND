@@ -10,6 +10,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Returns;
 
+/// <remarks>
+/// Worker tìm yêu cầu trả đến hạn, sau đó khóa và đọc lại order để áp dụng quy tắc quá hạn xác nhận.
+/// Thông báo/quyết định trên yêu cầu trả không thay cho xác nhận đóng allocation từ Inventory.
+/// </remarks>
 public sealed class ReturnConfirmationOverdueService(
     IRentalOrderRepository orders,
     IOrderLockManager locks,

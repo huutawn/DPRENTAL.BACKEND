@@ -8,8 +8,13 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Background;
 
+/// <summary>Số lượng order/item đã xử lý, tự hết hạn, gửi cảnh báo và lỗi trong một vòng quét.</summary>
 public sealed record HandoverOverdueBatchResult(int Orders, int ProcessedItems, int AutoExpired, int NoticesSent, int Failed);
 
+/// <remarks>
+/// Quét order có item đến mốc cảnh báo/hết hạn bàn giao theo cấu hình HandoverOverdueOptions.
+/// Tạo scope riêng cho từng order và gọi HandoverOverdueService; worker không tự quyết định hủy hoặc hoàn tiền.
+/// </remarks>
 public sealed class HandoverOverdueWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;

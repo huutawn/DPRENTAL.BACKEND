@@ -11,6 +11,10 @@ using Dprental.RentalService.Domain.IRepositories;
 
 namespace Dprental.RentalService.Application.Services.Orders;
 
+/// <remarks>
+/// Luồng đọc đơn renter: xác định caller → chuẩn hóa bộ lọc/phân trang → truy vấn theo quyền sở hữu → dựng response.
+/// Trạng thái và quyền thao tác trả cho giao diện là ảnh chụp tại lần đọc; lệnh thay đổi vẫn kiểm tra lại.
+/// </remarks>
 public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRenterOrderQueryService
 {
     public async Task<Result<PagedResponse<RenterOrderSummaryResponse>>> GetMyOrdersAsync(

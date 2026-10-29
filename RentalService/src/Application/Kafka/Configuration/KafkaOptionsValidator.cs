@@ -4,6 +4,10 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Kafka.Configuration;
 
+/// <remarks>
+/// Được Options gọi lúc startup: khi bật Kafka phải đủ broker, topic, timeout, lease và cấu hình proof Payment hợp lệ.
+/// Sai cấu hình làm startup thất bại; kiểm tra này không chứng minh broker hoặc service bên ngoài đang truy cập được.
+/// </remarks>
 public sealed class KafkaOptionsValidator : IValidateOptions<KafkaOptions>
 {
     public ValidateOptionsResult Validate(string? name, KafkaOptions options)

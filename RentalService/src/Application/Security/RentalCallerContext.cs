@@ -6,12 +6,10 @@ using Dprental.RentalService.Application.Security.Jwt;
 namespace Dprental.RentalService.Application.Security;
 
 /// <summary>
-/// Immutable runtime implementation of IRentalCallerContext.
-/// Enforces DPRental AuthService token contract specifications:
-/// - Service tokens carry a valid UUID in 'sub' and 'u=svc'. For service callers, UserId is always null.
-/// - Interactive user tokens must carry a valid non-empty UUID in 'sub'.
-/// - Malformed or missing subject claims invalidate caller authentication (never inferred as service).
-/// - Role and permission aliases (adm, adp, cus, own, mem) are mapped into immutable frozen sets.
+/// Context danh tính bất biến được dựng từ claims theo contract của AuthService.
+/// Token service có sub là UUID hợp lệ và u=svc; UserId luôn null để không đóng vai người dùng.
+/// Token cá nhân phải có sub là UUID khác rỗng; thiếu/sai sub thì context không được xác thực.
+/// Chuẩn hóa alias vai trò và quyền vào tập bất biến để các use case kiểm tra nhất quán.
 /// </summary>
 public sealed class RentalCallerContext : IRentalCallerContext
 {

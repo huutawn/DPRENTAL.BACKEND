@@ -11,6 +11,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Operations;
 
+/// <remarks>
+/// Nhánh xác nhận allocation cho supplier accept: lưu lần thử/provider key → gọi HTTP Inventory ngoài transaction
+/// → kiểm tra phản hồi → áp dụng trạng thái, receipt và event trong transaction cục bộ.
+/// Timeout có thể là kết quả chưa rõ; retry phải dùng lại provider key để tránh thực hiện hai lần.
+/// </remarks>
 public sealed partial class RentalOperationExecutor
 {
     private async Task<Result<SupplierDecisionResponse>> ConfirmAllocationCoreAsync(
@@ -41,7 +46,7 @@ public sealed partial class RentalOperationExecutor
         using var callCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         callCts.CancelAfter(TimeSpan.FromSeconds(10));
 
-        // HTTP retries, scheduled recovery and admin reconciliation share the persisted provider key.
+        // Retry HTTP, recovery worker và đối soát Admin dùng chung provider key đã lưu trong receipt.
         operationKey = receipt.InventoryOperationKey ?? ReadConfirmProviderKey(receipt) ?? operationKey;
         receipt.SetInventoryOperationKey(operationKey);
         receipt.BeginProviderAttempt(utcNow);

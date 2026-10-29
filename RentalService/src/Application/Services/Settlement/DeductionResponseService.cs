@@ -19,6 +19,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Settlement;
 
+/// <remarks>
+/// Nhánh renter phản hồi đề xuất khấu trừ: chấp nhận hoặc tranh chấp; worker xử lý khi quá hạn phản hồi.
+/// Quyết định được lưu tại Rental; tác vụ quyết toán Payment được điều phối qua receipt/executor.
+/// </remarks>
 public sealed partial class DeductionResponseService(
     IRentalOrderRepository orders,
     IOrderLockManager locks,

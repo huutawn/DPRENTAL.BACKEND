@@ -3,6 +3,10 @@ using Dprental.RentalService.Domain.Entities;
 
 namespace Dprental.RentalService.Application.Policies;
 
+/// <remarks>
+/// Tính mốc D+1 theo UTC+7 và cộng số giờ gia hạn do options cung cấp.
+/// Policy trả mốc/điều kiện; service quyết định cảnh báo, đối soát hoặc hết hạn trong luồng có khóa và transaction.
+/// </remarks>
 public static class HandoverDeadlinePolicy
 {
     private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);

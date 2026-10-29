@@ -14,6 +14,10 @@ namespace Dprental.RentalService.Api.Security;
 /// <summary>
 /// Mở rộng IServiceCollection thiết lập JWT Bearer Authentication cho RentalService kết nối JWKS với AuthService.
 /// </summary>
+/// <remarks>
+/// Program gọi khi startup để đăng ký xác thực JWT và bộ quản lý khóa JWKS.
+/// Middleware xác thực trước khi Application dựng RentalCallerContext; token hợp lệ chưa đủ chứng minh quyền trên order/item.
+/// </remarks>
 public static class JwtAuthenticationExtensions
 {
     public static IServiceCollection AddRentalJwtAuthentication(

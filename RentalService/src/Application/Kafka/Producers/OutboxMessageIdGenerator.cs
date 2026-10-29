@@ -6,8 +6,8 @@ namespace Dprental.RentalService.Application.Kafka.Producers;
 public static class OutboxMessageIdGenerator
 {
     /// <summary>
-    /// Computes a deterministic MessageId from producer, messageType, and logical operation identity.
-    /// Ensures replay safety and atomic outbox deduplication without additional DB tables.
+    /// Tạo MessageId ổn định từ producer, loại bản tin và định danh tác vụ bằng 16 byte đầu của SHA-256.
+    /// Cùng đầu vào cho cùng ID để Outbox nhận diện replay; khác nội dung vẫn phải được writer kiểm tra.
     /// </summary>
     public static Guid ComputeDeterministicId(string producer, string messageType, string logicalOperationIdentity)
     {

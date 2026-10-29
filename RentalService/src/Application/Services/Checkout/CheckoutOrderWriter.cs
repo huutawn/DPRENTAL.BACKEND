@@ -14,6 +14,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Checkout;
 
+/// <remarks>
+/// Chuyển kế hoạch checkout và các allocation đã giữ thành order, item, suborder và unit assignment.
+/// Không tự giữ máy hay tạo invoice; CheckoutService sở hữu thứ tự điều phối và transaction bao quanh bước ghi này.
+/// </remarks>
 public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
 {
     // Giữ nguyên chữ có dấu để chuỗi không phình quá giới hạn 256 ký tự của RefundDestinationRef.

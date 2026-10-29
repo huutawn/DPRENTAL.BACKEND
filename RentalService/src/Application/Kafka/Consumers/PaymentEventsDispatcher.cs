@@ -27,6 +27,12 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Kafka.Consumers;
 
+/// <remarks>
+/// Điểm điều phối nhận sự kiện Payment và Inventory, gồm hai giai đoạn độc lập.
+/// ReceiveMessageAsync kiểm tra envelope/topic/producer, proof Payment và trùng lặp, rồi lưu Inbox hoặc bản tin DLQ qua Outbox.
+/// ProcessInboxMessageAsync khóa và đọc lại dữ liệu, chọn handler, lưu thay đổi nghiệp vụ cùng Inbox/Outbox.
+/// Consumer commit offset sau tiếp nhận an toàn; nghiệp vụ có thể vẫn đang chờ InboxProcessingWorker xử lý hoặc retry.
+/// </remarks>
 public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -180,6 +186,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
 
 
 
+    // Giai đoạn tiếp nhận từ broker: chỉ kiểm tra và lưu bền vững, chưa áp dụng trạng thái đơn.
+    // Kết quả thành công cho phép consumer commit offset; lỗi lưu Inbox/DLQ phải trả về để nhận lại.
     public async Task<Result<KafkaIntakeDisposition>> ReceiveMessageAsync(
         string messageJson,
         string? topic = null,
@@ -352,6 +360,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                 }
             }
 
+            // Chuẩn hóa thứ tự thuộc tính JSON để so nội dung; MessageId trùng nhưng payload khác phải đi DLQ.
             string canonicalNew = CanonicalJson.Normalize(messageJson);
             string fingerprint = ComputeSha256Hex(canonicalNew);
 
@@ -422,6 +431,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
         }
     }
 
+    // Giai đoạn nghiệp vụ do InboxProcessingWorker gọi: kiểm tra lịch retry, lấy khóa và đọc lại Inbox.
+    // Handler Staged chuẩn bị thay đổi; dispatcher quyết định commit, rollback, retry hoặc đưa DLQ.
     public async Task<Result> ProcessInboxMessageAsync(
         Guid inboxMessageId,
         CancellationToken cancellationToken = default)
@@ -507,6 +518,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             }
         }
 
+        // Nếu cần cả hai khóa, luôn lấy renter trước order như checkout để giảm nguy cơ deadlock.
+        // Descriptor đọc trước khóa không đủ để quyết định; đọc lại bản ghi sau khi đã có khóa.
         await using var renterScope = renterLock;
         await using var orderLock = await _lockManager.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(5), cancellationToken);
         var msg = await _inboxRepository.GetByIdForProcessingAsync(inboxMessageId, cancellationToken);
@@ -571,6 +584,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             }
         }
 
+        // Kết quả Inventory: thay đổi order/receipt, Inbox Processed và Outbox cùng thành công hoặc cùng rollback.
         if (isAllocationEvent)
         {
             await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
@@ -679,6 +693,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
             }
         }
 
+        // Kiểm tra lại proof đã lưu trước khi áp dụng tiền/trạng thái, kể cả khi message đã qua intake.
+        // Thiếu key tạm thời được retry để chờ đồng bộ luân chuyển khóa; proof không hợp lệ phải đi DLQ.
         if (msg.MessageType is "InvoicePaid" or "RefundCompleted" or "RentalSettled")
         {
             var proofResult = PaymentPublicationProofVerifier.Verify(msg.Payload, msg.PublicationProofJson,
@@ -1213,7 +1229,7 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
                     }
                     catch
                     {
-                        // Safely ignored if parsing payload fails
+                        // Không dựng được dữ liệu thông báo; bỏ riêng thông báo này, không thay đổi kết quả nghiệp vụ đã lưu.
                     }
                 }
             }
@@ -1261,6 +1277,8 @@ public sealed class PaymentEventsDispatcher : IPaymentEventsDispatcher
 
 
 
+    // Ghi bản tin lỗi vào Outbox của topic DLQ với ID ổn định theo nguồn lỗi.
+    // Chỉ xác nhận intake sau khi lưu thành công; DLQ chưa gửi ra broker vẫn được publisher tiếp tục từ database.
     private async Task<Result> RouteToDlqAsync(
         string rawMessage,
         string errorCode,

@@ -13,6 +13,10 @@ using Dprental.RentalService.Domain.Errors;
 
 namespace Dprental.RentalService.Application.Services.Returns;
 
+/// <remarks>
+/// Nhánh renter tạo yêu cầu trả máy: kiểm tra quyền, assignment và yêu cầu đang mở trước khi lưu.
+/// Yêu cầu trả là bước trao đổi với supplier; chưa phải biên bản đã nhận máy hoặc kết quả đóng allocation.
+/// </remarks>
 public sealed partial class ReturnService
 {
     private const string RequestReturnAction = "RequestReturn";

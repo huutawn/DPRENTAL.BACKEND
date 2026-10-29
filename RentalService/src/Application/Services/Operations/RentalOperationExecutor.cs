@@ -24,6 +24,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Operations;
 
+/// <remarks>
+/// Thực thi side effect dựa trên RentalOperationReceipt: khóa order → đọc lại receipt → kiểm tra trạng thái/lịch retry
+/// và tác vụ tiên quyết → gọi nhánh xử lý tương ứng → lưu kết quả để retry/replay dùng cùng định danh.
+/// Các file partial là các phần của cùng executor. Receipt là nhật ký tác vụ, khác Inbox nhận sự kiện và Outbox gửi bản tin.
+/// </remarks>
 public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -130,6 +135,8 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
+    // Điểm vào recovery worker: descriptor chỉ là ứng viên; phải đọc lại receipt dưới order lock.
+    // Bỏ qua tác vụ đã thành công/chưa đến lịch, đợi prerequisite rồi mới thực thi đúng nhánh Action.
     public async Task<Result> ExecuteScheduledOperationAsync(
         OperationReceiptDescriptor descriptor,
         CancellationToken cancellationToken = default)
@@ -205,7 +212,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
             return Result.Success();
         }
 
-        // Prerequisite check: must be confirmed Succeeded before executing
+        // Chỉ thực hiện tác vụ phụ thuộc khi receipt tiên quyết đã được xác nhận Succeeded.
         if (!string.IsNullOrWhiteSpace(receipt.PrerequisiteOperationId))
         {
             var prereq = order.OperationReceipts.FirstOrDefault(r => r.OperationId == receipt.PrerequisiteOperationId);

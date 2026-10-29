@@ -7,6 +7,10 @@ using Dprental.RentalService.Domain.Entities;
 
 namespace Dprental.RentalService.Application.Services.Operations;
 
+/// <remarks>
+/// Ghi lệnh MarkAssetsOverdue qua Outbox với operation key đã lưu.
+/// Thiết bị chưa trả phải tiếp tục bị giữ lịch; gửi lệnh không có nghĩa đã nhận xác nhận từ Inventory.
+/// </remarks>
 public sealed partial class RentalOperationExecutor
 {
     internal async Task<Result> MarkAssetsOverdueCoreAsync(RentalOrder order, RentalItem item,

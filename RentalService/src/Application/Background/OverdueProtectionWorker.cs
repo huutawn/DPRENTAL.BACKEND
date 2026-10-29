@@ -8,6 +8,10 @@ using Dprental.RentalService.Application.Options;
 
 namespace Dprental.RentalService.Application.Background;
 
+/// <remarks>
+/// Lấy danh sách order cần bảo vệ do thiết bị thuê quá hạn rồi gọi OverdueProtectionService theo từng scope.
+/// Service lập receipt và executor gửi Kafka; worker không coi hết ngày thuê là đã được trả máy.
+/// </remarks>
 public sealed class OverdueProtectionWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
