@@ -6,8 +6,8 @@ using Microsoft.IdentityModel.Tokens;
 namespace Dprental.Gateway.Authentication;
 
 /// <summary>
-/// Loads AuthService's direct JWKS endpoint into the configuration shape consumed by JWT bearer authentication.
-/// It keeps the last valid key set so a short AuthService outage does not invalidate already trusted keys.
+/// Tải JWKS trực tiếp từ AuthService và chuyển thành cấu hình khóa cho bộ xác thực JWT Bearer.
+/// Giữ bộ khóa hợp lệ gần nhất trong thời hạn cho phép khi AuthService tạm thời không khả dụng.
 /// </summary>
 internal sealed class JwksConfigurationManager(
     HttpClient httpClient,
@@ -26,9 +26,10 @@ internal sealed class JwksConfigurationManager(
     private long nextForcedRefreshTicks;
     private DateTimeOffset retryAfterUtc;
 
-    /// <summary>Returns the cached key set or refreshes it when its bounded cache lifetime has elapsed.</summary>
+    /// <summary>Trả bộ khóa trong cache hoặc tải lại khi đến hạn; không dùng khóa quá tuổi cho phép.</summary>
     public async Task<OpenIdConnectConfiguration> GetConfigurationAsync(CancellationToken cancel)
     {
+        // Đọc snapshot nguyên tử để request đồng thời có thể dùng cache mà không phải chờ khóa.
         var cachedConfiguration = Volatile.Read(ref cache);
         DateTimeOffset now = timeProvider.GetUtcNow();
         if (cachedConfiguration is not null
@@ -39,9 +40,11 @@ internal sealed class JwksConfigurationManager(
             return cachedConfiguration.Configuration;
         }
 
+        // Chỉ một request tải JWKS tại một thời điểm; truyền tín hiệu hủy khi đang chờ.
         await refreshLock.WaitAsync(cancel);
         try
         {
+            // Kiểm tra lại sau khi lấy khóa: request trước có thể đã làm mới cache trong lúc chờ.
             cachedConfiguration = cache;
             now = timeProvider.GetUtcNow();
             if (cachedConfiguration is not null
@@ -52,6 +55,7 @@ internal sealed class JwksConfigurationManager(
                 return cachedConfiguration.Configuration;
             }
 
+            // Tạm ngừng gọi AuthService sau lần tải lỗi không có cache dùng được.
             if (now < retryAfterUtc)
                 throw new InvalidOperationException("JWKS refresh is temporarily unavailable.");
 
@@ -73,11 +77,14 @@ internal sealed class JwksConfigurationManager(
                 }
 
                 DateTimeOffset refreshedAtUtc = timeProvider.GetUtcNow();
+                // Chỉ thay cache sau khi tải và đọc được bộ khóa không rỗng.
                 Volatile.Write(ref cache, new KeyCache(configuration, refreshedAtUtc,
                     refreshedAtUtc.Add(GetRefreshInterval(response.Headers.CacheControl))));
                 Volatile.Write(ref refreshRequested, 0);
                 return configuration;
             }
+            // Khi tải lỗi, chỉ dùng lại cache nếu chưa quá 10 phút và request chưa bị hủy.
+            // Lùi lần thử tiếp theo 10 giây; không kéo dài tuổi gốc FetchedAtUtc của bộ khóa.
             catch when (!cancel.IsCancellationRequested && cachedConfiguration is not null &&
                 timeProvider.GetUtcNow() - cachedConfiguration.FetchedAtUtc <= MaximumUsableAge)
             {
@@ -98,9 +105,10 @@ internal sealed class JwksConfigurationManager(
         }
     }
 
-    /// <summary>Requests an immediate refresh, for example when JWT bearer encounters an unknown key ID.</summary>
+    /// <summary>Yêu cầu tải lại khóa, có giới hạn tần suất, khi gặp mã khóa ký chưa biết.</summary>
     public void RequestRefresh()
     {
+        // CompareExchange bảo đảm nhiều request gặp kid lạ chỉ đặt một yêu cầu refresh mỗi 10 giây.
         long now = timeProvider.GetUtcNow().UtcTicks;
         long next = Interlocked.Read(ref nextForcedRefreshTicks);
         if (now >= next && Interlocked.CompareExchange(ref nextForcedRefreshTicks,
@@ -108,6 +116,7 @@ internal sealed class JwksConfigurationManager(
             Volatile.Write(ref refreshRequested, 1);
     }
 
+    /// <summary>Tìm kid trong cache, yêu cầu làm mới khi thiếu rồi kiểm tra lại bộ khóa nhận được.</summary>
     internal async Task<bool> EnsureSigningKeyAsync(string? kid, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(kid)) return false;
@@ -118,7 +127,7 @@ internal sealed class JwksConfigurationManager(
         return configuration.SigningKeys.Any(k => k.KeyId == kid);
     }
 
-    /// <summary>Returns whether the key cache is valid enough for Gateway readiness.</summary>
+    /// <summary>Kiểm tra tuổi bộ khóa trong cache để xác định Gateway có sẵn sàng nhận request hay không.</summary>
     internal bool HasUsableConfiguration()
     {
         var cachedConfiguration = Volatile.Read(ref cache);
@@ -126,7 +135,7 @@ internal sealed class JwksConfigurationManager(
             && timeProvider.GetUtcNow() - cachedConfiguration.FetchedAtUtc <= MaximumUsableAge;
     }
 
-    /// <summary>Attempts an initial or stale-cache refresh for the readiness health check.</summary>
+    /// <summary>Tải khóa lần đầu hoặc làm mới cache quá hạn phục vụ kiểm tra readiness.</summary>
     internal async Task EnsureUsableConfigurationAsync(CancellationToken cancellationToken)
     {
         if (!HasUsableConfiguration())
@@ -136,11 +145,12 @@ internal sealed class JwksConfigurationManager(
         }
     }
 
-    /// <summary>Releases the synchronization primitive owned by this singleton.</summary>
+    /// <summary>Giải phóng semaphore do đối tượng singleton này sở hữu.</summary>
     public void Dispose() => refreshLock.Dispose();
 
     private static TimeSpan GetRefreshInterval(CacheControlHeaderValue? cacheControl)
     {
+        // Tôn trọng Max-Age nhưng giới hạn tối đa 5 phút; giá trị không dương dùng thời gian mặc định.
         TimeSpan requestedInterval = cacheControl?.MaxAge ?? DefaultRefreshInterval;
         return requestedInterval <= TimeSpan.Zero
             ? DefaultRefreshInterval

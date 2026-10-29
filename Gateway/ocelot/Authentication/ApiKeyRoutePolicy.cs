@@ -18,6 +18,7 @@ public sealed class ApiKeyRoutePolicy
         routes = entries.Select(Parse).ToArray();
     }
 
+    /// <summary>Khớp đồng thời HTTP method và số segment; dấu * chỉ thay đúng một segment.</summary>
     public bool RequiresApiKey(HttpRequest request)
     {
         string[] path = (request.Path.Value ?? string.Empty).Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -27,6 +28,7 @@ public sealed class ApiKeyRoutePolicy
                 string.Equals(pair.First, pair.Second, StringComparison.OrdinalIgnoreCase)));
     }
 
+    // Chặn cấu hình mơ hồ: chỉ nhận method hỗ trợ và wildcard đứng riêng trong một segment.
     private static (string Method, string[] Segments) Parse(string entry)
     {
         string[] parts = entry.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);

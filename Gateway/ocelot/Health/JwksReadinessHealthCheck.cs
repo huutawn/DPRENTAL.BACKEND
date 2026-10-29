@@ -3,7 +3,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Dprental.Gateway.Health;
 
-/// <summary>Reports readiness only after the Gateway has a current, valid AuthService key set.</summary>
+/// <summary>Chỉ báo sẵn sàng khi Gateway có bộ khóa AuthService còn trong thời hạn sử dụng.</summary>
 internal sealed class JwksReadinessHealthCheck(JwksConfigurationManager configurationManager) : IHealthCheck
 {
     /// <inheritdoc />

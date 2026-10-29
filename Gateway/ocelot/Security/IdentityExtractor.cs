@@ -56,6 +56,7 @@ public sealed class IdentityExtractor
         return new IdentityContext(userId, partyId, ExtractRoles(principal), true);
     }
 
+    // Gom role từ các tên claim hỗ trợ, tách danh sách và loại trùng theo đúng chữ hoa/thường.
     private static List<string> ExtractRoles(ClaimsPrincipal principal)
     {
         List<string> roles = new();
@@ -76,6 +77,7 @@ public sealed class IdentityExtractor
         return roles;
     }
 
+    // Thứ tự claimTypes là thứ tự ưu tiên; bỏ qua giá trị rỗng và chuẩn hóa khoảng trắng.
     private static string? FindFirstClaimValue(ClaimsPrincipal principal, string[] claimTypes)
     {
         foreach (string claimType in claimTypes)

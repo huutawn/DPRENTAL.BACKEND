@@ -7,14 +7,15 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace Dprental.Gateway.Authentication;
 
-/// <summary>Registers Gateway JWT authentication using public keys retrieved from AuthService.</summary>
+/// <summary>Đăng ký xác thực JWT bằng khóa công khai tải từ AuthService.</summary>
 internal static class JwtAuthenticationServiceCollectionExtensions
 {
     public const string InventoryScheme = "InventoryBearer";
 
-    /// <summary>Registers direct-JWKS JWT bearer authentication and a deny-by-default authorization policy.</summary>
+    /// <summary>Đăng ký hai scheme JWT dùng chung JWKS; yêu cầu xác thực của từng route do Ocelot cấu hình.</summary>
     internal static IServiceCollection AddGatewayJwtAuthentication(this IServiceCollection services, IConfiguration configuration)
     {
+        // Kiểm tra cấu hình lúc khởi động; dùng chung cache JWKS cho cả hai scheme.
         services.AddSingleton<IValidateOptions<GatewayJwtOptions>, GatewayJwtOptionsValidator>();
         services.AddOptions<GatewayJwtOptions>()
             .Bind(configuration.GetRequiredSection(GatewayJwtOptions.SectionName))
@@ -35,11 +36,11 @@ internal static class JwtAuthenticationServiceCollectionExtensions
             .AddJwtBearer(InventoryScheme);
         services.AddAuthorization();
 
-        // Default Bearer scheme: only accepts human audience (e.g. dprental-clients)
+        // Scheme Bearer mặc định chỉ chấp nhận audience người dùng được cấu hình (ví dụ dprental-clients).
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
             .Configure<JwksConfigurationManager, IOptions<GatewayJwtOptions>>(ConfigureJwtBearer);
 
-        // Inventory-specific scheme: accepts both human audience and inventory-api audience
+        // Scheme Inventory chọn audience người dùng hoặc inventory-api dựa trên claim loại danh tính.
         services.AddOptions<JwtBearerOptions>(InventoryScheme)
             .Configure<JwksConfigurationManager, IOptions<GatewayJwtOptions>>(ConfigureInventoryJwtBearer);
 
@@ -52,6 +53,7 @@ internal static class JwtAuthenticationServiceCollectionExtensions
         IOptions<GatewayJwtOptions> options)
     {
         GatewayJwtOptions jwtOptions = options.Value;
+        // Giữ nguyên tên claim từ token để sub và role được đọc nhất quán ở các bước tiếp theo.
         bearerOptions.MapInboundClaims = false;
         bearerOptions.ConfigurationManager = configurationManager;
         bearerOptions.RefreshOnIssuerKeyNotFound = true;
@@ -90,6 +92,7 @@ internal static class JwtAuthenticationServiceCollectionExtensions
             ValidIssuer = jwtOptions.Issuer,
             ValidateAudience = true,
             ValidAudiences = [jwtOptions.Audience, jwtOptions.InventoryAudience],
+            // Token có u=svc phải mang audience Inventory; token còn lại phải mang audience người dùng.
             AudienceValidator = (audiences, securityToken, validationParameters) =>
             {
                 if (audiences is null || !audiences.Any()) return false;
@@ -118,6 +121,7 @@ internal static class JwtAuthenticationServiceCollectionExtensions
     {
         OnMessageReceived = async context =>
         {
+            // Chỉ lấy token từ cookie nếu Authorization trống và chưa có token được cung cấp trước đó.
             if (string.IsNullOrWhiteSpace(context.Request.Headers.Authorization) &&
                 string.IsNullOrWhiteSpace(context.Token) &&
                 context.Request.Cookies.TryGetValue("accessToken", out string? accessToken) &&
@@ -133,6 +137,8 @@ internal static class JwtAuthenticationServiceCollectionExtensions
             if (token is null || !new JwtSecurityTokenHandler().CanReadToken(token)) return;
             try
             {
+                // Đọc kid để chuẩn bị khóa; việc đọc này chưa xác thực chữ ký hay độ tin cậy của token.
+                // Bộ JWT Bearer vẫn kiểm tra chữ ký, issuer, audience và thời hạn sau sự kiện này.
                 var jwt = new JwtSecurityToken(token);
                 if (!await configurationManager.EnsureSigningKeyAsync(jwt.Header.Kid, context.HttpContext.RequestAborted))
                     context.Fail("Unknown signing key.");

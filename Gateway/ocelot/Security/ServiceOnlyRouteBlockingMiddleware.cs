@@ -28,6 +28,7 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
         : this(next, new ConfigurationBuilder().Build())
     {
     }
+    /// <summary>Kiểm tra danh tính hub, chuẩn bị header nội bộ và chặn route không được công khai.</summary>
     public async Task InvokeAsync(HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -87,7 +88,7 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
                 return;
             }
 
-            // Forward only accessToken cookie; strip refreshToken and other cookies
+            // Chỉ giữ cookie accessToken cho hub; loại refreshToken và các cookie khác khỏi request chuyển tiếp.
             if (context.Request.Cookies.TryGetValue("accessToken", out string? accessToken) && !string.IsNullOrWhiteSpace(accessToken))
             {
                 context.Request.Headers["Cookie"] = $"accessToken={accessToken}";
@@ -97,7 +98,7 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
                 context.Request.Headers.Remove("Cookie");
             }
 
-            // Supply X-Api-Key for downstream (crucial for WebSocket proxying which bypasses HTTP DelegatingHandler)
+            // Gắn khóa nội bộ cho downstream tại đây vì luồng proxy WebSocket không đi qua HTTP DelegatingHandler.
             if (!string.IsNullOrWhiteSpace(_internalApiKey))
             {
                 context.Request.Headers["X-Api-Key"] = _internalApiKey;
@@ -109,6 +110,7 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
             context.Request.Headers["X-Api-Key"] = _internalApiKey;
         }
 
+        // Route nội bộ bị chặn tại biên công khai kể cả khi caller đã xác thực.
         if (IsServiceOnlyRoute(method, segments))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -127,6 +129,8 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
 
         if (IsDualPurposeRoute(method, segments))
         {
+            // Đây là bước kiểm tra có thông tin JWT; header/cookie có mặt chưa chứng minh token hợp lệ.
+            // Việc xác thực và phân quyền tiếp tục theo pipeline của route và downstream.
             bool hasJwt = (context.User?.Identity?.IsAuthenticated == true && !context.User.HasClaim("u", "svc")) ||
                           !string.IsNullOrWhiteSpace(context.Request.Headers.Authorization) ||
                           (context.Request.Cookies.TryGetValue("accessToken", out string? c) && !string.IsNullOrWhiteSpace(c));
@@ -151,6 +155,7 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
         await _next(context);
     }
 
+    /// <summary>Nhận diện route chỉ dành cho service theo method và từng segment để tránh khớp nhầm tiền tố.</summary>
     public static bool IsServiceOnlyRoute(string method, string[] segments)
     {
         // POST /api/v1/invoices
@@ -224,7 +229,7 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
                 return true;
         }
 
-        // Media internal service APIs:
+        // Các API Media chỉ dành cho giao tiếp service nội bộ:
         // GET /api/v1/media/{mediaId}/verify
         if (string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase) &&
             segments.Length == 5 &&
@@ -236,7 +241,7 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
             return true;
         }
 
-        // GET /api/v1/media/{mediaId} (metadata only, 4 segments, NOT /content which has 5 segments)
+        // GET /api/v1/media/{mediaId}: metadata có 4 segment; route /content có 5 segment nên không khớp.
         if (string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase) &&
             segments.Length == 4 &&
             segments[0].Equals("api", StringComparison.OrdinalIgnoreCase) &&
@@ -268,7 +273,7 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
             return true;
         }
 
-        // Integrity internal APIs: /internal/v1/integrity/*
+        // Các API Integrity nội bộ: /internal/v1/integrity/*
         if (segments.Length >= 4 &&
             segments[0].Equals("internal", StringComparison.OrdinalIgnoreCase) &&
             segments[1].Equals("v1", StringComparison.OrdinalIgnoreCase) &&
@@ -280,6 +285,7 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
         return false;
     }
 
+    /// <summary>Nhận diện API dùng chung nhưng yêu cầu thông tin JWT khi gọi qua Gateway.</summary>
     public static bool IsDualPurposeRoute(string method, string[] segments)
     {
         // GET /api/v1/payment/history

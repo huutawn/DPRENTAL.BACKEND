@@ -47,6 +47,7 @@ public sealed class GatewayRateLimiter : IGatewayRateLimiter, IDisposable
                     PermitLimit = permitLimit,
                     Window = TimeSpan.FromSeconds(options.WindowSeconds),
                     SegmentsPerWindow = options.SegmentsPerWindow,
+                    // Hết quota thì từ chối ngay; không giữ request chờ trong bộ nhớ.
                     QueueLimit = 0,
                     AutoReplenishment = true
                 };
@@ -72,6 +73,7 @@ public sealed class GatewayRateLimiter : IGatewayRateLimiter, IDisposable
             return GatewayRateLimitResult.Allowed;
         }
 
+        // Làm tròn lên để client không thử lại sớm hơn thời điểm quota có thể được cấp lại.
         int retryAfterSeconds = 1;
         if (lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfterTimeSpan) &&
             retryAfterTimeSpan.TotalSeconds > 0)
@@ -140,10 +142,12 @@ public sealed class GatewayRateLimiter : IGatewayRateLimiter, IDisposable
 
     private RateLimitPartitionKey ResolvePartitionKeyInternal(HttpContext context)
     {
+        // Khóa quota không chứa URL/query: cùng danh tính dùng chung hạn mức trong nhóm đọc hoặc ghi.
         string requestGroup = (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
             ? RateLimitPartitionKey.ReadGroup
             : RateLimitPartitionKey.WriteGroup;
 
+        // Chọn đúng một quota: có UserId hợp lệ thì dùng user, còn lại dùng IP đã chuẩn hóa.
         IdentityContext identity = identityExtractor.Extract(context.User);
         if (identity.IsAuthenticated && !string.IsNullOrWhiteSpace(identity.UserId))
         {

@@ -1,6 +1,6 @@
 namespace Dprental.Gateway.Health;
 
-/// <summary>Tags used to expose targeted health endpoints.</summary>
+/// <summary>Nhãn phân loại health check để các endpoint chạy đúng nhóm kiểm tra.</summary>
 internal static class GatewayHealthCheckTags
 {
     internal const string Readiness = "ready";

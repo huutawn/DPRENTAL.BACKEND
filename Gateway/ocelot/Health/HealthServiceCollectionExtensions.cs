@@ -2,10 +2,10 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Dprental.Gateway.Health;
 
-/// <summary>Registers Gateway operational health checks.</summary>
+/// <summary>Đăng ký các phép kiểm tra tình trạng hoạt động của Gateway.</summary>
 internal static class HealthServiceCollectionExtensions
 {
-    /// <summary>Registers the AuthService JWKS readiness dependency.</summary>
+    /// <summary>Đăng ký readiness cho cả bộ khóa JWKS và cấu hình route Ocelot.</summary>
     internal static IServiceCollection AddGatewayHealthChecks(this IServiceCollection services)
     {
         services.AddHealthChecks()

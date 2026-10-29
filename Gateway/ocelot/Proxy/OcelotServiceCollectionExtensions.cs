@@ -54,6 +54,7 @@ public static class OcelotServiceCollectionExtensions
 
         OcelotPipelineConfiguration pipelineConfiguration = new()
         {
+            // Hook chạy sau xác thực của Ocelot để quota có thể dựa trên danh tính của route.
             PreAuthorizationMiddleware = async (context, next) =>
             {
                 IGatewayRateLimiter rateLimiter = context.RequestServices.GetRequiredService<IGatewayRateLimiter>();

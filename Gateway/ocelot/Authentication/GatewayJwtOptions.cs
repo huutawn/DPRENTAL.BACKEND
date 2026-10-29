@@ -1,19 +1,19 @@
 namespace Dprental.Gateway.Authentication;
 
-/// <summary>JWT trust configuration owned by the Gateway.</summary>
+/// <summary>Cấu hình nguồn tin cậy để Gateway xác thực JWT.</summary>
 internal sealed class GatewayJwtOptions
 {
     internal const string SectionName = "Gateway:Authentication:Jwt";
 
-    /// <summary>Expected issuer claim of access tokens issued by AuthService.</summary>
+    /// <summary>Giá trị issuer bắt buộc của access token do AuthService phát hành.</summary>
     public string Issuer { get; init; } = string.Empty;
 
-    /// <summary>Expected audience claim of access tokens accepted by the Gateway.</summary>
+    /// <summary>Audience của token người dùng mà Gateway chấp nhận.</summary>
     public string Audience { get; init; } = string.Empty;
 
-    /// <summary>Expected audience claim of service tokens accepted for InventoryService routes.</summary>
+    /// <summary>Audience của token service dùng cho các route InventoryService.</summary>
     public string InventoryAudience { get; init; } = "inventory-api";
 
-    /// <summary>AuthService endpoint exposing only public JSON Web Keys.</summary>
+    /// <summary>Địa chỉ JWKS của AuthService, chỉ công bố khóa công khai để kiểm tra chữ ký.</summary>
     public string JwksUri { get; init; } = string.Empty;
 }

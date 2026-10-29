@@ -2,7 +2,7 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.Gateway.Authentication;
 
-/// <summary>Rejects incomplete or unsafe JWT trust configuration before the Gateway accepts traffic.</summary>
+/// <summary>Từ chối cấu hình JWT thiếu hoặc sai định dạng ngay khi khởi động Gateway.</summary>
 internal sealed class GatewayJwtOptionsValidator : IValidateOptions<GatewayJwtOptions>
 {
     /// <inheritdoc />

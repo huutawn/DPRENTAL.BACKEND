@@ -1,6 +1,6 @@
 namespace Dprental.Gateway.Errors;
 
-/// <summary>Stable, client-facing errors emitted by Gateway-owned HTTP boundaries.</summary>
+/// <summary>Danh mục mã lỗi ổn định trả cho client từ các lớp xử lý HTTP do Gateway sở hữu.</summary>
 internal sealed record GatewayError(string Code, string Message)
 {
     internal static readonly GatewayError UnexpectedFailure = new(

@@ -41,6 +41,7 @@ public sealed class HeaderSanitizer
             }
         }
 
+        // Chỉ ghi tên header đã xóa, không ghi giá trị chứa danh tính hoặc khóa bí mật.
         if (removedHeaders.Count > 0)
         {
             LogUntrustedHeadersRemoved(logger, string.Join(", ", removedHeaders), null);

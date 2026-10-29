@@ -171,6 +171,7 @@ public sealed class GatewayCorsMiddleware
         EnsureVaryIncludesOrigin(response);
     }
 
+    // Báo cho cache phân biệt phản hồi theo Origin, giữ nguyên các trường Vary đã có.
     private static void EnsureVaryIncludesOrigin(HttpResponse response)
     {
         if (!response.Headers.TryGetValue(HeaderNames.Vary, out var values))
