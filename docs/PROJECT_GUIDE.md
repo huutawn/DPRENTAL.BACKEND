@@ -489,6 +489,7 @@ PENDING_SUPPLIER_CONFIRMATION
         │
         ├── reject     → REJECTED
         ├── timeout    → EXPIRED
+        ├── renter cancel (chưa supplier nào xác nhận) → CANCELLED
         │
         ▼
 AWAITING_HANDOVER
@@ -608,6 +609,13 @@ request 100% refund for RentalItem
 ```
 
 Các item khác trong cùng Order không bị ảnh hưởng.
+
+Renter hủy cả Order (`POST /orders/{orderId}/cancel`) được khi:
+
+- Order còn `PENDING_PAYMENT`: hủy invoice, release hold, không có tiền để hoàn.
+- Order đã thanh toán và mọi item còn hiệu lực đều `PENDING_SUPPLIER_CONFIRMATION` (chưa supplier nào accept): mỗi item chuyển `CANCELLED`, release allocation và yêu cầu hoàn 100% tiền thuê cùng tiền cọc của item đó. Lệnh accept đang chờ Inventory xác nhận chặn việc hủy (`DECISION_IN_PROGRESS`).
+
+Khi đã có item được accept, renter không hủy cả Order được nữa (`Order.CancellationNotAllowed`). Response đơn của renter có `canCancel` tính bằng cùng quy tắc.
 
 Rental không trực tiếp chuyển tiền.
 

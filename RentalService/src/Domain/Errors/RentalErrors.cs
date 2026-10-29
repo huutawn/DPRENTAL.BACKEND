@@ -58,6 +58,9 @@ public static class RentalErrors
     public static readonly Error OrderCancellationForbidden =
         Error.Conflict("Order.CancellationForbidden", "Không thể hủy đơn thuê ở trạng thái hiện tại.");
 
+    public static readonly Error RenterOrderCancellationNotAllowed =
+        Error.Conflict("Order.CancellationNotAllowed", "Chỉ hủy được đơn khi chưa thanh toán hoặc nhà cung cấp chưa xác nhận.");
+
     public static readonly Error CancelTooEarly =
         Error.Conflict("CANCEL_TOO_EARLY", "Chưa qua mốc quá hạn giao thiết bị; người thuê chưa thể hủy.");
 

@@ -231,6 +231,26 @@ public sealed class OrderQueryServiceTests
     }
 
     [Fact]
+    public async Task Renter_CanCancel_UnpaidOrPaidAwaitingConfirmation_NotOrdersAlreadyEnded()
+    {
+        await SeedAsync();
+
+        Result<PagedResponse<RenterOrderSummaryResponse>> list =
+            await RenterService().GetMyOrdersAsync(1, 20, null, OrderTestData.User(_an));
+        Result<RenterOrderDetailResponse> paidDetail =
+            await RenterService().GetMyOrderAsync(_paidMixedOrder.Id, OrderTestData.User(_an));
+        Result<RenterOrderDetailResponse> latePaidDetail =
+            await RenterService().GetMyOrderAsync(_latePaidOrder.Id, OrderTestData.User(_an));
+
+        Dictionary<Guid, bool> canCancel = list.Value.Items.ToDictionary(o => o.OrderId, o => o.CanCancel);
+        Assert.True(canCancel[_unpaidOrder.Id]);
+        Assert.True(canCancel[_paidMixedOrder.Id]);
+        Assert.False(canCancel[_latePaidOrder.Id]);
+        Assert.True(paidDetail.Value.CanCancel);
+        Assert.False(latePaidDetail.Value.CanCancel);
+    }
+
+    [Fact]
     public async Task Renter_OrderDetail_OrderSavedBeforeRefundAccountsWereStored_HasNoRefundAccount()
     {
         RentalOrder legacy = OrderTestData.Order(
