@@ -55,7 +55,8 @@ public sealed class RentalOrdersController(
     }
 
     /// <summary>
-    /// Người thuê hủy cả đơn khi đang chờ thanh toán.
+    /// Người thuê hủy cả đơn khi đang chờ thanh toán, hoặc đã thanh toán mà chưa nhà cung cấp nào xác nhận.
+    /// Đơn đã thanh toán được nhả lịch giữ thiết bị và hoàn 100% tiền thuê lẫn tiền cọc của các dòng bị hủy.
     /// </summary>
     /// <param name="orderId">Mã định danh đơn hàng.</param>
     /// <param name="idempotencyKey">Khóa chống trùng lặp gửi qua header HTTP (bắt buộc, tối đa 64 ký tự).</param>
@@ -66,7 +67,7 @@ public sealed class RentalOrdersController(
     /// <response code="401">Người dùng chưa được xác thực.</response>
     /// <response code="403">Người gọi không phải tài khoản cá nhân có quyền Renter.</response>
     /// <response code="404">Không tìm thấy đơn của người gọi (Order.NotFound).</response>
-    /// <response code="409">Đơn không ở PendingPayment, hóa đơn đã thanh toán hoặc xung đột Idempotency-Key.</response>
+    /// <response code="409">Nhà cung cấp đã xác nhận hoặc đơn đã kết thúc (Order.CancellationNotAllowed), nhà cung cấp đang xác nhận (DECISION_IN_PROGRESS), hóa đơn vừa được thanh toán hoặc xung đột Idempotency-Key.</response>
     /// <response code="503">Hóa đơn đang được tạo hoặc việc giải phóng phân bổ chưa hoàn tất; thử lại cùng Idempotency-Key.</response>
     /// <returns>Kết quả hủy đơn.</returns>
     [HttpPost("{orderId:guid}/cancel")]

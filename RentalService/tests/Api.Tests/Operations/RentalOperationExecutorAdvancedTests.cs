@@ -239,21 +239,76 @@ public sealed class RentalOperationExecutorAdvancedTests
     }
 
     [Fact]
-    public async Task RenterCancelOrder_PaidOrderIsNotCancelled()
+    public async Task RenterCancelOrder_PaidBeforeConfirmation_CancelsItemsAndSchedulesFullRefund()
     {
         await using var db = CreateDbContext(Guid.NewGuid().ToString("N"));
         var order = CreatePendingOrder(Guid.NewGuid());
         order.MarkAsPaid("INV-001", "PAY-001", FixedNow, FixedNow);
         db.RentalOrders.Add(order);
         await db.SaveChangesAsync();
+        RentalItem item = order.Items.Single();
+
+        var executor = CreateExecutor(db, new StubInventoryClient(), new StubPaymentClient());
+        var first = await executor.ExecuteRenterCancelOrderAsync(
+            order.Id, order.RenterId, "Changed plans", "cancel-paid-1");
+        var replay = await executor.ExecuteRenterCancelOrderAsync(
+            order.Id, order.RenterId, "Changed plans", "cancel-paid-1");
+
+        Assert.True(first.IsSuccess);
+        Assert.Equal(first.Value, replay.Value);
+        Assert.Equal(RentalOrderStatus.Cancelled.ToString(), first.Value.Status);
+        Assert.Equal(item.RentalAmount + item.DepositAmount, first.Value.RefundAmount);
+        Assert.Equal(RentalOrderStatus.Cancelled, order.Status);
+        Assert.Equal(RentalItemStatus.Cancelled, item.Status);
+        Assert.Contains(order.OperationReceipts, r => r.Action == "ReleaseAllocation" && r.TargetItemId == item.Id);
+        Assert.Contains(order.OperationReceipts, r => r.Action == "RequestRefund" && r.TargetItemId == item.Id);
+        // Một event hủy dòng và một event hủy đơn; gửi lại cùng khóa không phát thêm.
+        Assert.Equal(2, db.RentalOutboxMessages.Count());
+    }
+
+    [Fact]
+    public async Task RenterCancelOrder_AfterSupplierAccepted_IsNotAllowed()
+    {
+        await using var db = CreateDbContext(Guid.NewGuid().ToString("N"));
+        var order = CreatePendingOrder(Guid.NewGuid());
+        order.MarkAsPaid("INV-001", "PAY-001", FixedNow, FixedNow);
+        order.Items.Single().SetStatus(RentalItemStatus.AwaitingHandover);
+        RentalOrderStatusPolicy.Apply(order, FixedNow, "accept-1");
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
 
         var executor = CreateExecutor(db, new StubInventoryClient(), new StubPaymentClient());
         var result = await executor.ExecuteRenterCancelOrderAsync(
-            order.Id, order.RenterId, "Changed plans", "cancel-paid-1");
+            order.Id, order.RenterId, "Changed plans", "cancel-accepted-1");
 
         Assert.True(result.IsFailure);
-        Assert.Equal("Order.NotPendingPayment", result.Error.Code);
+        Assert.Equal("Order.CancellationNotAllowed", result.Error.Code);
+        Assert.Equal(RentalOrderStatus.AwaitingHandover, order.Status);
+        Assert.DoesNotContain(order.OperationReceipts, r => r.Action == "RequestRefund");
+    }
+
+    [Fact]
+    public async Task RenterCancelOrder_SupplierAcceptInFlight_IsRejectedWithoutChangingOrder()
+    {
+        await using var db = CreateDbContext(Guid.NewGuid().ToString("N"));
+        var order = CreatePendingOrder(Guid.NewGuid());
+        order.MarkAsPaid("INV-001", "PAY-001", FixedNow, FixedNow);
+        RentalItem item = order.Items.Single();
+        order.AddOperationReceipt(new RentalOperationReceipt(
+            Guid.NewGuid(), order.Id, "accept-in-flight", "SupplierAccept", "accept-fingerprint",
+            isSuccess: false, errorCode: null, errorMessage: null, createdAt: FixedNow,
+            status: RentalOperationReceipt.StatusProcessing, targetItemId: item.Id));
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var executor = CreateExecutor(db, new StubInventoryClient(), new StubPaymentClient());
+        var result = await executor.ExecuteRenterCancelOrderAsync(
+            order.Id, order.RenterId, "Changed plans", "cancel-in-flight-1");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("DECISION_IN_PROGRESS", result.Error.Code);
         Assert.Equal(RentalOrderStatus.Paid, order.Status);
+        Assert.Equal(RentalItemStatus.PendingSupplierConfirmation, item.Status);
     }
 
     [Fact]

@@ -13,6 +13,7 @@ using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.Errors;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Operations;
@@ -21,13 +22,15 @@ public sealed partial class RentalOperationExecutor
 {
     private const string CancelOrderAction = "CancelOrder";
     private const string DefaultRenterCancelReason = "Cancelled by renter before payment";
+    private const string DefaultPaidCancelReason = "Cancelled by renter before supplier confirmation";
     private const int MaxCancelReasonLength = 500;
 
     /// <summary>
-    /// Renter hủy cả đơn khi đang PendingPayment.
-    /// Thứ tự: kiểm tra quyền sở hữu, khóa order, idempotency, kiểm tra PendingPayment,
+    /// Renter hủy cả đơn khi đang PendingPayment, hoặc đã thanh toán mà chưa nhà cung cấp nào xác nhận.
+    /// Thứ tự với PendingPayment: kiểm tra quyền sở hữu, khóa order, idempotency, kiểm tra trạng thái,
     /// hủy invoice (hoặc chặn nếu invoice đang được tạo), xếp lệnh release từng allocation vào outbox,
     /// rồi mới lưu trạng thái Cancelled, receipt và outbox event trong một lần commit.
+    /// Đơn đã thanh toán đi theo <see cref="CancelPaidOrderBeforeConfirmationAsync"/>.
     /// </summary>
     public async Task<Result<CancelOrderResponse>> ExecuteRenterCancelOrderAsync(
         Guid orderId,
@@ -105,10 +108,16 @@ public sealed partial class RentalOperationExecutor
             return Error.Conflict("IDEMPOTENCY_CONFLICT", "Khóa idempotency đã được sử dụng với hành động hoặc nội dung khác.");
         }
 
-        // 2. Chỉ hủy được khi đang chờ thanh toán.
-        if (order.Status != RentalOrderStatus.PendingPayment)
+        // 2. Chỉ hủy được khi chưa thanh toán, hoặc đã thanh toán mà chưa nhà cung cấp nào xác nhận.
+        if (!RenterOrderCancellationPolicy.CanCancel(order.Status, order.Items.Select(i => i.Status)))
         {
-            return Error.Conflict("Order.NotPendingPayment", $"Đơn hàng không ở trạng thái PendingPayment (trạng thái hiện tại: {order.Status}).");
+            return RentalErrors.RenterOrderCancellationNotAllowed;
+        }
+
+        if (order.Status == RentalOrderStatus.Paid)
+        {
+            string paidCancelReason = string.IsNullOrWhiteSpace(reason) ? DefaultPaidCancelReason : normalizedReason;
+            return await CancelPaidOrderBeforeConfirmationAsync(order, renterId, paidCancelReason, normalizedKey, fingerprint, cancellationToken);
         }
 
         // 3. Invoice: hủy nếu đã có InvoiceRef; nếu chưa có thì phải chứng minh invoice không đang được tạo.
@@ -254,6 +263,128 @@ public sealed partial class RentalOperationExecutor
                         utcNow),
                     cancellationToken);
             }
+            return response;
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Đơn đã thanh toán, chưa nhà cung cấp nào xác nhận: hủy mọi dòng đang chờ xác nhận, nhả lịch và hoàn 100%
+    /// tiền thuê lẫn tiền cọc của từng dòng (cùng đường release/refund với supplier từ chối).
+    /// Supplier accept cũng giữ khóa đơn nên không chạy chen; chỉ còn chặn lệnh accept đang chờ Inventory xác nhận.
+    /// </summary>
+    private async Task<Result<CancelOrderResponse>> CancelPaidOrderBeforeConfirmationAsync(
+        RentalOrder order,
+        Guid renterId,
+        string reason,
+        string normalizedKey,
+        string fingerprint,
+        CancellationToken cancellationToken)
+    {
+        List<RentalItem> pendingItems = order.Items
+            .Where(i => i.Status == RentalItemStatus.PendingSupplierConfirmation)
+            .ToList();
+
+        if (pendingItems.Any(i => order.HasInFlightAccept(i.Id)))
+        {
+            return Error.Conflict("DECISION_IN_PROGRESS", "Nhà cung cấp đang xác nhận đơn; vui lòng tải lại đơn hàng.");
+        }
+
+        DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+        decimal refundAmount = pendingItems.Sum(i => i.RentalAmount + i.DepositAmount);
+
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            foreach (RentalItem item in pendingItems)
+            {
+                item.ApplyCancelled(utcNow, normalizedKey, reason, renterId, ActorRole.Renter);
+                await ScheduleReleaseAndRefundAsync(order, item, renterId, reason, utcNow, cancellationToken);
+            }
+
+            RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
+            order.RecordReadModelUpdate(utcNow);
+
+            var response = new CancelOrderResponse(order.Id, order.OrderCode, order.Status.ToString(), utcNow, refundAmount);
+
+            order.AddOperationReceipt(new RentalOperationReceipt(
+                Guid.NewGuid(),
+                order.Id,
+                normalizedKey,
+                CancelOrderAction,
+                fingerprint,
+                isSuccess: true,
+                errorCode: null,
+                errorMessage: null,
+                createdAt: utcNow,
+                status: RentalOperationReceipt.StatusSucceeded,
+                completedAt: utcNow,
+                apiResponseJson: JsonSerializer.Serialize(response, JsonOptions)));
+
+            foreach (RentalItem item in pendingItems)
+            {
+                var itemCancelledRes = await _rentalEvents.EnqueueRentalItemCancelledAsync(
+                    new RentalItemCancelledPayload(order.Id, item.Id, renterId, ActorRole.Renter.ToString(), utcNow,
+                        KafkaContractSpec.ReasonCodes.RenterCancelled, item.RentalAmount + item.DepositAmount, order.Version),
+                    correlationId: normalizedKey,
+                    cancellationToken: cancellationToken);
+                if (itemCancelledRes.IsFailure)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    return itemCancelledRes.Error;
+                }
+            }
+
+            if (order.Status == RentalOrderStatus.Cancelled)
+            {
+                var cancelOrderRes = await _rentalEvents.EnqueueRentalOrderCancelledAsync(
+                    new RentalOrderCancelledPayload(order.Id, order.RenterId, utcNow, KafkaContractSpec.ReasonCodes.RenterCancelled, order.Version),
+                    correlationId: normalizedKey,
+                    cancellationToken: cancellationToken);
+                if (cancelOrderRes.IsFailure)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    return cancelOrderRes.Error;
+                }
+            }
+
+            await CommitLocalChangesAsync(order, cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+
+            if (_notifier != null)
+            {
+                await _notifier.NotifyRenterOrderChangedAsync(
+                    order.RenterId,
+                    new RenterOrderChangedNotification(
+                        Guid.NewGuid(),
+                        order.Id,
+                        order.Version,
+                        OrderChangeTypes.OrderCancelled,
+                        utcNow),
+                    cancellationToken);
+
+                foreach (RentalSubOrder subOrder in order.SubOrders.Where(s => pendingItems.Any(i => i.SupplierId == s.SupplierId)))
+                {
+                    await _notifier.NotifySupplierSubOrderChangedAsync(
+                        subOrder.SupplierId,
+                        new SupplierSubOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            subOrder.Id,
+                            order.Version,
+                            OrderChangeTypes.OrderCancelled,
+                            utcNow),
+                        cancellationToken);
+                }
+            }
+
             return response;
         }
         catch

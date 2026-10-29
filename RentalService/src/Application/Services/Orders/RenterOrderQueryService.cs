@@ -64,7 +64,8 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
                 r.Items.Select(OrderQueryMapper.ToSummaryItem).ToList(),
                 r.Version,
                 OrderQueryMapper.ToRefundProgress(r.RefundCount, r.PendingRefundCount),
-                r.RefundedAmount))
+                r.RefundedAmount,
+                RenterOrderCancellationPolicy.CanCancel(r.Status, r.Items.Select(i => i.Status))))
             .ToList();
 
         return OrderQueryMapper.ToPage(items, normalizedPage, normalizedPageSize, records.TotalCount);
@@ -121,7 +122,8 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             subOrders,
             order.Version,
             OrderQueryMapper.ToRefundProgress(refundLines.Count, refundLines.Values.Count(l => l.Confirmation is null)),
-            refundLines.Values.Sum(l => l.Confirmation?.RefundAmount ?? 0m));
+            refundLines.Values.Sum(l => l.Confirmation?.RefundAmount ?? 0m),
+            RenterOrderCancellationPolicy.CanCancel(order.Status, order.SubOrders.SelectMany(s => s.Items).Select(i => i.Status)));
     }
 
     private static RenterSubOrderResponse ToSubOrder(RentalSubOrder subOrder, Dictionary<Guid, RentalRefundLine> refundLines)

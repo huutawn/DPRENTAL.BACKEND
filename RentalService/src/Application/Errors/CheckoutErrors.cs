@@ -22,6 +22,10 @@ public static class CheckoutErrors
     public static readonly Error ItemsUnavailable =
         Error.Conflict("Checkout.ItemsUnavailable", "Một số thiết bị đã chọn không còn cho thuê hoặc không đủ số lượng.");
 
+    /// <summary>Mọi dòng bị từ chối đều là thiết bị do chính người thuê sở hữu.</summary>
+    public static readonly Error CannotRentOwnListing =
+        Error.Forbidden("Checkout.CannotRentOwnListing", "Bạn không thể thuê thiết bị do chính mình sở hữu.");
+
     public static readonly Error PriceChanged =
         Error.Conflict("Checkout.PriceChanged", "Giá vừa thay đổi. Vui lòng xem lại và gửi lại.");
 
