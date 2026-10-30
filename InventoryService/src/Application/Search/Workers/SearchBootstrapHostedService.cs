@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.InventoryService.Application.Search.Workers;
 
-/// <summary>Host-owned, cancellable bootstrap and periodic index-loss detection.</summary>
+/// <summary>Khởi tạo chỉ mục và kiểm tra mất chỉ mục định kỳ; dừng cùng vòng đời host.</summary>
 public sealed class SearchBootstrapHostedService(IServiceScopeFactory scopes,
     IOptions<MeilisearchOptions> options, ILogger<SearchBootstrapHostedService> logger) : BackgroundService
 {
@@ -54,6 +54,7 @@ public sealed class SearchBootstrapHostedService(IServiceScopeFactory scopes,
             throw new InvalidOperationException("Unresolved live submission requires task reconciliation.");
         var provisioner = scope.ServiceProvider.GetRequiredService<IInventoryIndexProvisioner>();
         var active = await store.GetActiveBackfillRunAsync(stoppingToken);
+        // Thế hệ chưa sẵn sàng hoặc backfill dở dang cần phục hồi trước khi phục vụ qua chỉ mục.
         bool rebuild = generation?.IsReady != true || active is not null;
         if (active?.Status != SearchBackfillRun.StatusSwapping)
         {

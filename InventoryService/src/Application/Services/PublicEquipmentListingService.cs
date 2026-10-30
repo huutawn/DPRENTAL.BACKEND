@@ -93,8 +93,12 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
         var validated = valResult.Value;
         bool isRecommendation = validated.Sort == AssetSortOption.Recommended;
 
+        // Recommended dùng cùng bộ lọc và truy vấn PostgreSQL với Search, chỉ thay cách xếp hạng.
+        // Điểm Valkey là tín hiệu ưu tiên, không phải danh sách giới hạn những listing được phép trả về.
         if (isRecommendation)
         {
+            // Chỉ cá nhân hóa cho người dùng thật có danh tính hợp lệ; anonymous/service dùng độ phổ biến chung.
+            // Đồng thời loại listing của chính người dùng để tránh gợi ý họ thuê thiết bị của mình.
             Guid? effectiveUserId = (callerContext.IsHuman && callerContext.UserId.HasValue && callerContext.UserId.Value != Guid.Empty)
                 ? callerContext.UserId.Value
                 : null;
@@ -111,6 +115,7 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
                 snapshot = RecommendationSnapshot.Unavailable(RecommendationReasons.Unconfigured);
             }
 
+            // Không đưa kết quả cá nhân hóa vào cache Search dùng chung giữa các người dùng.
             var coreResult = await ExecuteSearchCoreAsync(
                 request,
                 validated,
@@ -123,6 +128,8 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
                 return coreResult.Error;
             }
 
+            // Tier thực tế được xác định sau khi lọc trong SQL: điểm có thể tồn tại nhưng không còn
+            // listing phù hợp. Phân biệt tình huống này (filtered) với lỗi hoặc thiếu dữ liệu Valkey.
             string tier = coreResult.Value.EffectiveTier ?? "default";
             string reason;
             if (snapshot.Outcome != RecommendationOutcome.Available)
@@ -165,6 +172,7 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
             string searchScope = "public-discovery";
             string searchQueryType = "public-search";
             string effectiveSortStr = validated.Sort == AssetSortOption.Relevance ? "relevance" : (request.Sort ?? "created_desc");
+            // Khóa cache bao gồm bộ lọc, phân trang và ngày Việt Nam vì số lượng trống phụ thuộc ngày.
             string searchHash = Dprental.InventoryService.Application.Caching.CacheKeyHelper.ComputePublicSearchHash(
                 request.Page,
                 request.PageSize,
@@ -347,6 +355,8 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
         Guid? effectiveEquipmentTypeId,
         CancellationToken ct)
     {
+        // Chỉ mục chỉ cung cấp ID ứng viên cho Search có từ khóa. Recommended bỏ qua chỉ mục
+        // để SQL tự lọc toàn bộ tập hợp hợp lệ trước khi áp dụng điểm và phân trang.
         if (validated.Sort != AssetSortOption.Recommended &&
             !string.IsNullOrWhiteSpace(validated.SearchKeyword) &&
             _searchIndexService != null)
@@ -358,6 +368,8 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
                     BrandId: validated.BrandId),
                 ct);
 
+            // Sai quyền/cấu hình cần trả lỗi rõ ràng. Lỗi tạm thời, chưa sẵn sàng hoặc tập ứng viên
+            // bị cắt thì dùng SQL để tránh làm mất kết quả hoặc tính sai tổng số trang.
             if (candidateResult.IsFailure && candidateResult.Error.Code is
                 "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
             {
@@ -411,6 +423,7 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
 
         var (candidateIds, backend) = candidatesResult.Value;
 
+        // Kiểm tra bộ lọc thông số theo schema Catalog và chặn trường riêng tư ở luồng công khai.
         var resolveResult = await _filterResolver.ResolveAsync(
             request.Filters,
             effectiveEquipmentTypeId,
@@ -483,6 +496,8 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
             excludedOwnerUserId: excludedOwnerUserId,
             seed: recommendationSnapshot?.Seed);
 
+        // PostgreSQL kiểm tra trạng thái, vị trí, thông số và khả dụng từ dữ liệu nguồn;
+        // ID ứng viên từ Meilisearch không thay thế các kiểm tra này vì chỉ mục có thể cập nhật trễ.
         var searchResult = await _listingRepository.SearchPublicAsync(searchCriteria, ct);
         int totalCount = searchResult.TotalCount;
         int totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling((double)totalCount / validated.Take);
@@ -504,6 +519,8 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
 
         var searchExecutionResult = new SearchExecution<PagedResponse<PublicEquipmentListingResponse>>(paged, backend);
 
+        // Cache hết hạn theo mốc sớm nhất: TTL, hold sắp hết hạn, nửa đêm Việt Nam,
+        // schema hoặc danh mục. Nhờ đó không giữ kết quả lâu hơn dữ liệu đã dùng để tính nó.
         var baseTtl = TimeSpan.FromSeconds(_cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15);
         var candidateDeadline = snapshotStartedAt.Add(baseTtl);
 

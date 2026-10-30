@@ -43,6 +43,8 @@ public sealed partial class EquipmentListingRepository
             joinSql = "JOIN unnest(@pCandidateIds) AS cand(id) ON l.id = cand.id";
             parameters.Add(new NpgsqlParameter("pCandidateIds", filters.CandidateIds.ToArray()));
         }
+        // Không có ứng viên chỉ mục: mỗi từ phải xuất hiện trong name hoặc model (AND giữa các từ).
+        // Escape ký tự LIKE để %, _ và dấu gạch chéo trong đầu vào được tìm như văn bản.
         else if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
         {
             var words = filters.SearchKeyword.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -124,6 +126,7 @@ public sealed partial class EquipmentListingRepository
 
         if (_context.Database.IsRelational())
         {
+            // COUNT, trang kết quả và dữ liệu listing phải đọc cùng snapshot khi có cập nhật đồng thời.
             await using var transaction = await _context.Database.BeginTransactionAsync(
                 IsolationLevel.RepeatableRead,
                 cancellationToken);
@@ -199,10 +202,13 @@ public sealed partial class EquipmentListingRepository
             }
             else
             {
+                // Giữ thứ tự liên quan từ Meilisearch để dùng khi sort=relevance; SQL vẫn lọc lại.
                 joinSql = "JOIN unnest(@pCandidateIds) WITH ORDINALITY AS cand(id, ord) ON l.id = cand.id";
                 commonParams.Add(new NpgsqlParameter("pCandidateIds", filters.CandidateIds.ToArray()));
             }
         }
+        // Không có ứng viên chỉ mục: mỗi từ phải xuất hiện trong name hoặc model (AND giữa các từ).
+        // Escape ký tự LIKE để %, _ và dấu gạch chéo trong đầu vào được tìm như văn bản.
         else if (!string.IsNullOrWhiteSpace(filters.SearchKeyword))
         {
             var words = filters.SearchKeyword.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -258,7 +264,9 @@ public sealed partial class EquipmentListingRepository
 
         AppendDynamicFilters(clauses, commonParams, filters);
 
-        // Subquery expressions for total and available quantities
+        // Tổng lượng chỉ gồm asset đang nhận đặt thuê. Lượng trống loại lịch chặn,
+        // phân bổ trùng ngày, hold còn hạn và thiết bị đã bàn giao quá hạn nhưng chưa trả.
+        // Nếu không truyền khoảng thuê, đánh giá khả dụng trong ngày hiện tại ở Việt Nam.
         string totalQtyExpr = """
             COALESCE((
                 SELECT COUNT(*)::int FROM "inventory"."assets" a
@@ -346,7 +354,7 @@ public sealed partial class EquipmentListingRepository
 
         string baseWhere = string.Join(" AND ", clauses);
 
-        // When interval is provided, filter availableQuantity >= requestedQuantity (default 1)
+        // Có khoảng thuê thì chỉ giữ listing đủ số lượng yêu cầu, mặc định ít nhất một thiết bị.
         string filterWhere = baseWhere;
         if (hasInterval)
         {
@@ -381,6 +389,12 @@ public sealed partial class EquipmentListingRepository
             pageParamsList.Add(new NpgsqlParameter("pGlobalScores", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Bigint) { Value = globalScores });
             pageParamsList.Add(new NpgsqlParameter("pSeed", effectiveSeed));
 
+            // Chọn tier trên TOÀN BỘ tập hợp sau lọc, trước LIMIT/OFFSET để không đổi tier theo trang.
+            // personalized: weight = 1 + 12 * interest/max_interest + 4 * popularity/max_popularity.
+            // global: weight = 1 + 8 * popularity/max_popularity. Listing không có điểm vẫn có weight=1.
+            // Hash(seed, id) tạo u trong (0,1); sắp -ln(u)/weight tăng dần tạo thứ tự giả ngẫu nhiên
+            // có trọng số: điểm cao có cơ hội đứng đầu lớn hơn, không phải luôn đứng trước điểm thấp.
+            // Không có tín hiệu phù hợp thì dùng created_at DESC, id DESC; ID phá hòa để phân trang ổn định.
             pageSql = $"""
                 WITH valid_listings AS (
                     SELECT
@@ -467,6 +481,7 @@ public sealed partial class EquipmentListingRepository
         else
         {
             string orderSql;
+            // Ưu tiên khớp toàn bộ name/model, sau đó khớp cụm từ; tiếp theo mới dùng thứ tự chỉ mục.
             if (criteria.Filters.Sort == AssetSortOption.Relevance)
             {
                 bool hasKeyword = !string.IsNullOrWhiteSpace(criteria.Filters.SearchKeyword);

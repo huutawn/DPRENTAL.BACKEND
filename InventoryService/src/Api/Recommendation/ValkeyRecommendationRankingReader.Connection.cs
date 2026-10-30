@@ -11,6 +11,7 @@ public sealed partial class ValkeyRecommendationRankingReader
         if (_multiplexer != null && _multiplexer.IsConnected) return _multiplexer;
         if (!_ownsMultiplexer) return _multiplexer;
 
+        // Khóa và kiểm tra lại bên trong để nhiều request không cùng tạo kết nối mới.
         await _connectLock.WaitAsync(cancellationToken);
         try
         {
@@ -29,6 +30,7 @@ public sealed partial class ValkeyRecommendationRankingReader
             }
             catch
             {
+                // Kết nối có thể hoàn thành sau khi request hết hạn; phải giải phóng kết nối đến muộn.
                 _ = connecting.ContinueWith(task =>
                 {
                     if (task.IsCompletedSuccessfully)

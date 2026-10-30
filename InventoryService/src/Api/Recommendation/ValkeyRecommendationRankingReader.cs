@@ -7,6 +7,10 @@ using StackExchange.Redis;
 
 namespace Dprental.InventoryService.Api.Recommendation;
 
+/// <summary>
+/// Đọc điểm do hệ thống gợi ý cung cấp qua Valkey; lớp này không huấn luyện hay tính điểm hành vi.
+/// Đóng băng điểm theo chu kỳ 5 phút để các instance API dùng chung dữ liệu xếp hạng.
+/// </summary>
 public sealed partial class ValkeyRecommendationRankingReader : IRecommendationRankingReader, IAsyncDisposable, IDisposable
 {
     private const string GlobalPopularityKey = "rec:v1:global:popular-listings";
@@ -62,7 +66,7 @@ public sealed partial class ValkeyRecommendationRankingReader : IRecommendationR
         _isConfigured = true;
     }
 
-    // Constructor for testing with pre-existing multiplexer
+    // Nhận kết nối có sẵn để kiểm thử; vòng đời kết nối thuộc bên truyền vào.
     public ValkeyRecommendationRankingReader(
         IConnectionMultiplexer multiplexer,
         RecommendationMetrics? metrics = null,
@@ -86,10 +90,13 @@ public sealed partial class ValkeyRecommendationRankingReader : IRecommendationR
     {
         cancellationToken.ThrowIfCancellationRequested();
         userId = userId == Guid.Empty ? null : userId;
+        // Cùng người dùng và chu kỳ có cùng seed. SQL dùng seed để tạo thứ tự có trọng số
+        // lặp lại được; thứ tự vẫn có thể đổi nếu dữ liệu nguồn hoặc bộ lọc thay đổi.
         long cycle = _timeProvider.GetUtcNow().ToUnixTimeSeconds() / 300;
         string seed = userId.HasValue ? $"{userId.Value:D}:{cycle}" : $"anon:{cycle}";
         long startedAt = _timeProvider.GetTimestamp();
         var result = RecommendationSnapshot.Unavailable(RecommendationReasons.Unavailable, cycle, seed);
+        // Giới hạn toàn bộ lần đọc ở 100 ms để dịch vụ gợi ý chậm không giữ request quá lâu.
         using var timeout = new CancellationTokenSource(DefaultTimeout);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         try
@@ -98,6 +105,7 @@ public sealed partial class ValkeyRecommendationRankingReader : IRecommendationR
                 ? await ReadCycleAsync(userId, cycle, seed, deadline.Token)
                 : RecommendationSnapshot.Unavailable(RecommendationReasons.Unconfigured, cycle, seed);
         }
+        // Hủy từ request phải truyền ngược lên; timeout nội bộ trở thành trạng thái thiếu gợi ý.
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
@@ -145,6 +153,8 @@ public sealed partial class ValkeyRecommendationRankingReader : IRecommendationR
             Personal = source.PersonalInterests.Select(p => new PersonalScoreDto(p.EquipmentTypeId, p.Score)).ToList(),
             Global = source.GlobalPopularity.Select(g => new GlobalScoreDto(g.ListingId, g.Score)).ToList()
         });
+        // SET NX chỉ cho một instance thắng; PXAT làm snapshot hết hạn đúng cuối chu kỳ.
+        // Instance thua phải đọc bản thắng thay vì dùng điểm vừa đọc riêng, tránh lệch giữa các API.
         var written = await AwaitObservedAsync(db.ExecuteAsync("SET", key, payload, "NX", "PXAT", cycleEndMs), ct);
         if (CycleHasEnded(cycleEndMs))
             return RecommendationSnapshot.Unavailable(RecommendationReasons.Timeout, cycle, seed);
@@ -164,6 +174,7 @@ public sealed partial class ValkeyRecommendationRankingReader : IRecommendationR
     {
         if (CycleHasEnded(cycleEndMs))
             return RecommendationSnapshot.Unavailable(RecommendationReasons.Timeout, cycle, seed);
+        // Chặn payload quá lớn và kiểm tra hợp đồng trước khi đưa điểm vào truy vấn SQL.
         byte[] bytes = (byte[])value!;
         return bytes.Length <= 64 * 1024 &&
             TryParseSnapshotJson(bytes, cycle, seed, isAnonymous: !userId.HasValue, out var personal, out var global)
@@ -175,6 +186,8 @@ public sealed partial class ValkeyRecommendationRankingReader : IRecommendationR
 
     private static async Task<RecommendationSnapshot> ReadSourceAsync(IDatabase db, Guid? userId, long cycle, string seed, CancellationToken ct)
     {
+        // Đọc song song tối đa 300 listing phổ biến và 20 loại thiết bị quan tâm để giới hạn tải.
+        // Khách ẩn danh không đọc khóa cá nhân; cả hai tập rỗng được phân loại là miss.
         var globalTask = db.SortedSetRangeByRankWithScoresAsync(GlobalPopularityKey, 0, MaxPopularListingsCount - 1, Order.Descending);
         var personalTask = userId.HasValue
             ? db.SortedSetRangeByRankWithScoresAsync($"rec:v1:user:{userId.Value:D}:equipment-types", 0, MaxInterestsCount - 1, Order.Descending)
@@ -189,6 +202,8 @@ public sealed partial class ValkeyRecommendationRankingReader : IRecommendationR
 
     private static async Task<T> AwaitObservedAsync<T>(Task<T> task, CancellationToken ct)
     {
+        // WaitAsync chỉ dừng chờ, không hủy lệnh Redis đang chạy. Quan sát lỗi đến muộn
+        // để tác vụ nền không phát sinh exception không được xử lý sau timeout.
         try { return await task.WaitAsync(ct); }
         catch
         {

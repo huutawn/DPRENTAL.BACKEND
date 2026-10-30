@@ -33,6 +33,7 @@ public sealed partial class ValkeyRecommendationRankingReader
         [property: JsonPropertyName("listingId")] Guid ListingId,
         [property: JsonPropertyName("score")] long Score);
 
+    // Snapshot phải đúng version, chu kỳ, seed và danh tính; không chấp nhận ID trùng hoặc điểm sai.
     private static bool TryParseSnapshotJson(
         byte[] bytes,
         long expectedCycle,
@@ -153,7 +154,7 @@ public sealed partial class ValkeyRecommendationRankingReader
 
         if (!Guid.TryParseExact(str, "D", out id)) return false;
 
-        // Strictly verify lowercase hex chars and hyphens (canonical "D" format)
+        // Buộc UUID dạng D viết thường để khóa do bên ghi và ID do bên đọc hiểu thống nhất.
         for (int i = 0; i < str.Length; i++)
         {
             char c = str[i];
@@ -171,6 +172,7 @@ public sealed partial class ValkeyRecommendationRankingReader
         return id != Guid.Empty;
     }
 
+    // Sorted set lưu double: chỉ nhận số nguyên dương tới 2^53, giới hạn biểu diễn nguyên chính xác.
     private static bool IsValidScore(double score, out long longScore)
     {
         longScore = 0;
