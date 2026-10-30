@@ -464,4 +464,94 @@ public sealed class KafkaOutboxAtomicEnqueuePostgreSqlTests
             await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
         }
     }
+    [Theory]
+    [InlineData("worker", false, true)]
+    [InlineData("wrong-worker", false, false)]
+    [InlineData("worker", true, false)]
+    public async Task OutboxUpdates_RequireCurrentClaim_AndCannotBeRepeated(
+        string token, bool expired, bool expectedSuccess)
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            await using var db = new RentalServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(connectionString));
+            await db.Database.MigrateAsync();
+            var repository = new OutboxRepository(db);
+            var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            var published = new RentalOutboxMessage(Guid.NewGuid(), "events", "publish", "Test", "{}", now);
+            var failed = new RentalOutboxMessage(Guid.NewGuid(), "events", "failure", "Test", "{}", now);
+            published.Claim("worker", now.AddMinutes(expired ? -5 : 5));
+            failed.Claim("worker", now.AddMinutes(expired ? -5 : 5));
+            db.AddRange(published, failed);
+            await db.SaveChangesAsync();
+
+            Assert.Equal(expectedSuccess, await repository.MarkPublishedAsync(published.Id, token, now));
+            Assert.Equal(expectedSuccess, await repository.RecordFailureAsync(failed.Id, token, "offline", now, now.AddMinutes(1)));
+            Assert.False(await repository.MarkPublishedAsync(published.Id, "wrong-worker", now));
+            Assert.False(await repository.RecordFailureAsync(failed.Id, "wrong-worker", "again", now));
+            if (expectedSuccess)
+            {
+                Assert.False(await repository.MarkPublishedAsync(published.Id, token, now));
+                Assert.False(await repository.RecordFailureAsync(failed.Id, token, "again", now));
+            }
+
+            db.ChangeTracker.Clear();
+            var storedPublished = await db.RentalOutboxMessages.AsNoTracking().SingleAsync(m => m.Id == published.Id);
+            var storedFailed = await db.RentalOutboxMessages.AsNoTracking().SingleAsync(m => m.Id == failed.Id);
+            Assert.Equal(expectedSuccess ? "Published" : "Pending", storedPublished.Status);
+            Assert.Equal(expectedSuccess ? now : (DateTimeOffset?)null, storedPublished.PublishedAt);
+            Assert.Equal(expectedSuccess ? 1 : 0, storedFailed.RetryCount);
+            Assert.Equal(expectedSuccess ? "offline" : null, storedFailed.ErrorMessage);
+            Assert.Equal(expectedSuccess ? now.AddMinutes(1) : (DateTimeOffset?)null, storedFailed.ScheduledAt);
+            Assert.Equal(expectedSuccess ? null : "worker", storedFailed.LockedBy);
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Theory]
+    [InlineData(8, null, "Pending")]
+    [InlineData(9, null, "DeadLettered")]
+    [InlineData(9, "Pending", "Pending")]
+    [InlineData(0, "DeadLettered", "DeadLettered")]
+    public async Task RecordFailure_UpdatesRetryAndScheduleAtomically(
+        int retryCount, string? targetStatus, string expectedStatus)
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            await using var db = new RentalServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(connectionString));
+            await db.Database.MigrateAsync();
+            // PostgreSQL timestamps have microsecond precision.
+            var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            var message = new RentalOutboxMessage(Guid.NewGuid(), "events", "failure", "Test", "{}", now);
+            for (int i = 0; i < retryCount; i++)
+                message.RecordFailure("previous", now, targetStatus: "Pending");
+            message.Claim("worker", now.AddMinutes(5));
+            db.Add(message);
+            await db.SaveChangesAsync();
+
+            var repository = new OutboxRepository(db);
+            Assert.True(await repository.RecordFailureAsync(message.Id, "worker", "offline", now, now.AddMinutes(1), targetStatus));
+            Assert.False(await repository.RecordFailureAsync(message.Id, "worker", "duplicate", now));
+
+            db.ChangeTracker.Clear();
+            var stored = await db.RentalOutboxMessages.AsNoTracking().SingleAsync(m => m.Id == message.Id);
+            Assert.Equal(retryCount + 1, stored.RetryCount);
+            Assert.Equal(expectedStatus, stored.Status);
+            Assert.Equal(expectedStatus == "DeadLettered" ? null : (DateTimeOffset?)now.AddMinutes(1), stored.ScheduledAt);
+            Assert.Equal(now, stored.LastAttemptedAt);
+            Assert.Null(stored.LockedBy);
+            Assert.Null(stored.LockedUntilUtc);
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
 }
