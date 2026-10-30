@@ -13,8 +13,10 @@ namespace Dprental.RentalService.Application.Services.Refunds;
 /// </summary>
 internal static class AdminRefundMapper
 {
+    // Ghép khoản hoàn theo item với xác nhận chuyển khoản; ưu tiên snapshot tài khoản tại lúc xác nhận nếu đã có.
     public static AdminOrderRefundResponse ToOrderRefund(RentalOrder order, RentalRefundLine line)
     {
+        // Ghép chứng từ xác nhận nếu có; không có chứng từ thì khoản hoàn vẫn ở trạng thái chờ xác nhận.
         AdminRefundConfirmationResponse? confirmation = line.Confirmation is { } c
             ? ToConfirmation(c.RefundAmount, c.BankCode, c.AccountNumber, c.AccountHolderName, c.BankTransactionRef, c.Note, c.ConfirmedBy, c.ConfirmedAt)
             : null;
@@ -36,9 +38,11 @@ internal static class AdminRefundMapper
             confirmation);
     }
 
+    // Chuyển bằng chứng xác nhận refund sang DTO; chỉ tạo tài khoản hoàn tiền khi đủ các trường cần thiết.
     public static AdminRefundConfirmationResponse ToConfirmation(RefundConfirmationRecord c) =>
         ToConfirmation(c.RefundAmount, c.BankCode, c.AccountNumber, c.AccountHolderName, c.BankTransactionRef, c.Note, c.ConfirmedBy, c.ConfirmedAt);
 
+    // Chuyển bằng chứng xác nhận refund sang DTO; chỉ tạo tài khoản hoàn tiền khi đủ các trường cần thiết.
     private static AdminRefundConfirmationResponse ToConfirmation(
         decimal refundAmount,
         string? bankCode,

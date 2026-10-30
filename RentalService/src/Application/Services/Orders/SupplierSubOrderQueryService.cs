@@ -15,6 +15,7 @@ namespace Dprental.RentalService.Application.Services.Orders;
 /// </summary>
 public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) : ISupplierSubOrderQueryService
 {
+    // Chỉ đọc suborder thuộc người dùng supplier và đã thanh toán hợp lệ; chuẩn hóa status/phân trang trước truy vấn.
     public async Task<Result<PagedResponse<SupplierSubOrderSummaryResponse>>> GetMySubOrdersAsync(
         int page,
         int pageSize,
@@ -22,18 +23,23 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
         IRentalCallerContext caller,
         CancellationToken cancellationToken = default)
     {
+        // Kiểm tra danh tính/quyền của caller trước khi trả dữ liệu hoặc áp dụng quyết định trong phạm vi tài nguyên.
         Result<Guid> supplier = OrderQueryMapper.RequirePersonalCaller(caller);
+        // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (supplier.IsFailure)
         {
             return supplier.Error;
         }
 
+        // Chuẩn hóa bộ lọc và phân trang trước khi gọi repository để phạm vi truy vấn và kích thước response được xác định rõ.
         Result<RentalItemStatus?> statusFilter = OrderQueryMapper.ParseStatusFilter<RentalItemStatus>(status);
+        // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (statusFilter.IsFailure)
         {
             return statusFilter.Error;
         }
 
+        // Chuẩn hóa bộ lọc và phân trang trước khi gọi repository để phạm vi truy vấn và kích thước response được xác định rõ.
         (int normalizedPage, int normalizedPageSize) = OrderQueryMapper.NormalizePaging(page, pageSize);
         RecordPage<SupplierSubOrderSummaryRecord> records = await orders.GetPaidSubOrderPageForSupplierAsync(
             supplier.Value,
@@ -42,6 +48,7 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
             normalizedPageSize,
             cancellationToken);
 
+        // Dựng trang đơn con supplier từ projection đã giới hạn sở hữu/thanh toán, tóm tắt trạng thái từ các item của họ.
         List<SupplierSubOrderSummaryResponse> items = records.Items
             .Select(r => new SupplierSubOrderSummaryResponse(
                 r.SubOrderId,
@@ -61,23 +68,29 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
         return OrderQueryMapper.ToPage(items, normalizedPage, normalizedPageSize, records.TotalCount);
     }
 
+    // Tra cứu suborder thuộc supplier cùng order đã trả tiền; không tìm thấy hoặc ngoài phạm vi đều trả NotFound.
     public async Task<Result<SupplierSubOrderDetailResponse>> GetMySubOrderAsync(
         Guid subOrderId,
         IRentalCallerContext caller,
         CancellationToken cancellationToken = default)
     {
+        // Kiểm tra danh tính/quyền của caller trước khi trả dữ liệu hoặc áp dụng quyết định trong phạm vi tài nguyên.
         Result<Guid> supplier = OrderQueryMapper.RequirePersonalCaller(caller);
+        // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (supplier.IsFailure)
         {
             return supplier.Error;
         }
 
+        // Lấy dữ liệu qua abstraction sở hữu truy vấn; dùng các tiêu chí và phạm vi đã chuẩn bị trong service.
         RentalSubOrder? subOrder = await orders.GetPaidSubOrderForSupplierAsync(subOrderId, supplier.Value, cancellationToken);
+        // Kiểm tra dữ liệu tùy chọn hoặc kết quả tra cứu trước khi dùng; xử lý riêng trường hợp không có giá trị.
         if (subOrder?.RentalOrder is not RentalOrder order)
         {
             return OrderQueryErrors.SubOrderNotFound;
         }
 
+        // Dựng các dòng thuộc đúng suborder supplier đã được phép đọc, gồm snapshot và mapping unit cần cho bàn giao/trả.
         List<SupplierOrderItemResponse> items = subOrder.Items
             .OrderBy(i => i.ExpectedStartDate)
             .ThenBy(i => i.Id)
@@ -102,8 +115,10 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
             order.Version);
     }
 
+    // Chiếu item cho supplier gồm mapping unit và bằng chứng cần bàn giao/trả máy, dùng snapshot thương mại đã chốt.
     private static SupplierOrderItemResponse ToItem(RentalItem item)
     {
+        // Dùng policy/mapper hiện có để dựng dữ liệu response nhất quán với các điểm đọc khác của cùng nghiệp vụ.
         OrderItemResponse basics = OrderQueryMapper.ToItem(item, isSupplier: true);
 
         return new SupplierOrderItemResponse(

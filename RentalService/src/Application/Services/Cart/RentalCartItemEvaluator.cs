@@ -44,24 +44,30 @@ public sealed class RentalCartItemEvaluator(
     /// </summary>
     public Result ValidateRentalDates(DateOnly startDate, DateOnly endDate)
     {
+        // Lấy mốc thời gian cho lần kiểm tra này; các deadline được đối chiếu với mốc của bước xử lý tương ứng.
         DateOnly todayVn = DateOnly.FromDateTime(timeProvider.GetUtcNow().AddHours(7).DateTime);
 
+        // Kiểm tra giá trị ngày/thời gian và cửa sổ cho phép trước khi dùng trong tính giá hoặc điều kiện nghiệp vụ.
         if (startDate > endDate)
         {
             return RentalErrors.InvalidRentalPeriod;
         }
 
+        // Tính khoảng ngày hoặc số tiền từ dữ liệu của bước hiện tại; giữ công thức/chính sách đang được use case sử dụng.
         int durationDays = endDate.DayNumber - startDate.DayNumber + 1;
+        // Kiểm tra giá trị ngày/thời gian và cửa sổ cho phép trước khi dùng trong tính giá hoặc điều kiện nghiệp vụ.
         if (durationDays > policy.MaximumRentalDays)
         {
             return RentalErrors.DurationExceedsOneYear;
         }
 
+        // Dừng nhánh không hợp lệ với mã Cart.AdvanceBookingTooFar; caller nhận lỗi theo contract thay vì tiếp tục thay đổi dữ liệu.
         if (startDate > todayVn.AddMonths(6))
         {
             return Error.Validation("Cart.AdvanceBookingTooFar", "Chỉ được phép đặt trước tối đa 6 tháng.");
         }
 
+        // Dừng nhánh không hợp lệ với mã Cart.StartDateInvalid; caller nhận lỗi theo contract thay vì tiếp tục thay đổi dữ liệu.
         if (RentalBookingPolicy.IsStartDateTooSoon(startDate, todayVn))
         {
             return Error.Validation("Cart.StartDateInvalid", RentalBookingPolicy.TooSoonMessage(todayVn));
@@ -87,8 +93,10 @@ public sealed class RentalCartItemEvaluator(
     {
         // 1. Kiểm tra listing tồn tại và đang nhận thuê (Ưu tiên hơn lỗi ngày!)
         Result<RentalListingSnapshot> listingResult = await listingReader.GetListingAsync(listingId, cancellationToken);
+        // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (listingResult.IsFailure)
         {
+            // Điều kiện này quyết định có thể tiếp tục hay phải trả Result.Success theo contract của use case.
             if (listingResult.Error.Type == ErrorType.NotFound)
             {
                 return Result.Success(new RentalCartItemEvaluationResult(
@@ -100,7 +108,9 @@ public sealed class RentalCartItemEvaluator(
             return listingResult.Error;
         }
 
+        // Sử dụng dữ liệu của kết quả đã kiểm tra ở bước trước để dựng quyết định tiếp theo, không gọi lại để thay snapshot giữa luồng.
         RentalListingSnapshot listing = listingResult.Value;
+        // Listing không còn nhận thuê thì trả dòng không khả dụng, không tiếp tục như một listing đang mở bán.
         if (!listing.IsPublished || !listing.AcceptsBookings)
         {
             return Result.Success(new RentalCartItemEvaluationResult(
@@ -130,9 +140,12 @@ public sealed class RentalCartItemEvaluator(
                 "Số lượng thuê phải lớn hơn 0."));
         }
 
+        // Chạy validator/policy của bước hiện tại; chỉ chuyển sang bước sau khi kết quả hợp lệ.
         Result dateCheck = ValidateRentalDates(startDate, endDate);
+        // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (dateCheck.IsFailure)
         {
+            // Kiểm tra giá trị ngày/thời gian và cửa sổ cho phép trước khi dùng trong tính giá hoặc điều kiện nghiệp vụ.
             if (dateCheck.Error.Code == "Cart.StartDateInvalid")
             {
                 return Result.Success(new RentalCartItemEvaluationResult(
@@ -155,6 +168,7 @@ public sealed class RentalCartItemEvaluator(
         Result<RentalAvailabilityResult> availResult = await availabilityReader.GetAvailableQuantityAsync(
             listingId, startDate, endDate, quantity, cancellationToken);
 
+        // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (availResult.IsFailure)
         {
             // Race condition: Snapshot đọc thành công nhưng availability trả NotFound (listing vừa bị xóa)
@@ -170,7 +184,9 @@ public sealed class RentalCartItemEvaluator(
             return availResult.Error;
         }
 
+        // Dùng số lượng khả dụng đã trả về cho toàn khoảng thuê để so với số lượng yêu cầu.
         RentalAvailabilityResult avail = availResult.Value;
+        // Kiểm tra số lượng và giới hạn tập dữ liệu trước khi xử lý, tránh chấp nhận thiếu/thừa phần tử của yêu cầu.
         if (!avail.IsAvailable || avail.AvailableQuantity < quantity)
         {
             return Result.Success(new RentalCartItemEvaluationResult(
@@ -203,11 +219,14 @@ public sealed class RentalCartItemEvaluator(
         DateOnly endDate,
         RentalCartItemEvaluationResult evaluation)
     {
+        // Sử dụng dữ liệu của kết quả đã kiểm tra ở bước trước để dựng quyết định tiếp theo, không gọi lại để thay snapshot giữa luồng.
         RentalListingSnapshot? listing = evaluation.Snapshot;
         bool hasValidPeriod = startDate <= endDate && quantity >= 1 && (endDate.DayNumber - startDate.DayNumber + 1) <= policy.MaximumRentalDays;
 
+        // Kiểm tra dữ liệu tùy chọn hoặc kết quả tra cứu trước khi dùng; xử lý riêng trường hợp không có giá trị.
         if (listing is not null && hasValidPeriod)
         {
+            // Tính khoảng ngày hoặc số tiền từ dữ liệu của bước hiện tại; giữ công thức/chính sách đang được use case sử dụng.
             int duration = endDate.DayNumber - startDate.DayNumber + 1;
             decimal estimatedAmount = duration * listing.DailyRate * quantity;
 
