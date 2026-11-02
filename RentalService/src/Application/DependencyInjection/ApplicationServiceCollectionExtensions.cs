@@ -99,6 +99,7 @@ public static class ApplicationServiceCollectionExtensions
 
         // Sổ tài khoản hoàn tiền của renter và hàng đợi hoàn tiền cho Admin.
         services.AddScoped<IRenterBankAccountService, RenterBankAccountService>();
+        services.AddScoped<IAdminSupplierBankAccountService, AdminSupplierBankAccountService>();
         services.AddScoped<IAdminRefundQueryService, AdminRefundQueryService>();
         services.AddScoped<IAdminRefundCommandService, AdminRefundCommandService>();
 
