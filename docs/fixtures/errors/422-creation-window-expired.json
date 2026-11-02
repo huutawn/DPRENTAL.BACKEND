@@ -1,0 +1,8 @@
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.21",
+  "title": "Unprocessable Entity",
+  "status": 422,
+  "detail": "Thời hạn tạo đánh giá cho mục thuê này đã kết thúc vào lúc 2026-11-14T10:00:00.000Z (quy tắc completedAt + 30 ngày).",
+  "instance": "/api/v1/reviews",
+  "code": "REVIEW_CREATION_WINDOW_EXPIRED"
+}

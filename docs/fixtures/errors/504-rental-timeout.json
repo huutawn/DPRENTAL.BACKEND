@@ -1,0 +1,8 @@
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.6.5",
+  "title": "Gateway Timeout",
+  "status": 504,
+  "detail": "Dịch vụ RentalService không phản hồi yêu cầu snapshot trong thời gian giới hạn (5 giây).",
+  "instance": "/api/v1/reviews",
+  "code": "RENTAL_SERVICE_TIMEOUT"
+}

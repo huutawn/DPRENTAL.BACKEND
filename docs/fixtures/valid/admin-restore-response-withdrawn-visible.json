@@ -1,0 +1,9 @@
+{
+  "reviewId": "8f731888-eb87-43cf-8a21-72946c87e6aa",
+  "authorState": "Withdrawn",
+  "moderationState": "Visible",
+  "version": 8,
+  "moderatedAt": "2026-11-04T15:30:00.000Z",
+  "moderatorId": "99999999-9999-9999-9999-999999999999",
+  "reason": "Admin khôi phục moderationState nhưng review vẫn Withdrawn (không hiện public)."
+}

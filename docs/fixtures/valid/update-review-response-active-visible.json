@@ -1,0 +1,18 @@
+{
+  "reviewId": "8f731888-eb87-43cf-8a21-72946c87e6aa",
+  "orderId": "4a713833-2882-4df3-a185-1bf035fe85d1",
+  "itemId": "b8f0474c-4da6-466d-a2dc-bf61dd3147f7",
+  "direction": "renter_to_supplier_listing",
+  "authorId": "11111111-1111-1111-1111-111111111111",
+  "subjectId": "22222222-2222-2222-2222-222222222222",
+  "equipmentListingId": "33333333-3333-3333-3333-333333333333",
+  "rating": 4,
+  "comment": "Cập nhật lại: máy quay rất tốt nhưng pin hơi chai nhẹ sau thời gian dài sử dụng.",
+  "authorState": "Active",
+  "moderationState": "Visible",
+  "version": 2,
+  "createdAt": "2026-11-02T08:30:00.000Z",
+  "updatedAt": "2026-11-03T09:15:00.000Z",
+  "withdrawnAt": null,
+  "canEditUntil": "2026-11-09T08:30:00.000Z"
+}

@@ -1,0 +1,8 @@
+{
+  "type": "https://tools.ietf.org/html/rfc6585#section-3",
+  "title": "Precondition Required",
+  "status": 428,
+  "detail": "Yêu cầu chỉnh sửa hoặc thay đổi trạng thái đánh giá bắt buộc phải có header 'If-Match' chứa ETag phiên bản hiện tại.",
+  "instance": "/api/v1/reviews/8f731888-eb87-43cf-8a21-72946c87e6aa",
+  "code": "PRECONDITION_REQUIRED"
+}

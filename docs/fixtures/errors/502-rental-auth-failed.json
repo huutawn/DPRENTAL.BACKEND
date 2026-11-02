@@ -1,0 +1,8 @@
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.6.3",
+  "title": "Bad Gateway",
+  "status": 502,
+  "detail": "Không thể xác thực với dịch vụ RentalService nội bộ qua X-Api-Key.",
+  "instance": "/api/v1/reviews",
+  "code": "RENTAL_SERVICE_AUTHENTICATION_FAILED"
+}

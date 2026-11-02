@@ -1,0 +1,8 @@
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+  "title": "Unauthorized",
+  "status": 401,
+  "detail": "Yêu cầu cần có Bearer token hợp lệ của người dùng.",
+  "instance": "/api/v1/reviews",
+  "code": "UNAUTHORIZED"
+}

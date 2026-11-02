@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "orderId": "5b824944-3993-5ef4-b296-2cf146fe96e2",
+      "itemId": "c9a1585d-5eb7-577e-b3ed-cf72ee4258a8",
+      "equipmentListingId": "33333333-3333-3333-3333-333333333333",
+      "counterpartId": "22222222-2222-2222-2222-222222222222",
+      "direction": "renter_to_supplier_listing",
+      "completedAt": "2026-10-15T10:00:00.000Z",
+      "deadlineAt": "2026-11-14T10:00:00.000Z",
+      "daysRemaining": 12
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "totalCount": 1,
+  "totalPages": 1
+}

@@ -1,0 +1,230 @@
+{
+  "$schema": "manifest-schema.json",
+  "version": "1.0.0",
+  "description": "Danh mục fixtures chính thức của ReviewService phục vụ kiểm chứng contract, validation và kiểm thử tự động trước DPR-274.",
+  "categories": {
+    "invalid_syntax": {
+      "description": "Các bản tin JSON hỏng cú pháp (parser error), phục vụ kiểm tra middleware xử lý lỗi HTTP 400 Bad Request.",
+      "fixtures": [
+        {
+          "file": "invalid/invalid-syntax.json",
+          "expectedStatus": 400,
+          "expectedErrorCode": "INVALID_JSON_SYNTAX",
+          "description": "JSON bị thiếu dấu ngoặc kép và dấu ngoặc đóng."
+        }
+      ]
+    },
+    "invalid_dto": {
+      "description": "Các request có cú pháp JSON đúng nhưng vi phạm validation ràng buộc dữ liệu DTO.",
+      "fixtures": [
+        {
+          "file": "invalid/invalid-rating-range.json",
+          "targetEndpoint": "POST /api/v1/reviews",
+          "expectedStatus": 400,
+          "expectedErrorCode": "INVALID_RATING",
+          "description": "Điểm rating = 6 (ngoài khoảng 1..5)."
+        },
+        {
+          "file": "invalid/invalid-comment-length.json",
+          "targetEndpoint": "POST /api/v1/reviews",
+          "expectedStatus": 400,
+          "expectedErrorCode": "COMMENT_EXCEEDS_MAX_LENGTH",
+          "description": "Bình luận có 1.001 ký tự (vượt quá giới hạn 1.000 Unicode runes)."
+        },
+        {
+          "file": "invalid/missing-required-fields.json",
+          "targetEndpoint": "POST /api/v1/reviews",
+          "expectedStatus": 400,
+          "expectedErrorCode": "VALIDATION_FAILED",
+          "description": "Thiếu các trường bắt buộc orderId và itemId."
+        }
+      ]
+    },
+    "business_failures": {
+      "description": "Các phản hồi ProblemDetails chuẩn (RFC 7807/RFC 9110) khi vi phạm quy tắc nghiệp vụ, ranh giới hoặc điều kiện phụ thuộc.",
+      "fixtures": [
+        {
+          "file": "errors/401-unauthorized.json",
+          "status": 401,
+          "code": "UNAUTHORIZED",
+          "description": "Thiếu hoặc sai Bearer JWT."
+        },
+        {
+          "file": "errors/403-forbidden-not-participant.json",
+          "status": 403,
+          "code": "ACTOR_NOT_PARTICIPANT",
+          "description": "Actor không phải Renter hoặc Supplier của mục thuê."
+        },
+        {
+          "file": "errors/404-rental-item-not-found.json",
+          "status": 404,
+          "code": "RENTAL_ITEM_NOT_FOUND",
+          "description": "RentalService báo mục thuê không tồn tại."
+        },
+        {
+          "file": "errors/409-review-already-exists.json",
+          "status": 409,
+          "code": "REVIEW_ALREADY_EXISTS",
+          "description": "Đã có review cho cặp (itemId, direction), kể cả khi đã withdraw."
+        },
+        {
+          "file": "errors/409-idempotency-key-mismatch.json",
+          "status": 409,
+          "code": "IDEMPOTENCY_KEY_REUSE_MISMATCH",
+          "description": "Trùng Idempotency-Key nhưng khác payload/route/ifMatch."
+        },
+        {
+          "file": "errors/412-etag-precondition-failed.json",
+          "status": 412,
+          "code": "ETAG_PRECONDITION_FAILED",
+          "description": "Header If-Match không khớp với version hiện tại."
+        },
+        {
+          "file": "errors/422-creation-window-expired.json",
+          "status": 422,
+          "code": "REVIEW_CREATION_WINDOW_EXPIRED",
+          "description": "Đã quá 30 ngày kể từ completedAt."
+        },
+        {
+          "file": "errors/422-edit-window-expired.json",
+          "status": 422,
+          "code": "REVIEW_EDIT_WINDOW_EXPIRED",
+          "description": "Đã quá hạn chỉnh sửa min(createdAt + 7d, completedAt + 30d)."
+        },
+        {
+          "file": "errors/428-precondition-required.json",
+          "status": 428,
+          "code": "PRECONDITION_REQUIRED",
+          "description": "Thiếu header If-Match trên thao tác mutation."
+        },
+        {
+          "file": "errors/502-rental-auth-failed.json",
+          "status": 502,
+          "code": "RENTAL_SERVICE_AUTHENTICATION_FAILED",
+          "description": "RentalService từ chối X-Api-Key do sai cấu hình."
+        },
+        {
+          "file": "errors/504-rental-timeout.json",
+          "status": 504,
+          "code": "RENTAL_SERVICE_TIMEOUT",
+          "description": "Cuộc gọi snapshot sang RentalService bị timeout quá 5 giây."
+        }
+      ]
+    },
+    "lifecycle_and_operations": {
+      "description": "Bộ request và response chuẩn cho toàn bộ 4 tổ hợp trạng thái (authorState x moderationState) và các endpoint.",
+      "fixtures": [
+        {
+          "file": "valid/create-review-request.json",
+          "operation": "CreateReview",
+          "method": "POST",
+          "route": "/api/v1/reviews"
+        },
+        {
+          "file": "valid/create-review-response-active-visible.json",
+          "combination": "Active + Visible",
+          "description": "Review vừa tạo thành công, công khai."
+        },
+        {
+          "file": "valid/update-review-request.json",
+          "operation": "UpdateReview",
+          "method": "PUT",
+          "route": "/api/v1/reviews/{reviewId}"
+        },
+        {
+          "file": "valid/update-review-response-active-visible.json",
+          "combination": "Active + Visible",
+          "description": "Review cập nhật thành công khi đang visible."
+        },
+        {
+          "file": "valid/update-review-response-active-hidden.json",
+          "combination": "Active + Hidden",
+          "description": "Review cập nhật thành công khi đang bị ẩn (moderationState giữ Hidden)."
+        },
+        {
+          "file": "valid/withdraw-review-request.json",
+          "operation": "WithdrawReview",
+          "method": "POST",
+          "route": "/api/v1/reviews/{reviewId}/withdraw"
+        },
+        {
+          "file": "valid/withdraw-review-response-withdrawn-visible.json",
+          "combination": "Withdrawn + Visible",
+          "description": "Tác giả tự rút review đang visible (soft-delete)."
+        },
+        {
+          "file": "valid/withdraw-review-response-withdrawn-hidden.json",
+          "combination": "Withdrawn + Hidden",
+          "description": "Tác giả rút review đang bị Admin ẩn."
+        },
+        {
+          "file": "valid/admin-hide-request.json",
+          "operation": "AdminHide",
+          "method": "POST",
+          "route": "/api/v1/admin/reviews/{reviewId}/hide"
+        },
+        {
+          "file": "valid/admin-hide-response-active-hidden.json",
+          "combination": "Active + Hidden",
+          "description": "Admin ẩn review vi phạm."
+        },
+        {
+          "file": "valid/admin-restore-request.json",
+          "operation": "AdminRestore",
+          "method": "POST",
+          "route": "/api/v1/admin/reviews/{reviewId}/restore"
+        },
+        {
+          "file": "valid/admin-restore-response-active-visible.json",
+          "combination": "Active + Visible",
+          "description": "Admin khôi phục review Active trở lại hiển thị."
+        },
+        {
+          "file": "valid/admin-restore-response-withdrawn-visible.json",
+          "combination": "Withdrawn + Visible",
+          "description": "Admin khôi phục moderationState cho review Withdrawn (vẫn không hiện public)."
+        },
+        {
+          "file": "valid/review-detail-private-supplier-to-renter.json",
+          "operation": "GetReviewDetail",
+          "description": "Chi tiết review chiều supplier_to_renter (chỉ author/subject/admin xem)."
+        },
+        {
+          "file": "valid/public-listing-reviews-response.json",
+          "operation": "GetListingReviews",
+          "description": "Danh sách public review với allowlist DTO và masked name."
+        },
+        {
+          "file": "valid/review-summary-response.json",
+          "operation": "GetReviewSummary",
+          "description": "Tổng hợp điểm và phân bổ sao cho thiết bị có đánh giá."
+        },
+        {
+          "file": "valid/review-summary-empty-response.json",
+          "operation": "GetReviewSummary",
+          "description": "Tổng hợp điểm khi chưa có đánh giá (averageRating null)."
+        },
+        {
+          "file": "valid/pending-reviews-response.json",
+          "operation": "GetPendingReviews",
+          "description": "Danh sách mục chờ đánh giá dựa trên bảng chiếu và loại trừ."
+        },
+        {
+          "file": "valid/rental-item-review-snapshot.json",
+          "operation": "RentalSnapshot",
+          "description": "Snapshot tối thiểu từ RentalService không có orderCode."
+        },
+        {
+          "file": "valid/kafka-rental-item-completed-envelope.json",
+          "operation": "KafkaEvent",
+          "description": "Bản tin Kafka Envelope v1 bỏ organizationId khi null."
+        },
+        {
+          "file": "valid/reconciliation-batch-response.json",
+          "operation": "Reconciliation",
+          "description": "Phản hồi một trang đối soát với cursor opaque."
+        }
+      ]
+    }
+  }
+}

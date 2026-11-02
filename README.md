@@ -1,6 +1,6 @@
 # ReviewService
 
-Dịch vụ ReviewService cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET 10 theo kiến trúc phân lớp sạch (Clean Architecture) tương đồng với AuthService.
+Dịch vụ ReviewService cho hệ sinh thái DPRENTAL, được xây dựng bằng .NET 10 theo kiến trúc phân lớp sạch (Clean Architecture) tham khảo cấu trúc RentalService.
 
 ## Cấu trúc
 
@@ -19,6 +19,9 @@ docker-compose.yml
 docs/                # Tài liệu kỹ thuật
 scripts/             # Scripts hỗ trợ và Git hooks
 ```
+
+Cấu trúc chi tiết và trách nhiệm từng thư mục: [docs/README.md](docs/README.md).
+Quy tắc làm việc trong repository: [AGENTS.md](AGENTS.md).
 
 ## Chạy hạ tầng cục bộ
 
@@ -66,7 +69,7 @@ không trả exception message hoặc payload; request bị hủy không chuyể
 `Domain/IRepositories/IRepo<TEntity, TKey>` là contract CRUD có CancellationToken,
 không phụ thuộc EF/HTTP. Repository theo aggregate chỉ kế thừa khi cần đủ các thao tác;
 nếu không, định nghĩa contract nhỏ theo use case. Implementation persistence ở
-`Domain/Repositories` theo bố cục hiện tại của AuthService; không sinh generic EF
+`Domain/Repositories` theo bố cục hiện tại của RentalService; không sinh generic EF
 repository hoặc entity nghiệp vụ giả. `GetAllAsync` chỉ dùng cho tập dữ liệu nhỏ;
 với dữ liệu lớn, contract chuyên biệt phải hỗ trợ phân trang.
 

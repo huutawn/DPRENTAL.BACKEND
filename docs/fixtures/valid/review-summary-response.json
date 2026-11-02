@@ -1,0 +1,13 @@
+{
+  "targetType": "listing",
+  "targetId": "33333333-3333-3333-3333-333333333333",
+  "averageRating": 4.8,
+  "reviewCount": 15,
+  "ratingDistribution": {
+    "5": 12,
+    "4": 3,
+    "3": 0,
+    "2": 0,
+    "1": 0
+  }
+}

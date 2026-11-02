@@ -1,0 +1,8 @@
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "Khóa Idempotency-Key đã được sử dụng trước đó cho một yêu cầu có nội dung hoặc phiên bản khác.",
+  "instance": "/api/v1/reviews",
+  "code": "IDEMPOTENCY_KEY_REUSE_MISMATCH"
+}

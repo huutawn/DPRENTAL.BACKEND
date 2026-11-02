@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "reviewId": "8f731888-eb87-43cf-8a21-72946c87e6aa",
+      "rating": 5,
+      "comment": "Thiết bị máy quay Sony FX3 hoạt động rất tốt, phụ kiện đi kèm đầy đủ và sạch sẽ!",
+      "createdAt": "2026-11-02T08:30:00.000Z",
+      "updatedAt": null,
+      "authorMaskedName": "N** T**"
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "totalCount": 1,
+  "totalPages": 1
+}

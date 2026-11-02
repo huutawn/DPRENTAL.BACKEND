@@ -1,0 +1,8 @@
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.5",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "Không tìm thấy mục thuê hoặc mục thuê không thuộc về đơn hàng đã chỉ định.",
+  "instance": "/api/v1/reviews",
+  "code": "RENTAL_ITEM_NOT_FOUND"
+}

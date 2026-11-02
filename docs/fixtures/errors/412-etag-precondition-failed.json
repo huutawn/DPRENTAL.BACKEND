@@ -1,0 +1,8 @@
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.13",
+  "title": "Precondition Failed",
+  "status": 412,
+  "detail": "Đánh giá đã bị thay đổi bởi thao tác khác (phiên bản gửi lên không khớp với cơ sở dữ liệu). Vui lòng tải lại trước khi thao tác.",
+  "instance": "/api/v1/reviews/8f731888-eb87-43cf-8a21-72946c87e6aa",
+  "code": "ETAG_PRECONDITION_FAILED"
+}

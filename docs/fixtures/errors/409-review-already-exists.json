@@ -1,0 +1,8 @@
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "Mục thuê này đã được bạn đánh giá trước đó. Mỗi bên chỉ được phép gửi đánh giá một lần cho mỗi mục thuê.",
+  "instance": "/api/v1/reviews",
+  "code": "REVIEW_ALREADY_EXISTS"
+}
