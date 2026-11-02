@@ -1,0 +1,62 @@
+Configuration:
+  Properties:
+    Property:
+      - name: "logPattern"
+        value: "[%d] %p %m (%c)%n"
+
+  Appenders:
+    Console:
+      name: STDOUT
+      PatternLayout:
+        pattern: "${logPattern}"
+
+  Loggers:
+    Root:
+      level: INFO
+      AppenderRef:
+        - ref: STDOUT
+    Logger:
+      - name: kafka
+        level: INFO
+      - name: org.apache.kafka
+        level: INFO
+      - name: kafka.request.logger
+        level: WARN
+        additivity: false
+        AppenderRef:
+          ref: STDOUT
+      - name: kafka.network.RequestChannel$
+        level: WARN
+        additivity: false
+        AppenderRef:
+          ref: STDOUT
+      - name: org.apache.kafka.controller
+        level: INFO
+        additivity: false
+        AppenderRef:
+          ref: STDOUT
+      - name: org.apache.kafka.storage.internals.log.LogCleaner
+        level: INFO
+        additivity: false
+        AppenderRef:
+          ref: STDOUT
+      - name: org.apache.kafka.storage.internals.log.LogCleaner$CleanerThread
+        level: INFO
+        additivity: false
+        AppenderRef:
+          ref: STDOUT
+      - name: org.apache.kafka.storage.internals.log.Cleaner
+        level: INFO
+        additivity: false
+        AppenderRef:
+          ref: STDOUT
+      - name: state.change.logger
+        level: INFO
+        additivity: false
+        AppenderRef:
+          ref: STDOUT
+      - name: kafka.authorizer.logger
+        level: INFO
+        additivity: false
+        AppenderRef:
+          ref: STDOUT
