@@ -43,6 +43,7 @@ public static class PublicEquipmentListingMapper
 
         return new PublicEquipmentListingResponse(
             listing.Id,
+            listing.OwnerUserId,
             listing.EquipmentTypeId,
             listing.BrandId,
             listing.Name,

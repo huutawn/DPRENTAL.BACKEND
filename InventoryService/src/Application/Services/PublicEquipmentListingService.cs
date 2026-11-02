@@ -170,7 +170,7 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
             var todayVn = BusinessDateTime.ToVietnamDate(nowUtc);
 
             string searchScope = "public-discovery";
-            string searchQueryType = "public-search";
+            string searchQueryType = "public-search-v2";
             string effectiveSortStr = validated.Sort == AssetSortOption.Relevance ? "relevance" : (request.Sort ?? "created_desc");
             // Khóa cache bao gồm bộ lọc, phân trang và ngày Việt Nam vì số lượng trống phụ thuộc ngày.
             string searchHash = Dprental.InventoryService.Application.Caching.CacheKeyHelper.ComputePublicSearchHash(

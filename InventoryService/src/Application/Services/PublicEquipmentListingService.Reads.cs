@@ -37,7 +37,7 @@ public sealed partial class PublicEquipmentListingService
         var today = BusinessDateTime.ToVietnamDate(nowUtc);
 
         string scope = $"listing:{id:D}";
-        string queryType = "public-detail";
+        string queryType = "public-detail-v2";
         string inputHash = today.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
 
         var result = await _cache.GetOrCreateAsync<PublicEquipmentListingResponse>(
