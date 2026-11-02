@@ -55,6 +55,9 @@ public sealed partial class EquipmentSearchFullWordAndExactMatchTests
         Assert.False((await _store.GetGenerationAsync())!.IsReady);
         Assert.Equal("SEARCH_NOT_READY", (await _searchService.SearchOwnerAssetCandidatesAsync(new(_owner1Id, "xe nâng"))).Error.Code);
 
+        // The current application model requires every migration after the upgrade under test.
+        await migrator.MigrateAsync();
+
         var services = new ServiceCollection();
         services.AddDbContext<InventoryServiceDbContext>(o => o.UseNpgsql(_postgres.ConnectionString));
         services.AddScoped<ISearchProjectionStore, SearchProjectionStore>();
@@ -83,7 +86,7 @@ public sealed partial class EquipmentSearchFullWordAndExactMatchTests
         {
             Assert.True(await restarted.SynchronizeAsync(timeout.Token));
         }
-        await migrator.MigrateAsync(NameUpgrade);
+        await migrator.MigrateAsync();
         Assert.True((await _store.GetGenerationAsync())!.IsReady);
         Assert.Equal(runCount, await _db.SearchBackfillRuns.CountAsync());
     }
