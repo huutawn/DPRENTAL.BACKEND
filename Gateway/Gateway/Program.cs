@@ -47,7 +47,7 @@ if (app.Environment.IsDevelopment())
         options.SwaggerEndpoint("/catalog/swagger/v1/swagger.json", "CatalogService");
         options.SwaggerEndpoint("/inventory/swagger/v1/swagger.json", "InventoryService");
         options.SwaggerEndpoint("/rental/swagger/v1/swagger.json", "RentalService");
-        options.SwaggerEndpoint("/payment/swagger/v1/swagger.json", "PaymentService");
+        options.SwaggerEndpoint("/api/v1/payment/swagger/v1/swagger.json", "PaymentService");
         options.SwaggerEndpoint("/analytics/swagger/v1/swagger.json", "AnalyticsService");
     });
 }

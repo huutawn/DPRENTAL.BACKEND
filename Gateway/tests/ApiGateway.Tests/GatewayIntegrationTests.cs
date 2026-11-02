@@ -141,7 +141,7 @@ public sealed class GatewayIntegrationTests
         Assert.Contains("RentalService", uiConfiguration);
         Assert.Contains("/rental/swagger/v1/swagger.json", uiConfiguration);
         Assert.Contains("PaymentService", uiConfiguration);
-        Assert.Contains("/payment/swagger/v1/swagger.json", uiConfiguration);
+        Assert.Contains("/api/v1/payment/swagger/v1/swagger.json", uiConfiguration);
         Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
 
         using HttpResponseMessage responseRoot = await client.GetAsync("/swagger");
@@ -166,8 +166,10 @@ public sealed class GatewayIntegrationTests
         using WebApplicationFactory<Program> factory = DownstreamGatewayTestHost.CreateFactory(upstream.BaseAddress);
         using HttpClient client = factory.CreateClient();
 
-        using HttpResponseMessage response = await client.GetAsync("/payment/swagger/v1/swagger.json");
+        using HttpResponseMessage response = await client.GetAsync("/api/v1/payment/swagger/v1/swagger.json");
 
+        using HttpResponseMessage oldPathResponse = await client.GetAsync("/payment/swagger/v1/swagger.json");
+        Assert.Equal(HttpStatusCode.NotFound, oldPathResponse.StatusCode);
         Assert.Equal(statusCode, response.StatusCode);
         Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest?.Path);
         Assert.Equal(upstream.ResponseBody, await response.Content.ReadAsStringAsync());

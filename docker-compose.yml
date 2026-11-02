@@ -144,54 +144,42 @@ services:
       - Routes__28__DownstreamScheme=${MEDIA_SERVICE_SCHEME:-http}
       - Routes__28__DownstreamHostAndPorts__0__Host=${MEDIA_SERVICE_HOST:-media-service}
       - Routes__28__DownstreamHostAndPorts__0__Port=${MEDIA_SERVICE_PORT:-8080}
-      # [29] Payment: payment-service-invoices
+      # [29] Payment: payment-hub-negotiate
       - Routes__29__DownstreamScheme=${PAYMENT_SERVICE_SCHEME:-http}
       - Routes__29__DownstreamHostAndPorts__0__Host=${PAYMENT_SERVICE_HOST:-payment-service}
       - Routes__29__DownstreamHostAndPorts__0__Port=${PAYMENT_SERVICE_PORT:-8080}
-      # [30] Payment: payment-service-payment
-      - Routes__30__DownstreamScheme=${PAYMENT_SERVICE_SCHEME:-http}
+      # [30] Payment: payment-hub-ws
+      - Routes__30__DownstreamScheme=${PAYMENT_SERVICE_WS_SCHEME:-ws}
       - Routes__30__DownstreamHostAndPorts__0__Host=${PAYMENT_SERVICE_HOST:-payment-service}
       - Routes__30__DownstreamHostAndPorts__0__Port=${PAYMENT_SERVICE_PORT:-8080}
-      # [31] Payment: payment-service-settlements
+      # [31] Payment: payment-service-openapi
       - Routes__31__DownstreamScheme=${PAYMENT_SERVICE_SCHEME:-http}
       - Routes__31__DownstreamHostAndPorts__0__Host=${PAYMENT_SERVICE_HOST:-payment-service}
       - Routes__31__DownstreamHostAndPorts__0__Port=${PAYMENT_SERVICE_PORT:-8080}
-      # [32] Payment: payment-service-manual-refunds
+      # [32] Payment: payment-service-payment
       - Routes__32__DownstreamScheme=${PAYMENT_SERVICE_SCHEME:-http}
       - Routes__32__DownstreamHostAndPorts__0__Host=${PAYMENT_SERVICE_HOST:-payment-service}
       - Routes__32__DownstreamHostAndPorts__0__Port=${PAYMENT_SERVICE_PORT:-8080}
-      # [33] Payment: payment-service-openapi
-      - Routes__33__DownstreamScheme=${PAYMENT_SERVICE_SCHEME:-http}
-      - Routes__33__DownstreamHostAndPorts__0__Host=${PAYMENT_SERVICE_HOST:-payment-service}
-      - Routes__33__DownstreamHostAndPorts__0__Port=${PAYMENT_SERVICE_PORT:-8080}
-      # [34] Payment: payment-hub-negotiate
-      - Routes__34__DownstreamScheme=${PAYMENT_SERVICE_SCHEME:-http}
-      - Routes__34__DownstreamHostAndPorts__0__Host=${PAYMENT_SERVICE_HOST:-payment-service}
-      - Routes__34__DownstreamHostAndPorts__0__Port=${PAYMENT_SERVICE_PORT:-8080}
-      # [35] Payment: payment-hub-ws
-      - Routes__35__DownstreamScheme=${PAYMENT_SERVICE_WS_SCHEME:-ws}
-      - Routes__35__DownstreamHostAndPorts__0__Host=${PAYMENT_SERVICE_HOST:-payment-service}
-      - Routes__35__DownstreamHostAndPorts__0__Port=${PAYMENT_SERVICE_PORT:-8080}
-      # [36] Recommendation: recommendation-service-ready
-      - Routes__36__DownstreamScheme=${RECOMMENDATION_SERVICE_SCHEME:-http}
-      - Routes__36__DownstreamHostAndPorts__0__Host=${RECOMMENDATION_SERVICE_HOST:-recommendation-service}
-      - Routes__36__DownstreamHostAndPorts__0__Port=${RECOMMENDATION_SERVICE_PORT:-8080}
-      # [37] Rental: rental-order-hub-negotiate
+      # [33] Recommendation: recommendation-service-ready
+      - Routes__33__DownstreamScheme=${RECOMMENDATION_SERVICE_SCHEME:-http}
+      - Routes__33__DownstreamHostAndPorts__0__Host=${RECOMMENDATION_SERVICE_HOST:-recommendation-service}
+      - Routes__33__DownstreamHostAndPorts__0__Port=${RECOMMENDATION_SERVICE_PORT:-8080}
+      # [34] Rental: rental-order-hub-negotiate
+      - Routes__34__DownstreamScheme=${RENTAL_SERVICE_SCHEME:-http}
+      - Routes__34__DownstreamHostAndPorts__0__Host=${RENTAL_SERVICE_HOST:-rental-service}
+      - Routes__34__DownstreamHostAndPorts__0__Port=${RENTAL_SERVICE_PORT:-8080}
+      # [35] Rental: rental-order-hub-ws
+      - Routes__35__DownstreamScheme=${RENTAL_SERVICE_WS_SCHEME:-ws}
+      - Routes__35__DownstreamHostAndPorts__0__Host=${RENTAL_SERVICE_HOST:-rental-service}
+      - Routes__35__DownstreamHostAndPorts__0__Port=${RENTAL_SERVICE_PORT:-8080}
+      # [36] Rental: rental-service
+      - Routes__36__DownstreamScheme=${RENTAL_SERVICE_SCHEME:-http}
+      - Routes__36__DownstreamHostAndPorts__0__Host=${RENTAL_SERVICE_HOST:-rental-service}
+      - Routes__36__DownstreamHostAndPorts__0__Port=${RENTAL_SERVICE_PORT:-8080}
+      # [37] Rental: rental-service-openapi
       - Routes__37__DownstreamScheme=${RENTAL_SERVICE_SCHEME:-http}
       - Routes__37__DownstreamHostAndPorts__0__Host=${RENTAL_SERVICE_HOST:-rental-service}
       - Routes__37__DownstreamHostAndPorts__0__Port=${RENTAL_SERVICE_PORT:-8080}
-      # [38] Rental: rental-order-hub-ws
-      - Routes__38__DownstreamScheme=${RENTAL_SERVICE_WS_SCHEME:-ws}
-      - Routes__38__DownstreamHostAndPorts__0__Host=${RENTAL_SERVICE_HOST:-rental-service}
-      - Routes__38__DownstreamHostAndPorts__0__Port=${RENTAL_SERVICE_PORT:-8080}
-      # [39] Rental: rental-service
-      - Routes__39__DownstreamScheme=${RENTAL_SERVICE_SCHEME:-http}
-      - Routes__39__DownstreamHostAndPorts__0__Host=${RENTAL_SERVICE_HOST:-rental-service}
-      - Routes__39__DownstreamHostAndPorts__0__Port=${RENTAL_SERVICE_PORT:-8080}
-      # [40] Rental: rental-service-openapi
-      - Routes__40__DownstreamScheme=${RENTAL_SERVICE_SCHEME:-http}
-      - Routes__40__DownstreamHostAndPorts__0__Host=${RENTAL_SERVICE_HOST:-rental-service}
-      - Routes__40__DownstreamHostAndPorts__0__Port=${RENTAL_SERVICE_PORT:-8080}
 
       # Cấu hình Bảo mật CORS & Kích thước Payload
       - Gateway__Security__Cors__AllowedOrigins__0=${CORS_ALLOWED_ORIGIN_0:-http://localhost:3000}
