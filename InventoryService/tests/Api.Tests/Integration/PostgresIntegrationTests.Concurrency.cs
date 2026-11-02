@@ -29,7 +29,7 @@ public sealed partial class PostgresIntegrationTests
 
         var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setupContext, assetId: assetId, ownerId: ownerId, eqTypeId: typeId, now: now);
 
-        var sharedPeriod = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
+        var sharedPeriod = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(2), BusinessDateTime.ToVietnamDate(now).AddDays(6));
         var readySignal = new TaskCompletionSource<bool>();
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
 
@@ -90,8 +90,8 @@ public sealed partial class PostgresIntegrationTests
 
         var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setupContext, assetId: assetId, ownerId: ownerId, eqTypeId: typeId, now: now);
 
-        var periodA = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
-        var periodB = new RentalPeriod(new DateOnly(2026, 11, 10), new DateOnly(2026, 11, 15));
+        var periodA = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(2), BusinessDateTime.ToVietnamDate(now).AddDays(6));
+        var periodB = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(10), BusinessDateTime.ToVietnamDate(now).AddDays(15));
 
         var readySignal = new TaskCompletionSource<bool>();
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
@@ -149,7 +149,7 @@ public sealed partial class PostgresIntegrationTests
         Guid outboxId = Guid.NewGuid();
         var result = await executor.ExecuteAsync<bool>(assetId, (ctx, ct) =>
         {
-            var p = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
+            var p = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(2), BusinessDateTime.ToVietnamDate(now).AddDays(6));
             var alloc = AssetAllocation.CreateManual(allocId, assetId, p, now).Value;
             ctx.Allocations.Add(alloc);
 
@@ -204,7 +204,7 @@ public sealed partial class PostgresIntegrationTests
         var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setup, assetId: assetId, now: now);
 
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
-        var period = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
+        var period = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(2), BusinessDateTime.ToVietnamDate(now).AddDays(6));
 
         var blockStarted = new TaskCompletionSource<bool>();
         var proceedBlock = new TaskCompletionSource<bool>();
@@ -228,7 +228,7 @@ public sealed partial class PostgresIntegrationTests
                 {
                     var block = CalendarBlock.Create(
                         Guid.NewGuid(), assetId, period.StartDate, period.EndDate,
-                        CalendarBlockReason.Maintenance, "op", DateTimeOffset.UtcNow, new DateOnly(2026, 10, 1)).Value;
+                        CalendarBlockReason.Maintenance, "op", DateTimeOffset.UtcNow, BusinessDateTime.ToVietnamDate(now)).Value;
                     ctx.CalendarBlocks.Add(block);
                 }
 
@@ -280,7 +280,7 @@ public sealed partial class PostgresIntegrationTests
         Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
         var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setup, assetId: assetId, now: now);
-        var period = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
+        var period = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(2), BusinessDateTime.ToVietnamDate(now).AddDays(6));
         var hold = AssetAllocation.CreateHold(
             Guid.NewGuid(), assetId, period, now.AddSeconds(1), now, "rental", "EXT-EXP-COMPETE").Value;
         setup.AssetAllocations.Add(hold);

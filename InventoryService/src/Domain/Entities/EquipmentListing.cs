@@ -28,6 +28,9 @@ public sealed class EquipmentListing
     [Column("owner_user_id")]
     public Guid OwnerUserId { get; private set; }
 
+    [Column("organization_id")]
+    public Guid? OrganizationId { get; private set; }
+
     [Column("equipment_type_id")]
     public Guid EquipmentTypeId { get; private set; }
 
@@ -160,7 +163,8 @@ public sealed class EquipmentListing
         int? manufactureYear,
         IReadOnlyList<Guid>? mediaIds = null,
         Guid? thumbnailMediaId = null,
-        decimal depositAmount = 0m)
+        decimal depositAmount = 0m,
+        Guid? organizationId = null)
     {
         if (id == Guid.Empty)
         {
@@ -208,7 +212,7 @@ public sealed class EquipmentListing
 
         var (validName, validDesc, validModel, validMediaIds, validThumb, validSchema, validSpecs) = detailsValidation.Value;
 
-        return new EquipmentListing(
+        var listing = new EquipmentListing(
             id,
             ownerUserId,
             equipmentTypeId,
@@ -228,6 +232,8 @@ public sealed class EquipmentListing
             depositAmount,
             EquipmentListingStatus.Draft,
             now);
+        listing.OrganizationId = organizationId;
+        return listing;
     }
 
     /// <summary>

@@ -12,7 +12,10 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.InventoryService.Application.Search.Adapters;
 
-/// <summary>Committed Outbox is the replay journal; a short mutation barrier closes the snapshot/swap gap.</summary>
+/// <summary>
+/// Dựng lại ba chỉ mục trên staging từ snapshot rồi phát lại Outbox đã commit để bắt kịp thay đổi.
+/// Chặn ghi nghiệp vụ trong thời gian ngắn ở bước cuối để không mất cập nhật giữa snapshot và swap.
+/// </summary>
 public sealed partial class MeilisearchBackfillService(IServiceScopeFactory scopeFactory,
     MeilisearchClient client, IOptions<MeilisearchOptions> options, TimeProvider? timeProvider = null,
     ILogger<MeilisearchBackfillService>? logger = null) : IInventorySearchBackfillService
@@ -37,7 +40,7 @@ public sealed partial class MeilisearchBackfillService(IServiceScopeFactory scop
         }
         if (old is not null)
         {
-            // An interrupted staging upload may have unknown requests in flight. Never reuse it for a swap.
+            // Staging bị ngắt có thể còn request chưa rõ kết quả; tạo thế hệ khác để tránh swap dữ liệu dở dang.
             old.Transition(SearchBackfillRun.StatusFailed, _clock.GetUtcNow(), "Interrupted before swap; superseded by a fresh staging generation.");
             await store.SaveBackfillRunAsync(old, cancellationToken);
         }
@@ -94,7 +97,7 @@ public sealed partial class MeilisearchBackfillService(IServiceScopeFactory scop
                     generation.MarkUnavailable(null, _clock.GetUtcNow());
                     run.Transition(SearchBackfillRun.StatusSwapping, _clock.GetUtcNow());
                     await store.SaveBackfillStateAsync(run, generation, cutover.Token);
-                    // Release domain writes after persisting the UID. Writer remains owned until the swap is terminal.
+                    // Lưu UID trước khi nhả khóa ghi nghiệp vụ; giữ khóa writer tới khi swap kết thúc.
                     var task = await client.SwapIndexesAsync(new List<IndexSwap>
                     {
                         new(_options.PublicListingsIndex, run.StagingPublicIndex),
@@ -143,7 +146,8 @@ public sealed partial class MeilisearchBackfillService(IServiceScopeFactory scop
     {
         if (run.SwapTaskUid is null)
         {
-            // Staging names contain a unique run UUID. Task history can safely identify its one swap.
+            // UUID riêng trong tên staging giúp tìm lại task swap khi tiến trình chết trước lúc lưu UID.
+            // Không gửi lại swap mù quáng vì swap lần hai có thể đổi ngược chỉ mục.
             int? from = null;
             do
             {

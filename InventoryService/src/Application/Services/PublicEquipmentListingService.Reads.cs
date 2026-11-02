@@ -68,6 +68,15 @@ public sealed partial class PublicEquipmentListingService
                     availableQuantity,
                     _mediaOptions.PublicGatewayUrl);
 
+                if (_catalogClient is not null)
+                {
+                    var categoryResult = await _catalogClient.GetPublishedEquipmentTypeAsync(snapshot.EquipmentTypeId, ct);
+                    if (categoryResult.IsSuccess)
+                    {
+                        response = response with { CategoryIds = categoryResult.Value.CategoryIds };
+                    }
+                }
+
                 var baseTtl = TimeSpan.FromSeconds(_cacheOptions.DynamicTtlSeconds > 0 ? _cacheOptions.DynamicTtlSeconds : 15);
                 DateTimeOffset? nearestHold = snapshot.Assets
                     .SelectMany(a => a.Allocations)

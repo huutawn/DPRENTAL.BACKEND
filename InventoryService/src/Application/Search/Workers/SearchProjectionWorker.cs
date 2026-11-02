@@ -13,6 +13,10 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.InventoryService.Application.Search.Workers;
 
+/// <summary>
+/// Đồng bộ thay đổi PostgreSQL sang chỉ mục bằng job bền vững. Chỉ hoàn tất job sau khi
+/// Meilisearch xác nhận task thành công; lease và khóa writer kiểm soát các worker chạy đồng thời.
+/// </summary>
 public sealed class SearchProjectionWorker(IServiceScopeFactory scopeFactory, MeilisearchClient client,
     IOptions<MeilisearchOptions> options, TimeProvider? timeProvider = null,
     ILogger<SearchProjectionWorker>? logger = null) : BackgroundService
@@ -47,6 +51,7 @@ public sealed class SearchProjectionWorker(IServiceScopeFactory scopeFactory, Me
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<ISearchProjectionStore>();
+        // Dùng cùng khóa writer với backfill để không ghi chồng khi chuyển thế hệ chỉ mục.
         await using var writer = await store.TryAcquireCoordinationAsync(SearchCoordination.WriterKey, ct);
         if (writer is null) return 0;
         var generation = await store.GetGenerationAsync(ct);
@@ -126,6 +131,8 @@ public sealed class SearchProjectionWorker(IServiceScopeFactory scopeFactory, Me
                 var actions = await BuildSubmissionAsync(job, store, ct);
                 foreach (var submit in actions)
                 {
+                    // Ghi trạng thái chưa rõ TRƯỚC khi gửi HTTP. Nếu mất phản hồi, không được
+                    // giả định task chưa chạy rồi tiếp tục ghi chỉ mục với thứ tự không xác định.
                     uncertain = true;
                     Require(await store.SaveSubmissionAsync(job.Id, lease, revision, taskIds, true, false, _clock.GetUtcNow(), ct));
                     TaskInfo task;
@@ -133,7 +140,7 @@ public sealed class SearchProjectionWorker(IServiceScopeFactory scopeFactory, Me
                     catch (MeilisearchApiError ex) when (ex.Code is "invalid_api_key" or "missing_authorization_header" or
                         "missing_document_id" or "invalid_document_id" or "index_not_found")
                     {
-                        uncertain = false; // A definitive API rejection did not enqueue a task.
+                        uncertain = false; // API từ chối dứt khoát nên không có task nào được xếp hàng.
                         Require(await store.SaveSubmissionAsync(job.Id, lease, revision, taskIds, false, false, _clock.GetUtcNow(), ct));
                         throw;
                     }
@@ -231,6 +238,7 @@ public sealed class SearchProjectionWorker(IServiceScopeFactory scopeFactory, Me
         }
     }
 
+    // Tắt trạng thái ready khi chưa rõ kết quả gửi; cần đối soát task trước khi ghi tiếp.
     private async Task QuarantineAsync(ISearchProjectionStore store, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);

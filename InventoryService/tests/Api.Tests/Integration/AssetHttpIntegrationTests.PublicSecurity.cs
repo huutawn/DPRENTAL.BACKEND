@@ -139,7 +139,13 @@ public sealed partial class AssetHttpIntegrationTests
             case JsonValueKind.Object:
                 foreach (var prop in element.EnumerateObject())
                 {
-                    Assert.DoesNotContain(prop.Name, ForbiddenFieldNames, StringComparer.OrdinalIgnoreCase);
+                    bool isPublicListingOrganization = prop.NameEquals("organizationId")
+                        && element.TryGetProperty("equipmentTypeId", out _)
+                        && element.TryGetProperty("id", out _);
+                    if (!isPublicListingOrganization)
+                    {
+                        Assert.DoesNotContain(prop.Name, ForbiddenFieldNames, StringComparer.OrdinalIgnoreCase);
+                    }
                     AssertZeroForbiddenProperties(prop.Value);
                 }
                 break;

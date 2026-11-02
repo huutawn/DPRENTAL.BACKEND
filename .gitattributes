@@ -1,0 +1,2 @@
+# Pinned contract checksums are computed from canonical LF bytes.
+InventoryService/tests/Api.Tests/Contracts/Recommendation/*.json text eol=lf

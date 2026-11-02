@@ -156,8 +156,13 @@ public sealed class InventoryCallerContext : IInventoryCallerContext
         get
         {
             if (!IsAuthenticated) return null;
-            string? org = _user?.FindFirst("o")?.Value;
-            return Guid.TryParse(org, out Guid id) && id != Guid.Empty ? id : null;
+            var organizations = _user?.FindAll("o")
+                .Select(claim => Guid.TryParse(claim.Value, out var id) ? id : Guid.Empty)
+                .Where(id => id != Guid.Empty)
+                .Distinct()
+                .Take(2)
+                .ToArray() ?? [];
+            return organizations.Length == 1 ? organizations[0] : null;
         }
     }
 }
