@@ -7,6 +7,7 @@ using Dprental.RecommendationService.Application.Kafka.Options;
 using Dprental.RecommendationService.Application.Kafka.Producer;
 using Dprental.RecommendationService.Application.Validation;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -918,5 +919,451 @@ public sealed class KafkaCoordinationLifecycleTests
         Assert.True(stopSw.ElapsedMilliseconds < 800, $"StopAsync took too long to interrupt delay: {stopSw.ElapsedMilliseconds}ms");
         // Creation count bounded because of 1s delay
         Assert.True(creationCount <= 6, $"Expected bounded creation count due to 1s delay, got: {creationCount}");
+    }
+
+    [Fact]
+    public async Task IngestionIgnoresCancellation_OverOneSecond_WaitsForTaskToFinish_BeforeCreatingNewSession()
+    {
+        var consumerMock1 = new Mock<IConsumer<string?, string>>();
+        var consumerMock2 = new Mock<IConsumer<string?, string>>();
+        var clientFactoryMock = new Mock<IKafkaClientFactory>();
+        var dlqProducerMock = new Mock<IKafkaDlqProducer>();
+        var ingestionServiceMock = new Mock<IInteractionIngestionService>();
+
+        var testMsg = new ConsumeResult<string?, string>
+        {
+            Topic = "inventory.behavior.events.v1",
+            Partition = new Partition(0),
+            Offset = new Offset(1),
+            Message = new Message<string?, string> { Key = "k1", Value = "{\"slow\": true}" }
+        };
+
+        consumerMock1.Setup(c => c.Assignment).Returns([new TopicPartition("inventory.behavior.events.v1", new Partition(0))]);
+        consumerMock1.Setup(c => c.Consume(It.IsAny<TimeSpan>())).Returns(testMsg);
+        consumerMock2.Setup(c => c.Assignment).Returns([new TopicPartition("inventory.behavior.events.v1", new Partition(0))]);
+        consumerMock2.Setup(c => c.Consume(It.IsAny<TimeSpan>())).Returns((ConsumeResult<string?, string>?)null!);
+
+        var ingestionStarted = new TaskCompletionSource<bool>();
+        var taskCanFinish = new TaskCompletionSource<bool>();
+        bool taskCompleted = false;
+
+        ingestionServiceMock
+            .Setup(s => s.ProcessEventAsync(It.IsAny<string>(), It.IsAny<InteractionEventSource>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                ingestionStarted.TrySetResult(true);
+                // Deliberately ignore cancellation token and wait for external signal
+                await taskCanFinish.Task;
+                taskCompleted = true;
+                return new EventProcessResult(EventProcessOutcome.Processed);
+            });
+
+        int inventoryCreations = 0;
+        Action<IConsumer<string?, string>, List<TopicPartitionOffset>>? revokedHandler = null;
+        clientFactoryMock
+            .Setup(f => f.CreateConsumer(
+                "recommendation-inventory-behavior-v1",
+                It.IsAny<string>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartition>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, Error>>()))
+            .Returns(() =>
+            {
+                inventoryCreations++;
+                if (inventoryCreations == 1) return consumerMock1.Object;
+                return consumerMock2.Object;
+            })
+            .Callback<string, string,
+                Action<IConsumer<string?, string>, List<TopicPartition>>?,
+                Action<IConsumer<string?, string>, List<TopicPartitionOffset>>?,
+                Action<IConsumer<string?, string>, List<TopicPartitionOffset>>?,
+                Action<IConsumer<string?, string>, Error>?>((_, _, _, revoked, _, _) =>
+            {
+                if (inventoryCreations == 1) revokedHandler = revoked;
+            });
+
+        var idleRentalConsumer = new Mock<IConsumer<string?, string>>();
+        idleRentalConsumer.Setup(c => c.Consume(It.IsAny<TimeSpan>())).Returns((ConsumeResult<string?, string>?)null!);
+        clientFactoryMock
+            .Setup(f => f.CreateConsumer(
+                "recommendation-rental-behavior-v1",
+                It.IsAny<string>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartition>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, Error>>()))
+            .Returns(idleRentalConsumer.Object);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(ingestionServiceMock.Object);
+        var sp = services.BuildServiceProvider();
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(s => s.CreateScope()).Returns(() => sp.CreateScope());
+
+        var options = Options.Create(new KafkaOptions { Enabled = true });
+        using var cts = new CancellationTokenSource();
+        var worker = new RecommendationKafkaConsumerWorker(
+            scopeFactoryMock.Object,
+            dlqProducerMock.Object,
+            clientFactoryMock.Object,
+            options,
+            NullLogger<RecommendationKafkaConsumerWorker>.Instance);
+
+        var workerTask = worker.StartAsync(cts.Token);
+        await ingestionStarted.Task;
+
+        // Trigger partition revoke to invalidate session while task is running
+        revokedHandler?.Invoke(consumerMock1.Object, [new TopicPartitionOffset("inventory.behavior.events.v1", new Partition(0), new Offset(1))]);
+
+        // Wait more than 1 second (1.2s) - during this time, session 1 cleanup warning occurs, but session 2 MUST NOT open
+        await Task.Delay(1200);
+        Assert.Equal(1, inventoryCreations);
+        Assert.False(taskCompleted);
+
+        // Now allow task to complete
+        taskCanFinish.TrySetResult(true);
+
+        // Allow worker to finish cleanup, observe task, dispose consumer 1, and open session 2
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.Elapsed < TimeSpan.FromSeconds(3) && inventoryCreations < 2)
+        {
+            await Task.Delay(100);
+        }
+
+        await worker.StopAsync(CancellationToken.None);
+        try { await workerTask; } catch (OperationCanceledException) { }
+
+        Assert.True(taskCompleted);
+        Assert.Equal(2, inventoryCreations);
+        consumerMock1.Verify(c => c.Dispose(), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task RevokeAndShutdown_DuringIngestion_TaskCompletesBeforeDispose_DoesNotCommitOldAssignment()
+    {
+        var consumerMock = new Mock<IConsumer<string?, string>>();
+        var clientFactoryMock = new Mock<IKafkaClientFactory>();
+        var dlqProducerMock = new Mock<IKafkaDlqProducer>();
+        var ingestionServiceMock = new Mock<IInteractionIngestionService>();
+
+        var testMsg = new ConsumeResult<string?, string>
+        {
+            Topic = "inventory.behavior.events.v1",
+            Partition = new Partition(0),
+            Offset = new Offset(99),
+            Message = new Message<string?, string> { Key = "k99", Value = "{\"val\": 99}" }
+        };
+
+        consumerMock.Setup(c => c.Assignment).Returns([new TopicPartition("inventory.behavior.events.v1", new Partition(0))]);
+        consumerMock.Setup(c => c.Consume(It.IsAny<TimeSpan>())).Returns(testMsg);
+
+        bool taskCompleted = false;
+        bool taskCompletedBeforeDispose = false;
+        var ingestionStarted = new TaskCompletionSource<bool>();
+
+        ingestionServiceMock
+            .Setup(s => s.ProcessEventAsync(It.IsAny<string>(), It.IsAny<InteractionEventSource>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, InteractionEventSource _, CancellationToken ct) =>
+            {
+                ingestionStarted.TrySetResult(true);
+                try
+                {
+                    await Task.Delay(200, ct);
+                }
+                catch (OperationCanceledException) { }
+                taskCompleted = true;
+                return new EventProcessResult(EventProcessOutcome.Processed);
+            });
+
+        consumerMock
+            .Setup(c => c.Dispose())
+            .Callback(() =>
+            {
+                if (taskCompleted)
+                {
+                    taskCompletedBeforeDispose = true;
+                }
+            });
+
+        var committedRecords = new List<ConsumeResult<string?, string>>();
+        consumerMock
+            .Setup(c => c.Commit(It.IsAny<ConsumeResult<string?, string>>()))
+            .Callback<ConsumeResult<string?, string>>(cr => committedRecords.Add(cr));
+
+        Action<IConsumer<string?, string>, List<TopicPartitionOffset>>? revokedHandler = null;
+        clientFactoryMock
+            .Setup(f => f.CreateConsumer(
+                "recommendation-inventory-behavior-v1",
+                It.IsAny<string>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartition>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, Error>>()))
+            .Callback<string, string,
+                Action<IConsumer<string?, string>, List<TopicPartition>>?,
+                Action<IConsumer<string?, string>, List<TopicPartitionOffset>>?,
+                Action<IConsumer<string?, string>, List<TopicPartitionOffset>>?,
+                Action<IConsumer<string?, string>, Error>?>((_, _, _, revoked, _, _) =>
+            {
+                revokedHandler = revoked;
+            })
+            .Returns(consumerMock.Object);
+
+        var idleRentalConsumer = new Mock<IConsumer<string?, string>>();
+        idleRentalConsumer.Setup(c => c.Consume(It.IsAny<TimeSpan>())).Returns((ConsumeResult<string?, string>?)null!);
+        clientFactoryMock
+            .Setup(f => f.CreateConsumer(
+                "recommendation-rental-behavior-v1",
+                It.IsAny<string>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartition>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, Error>>()))
+            .Returns(idleRentalConsumer.Object);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(ingestionServiceMock.Object);
+        var sp = services.BuildServiceProvider();
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(s => s.CreateScope()).Returns(() => sp.CreateScope());
+
+        var options = Options.Create(new KafkaOptions { Enabled = true });
+        using var cts = new CancellationTokenSource();
+        var worker = new RecommendationKafkaConsumerWorker(
+            scopeFactoryMock.Object,
+            dlqProducerMock.Object,
+            clientFactoryMock.Object,
+            options,
+            NullLogger<RecommendationKafkaConsumerWorker>.Instance);
+
+        var workerTask = worker.StartAsync(cts.Token);
+        await ingestionStarted.Task;
+
+        // Revoke and shutdown while task in progress
+        revokedHandler?.Invoke(consumerMock.Object, [new TopicPartitionOffset("inventory.behavior.events.v1", new Partition(0), new Offset(99))]);
+        await worker.StopAsync(CancellationToken.None);
+        try { await workerTask; } catch (OperationCanceledException) { }
+
+        Assert.True(taskCompletedBeforeDispose, "Task must complete before consumer is disposed.");
+        Assert.Empty(committedRecords);
+    }
+
+    [Fact]
+    public async Task TaskThrowsOrCancellationThrows_ResourcesCleanedUp_ExceptionsObserved()
+    {
+        var consumerMock = new Mock<IConsumer<string?, string>>();
+        var clientFactoryMock = new Mock<IKafkaClientFactory>();
+        var dlqProducerMock = new Mock<IKafkaDlqProducer>();
+        var ingestionServiceMock = new Mock<IInteractionIngestionService>();
+
+        var testMsg = new ConsumeResult<string?, string>
+        {
+            Topic = "inventory.behavior.events.v1",
+            Partition = new Partition(0),
+            Offset = new Offset(1),
+            Message = new Message<string?, string> { Key = "k1", Value = "{\"crash\": true}" }
+        };
+
+        consumerMock.Setup(c => c.Assignment).Returns([new TopicPartition("inventory.behavior.events.v1", new Partition(0))]);
+        consumerMock.Setup(c => c.Consume(It.IsAny<TimeSpan>())).Returns(testMsg);
+        consumerMock.Setup(c => c.Close()).Throws(new KafkaException(new Error(ErrorCode.Local_State, "Simulated Close failure")));
+
+        ingestionServiceMock
+            .Setup(s => s.ProcessEventAsync(It.IsAny<string>(), It.IsAny<InteractionEventSource>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Ingestion task crash"));
+
+        clientFactoryMock
+            .Setup(f => f.CreateConsumer(
+                "recommendation-inventory-behavior-v1",
+                It.IsAny<string>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartition>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, Error>>()))
+            .Returns(consumerMock.Object);
+
+        var idleRentalConsumer = new Mock<IConsumer<string?, string>>();
+        idleRentalConsumer.Setup(c => c.Consume(It.IsAny<TimeSpan>())).Returns((ConsumeResult<string?, string>?)null!);
+        clientFactoryMock
+            .Setup(f => f.CreateConsumer(
+                "recommendation-rental-behavior-v1",
+                It.IsAny<string>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartition>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, Error>>()))
+            .Returns(idleRentalConsumer.Object);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(ingestionServiceMock.Object);
+        var sp = services.BuildServiceProvider();
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(s => s.CreateScope()).Returns(() => sp.CreateScope());
+
+        var options = Options.Create(new KafkaOptions { Enabled = true });
+        using var cts = new CancellationTokenSource();
+        var worker = new RecommendationKafkaConsumerWorker(
+            scopeFactoryMock.Object,
+            dlqProducerMock.Object,
+            clientFactoryMock.Object,
+            options,
+            NullLogger<RecommendationKafkaConsumerWorker>.Instance);
+
+        var workerTask = worker.StartAsync(cts.Token);
+        await Task.Delay(100);
+        await worker.StopAsync(CancellationToken.None);
+        try { await workerTask; } catch (OperationCanceledException) { }
+
+        consumerMock.Verify(c => c.Close(), Times.AtLeastOnce);
+        consumerMock.Verify(c => c.Dispose(), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task ContinuousCommitFailures_RateLimitedToTenSeconds_IngestionRunsOnce_RecoversOnSuccess()
+    {
+        var consumerMock = new Mock<IConsumer<string?, string>>();
+        var clientFactoryMock = new Mock<IKafkaClientFactory>();
+        var dlqProducerMock = new Mock<IKafkaDlqProducer>();
+        var ingestionServiceMock = new Mock<IInteractionIngestionService>();
+
+        var testMsg = new ConsumeResult<string?, string>
+        {
+            Topic = "inventory.behavior.events.v1",
+            Partition = new Partition(0),
+            Offset = new Offset(55),
+            Message = new Message<string?, string> { Key = "k55", Value = "{\"val\": 55}" }
+        };
+
+        consumerMock.Setup(c => c.Assignment).Returns([new TopicPartition("inventory.behavior.events.v1", new Partition(0))]);
+
+
+        int consumeCount = 0;
+        consumerMock.Setup(c => c.Consume(It.IsAny<TimeSpan>()))
+            .Returns((TimeSpan _) =>
+            {
+                consumeCount++;
+                if (consumeCount == 1) return testMsg;
+                return null!;
+            });
+
+        int ingestionCount = 0;
+        ingestionServiceMock
+            .Setup(s => s.ProcessEventAsync(It.IsAny<string>(), It.IsAny<InteractionEventSource>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                ingestionCount++;
+                return new EventProcessResult(EventProcessOutcome.Processed);
+            });
+
+        var customTimeProvider = new TestControllableTimeProvider();
+        int commitAttempts = 0;
+        var commitRecoveredSignal = new TaskCompletionSource<bool>();
+
+        consumerMock
+            .Setup(c => c.Commit(It.IsAny<ConsumeResult<string?, string>>()))
+            .Callback<ConsumeResult<string?, string>>(cr =>
+            {
+                commitAttempts++;
+                if (commitAttempts <= 10)
+                {
+                    // Fail commit for first 10 calls, advancing time slightly (1s per call)
+                    customTimeProvider.Advance(TimeSpan.FromSeconds(1));
+                    throw new KafkaException(new Error(ErrorCode.Local_QueueFull, "Temporary broker commit failure"));
+                }
+                else if (commitAttempts == 11)
+                {
+                    // Advance past 10 seconds boundary
+                    customTimeProvider.Advance(TimeSpan.FromSeconds(11));
+                    throw new KafkaException(new Error(ErrorCode.Local_QueueFull, "Second wave broker commit failure"));
+                }
+                else
+                {
+                    // Commit succeeds
+                    commitRecoveredSignal.TrySetResult(true);
+                }
+            });
+
+        clientFactoryMock
+            .Setup(f => f.CreateConsumer(
+                "recommendation-inventory-behavior-v1",
+                It.IsAny<string>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartition>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, Error>>()))
+            .Returns(consumerMock.Object);
+
+        var idleRentalConsumer = new Mock<IConsumer<string?, string>>();
+        idleRentalConsumer.Setup(c => c.Consume(It.IsAny<TimeSpan>())).Returns((ConsumeResult<string?, string>?)null!);
+        clientFactoryMock
+            .Setup(f => f.CreateConsumer(
+                "recommendation-rental-behavior-v1",
+                It.IsAny<string>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartition>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, List<TopicPartitionOffset>>>(),
+                It.IsAny<Action<IConsumer<string?, string>, Error>>()))
+            .Returns(idleRentalConsumer.Object);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(ingestionServiceMock.Object);
+        var sp = services.BuildServiceProvider();
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(s => s.CreateScope()).Returns(() => sp.CreateScope());
+
+        var options = Options.Create(new KafkaOptions { Enabled = true });
+        var loggerMock = new Mock<ILogger<RecommendationKafkaConsumerWorker>>();
+        int warningCount = 0;
+        int infoCount = 0;
+        loggerMock
+            .Setup(l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
+            .Callback(() => warningCount++);
+        loggerMock
+            .Setup(l => l.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
+            .Callback(() => infoCount++);
+
+        using var cts = new CancellationTokenSource();
+        var worker = new RecommendationKafkaConsumerWorker(
+            scopeFactoryMock.Object,
+            dlqProducerMock.Object,
+            clientFactoryMock.Object,
+            options,
+            loggerMock.Object,
+            customTimeProvider);
+
+        var workerTask = worker.StartAsync(cts.Token);
+        await Task.WhenAny(commitRecoveredSignal.Task, Task.Delay(2000));
+        await worker.StopAsync(CancellationToken.None);
+        try { await workerTask; } catch (OperationCanceledException) { }
+
+        // Ingestion must execute exactly once throughout the entire retry storm
+        Assert.Equal(1, ingestionCount);
+        // Commit was retried multiple times
+        Assert.True(commitAttempts >= 12);
+        // Warning count bounded: only 2 warnings (initial failure and after 10s mark), not 11 warnings
+        Assert.True(warningCount <= 3, $"Expected <= 3 warnings, actual: {warningCount}");
+        // Recovery message logged and partitions resumed
+        Assert.True(infoCount >= 1);
+        consumerMock.Verify(c => c.Resume(It.IsAny<IEnumerable<TopicPartition>>()), Times.AtLeastOnce);
+    }
+
+    private sealed class TestControllableTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _utcNow = new(2026, 11, 2, 10, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public void Advance(TimeSpan delta) => _utcNow += delta;
     }
 }

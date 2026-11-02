@@ -203,6 +203,9 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
             DateTimeOffset retryDeadline = DateTimeOffset.MinValue;
             DateTimeOffset lastOutageLog = DateTimeOffset.MinValue;
             bool isRecoveredFromOutage = false;
+            DateTimeOffset lastCommitErrorLog = DateTimeOffset.MinValue;
+            int suppressedCommitErrorCount = 0;
+            bool isCommitErrorActive = false;
 
             while (!stoppingToken.IsCancellationRequested && isSessionValid)
             {
@@ -352,6 +355,15 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
                             try
                             {
                                 consumer.Commit(currentConsumeResult!);
+                                if (isCommitErrorActive)
+                                {
+                                    _logger.LogInformation(
+                                        "Commit succeeded after previous failures for {Topic}:{Partition}@{Offset}.",
+                                        topic, currentConsumeResult!.Partition.Value, currentConsumeResult.Offset.Value);
+                                    isCommitErrorActive = false;
+                                    suppressedCommitErrorCount = 0;
+                                }
+
                                 // Only resume once current record has committed successfully
                                 var currentAssignment = consumer.Assignment;
                                 if (currentAssignment != null && currentAssignment.Count > 0)
@@ -369,10 +381,31 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
                             {
                                 if (isSessionValid && currentExpectedGeneration == Interlocked.Read(ref assignmentGeneration))
                                 {
-                                    _logger.LogWarning(
-                                        ex,
-                                        "Commit failed temporarily for {Topic}:{Partition}@{Offset}. Retrying commit...",
-                                        topic, currentConsumeResult!.Partition.Value, currentConsumeResult.Offset.Value);
+                                    var now = _timeProvider.GetUtcNow();
+                                    if (!isCommitErrorActive || now - lastCommitErrorLog >= TimeSpan.FromSeconds(10))
+                                    {
+                                        if (suppressedCommitErrorCount > 0)
+                                        {
+                                            _logger.LogWarning(
+                                                ex,
+                                                "Commit failed temporarily for {Group} on {Topic}:{Partition}@{Offset} (suppressed {Count} repeated warnings). Retrying commit...",
+                                                consumerGroup, topic, currentConsumeResult!.Partition.Value, currentConsumeResult.Offset.Value, suppressedCommitErrorCount);
+                                        }
+                                        else
+                                        {
+                                            _logger.LogWarning(
+                                                ex,
+                                                "Commit failed temporarily for {Group} on {Topic}:{Partition}@{Offset}. Retrying commit...",
+                                                consumerGroup, topic, currentConsumeResult!.Partition.Value, currentConsumeResult.Offset.Value);
+                                        }
+                                        lastCommitErrorLog = now;
+                                        isCommitErrorActive = true;
+                                        suppressedCommitErrorCount = 0;
+                                    }
+                                    else
+                                    {
+                                        suppressedCommitErrorCount++;
+                                    }
 
                                     if (!PollWhileBusy(consumer, "WaitingForCommit", TimeSpan.FromMilliseconds(100)))
                                     {
@@ -386,6 +419,7 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
                                 }
                             }
                             break;
+
                         }
 
                     case ConsumerSessionState.ClosingSession:
@@ -398,10 +432,17 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
         }
         finally
         {
-            await CleanupInFlightTaskAsync(processingTask, inFlightCts);
-            DisposeConsumerSafely(consumer, consumerGroup);
+            try
+            {
+                await CleanupInFlightTaskAsync(processingTask, inFlightCts);
+            }
+            finally
+            {
+                DisposeConsumerSafely(consumer, consumerGroup);
+            }
         }
     }
+
 
     private bool PollWhileBusy(
         IConsumer<string?, string> consumer,
@@ -431,31 +472,46 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
 
         try
         {
-            inFlightCts.Cancel();
-        }
-        catch (ObjectDisposedException) { }
-
-        if (processingTask != null)
-        {
             try
             {
-                await processingTask.WaitAsync(TimeSpan.FromSeconds(1), _timeProvider);
+                inFlightCts.Cancel();
             }
-            catch (TimeoutException)
+            catch (ObjectDisposedException) { }
+
+            if (processingTask != null)
             {
-                _logger.LogWarning("In-flight processing task did not complete within 1s timeout during session cleanup.");
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected cancellation
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Observed unhandled exception from in-flight task during session cleanup.");
+                try
+                {
+                    try
+                    {
+                        await processingTask.WaitAsync(TimeSpan.FromSeconds(1), _timeProvider);
+                    }
+                    catch (TimeoutException)
+                    {
+                        _logger.LogWarning("In-flight processing task did not complete within 1s timeout during session cleanup. Waiting for task to terminate before releasing session...");
+                        await processingTask;
+                    }
+
+                    var outcome = await processingTask;
+                    if (!outcome.IsSuccess && outcome.Exception != null && outcome.Exception is not OperationCanceledException)
+                    {
+                        _logger.LogWarning(outcome.Exception, "In-flight task completed with error during session cleanup.");
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected cancellation
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Observed unhandled exception from in-flight task during session cleanup.");
+                }
             }
         }
-
-        inFlightCts.Dispose();
+        finally
+        {
+            inFlightCts.Dispose();
+        }
     }
 
     private void DisposeConsumerSafely(IConsumer<string?, string>? consumer, string consumerGroup)
