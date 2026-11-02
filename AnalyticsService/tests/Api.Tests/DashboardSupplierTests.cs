@@ -30,7 +30,7 @@ public sealed class DashboardSupplierTests
 
         var rentalRepo = new RentalFactRepository(db);
         var paymentRepo = new PaymentFinancialEventRepository(db);
-        var service = new DashboardQueryService(rentalRepo, paymentRepo);
+        var service = new DashboardQueryService(rentalRepo, paymentRepo, new SupplierDashboardQueryRepository(db));
 
         var range = DashboardDateRange.Create(new DateOnly(2026, 10, 10), new DateOnly(2026, 10, 12));
 
@@ -99,7 +99,7 @@ public sealed class DashboardSupplierTests
 
         var rentalRepo = new RentalFactRepository(db);
         var paymentRepo = new PaymentFinancialEventRepository(db);
-        var dashboard = new DashboardQueryService(rentalRepo, paymentRepo);
+        var dashboard = new DashboardQueryService(rentalRepo, paymentRepo, new SupplierDashboardQueryRepository(db));
         var trend = new OrderTrendQueryService(rentalRepo, dashboard);
         var revenue = new RevenueAnalyticsQueryService(paymentRepo);
 
@@ -134,7 +134,7 @@ public sealed class DashboardSupplierTests
 
         var rentalRepo = new RentalFactRepository(db);
         var paymentRepo = new PaymentFinancialEventRepository(db);
-        var dashboard = new DashboardQueryService(rentalRepo, paymentRepo);
+        var dashboard = new DashboardQueryService(rentalRepo, paymentRepo, new SupplierDashboardQueryRepository(db));
         var trend = new OrderTrendQueryService(rentalRepo, dashboard);
         var revenue = new RevenueAnalyticsQueryService(paymentRepo);
 

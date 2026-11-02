@@ -40,11 +40,6 @@ public interface IRentalFactRepository
         int limit,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<Guid>> GetSupplierCandidatesAsync(
-        DateTimeOffset startUtc,
-        DateTimeOffset endUtc,
-        CancellationToken cancellationToken = default);
-
     Task<IReadOnlyDictionary<Guid, int>> GetSupplierRequestCountsAsync(
         IReadOnlyCollection<Guid> supplierIds,
         DateTimeOffset startUtc,

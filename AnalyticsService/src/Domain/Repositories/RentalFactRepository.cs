@@ -218,25 +218,6 @@ public sealed class RentalFactRepository : IRentalFactRepository
         return new EquipmentRankingsResult(types, listings, brands);
     }
 
-    public async Task<IReadOnlyList<Guid>> GetSupplierCandidatesAsync(
-        DateTimeOffset startUtc,
-        DateTimeOffset endUtc,
-        CancellationToken cancellationToken = default)
-    {
-        var rentalCandidates = from item in _context.RentalItems.AsNoTracking()
-                               join order in _context.RentalOrders.AsNoTracking()
-                                   on item.RentalOrderId equals order.RentalOrderId
-                               where order.CreatedAt >= startUtc && order.CreatedAt < endUtc ||
-                                   order.PaidAt >= startUtc && order.PaidAt < endUtc ||
-                                   item.ConfirmedAt >= startUtc && item.ConfirmedAt < endUtc ||
-                                   item.RejectedAt >= startUtc && item.RejectedAt < endUtc ||
-                                   item.ExpiredAt >= startUtc && item.ExpiredAt < endUtc ||
-                                   item.CompletedAt >= startUtc && item.CompletedAt < endUtc
-                               select item.SupplierId;
-
-        return await rentalCandidates.Distinct().ToListAsync(cancellationToken);
-    }
-
     public async Task<IReadOnlyDictionary<Guid, int>> GetSupplierRequestCountsAsync(
         IReadOnlyCollection<Guid> supplierIds,
         DateTimeOffset startUtc,

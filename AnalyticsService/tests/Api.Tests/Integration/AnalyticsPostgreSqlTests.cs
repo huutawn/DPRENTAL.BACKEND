@@ -17,6 +17,49 @@ namespace Dprental.AnalyticsService.Api.Tests.Integration;
 /// </summary>
 public sealed class AnalyticsPostgreSqlTests
 {
+    [Fact]
+    public async Task SupplierDashboard_PaginatesDistinctCandidatesFromBothSourcesOnPostgres()
+    {
+        await using PostgresTestDatabase database = await PostgresTestDatabase.CreateAsync()
+            ?? throw new InvalidOperationException("Thiếu ANALYTICS_TEST_POSTGRES để kiểm thử PostgreSQL thật.");
+        await using AnalyticsServiceDbContext db = database.CreateContext();
+        var start = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+        var end = start.AddDays(1);
+        var supplierA = Guid.Parse("10000000-0000-0000-0000-000000000001");
+        var supplierB = Guid.Parse("20000000-0000-0000-0000-000000000002");
+        var supplierC = Guid.Parse("30000000-0000-0000-0000-000000000003");
+        var outside = Guid.Parse("40000000-0000-0000-0000-000000000004");
+        var orderId = Guid.NewGuid();
+        db.RentalOrders.Add(new RentalOrderFact { RentalOrderId = orderId, CreatedAt = start });
+        foreach (var supplierId in new[] { supplierA, supplierB, supplierB })
+        {
+            db.RentalItems.Add(new RentalItemFact { RentalItemId = Guid.NewGuid(), RentalOrderId = orderId,
+                SupplierId = supplierId, EquipmentListingId = Guid.NewGuid(), Quantity = 1 });
+        }
+        foreach (var entry in new[] { (supplierB, start), (supplierC, start), (outside, end) })
+        {
+            var id = Guid.NewGuid();
+            db.PaymentFinancialEvents.Add(new PaymentFinancialEvent { MessageId = id, LogicalEventId = id.ToString(),
+                AggregateId = id.ToString(), MessageType = "SupplierPayoutCompleted", SupplierId = entry.Item1,
+                OccurredAt = entry.Item2, CompletedAt = entry.Item2 });
+        }
+        await db.SaveChangesAsync();
+
+        var repo = new SupplierDashboardQueryRepository(db);
+        var first = await repo.GetCandidatesAsync(start, end, 0, 2);
+        var second = await repo.GetCandidatesAsync(start, end, 2, 2);
+        var empty = await repo.GetCandidatesAsync(start, end, 4, 2);
+        Assert.Equal(3, first.Total);
+        Assert.Equal(3, second.Total);
+        Assert.Equal(3, empty.Total);
+        Assert.Equal(new[] { supplierA, supplierB }, first.SupplierIds);
+        Assert.Equal(new[] { supplierC }, second.SupplierIds);
+        Assert.Empty(empty.SupplierIds);
+        var noMatches = await repo.GetCandidatesAsync(start.AddDays(-2), start.AddDays(-1), 0, 2);
+        Assert.Equal(0, noMatches.Total);
+        Assert.Empty(noMatches.SupplierIds);
+    }
+
     private static readonly Guid OrderX = Guid.Parse("10000000-0000-0000-0000-000000000001");
     private static readonly Guid ItemI1 = Guid.Parse("20000000-0000-0000-0000-000000000001"); // máy đầm cóc, NCC A
     private static readonly Guid ItemI2 = Guid.Parse("20000000-0000-0000-0000-000000000002"); // máy xúc mini, NCC B
@@ -75,7 +118,7 @@ public sealed class AnalyticsPostgreSqlTests
         Add(PaymentAnalyticsEventTypes.RefundRequestedFinancial, null, 900m);
         Add(PaymentAnalyticsEventTypes.RefundRequestedFinancial, "foreign", 900m, "USD");
         await db.SaveChangesAsync();
-        var service = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db));
+        var service = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db), new SupplierDashboardQueryRepository(db));
         OverviewResponse overview = await service.OverviewAsync(Range);
         Assert.Equal(expected.HasValue ? (decimal?)expected.Value : null, overview.Financial.PendingRefund);
 
@@ -214,7 +257,7 @@ public sealed class AnalyticsPostgreSqlTests
         Assert.Equal(0m, revenue.Buckets.Single(b => b.PeriodStart == new DateOnly(2026, 11, 15)).PlatformRevenue);
         Assert.Equal(90_000m, revenue.Buckets.Single(b => b.PeriodStart == new DateOnly(2026, 11, 16)).PlatformRevenue);
 
-        var queryDashboard = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db));
+        var queryDashboard = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db), new SupplierDashboardQueryRepository(db));
         OrdersResponse trend = await new OrderTrendQueryService(new RentalFactRepository(db), queryDashboard)
             .GetAsync(DashboardDateRange.Create(new DateOnly(2026, 11, 15), new DateOnly(2026, 11, 16)), CancellationToken.None);
         Assert.Equal(1, trend.Points.Single(p => p.Date == new DateOnly(2026, 11, 16)).Created);
@@ -224,7 +267,7 @@ public sealed class AnalyticsPostgreSqlTests
     private static async Task AssertOrderXDashboard(PostgresTestDatabase database)
     {
         await using AnalyticsServiceDbContext db = database.CreateContext();
-        DashboardQueryService dashboard = new(new RentalFactRepository(db), new PaymentFinancialEventRepository(db));
+        DashboardQueryService dashboard = new(new RentalFactRepository(db), new PaymentFinancialEventRepository(db), new SupplierDashboardQueryRepository(db));
         OverviewResponse overview = await dashboard.OverviewAsync(Range, null, CancellationToken.None);
         Assert.Equal(new OrderMetrics(TotalOrders: 1, PaidOrders: 1, ActiveOrders: 0, CompletedOrders: 1,
             CancelledOrders: 0, ExpiredOrders: 0, RejectedItems: 1), overview.Orders);
