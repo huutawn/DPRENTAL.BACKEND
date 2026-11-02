@@ -85,11 +85,22 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
     {
         await Task.Yield();
 
+        DateTimeOffset lastSessionErrorLog = DateTimeOffset.MinValue;
+        int suppressedSessionErrorCount = 0;
+        bool hasLoggedSessionError = false;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 await RunSingleSessionLoopAsync(topic, consumerGroup, dlqTopic, source, stoppingToken);
+
+                if (hasLoggedSessionError)
+                {
+                    _logger.LogInformation("Consumer session for {Group} on {Topic} recovered and exited cleanly.", consumerGroup, topic);
+                    hasLoggedSessionError = false;
+                    suppressedSessionErrorCount = 0;
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -97,7 +108,30 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Consumer session for {Group} on {Topic} encountered an unhandled error. Restarting session in 1s...", consumerGroup, topic);
+                var now = _timeProvider.GetUtcNow();
+                if (!hasLoggedSessionError || now - lastSessionErrorLog >= TimeSpan.FromSeconds(10))
+                {
+                    if (suppressedSessionErrorCount > 0)
+                    {
+                        _logger.LogWarning("Consumer session for {Group} on {Topic} encountered an error after {Count} suppressed failures: {Message}",
+                            consumerGroup, topic, suppressedSessionErrorCount, ex.Message);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(ex, "Consumer session for {Group} on {Topic} encountered an unhandled error. Restarting session...", consumerGroup, topic);
+                    }
+                    lastSessionErrorLog = now;
+                    hasLoggedSessionError = true;
+                    suppressedSessionErrorCount = 0;
+                }
+                else
+                {
+                    suppressedSessionErrorCount++;
+                }
+            }
+
+            if (!stoppingToken.IsCancellationRequested)
+            {
                 try
                 {
                     await Task.Delay(TimeSpan.FromSeconds(1), _timeProvider, stoppingToken);
@@ -121,6 +155,9 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
         bool isSessionValid = true;
 
         IConsumer<string?, string>? consumer = null;
+        Task<ProcessTaskResult>? processingTask = null;
+        CancellationTokenSource? inFlightCts = null;
+
         try
         {
             consumer = _clientFactory.CreateConsumer(
@@ -162,8 +199,6 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
             var sessionState = ConsumerSessionState.WaitingForRecord;
             ConsumeResult<string?, string>? currentConsumeResult = null;
             long currentExpectedGeneration = 0;
-            Task<ProcessTaskResult>? processingTask = null;
-            CancellationTokenSource? inFlightCts = null;
             int retryAttempt = 0;
             DateTimeOffset retryDeadline = DateTimeOffset.MinValue;
             DateTimeOffset lastOutageLog = DateTimeOffset.MinValue;
@@ -175,23 +210,30 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
                 {
                     case ConsumerSessionState.WaitingForRecord:
                         {
-                            var assignment = consumer.Assignment;
-                            if (assignment != null && assignment.Count > 0)
-                            {
-                                consumer.Resume(assignment);
-                            }
-
                             var cr = consumer.Consume(TimeSpan.FromMilliseconds(200));
                             if (cr == null || cr.IsPartitionEOF || cr.Message == null)
                             {
                                 break;
                             }
 
-                            // Immediately pause all owned partitions
-                            if (assignment != null && assignment.Count > 0)
+                            if (!isSessionValid)
                             {
-                                consumer.Pause(assignment);
+                                sessionState = ConsumerSessionState.ClosingSession;
+                                break;
                             }
+
+                            var currentAssignment = consumer.Assignment;
+                            if (currentAssignment == null || !currentAssignment.Any(tp => tp.Topic == cr.Topic && tp.Partition == cr.Partition))
+                            {
+                                _logger.LogWarning("Record {Topic}:{Partition}@{Offset} does not belong to current assignment. Invalidating session.",
+                                    cr.Topic, cr.Partition.Value, cr.Offset.Value);
+                                isSessionValid = false;
+                                sessionState = ConsumerSessionState.ClosingSession;
+                                break;
+                            }
+
+                            // Immediately pause all owned partitions before starting ingestion
+                            consumer.Pause(currentAssignment);
 
                             currentConsumeResult = cr;
                             currentExpectedGeneration = Interlocked.Read(ref assignmentGeneration);
@@ -205,11 +247,8 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
 
                     case ConsumerSessionState.Processing:
                         {
-                            // Poll short timeout during in-flight processing to keep heartbeat alive
-                            var unexpectedCr = consumer.Consume(TimeSpan.FromMilliseconds(100));
-                            if (unexpectedCr != null && !unexpectedCr.IsPartitionEOF && unexpectedCr.Message != null)
+                            if (!PollWhileBusy(consumer, "Processing", TimeSpan.FromMilliseconds(100)))
                             {
-                                _logger.LogWarning("Unexpected record received while processing. Closing session to recover.");
                                 isSessionValid = false;
                                 sessionState = ConsumerSessionState.ClosingSession;
                                 break;
@@ -266,12 +305,22 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
                                     sessionState = ConsumerSessionState.WaitingForRetry;
                                 }
                             }
+                            else
+                            {
+                                await Task.Yield();
+                            }
                             break;
                         }
 
                     case ConsumerSessionState.WaitingForRetry:
                         {
-                            consumer.Consume(TimeSpan.FromMilliseconds(100));
+                            if (!PollWhileBusy(consumer, "WaitingForRetry", TimeSpan.FromMilliseconds(100)))
+                            {
+                                isSessionValid = false;
+                                sessionState = ConsumerSessionState.ClosingSession;
+                                break;
+                            }
+
                             if (!isSessionValid)
                             {
                                 inFlightCts?.Cancel();
@@ -291,10 +340,25 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
 
                     case ConsumerSessionState.WaitingForCommit:
                         {
+                            if (!isSessionValid || currentExpectedGeneration != Interlocked.Read(ref assignmentGeneration))
+                            {
+                                _logger.LogWarning("Session or assignment generation changed before commit ({Expected} vs {Current}). Invalidating session.",
+                                    currentExpectedGeneration, Interlocked.Read(ref assignmentGeneration));
+                                isSessionValid = false;
+                                sessionState = ConsumerSessionState.ClosingSession;
+                                break;
+                            }
+
                             try
                             {
                                 consumer.Commit(currentConsumeResult!);
-                                // Offset committed!
+                                // Only resume once current record has committed successfully
+                                var currentAssignment = consumer.Assignment;
+                                if (currentAssignment != null && currentAssignment.Count > 0)
+                                {
+                                    consumer.Resume(currentAssignment);
+                                }
+
                                 currentConsumeResult = null;
                                 processingTask = null;
                                 inFlightCts?.Dispose();
@@ -309,7 +373,12 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
                                         ex,
                                         "Commit failed temporarily for {Topic}:{Partition}@{Offset}. Retrying commit...",
                                         topic, currentConsumeResult!.Partition.Value, currentConsumeResult.Offset.Value);
-                                    consumer.Consume(TimeSpan.FromMilliseconds(100));
+
+                                    if (!PollWhileBusy(consumer, "WaitingForCommit", TimeSpan.FromMilliseconds(100)))
+                                    {
+                                        isSessionValid = false;
+                                        sessionState = ConsumerSessionState.ClosingSession;
+                                    }
                                 }
                                 else
                                 {
@@ -326,38 +395,93 @@ public sealed class RecommendationKafkaConsumerWorker : BackgroundService
                         }
                 }
             }
-
-            // Cleanup in-flight task on session close
-            if (inFlightCts != null)
-            {
-                try
-                {
-                    inFlightCts.Cancel();
-                    if (processingTask != null)
-                    {
-                        await Task.WhenAny(processingTask, Task.Delay(TimeSpan.FromSeconds(1), _timeProvider, CancellationToken.None));
-                    }
-                }
-                catch { }
-                finally
-                {
-                    inFlightCts.Dispose();
-                }
-            }
         }
         finally
         {
-            if (consumer != null)
+            await CleanupInFlightTaskAsync(processingTask, inFlightCts);
+            DisposeConsumerSafely(consumer, consumerGroup);
+        }
+    }
+
+    private bool PollWhileBusy(
+        IConsumer<string?, string> consumer,
+        string currentStateName,
+        TimeSpan timeout)
+    {
+        var unexpectedCr = consumer.Consume(timeout);
+        if (unexpectedCr != null && !unexpectedCr.IsPartitionEOF && unexpectedCr.Message != null)
+        {
+            _logger.LogWarning(
+                "Unexpected record received while in {State} on {Topic}:{Partition}@{Offset}. Invalidating session without committing to allow Kafka to replay.",
+                currentStateName, unexpectedCr.Topic, unexpectedCr.Partition.Value, unexpectedCr.Offset.Value);
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task CleanupInFlightTaskAsync(
+        Task<ProcessTaskResult>? processingTask,
+        CancellationTokenSource? inFlightCts)
+    {
+        if (inFlightCts == null)
+        {
+            return;
+        }
+
+        try
+        {
+            inFlightCts.Cancel();
+        }
+        catch (ObjectDisposedException) { }
+
+        if (processingTask != null)
+        {
+            try
             {
-                try
-                {
-                    consumer.Close();
-                    consumer.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Error disposing consumer for {Group}.", consumerGroup);
-                }
+                await processingTask.WaitAsync(TimeSpan.FromSeconds(1), _timeProvider);
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning("In-flight processing task did not complete within 1s timeout during session cleanup.");
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected cancellation
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Observed unhandled exception from in-flight task during session cleanup.");
+            }
+        }
+
+        inFlightCts.Dispose();
+    }
+
+    private void DisposeConsumerSafely(IConsumer<string?, string>? consumer, string consumerGroup)
+    {
+        if (consumer == null)
+        {
+            return;
+        }
+
+        try
+        {
+            consumer.Close();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error closing consumer for {Group}.", consumerGroup);
+        }
+        finally
+        {
+            try
+            {
+                consumer.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error disposing consumer for {Group}.", consumerGroup);
             }
         }
     }

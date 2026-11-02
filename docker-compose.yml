@@ -37,6 +37,11 @@ services:
       Kafka__BootstrapServers: "${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}"
     ports:
       - "127.0.0.1:${API_PORT:-8080}:8080"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -56,6 +61,17 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_LOG4J_OPTS: "-Dlog4j2.configurationFile=/etc/kafka/log4j2.yaml"
+      KAFKA_GC_LOG_OPTS: "-Xlog:gc*:file=/opt/kafka/logs/kafkaServer-gc.log:time,tags:filecount=5,filesize=10M"
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+      - ./kafka-log4j2.yaml:/etc/kafka/log4j2.yaml:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
     ports:
       - "127.0.0.1:${KAFKA_PORT:-29092}:29092"
     healthcheck:
@@ -93,3 +109,4 @@ services:
 
 volumes:
   recommendation-pg:
+  kafka-data:
