@@ -1,9 +1,10 @@
 # Tài liệu AuthService
 
-`GET /api/v1/auth/organizations/{organizationId}/supplier-contact` công khai tên và số
-điện thoại liên hệ của nhà cung cấp đang hoạt động. Tổ chức chưa hoạt động, không phải
-nhà cung cấp hoặc không tồn tại trả 404. Owner tiếp tục dùng
-`GET /api/v1/auth/organizations/{id}` để xem hồ sơ chi tiết của mình.
+`GET /api/v1/auth/organizations/{id}` yêu cầu đăng nhập: Owner nhận hồ sơ đầy đủ,
+người khác nhận thông tin giới hạn nếu tổ chức đang hoạt động, nếu không trả 404.
+`GET /api/v1/auth/organizations/by-owner/{userId}` trả thông tin giới hạn; nếu một
+người là owner của nhiều tổ chức, API trả 409 để tránh chọn sai. API liên hệ
+`GET /api/v1/auth/organizations/{organizationId}/supplier-contact` cũng yêu cầu đăng nhập.
 
 ## Ranh giới các lớp
 

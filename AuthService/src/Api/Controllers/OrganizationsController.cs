@@ -1,6 +1,7 @@
 using Dprental.AuthService.Api.Filters;
 using Dprental.AuthService.Api.Security;
 using Dprental.AuthService.Application.IServices;
+using Dprental.AuthService.Application.Services;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Application.DTOs.Organization;
@@ -19,7 +20,8 @@ namespace Dprental.AuthService.Api.Controllers;
 [Authorize]
 public sealed class OrganizationsController(
     IOrganizationService organizationService,
-    IOrganizationRegistrationService organizationRegistrationService) : ControllerBase
+    IOrganizationRegistrationService organizationRegistrationService,
+    OrganizationLookupService organizationLookupService) : ControllerBase
 {
     /// <summary>Người dùng đang đăng nhập chọn đăng ký tổ chức Supplier/Renter và trở thành Owner; tổ chức chờ Platform duyệt.</summary>
     [HttpPost("register")]
@@ -68,7 +70,7 @@ public sealed class OrganizationsController(
         return result.Value is null ? NoContent() : Ok(result.Value);
     }
 
-    /// <summary>Lấy thông tin một organization khi người gọi là Owner.</summary>
+    /// <summary>Owner xem hồ sơ đầy đủ; người dùng khác xem thông tin giới hạn của tổ chức đang hoạt động.</summary>
     [HttpGet("{id:guid}")]
     [ProducesResponseType<OrganizationResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
@@ -81,7 +83,20 @@ public sealed class OrganizationsController(
             return Unauthorized();
         }
 
-        Result<OrganizationResponse> result = await organizationService.GetByIdAsync(userId, id, cancellationToken);
+        Result<object> result = await organizationLookupService.GetByIdAsync(userId, id, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Tra thông tin giới hạn của tổ chức theo chủ tin đăng.</summary>
+    [HttpGet("by-owner/{userId:guid}")]
+    [ProducesResponseType<OrganizationPublicResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> GetByOwner(Guid userId, CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid actorId)) return Unauthorized();
+        var result = await organizationLookupService.GetByOwnerAsync(actorId, userId, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
     /// <summary>

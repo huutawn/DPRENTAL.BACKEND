@@ -29,6 +29,7 @@ public sealed class OrganizationIntegrationTests
     private static readonly Guid CustomerRoleId = new("82127c20-a094-4d8b-a1c7-b94266c001d2");
     private static readonly Guid OwnerRoleId = new("a1010000-0000-0000-0000-000000000001");
     private static readonly Guid MemberRoleId = new("a1010000-0000-0000-0000-000000000002");
+    private static readonly string[] PublicOrganizationFields = ["contactPhone", "id", "logoMediaId", "logoUrl", "name", "slug", "status", "type"];
 
     [Fact]
     public async Task SupplierContactReturnsOnlyMinimalActiveSupplierData()
@@ -58,7 +59,8 @@ public sealed class OrganizationIntegrationTests
         using HttpClient owner = CreateAuthenticatedClient(factory, ownerId, "customer");
         using HttpClient other = CreateAuthenticatedClient(factory, otherId, "customer");
         string route = $"/api/v1/auth/organizations/{activeId}/supplier-contact";
-        foreach (HttpClient client in new[] { anonymous, owner, other })
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(route)).StatusCode);
+        foreach (HttpClient client in new[] { owner, other })
         {
             using HttpResponseMessage response = await client.GetAsync(route);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -72,13 +74,66 @@ public sealed class OrganizationIntegrationTests
         {
             Assert.Equal(HttpStatusCode.NotFound,
                 (await other.GetAsync($"/api/v1/auth/organizations/{id}/supplier-contact")).StatusCode);
-            Assert.Equal(HttpStatusCode.NotFound,
-                (await anonymous.GetAsync($"/api/v1/auth/organizations/{id}/supplier-contact")).StatusCode);
         }
-        Assert.Equal(HttpStatusCode.Forbidden,
+        Assert.Equal(HttpStatusCode.OK,
             (await other.GetAsync($"/api/v1/auth/organizations/{activeId}")).StatusCode);
         Assert.Equal(HttpStatusCode.OK,
             (await owner.GetAsync($"/api/v1/auth/organizations/{activeId}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task OrganizationPublicViewsRespectOwnershipAndHideSensitiveFields()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+        Guid ownerId = Guid.NewGuid();
+        Guid otherId = Guid.NewGuid();
+        await CreateUserAsync(factory, ownerId, "public-owner@example.com", "Owner", CustomerRoleId);
+        await CreateUserAsync(factory, otherId, "public-other@example.com", "Other", CustomerRoleId);
+        Guid orgId = await SeedOrganizationAsync(factory, ownerId, "public-supplier", OrganizationStatus.Active, "Supplier A");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            var org = await db.Organizations.SingleAsync(o => o.Id == orgId);
+            org.ContactPhone = "0281234567";
+            org.TaxCode = "9876543210";
+            org.ContactEmail = "private@example.com";
+            await db.SaveChangesAsync();
+        }
+        using var anonymous = factory.CreateClient();
+        using var owner = CreateAuthenticatedClient(factory, ownerId, "customer");
+        using var other = CreateAuthenticatedClient(factory, otherId, "customer");
+        string byId = $"/api/v1/auth/organizations/{orgId}";
+        string byOwner = $"/api/v1/auth/organizations/by-owner/{ownerId}";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(byId)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(byOwner)).StatusCode);
+        foreach (string route in new[] { byId, byOwner })
+        {
+            using var response = await other.GetAsync(route);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var doc = await response.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.NotNull(doc);
+            Assert.Equal(orgId, doc.RootElement.GetProperty("id").GetGuid());
+            Assert.Equal("0281234567", doc.RootElement.GetProperty("contactPhone").GetString());
+            Assert.Equal(PublicOrganizationFields,
+                doc.RootElement.EnumerateObject().Select(p => p.Name).OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        }
+        using var ownerResponse = await owner.GetAsync(byId);
+        using var ownerDoc = await ownerResponse.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.Equal(HttpStatusCode.OK, ownerResponse.StatusCode);
+        Assert.Equal("9876543210", ownerDoc!.RootElement.GetProperty("taxCode").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/auth/organizations/by-owner/{Guid.NewGuid()}")).StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            (await db.Organizations.SingleAsync(o => o.Id == orgId)).Status = OrganizationStatus.Suspended;
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync(byId)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync(byOwner)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await owner.GetAsync(byId)).StatusCode);
+        await SeedOrganizationAsync(factory, ownerId, "public-supplier-second", OrganizationStatus.Active, "Supplier B");
+        Assert.Equal(HttpStatusCode.Conflict, (await other.GetAsync(byOwner)).StatusCode);
     }
 
     [Fact]
@@ -112,7 +167,7 @@ public sealed class OrganizationIntegrationTests
         using HttpResponseMessage ownerGet = await ownerClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
         Assert.Equal(HttpStatusCode.OK, ownerGet.StatusCode);
         using HttpResponseMessage outsiderGet = await outsiderClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
-        Assert.Equal(HttpStatusCode.Forbidden, outsiderGet.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, outsiderGet.StatusCode);
 
         // 3. Admin duyệt bằng PATCH /admin/organizations/{id}/approve
         using HttpResponseMessage approveRes = await adminClient.PatchAsync($"/api/v1/auth/admin/organizations/{orgId}/approve", null);
@@ -194,7 +249,7 @@ public sealed class OrganizationIntegrationTests
         using HttpClient outsiderClient = CreateAuthenticatedClient(factory, outsiderId, "customer");
 
         using HttpResponseMessage getRes = await outsiderClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
-        Assert.Equal(HttpStatusCode.Forbidden, getRes.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, getRes.StatusCode);
     }
 
     [Fact]
@@ -228,7 +283,7 @@ public sealed class OrganizationIntegrationTests
 
         // Normal user accesses deactivated organization -> 403
         using HttpResponseMessage normalGet = await normalClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
-        Assert.Equal(HttpStatusCode.Forbidden, normalGet.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, normalGet.StatusCode);
 
         // Platform admin can inspect deactivated organization -> 200 via admin route
         using HttpResponseMessage adminGet = await adminClient.GetAsync($"/api/v1/auth/admin/organizations/{orgId}");

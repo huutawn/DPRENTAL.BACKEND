@@ -17,6 +17,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
         services.AddScoped<IExternalLoginRepository, EfExternalLoginRepository>();
         services.AddScoped<IOrganizationRepository, EfOrganizationRepository>();
         services.AddScoped<ISupplierContactRepository, EfSupplierContactRepository>();
+        services.AddScoped<IOrganizationLookupRepository, EfOrganizationLookupRepository>();
         services.AddScoped<IOrganizationMembershipRepository, EfOrganizationMembershipRepository>();
         services.AddScoped<IAuditLogRepository, EfAuditLogRepository>();
         services.AddScoped<IRecoveryTokenRepository, EfRecoveryTokenRepository>();
