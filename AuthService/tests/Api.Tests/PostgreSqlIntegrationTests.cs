@@ -52,6 +52,28 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         return new AuthDbContext(options);
     }
 
+    [Fact]
+    public async Task PostgreSqlOrganizationLookupFindsActiveOwnerMembership()
+    {
+        await using var db = CreateDbContext();
+        string suffix = Guid.NewGuid().ToString("N");
+        var ownerId = Guid.NewGuid();
+        var ownerRole = await db.Roles.SingleAsync(role => role.Name == "Owner");
+        var organization = new Organization { Id = Guid.NewGuid(), Name = "Supplier", Slug = $"lookup-{suffix}",
+            Status = OrganizationStatus.Active, Type = OrganizationType.Supplier, ContactPhone = "0281234567" };
+        db.OrganizationMemberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(), User = new User { Id = ownerId, Email = $"lookup-{suffix}@example.com", FullName = "Owner", PasswordHash = "hash" },
+            Organization = organization, RoleId = ownerRole.Id, Status = MembershipStatus.Active
+        });
+        await db.SaveChangesAsync();
+        var repository = new EfOrganizationLookupRepository(db);
+        var result = await repository.FindByOwnerAsync(ownerId);
+        Assert.Equal(organization.Id, Assert.Single(result).Id);
+        Assert.Equal("0281234567", (await repository.FindByIdAsync(organization.Id))!.ContactPhone);
+        Assert.Empty(await repository.FindByOwnerAsync(Guid.NewGuid()));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
