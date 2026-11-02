@@ -11,6 +11,7 @@ namespace Dprental.InventoryService.Application.DTOs.Listings;
 /// </summary>
 public sealed record PublicEquipmentListingResponse(
     [property: JsonPropertyName("id")] Guid Id,
+    [property: JsonPropertyName("ownerUserId")] Guid OwnerUserId,
     [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
     [property: JsonPropertyName("brandId")] Guid BrandId,
     [property: JsonPropertyName("name")] string Name,

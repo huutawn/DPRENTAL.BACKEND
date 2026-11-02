@@ -38,7 +38,7 @@ public sealed partial class RecommendationHttpEndToEndIntegrationTests
         var cache = app.Services.GetRequiredService<IInventoryReadCache>();
         string today = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
         var cached = await cache.GetAsync<Dprental.InventoryService.Application.DTOs.Listings.PublicEquipmentListingResponse>(
-            $"listing:{listing.Id:D}", "public-detail", today);
+            $"listing:{listing.Id:D}", "public-detail-v2", today);
         Assert.True(cached.IsHit);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(detail)).StatusCode);
         var views = await db.OutboxMessages.AsNoTracking().Where(m => m.Topic == KafkaTopics.InventoryBehaviorEventsV1).ToListAsync();
