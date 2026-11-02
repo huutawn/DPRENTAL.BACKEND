@@ -1,0 +1,49 @@
+{
+  "Routes": [
+    {
+      "Key": "auth-service-google-provider-callback",
+      "UpstreamPathTemplate": "/signin-google",
+      "DownstreamPathTemplate": "/signin-google",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 64837
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "auth-service",
+      "UpstreamPathTemplate": "/api/v1/auth/{everything}",
+      "DownstreamPathTemplate": "/api/v1/auth/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 64837
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "auth-service-openapi",
+      "UpstreamPathTemplate": "/swagger/v1/swagger.json",
+      "DownstreamPathTemplate": "/swagger/v1/swagger.json",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 64837
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    }
+  ]
+}

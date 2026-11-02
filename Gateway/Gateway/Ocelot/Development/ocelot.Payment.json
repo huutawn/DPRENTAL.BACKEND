@@ -1,0 +1,115 @@
+{
+  "Routes": [
+    {
+      "Key": "payment-service-invoices",
+      "UpstreamPathTemplate": "/api/v1/invoices/{everything}",
+      "DownstreamPathTemplate": "/api/v1/invoices/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 47297
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "payment-service-payment",
+      "UpstreamPathTemplate": "/api/v1/payment/{everything}",
+      "DownstreamPathTemplate": "/api/v1/payment/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 47297
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "payment-service-settlements",
+      "UpstreamPathTemplate": "/api/v1/settlements/{everything}",
+      "DownstreamPathTemplate": "/api/v1/settlements/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "payment-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "payment-service-manual-refunds",
+      "UpstreamPathTemplate": "/api/v1/manual-refunds/{everything}",
+      "DownstreamPathTemplate": "/api/v1/manual-refunds/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "payment-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "payment-service-openapi",
+      "UpstreamPathTemplate": "/payment/swagger/v1/swagger.json",
+      "DownstreamPathTemplate": "/swagger/v1/swagger.json",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "payment-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "payment-hub-negotiate",
+      "UpstreamPathTemplate": "/hubs/payments/negotiate",
+      "DownstreamPathTemplate": "/hubs/payments/negotiate",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "payment-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "payment-hub-ws",
+      "UpstreamPathTemplate": "/hubs/payments",
+      "DownstreamPathTemplate": "/hubs/payments",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "DownstreamScheme": "ws",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "payment-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    }
+  ]
+}

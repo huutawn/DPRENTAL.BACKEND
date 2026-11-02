@@ -16,7 +16,7 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../../ocelot/ocelot.csproj" />
+    <ProjectReference Include="../../Gateway/Gateway.csproj" />
     <ProjectReference Include="../../../../RentalService/RentalService/src/Api/RentalService.Api.csproj" Aliases="RentalApi" />
     <ProjectReference Include="../../../../AnalyticsService/AnalyticsService/src/Api/AnalyticsService.Api.csproj" Aliases="AnalyticsApi" />
     <ProjectReference Include="../../../../AnalyticsService/AnalyticsService/src/Domain/AnalyticsService.Domain.csproj" />

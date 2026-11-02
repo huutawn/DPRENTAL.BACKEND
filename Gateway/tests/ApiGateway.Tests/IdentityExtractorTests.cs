@@ -1,6 +1,8 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using Dprental.Gateway.Security;
+using Dprental.Gateway.Models.Security;
+using Dprental.Gateway.Middlewares.Security;
+using Dprental.Gateway.Extensions.Security;
 using Xunit;
 
 namespace Dprental.Gateway.Tests;

@@ -1,3 +1,4 @@
+using Dprental.Gateway.Extensions.Proxy;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
@@ -6,8 +7,11 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Dprental.Gateway.Authentication;
-using Dprental.Gateway.Errors;
+using Dprental.Gateway.Models.Authentication;
+using Dprental.Gateway.Extensions.Authentication;
+using Dprental.Gateway.Models.Errors;
+using Dprental.Gateway.Middlewares.Errors;
+using Dprental.Gateway.Extensions.Errors;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -18,6 +22,16 @@ namespace Dprental.Gateway.Tests;
 
 public sealed class GatewayIntegrationTests
 {
+    private sealed class TempHostEnv : IWebHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Development";
+        public string ApplicationName { get; set; } = "Gateway.Api";
+        public string WebRootPath { get; set; } = "";
+        public Microsoft.Extensions.FileProviders.IFileProvider WebRootFileProvider { get; set; } = null!;
+        public string ContentRootPath { get; set; } = "";
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = null!;
+    }
+
     private const string Issuer = "https://auth.example.test";
     private const string Audience = "dprental-clients";
 
@@ -262,7 +276,7 @@ public sealed class GatewayIntegrationTests
     {
         Dictionary<string, string?> overrides = new(StringComparer.Ordinal)
         {
-            ["Routes:0:UpstreamPathTemplate"] = "invalid-no-slash"
+            ["Routes:36:UpstreamPathTemplate"] = "invalid-no-slash"
         };
 
         using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
@@ -288,36 +302,39 @@ public sealed class GatewayIntegrationTests
 
     private static WebApplicationFactory<Program> CreateFactory(Uri upstreamAddress, bool includeProtectedRoute = false)
     {
+        var ocelotDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../Gateway/Ocelot/Development"));
+        var env = new TempHostEnv { ContentRootPath = Path.GetDirectoryName(Path.GetDirectoryName(ocelotDir))! };
+        var ocelotConfigBuilder = new ConfigurationBuilder();
+        OcelotServiceCollectionExtensions.AddGatewayOcelotConfiguration(
+            ocelotConfigBuilder, ocelotDir, env);
+        var ocelotConfig = ocelotConfigBuilder.Build();
+
         Dictionary<string, string?> overrides = new(StringComparer.Ordinal)
         {
             ["Gateway:Authentication:Jwt:Issuer"] = Issuer,
             ["Gateway:Authentication:Jwt:Audience"] = Audience,
             ["Gateway:Authentication:Jwt:JwksUri"] = new Uri(upstreamAddress, ".well-known/jwks.json").AbsoluteUri,
-            ["Routes:0:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:0:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:0:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Routes:1:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:1:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:1:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Routes:2:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:2:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:2:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Routes:3:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:3:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:3:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Routes:5:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:5:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:5:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
+
+        foreach (var route in ocelotConfig.GetSection("Routes").GetChildren())
+        {
+            string existingScheme = route["DownstreamScheme"] ?? "http";
+            overrides[$"{route.Path}:DownstreamScheme"] = string.Equals(existingScheme, "ws", StringComparison.OrdinalIgnoreCase)
+                ? "ws"
+                : upstreamAddress.Scheme;
+            overrides[$"{route.Path}:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
+            overrides[$"{route.Path}:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
 
         if (includeProtectedRoute)
         {
-            overrides["Routes:6:Key"] = "protected-service";
-            overrides["Routes:6:UpstreamPathTemplate"] = "/protected/{everything}";
-            overrides["Routes:6:DownstreamPathTemplate"] = "/protected/{everything}";
-            overrides["Routes:6:DownstreamScheme"] = upstreamAddress.Scheme;
-            overrides["Routes:6:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
-            overrides["Routes:6:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            overrides["Routes:19:Key"] = "protected-service";
+            overrides["Routes:19:UpstreamPathTemplate"] = "/protected/{everything}";
+            overrides["Routes:19:DownstreamPathTemplate"] = "/protected/{everything}";
+            overrides["Routes:19:DownstreamScheme"] = upstreamAddress.Scheme;
+            overrides["Routes:19:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
+            overrides["Routes:19:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            overrides["Routes:19:AuthenticationOptions:AuthenticationProviderKey"] = "Bearer";
         }
         return new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddInMemoryCollection(overrides)));

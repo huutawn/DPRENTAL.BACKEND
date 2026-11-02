@@ -1,0 +1,73 @@
+{
+  "Routes": [
+    {
+      "Key": "rental-order-hub-negotiate",
+      "UpstreamPathTemplate": "/api/v1/rental/hubs/orders/negotiate",
+      "DownstreamPathTemplate": "/api/v1/rental/hubs/orders/negotiate",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "rental-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "rental-order-hub-ws",
+      "UpstreamPathTemplate": "/api/v1/rental/hubs/orders",
+      "DownstreamPathTemplate": "/api/v1/rental/hubs/orders",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "DownstreamScheme": "ws",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "rental-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "rental-service",
+      "UpstreamPathTemplate": "/api/v1/rental/{everything}",
+      "DownstreamPathTemplate": "/api/v1/rental/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "rental-service",
+          "Port": 8080
+        }
+      ],
+      "Timeout": 60,
+      "AuthenticationOptions": {
+        "AuthenticationProviderKeys": [
+          "Bearer"
+        ]
+      }
+    },
+    {
+      "Key": "rental-service-openapi",
+      "UpstreamPathTemplate": "/rental/swagger/v1/swagger.json",
+      "DownstreamPathTemplate": "/swagger/v1/swagger.json",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "rental-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    }
+  ]
+}

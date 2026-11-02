@@ -1,5 +1,7 @@
 using System.Text.Json;
-using Dprental.Gateway.Errors;
+using Dprental.Gateway.Models.Errors;
+using Dprental.Gateway.Middlewares.Errors;
+using Dprental.Gateway.Extensions.Errors;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;

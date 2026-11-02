@@ -1,0 +1,55 @@
+{
+  "Routes": [
+    {
+      "Key": "media-service-public-content",
+      "UpstreamPathTemplate": "/api/v1/media/{mediaId}/content",
+      "DownstreamPathTemplate": "/api/v1/media/{mediaId}/content",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "media-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "media-service",
+      "UpstreamPathTemplate": "/api/v1/media/{everything}",
+      "DownstreamPathTemplate": "/api/v1/media/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "media-service",
+          "Port": 8080
+        }
+      ],
+      "Timeout": 60,
+      "AuthenticationOptions": {
+        "AuthenticationProviderKeys": [
+          "Bearer"
+        ]
+      }
+    },
+    {
+      "Key": "media-service-openapi",
+      "UpstreamPathTemplate": "/media/swagger/v1/swagger.json",
+      "DownstreamPathTemplate": "/swagger/v1/swagger.json",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "media-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    }
+  ]
+}

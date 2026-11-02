@@ -1,0 +1,11 @@
+{
+  "GlobalConfiguration": {
+    "BaseUrl": "http://localhost:5050",
+    "Timeout": 10,
+    "AuthenticationOptions": {
+      "AuthenticationProviderKeys": [
+        "Bearer"
+      ]
+    }
+  }
+}

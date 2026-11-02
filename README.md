@@ -8,13 +8,29 @@ Gateway được tổ chức thành project chạy Ocelot và project kiểm th�
 
 ```text
 Gateway/
-  ocelot/
-    Authentication/    # JWT RS256 và JWKS của AuthService, ApiKeyRoutePolicy
-    Errors/            # GatewayError, GatewayExceptionMiddleware, Error response writer
-    Health/            # Health checks (JwksReadinessHealthCheck, GatewayConfigurationHealthCheck)
-    Proxy/             # Ocelot composition và configuration validation
-    Security/          # IdentityContext, IdentityExtractor, Security middlewares, DelegatingHandlers, HeaderSanitizer, GatewayHeaderConstants, GatewaySecurityOptions
-  tests/ApiGateway.Tests/
+├── Gateway.sln
+├── Gateway/
+│   ├── Extensions/
+│   ├── Middlewares/
+│   ├── Models/
+│   ├── Ocelot/
+│   │   ├── Development/
+│   │   │   ├── ocelot.Auth.json
+│   │   │   ├── ocelot.Media.json
+│   │   │   ├── ocelot.Catalog.json
+│   │   │   ├── ocelot.Inventory.json
+│   │   │   ├── ocelot.Rental.json
+│   │   │   ├── ocelot.Payment.json
+│   │   │   ├── ocelot.Analytics.json
+│   │   │   ├── ocelot.Recommendation.json
+│   │   │   └── ocelot.global.json
+│   │   └── Production/
+│   │       └── cùng bộ tên file như Development
+│   ├── Properties/
+│   ├── Program.cs
+│   ├── Gateway.csproj
+│   └── appsettings*.json
+└── tests/
 ```
 Gateway nhận JWT được AuthService ký và chỉ tải public key từ JWKS. Không đặt private key, token, hoặc password vào `appsettings*.json`.
 
@@ -32,7 +48,7 @@ equipment-types/{id}, equipment-types/{id}/schema, equipment-types/{id}/schemas/
 và equipment-types/{id}/spec-schemas/{version}.
 POST equipment-types/{id}/schemas/batch cũng cho phép anonymous vì đây là truy vấn chỉ đọc.
 Các route public chỉ mở đúng HTTP method và path; admin, ghi dữ liệu và validate specifications vẫn yêu cầu JWT.
-Route mới được nối cuối danh sách; appsettings.Development.json giữ override theo cùng index để không đổi đích của route hiện có.
+Route được merge trong bộ nhớ theo tên file `ocelot.*.json` (ordinal), giữ nguyên thứ tự trong từng file để bảo toàn ưu tiên route. Khi thêm hoặc đổi tên file/route, cập nhật các override theo index trong Compose, cấu hình VM và test trong cùng thay đổi.
 Template detail kết thúc bằng `/` để Ocelot chỉ match một segment ID; URL caller không cần slash cuối.
 Các request Catalog còn lại yêu cầu JWT Bearer với audience `Gateway:Authentication:Jwt:Audience`;
 Catalog tự kiểm tra role `Admin` cho POST/PATCH/publish/disable. Gateway không thêm nghiệp vụ Catalog.
@@ -79,7 +95,7 @@ Bộ kiểm thử tích hợp `RentalRealtimeGatewayEndToEndTests` kiểm chứn
 Khởi động AuthService tại `http://localhost:64837` (cổng HTTP chuẩn theo `launchSettings.json` của AuthService), sau đó khởi động Gateway với môi trường `Development`:
 
 ```bash
-ASPNETCORE_ENVIRONMENT=Development dotnet run --project Gateway/ocelot --urls "http://127.0.0.1:5050"
+ASPNETCORE_ENVIRONMENT=Development dotnet run --project Gateway/Gateway --urls "http://127.0.0.1:5050"
 ```
 
 Hoặc dùng Visual Studio / Rider / VS Code với profile `Gateway.Api` đã cấu hình sẵn cổng `http://localhost:5050`.
@@ -100,14 +116,12 @@ docker run -d --name dprental-gateway \
   -e Gateway__Authentication__Jwt__Issuer=dprental-authservice-dev \
   -e Gateway__Authentication__Jwt__Audience=dprental-clients \
   -e Gateway__Authentication__Jwt__JwksUri=http://auth-service:5000/.well-known/jwks.json \
-  -e Routes__0__DownstreamHostAndPorts__0__Host=auth-service \
-  -e Routes__0__DownstreamHostAndPorts__0__Port=5000 \
-  -e Routes__1__DownstreamHostAndPorts__0__Host=auth-service \
-  -e Routes__1__DownstreamHostAndPorts__0__Port=5000 \
-  -e Routes__2__DownstreamHostAndPorts__0__Host=auth-service \
-  -e Routes__2__DownstreamHostAndPorts__0__Port=5000 \
-  -e Routes__3__DownstreamHostAndPorts__0__Host=auth-service \
-  -e Routes__3__DownstreamHostAndPorts__0__Port=5000 \
+  -e Routes__4__DownstreamHostAndPorts__0__Host=auth-service \
+  -e Routes__4__DownstreamHostAndPorts__0__Port=5000 \
+  -e Routes__5__DownstreamHostAndPorts__0__Host=auth-service \
+  -e Routes__5__DownstreamHostAndPorts__0__Port=5000 \
+  -e Routes__6__DownstreamHostAndPorts__0__Host=auth-service \
+  -e Routes__6__DownstreamHostAndPorts__0__Port=5000 \
   -e Gateway__Security__Cors__AllowedOrigins__0=http://localhost:3000 \
   dprental-gateway:latest
 ```
@@ -304,3 +318,11 @@ Xem [hướng dẫn vận hành và recovery](docs/SELF_HOSTED_DEPLOYMENT.md) v�
 ```bash
 python3 -m unittest discover -s scripts/tests -p 'test_deploy*.py' -v
 ```
+
+User `deploy` phải thuộc group `docker`; quyền Docker tương đương quyền quản trị VPS nên deploy key chỉ dùng cho automation này. Khóa host SSH có thể lấy từ máy tin cậy bằng `ssh-keyscan -H <vps-host>` rồi lưu nguyên kết quả vào `DEV_VPS_KNOWN_HOSTS`. Nếu chỉ muốn triển khai sau khi merge PR, cấu hình branch protection/ruleset cho `gateway/develop-ci-cd` để yêu cầu PR và chặn push trực tiếp; event `push` tự nó không bảo đảm commit đến từ PR.
+
+### Đồng bộ cấu hình deploy trên Ubuntu VM
+
+CI/CD dùng `/opt/dprental/dev/compose.yaml` và script root-owned trên VM, không tự sao chép `docker-compose.yml` từ repository. Gateway Development trong Docker cần override downstream cho toàn bộ route theo thứ tự file ordinal, giữ thứ tự route trong từng file. Mọi service trên stack VM dùng cổng 8080; chỉ route hub WebSocket dùng `ws`. Route Payment API dùng `http`.
+
+Trước khi merge vào `gateway/develop-ci-cd`, kiểm tra cấu hình VM tương ứng với image mới và sao lưu Compose cũ để rollback cùng image cũ. Mở PR không deploy; push/merge vào nhánh đích mới kích hoạt workflow.

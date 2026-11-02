@@ -2,7 +2,8 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Dprental.Gateway.Authentication;
+using Dprental.Gateway.Models.Authentication;
+using Dprental.Gateway.Extensions.Authentication;
 using Microsoft.IdentityModel.Tokens;
 using Xunit;
 

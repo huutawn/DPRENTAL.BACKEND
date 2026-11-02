@@ -6,16 +6,14 @@ WORKDIR /src
 
 # Sao chép file định nghĩa project để cache layer restore dependencies
 COPY Gateway/Directory.Build.props Gateway/
-COPY Gateway/ocelot/ocelot.csproj Gateway/ocelot/
+COPY Gateway/Gateway/Gateway.csproj Gateway/Gateway/
 
-RUN dotnet restore Gateway/ocelot/ocelot.csproj
+RUN dotnet restore Gateway/Gateway/Gateway.csproj
 
 # Sao chép toàn bộ mã nguồn và thực hiện build release
-COPY Gateway/ocelot/ Gateway/ocelot/
-WORKDIR /src/Gateway/ocelot
-# Development settings contain host-machine localhost ports, not Docker service addresses.
-RUN dotnet publish -c Release -o /app/publish --no-restore \
-    && rm /app/publish/appsettings.Development.json
+COPY Gateway/Gateway/ Gateway/Gateway/
+WORKDIR /src/Gateway/Gateway
+RUN dotnet publish -c Release -o /app/publish --no-restore
 
 # ==========================================
 # Runtime Stage: Image chạy tối giản và an toàn

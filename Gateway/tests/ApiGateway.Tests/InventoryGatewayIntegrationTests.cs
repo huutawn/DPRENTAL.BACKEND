@@ -2,7 +2,9 @@ using static Dprental.Gateway.Tests.DownstreamGatewayTestHost;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
-using Dprental.Gateway.Security;
+using Dprental.Gateway.Models.Security;
+using Dprental.Gateway.Middlewares.Security;
+using Dprental.Gateway.Extensions.Security;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Xunit;
@@ -204,13 +206,12 @@ public sealed class InventoryGatewayIntegrationTests
     [Fact]
     public void GatewayConfigurationBaseAndDevelopmentRoutesPointToExpectedDownstreams()
     {
-        var ocelotDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ocelot"));
+        var ocelotDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Gateway", "Ocelot", "Development"));
+        var env = new TestHostEnvironment { ContentRootPath = Path.GetDirectoryName(Path.GetDirectoryName(ocelotDir))! };
         var configBuilder = new ConfigurationBuilder();
-        configBuilder.SetBasePath(ocelotDir);
-        configBuilder.AddJsonFile("appsettings.json", optional: false);
-        configBuilder.AddJsonFile("appsettings.Development.json", optional: true);
+        Dprental.Gateway.Extensions.Proxy.OcelotServiceCollectionExtensions.AddGatewayOcelotConfiguration(
+            configBuilder, ocelotDir, env);
         var config = configBuilder.Build();
-
         var routes = config.GetSection("Routes").GetChildren().ToList();
         var routeMap = routes.ToDictionary(
             r => r["Key"] ?? throw new InvalidOperationException("Route missing Key"),
@@ -246,12 +247,12 @@ public sealed class InventoryGatewayIntegrationTests
     [Fact]
     public void GatewayConfigurationProductionBaseRoutesPointToExpectedServiceContainers()
     {
-        var ocelotDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "ocelot"));
+        var ocelotDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Gateway", "Ocelot", "Production"));
+        var env = new TestHostEnvironment { EnvironmentName = "Production", ContentRootPath = Path.GetDirectoryName(Path.GetDirectoryName(ocelotDir))! };
         var configBuilder = new ConfigurationBuilder();
-        configBuilder.SetBasePath(ocelotDir);
-        configBuilder.AddJsonFile("appsettings.json", optional: false);
+        Dprental.Gateway.Extensions.Proxy.OcelotServiceCollectionExtensions.AddGatewayOcelotConfiguration(
+            configBuilder, ocelotDir, env);
         var config = configBuilder.Build();
-
         var routes = config.GetSection("Routes").GetChildren().ToList();
         var routeMap = routes.ToDictionary(
             r => r["Key"] ?? throw new InvalidOperationException("Route missing Key"),
@@ -312,5 +313,15 @@ public sealed class InventoryGatewayIntegrationTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("/api/v1/inventory/equipment-listings/statistics", upstream.LastRequest?.Path);
         Assert.Equal($"Bearer {token}", upstream.LastRequest?.Authorization);
+    }
+
+    private sealed class TestHostEnvironment : Microsoft.AspNetCore.Hosting.IWebHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Development";
+        public string ApplicationName { get; set; } = "Gateway.Api";
+        public string WebRootPath { get; set; } = "";
+        public Microsoft.Extensions.FileProviders.IFileProvider WebRootFileProvider { get; set; } = null!;
+        public string ContentRootPath { get; set; } = "";
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = null!;
     }
 }

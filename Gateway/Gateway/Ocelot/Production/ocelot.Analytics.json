@@ -1,0 +1,78 @@
+{
+  "Routes": [
+    {
+      "Key": "analytics-hub-negotiate",
+      "UpstreamPathTemplate": "/hubs/analytics/negotiate",
+      "DownstreamPathTemplate": "/hubs/analytics/negotiate",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "analytics-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "analytics-hub-ws",
+      "UpstreamPathTemplate": "/hubs/analytics",
+      "DownstreamPathTemplate": "/hubs/analytics",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "DownstreamScheme": "ws",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "analytics-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "analytics-api",
+      "UpstreamPathTemplate": "/api/v1/analytics/{everything}",
+      "DownstreamPathTemplate": "/api/v1/analytics/{everything}",
+      "UpstreamHttpMethod": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "OPTIONS"
+      ],
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "analytics-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "analytics-service-openapi",
+      "UpstreamPathTemplate": "/analytics/swagger/v1/swagger.json",
+      "DownstreamPathTemplate": "/swagger/v1/swagger.json",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "analytics-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,137 @@
+{
+  "Routes": [
+    {
+      "Key": "inventory-service",
+      "UpstreamPathTemplate": "/api/v1/inventory/{everything}",
+      "DownstreamPathTemplate": "/api/v1/inventory/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "inventory-service",
+          "Port": 8080
+        }
+      ],
+      "Timeout": 60,
+      "AuthenticationOptions": {
+        "AuthenticationProviderKeys": [
+          "InventoryBearer"
+        ]
+      }
+    },
+    {
+      "Key": "inventory-service-openapi",
+      "UpstreamPathTemplate": "/inventory/swagger/v1/swagger.json",
+      "DownstreamPathTemplate": "/swagger/v1/swagger.json",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "inventory-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "inventory-service-public-equipment-listings",
+      "UpstreamPathTemplate": "/api/v1/inventory/public/equipment-listings",
+      "DownstreamPathTemplate": "/api/v1/inventory/public/equipment-listings",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "Priority": 10,
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "inventory-service",
+          "Port": 8080
+        }
+      ],
+      "Timeout": 60,
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "inventory-service-public-equipment-listing-detail",
+      "UpstreamPathTemplate": "/api/v1/inventory/public/equipment-listings/{id}/",
+      "DownstreamPathTemplate": "/api/v1/inventory/public/equipment-listings/{id}",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "Priority": 10,
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "inventory-service",
+          "Port": 8080
+        }
+      ],
+      "Timeout": 60,
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "inventory-service-public-listing-availability-check",
+      "UpstreamPathTemplate": "/api/v1/inventory/public/equipment-listings/{id}/availability/check",
+      "DownstreamPathTemplate": "/api/v1/inventory/public/equipment-listings/{id}/availability/check",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "Priority": 10,
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "inventory-service",
+          "Port": 8080
+        }
+      ],
+      "Timeout": 60,
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "inventory-service-public-availability-check",
+      "UpstreamPathTemplate": "/api/v1/inventory/public/availability/check",
+      "DownstreamPathTemplate": "/api/v1/inventory/availability/check",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "Priority": 10,
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "inventory-service",
+          "Port": 8080
+        }
+      ],
+      "Timeout": 60,
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "inventory-service-public-equipment-listings-statistics",
+      "UpstreamPathTemplate": "/api/v1/inventory/public/equipment-listings/statistics",
+      "DownstreamPathTemplate": "/api/v1/inventory/public/equipment-listings/statistics",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "Priority": 10,
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "inventory-service",
+          "Port": 8080
+        }
+      ],
+      "Timeout": 60,
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    }
+  ]
+}

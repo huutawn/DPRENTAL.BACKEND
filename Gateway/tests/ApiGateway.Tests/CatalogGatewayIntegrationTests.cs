@@ -2,7 +2,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
-using Dprental.Gateway.Security;
+using Dprental.Gateway.Models.Security;
+using Dprental.Gateway.Middlewares.Security;
+using Dprental.Gateway.Extensions.Security;
 using Xunit;
 using static Dprental.Gateway.Tests.DownstreamGatewayTestHost;
 
