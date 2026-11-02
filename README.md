@@ -208,10 +208,10 @@ Khi người thuê có đơn hàng đang ở trạng thái `PendingPayment` và 
 
 1. `GET /api/v1/rental/orders?status=PendingPayment` để tìm danh sách đơn chờ thanh toán.
 2. `GET /api/v1/rental/orders/{orderId}` để lấy `invoiceRef` và `paymentDeadline`.
-3. `GET /api/v1/invoices/{invoiceRef}` (Payment Service) để lấy mã QR, số tiền và nội dung chuyển khoản.
+3. `GET /api/v1/payment/invoices/{invoiceRef}` (Payment Service) để lấy mã QR, số tiền và nội dung chuyển khoản.
 
 Checkout dùng QR và thông tin nhận tiền do Payment trả về, lưu đầy đủ vào receipt. Nếu response hoặc cache thiếu QR hợp lệ, retry cùng Idempotency-Key sẽ gọi lại Payment bằng operation key của đơn, không tạo đơn thay thế. Chỉ đánh dấu invoice `Ready` khi response chờ thanh toán có QR HTTPS và đủ thông tin chuyển khoản; không phục hồi đơn đã hết hạn. Deadline được đối chiếu theo độ chính xác microsecond của PostgreSQL để cache vẫn hợp lệ sau khi nạp lại đơn.
-4. `GET /api/v1/invoices/{invoiceRef}/status` (Payment Service) để theo dõi trạng thái thanh toán.
+4. `GET /api/v1/payment/invoices/{invoiceRef}/status` (Payment Service) để theo dõi trạng thái thanh toán.
 
 *Lưu ý:*
 - Nếu đơn chưa có `invoiceRef` (hóa đơn đang trong quá trình tạo hoặc retry qua Outbox/Worker), chờ xử lý tạo hóa đơn; không tạo checkout mới thay thế.

@@ -14,11 +14,11 @@ public static class PaymentContractSpec
 
     public static class ProposedRoutes
     {
-        public const string CreateInvoice = "/api/v1/invoices";
-        public static string CancelInvoice(string invoiceRef) => $"/api/v1/invoices/{invoiceRef}/cancel";
-        public static string AcceptLatePayment(string invoiceRef) => $"/api/v1/invoices/{invoiceRef}/accept-late-payment";
-        public const string RequestRefund = "/api/v1/refunds";
-        public const string SettleRental = "/api/v1/settlements";
+        public const string CreateInvoice = "/api/v1/payment/invoices";
+        public static string CancelInvoice(string invoiceRef) => $"/api/v1/payment/invoices/{invoiceRef}/cancel";
+        public static string AcceptLatePayment(string invoiceRef) => $"/api/v1/payment/invoices/{invoiceRef}/accept-late-payment";
+        public const string RequestRefund = "/api/v1/payment/refunds";
+        public const string SettleRental = "/api/v1/payment/settlements";
     }
 
     public static class ProposedScopes
