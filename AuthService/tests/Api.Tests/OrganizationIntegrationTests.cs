@@ -31,6 +31,57 @@ public sealed class OrganizationIntegrationTests
     private static readonly Guid MemberRoleId = new("a1010000-0000-0000-0000-000000000002");
 
     [Fact]
+    public async Task SupplierContactReturnsOnlyMinimalActiveSupplierData()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+        Guid ownerId = Guid.NewGuid();
+        Guid otherId = Guid.NewGuid();
+        await CreateUserAsync(factory, ownerId, "contact-owner@example.com", "Owner", CustomerRoleId);
+        await CreateUserAsync(factory, otherId, "contact-other@example.com", "Other", CustomerRoleId);
+        Guid activeId = await SeedOrganizationAsync(factory, ownerId, "supplier-contact-active", OrganizationStatus.Active, "Supplier A");
+        Guid pendingId = await SeedOrganizationAsync(factory, ownerId, "supplier-contact-pending", OrganizationStatus.Pending);
+        Guid suspendedId = await SeedOrganizationAsync(factory, ownerId, "supplier-contact-suspended", OrganizationStatus.Suspended);
+        Guid renterId = await SeedOrganizationAsync(factory, ownerId, "supplier-contact-renter", OrganizationStatus.Active);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            Organization active = await db.Organizations.SingleAsync(o => o.Id == activeId);
+            active.ContactPhone = "0281234567";
+            active.ContactEmail = "private@example.com";
+            active.TaxCode = "9876543210";
+            (await db.Organizations.SingleAsync(o => o.Id == renterId)).Type = OrganizationType.Renter;
+            await db.SaveChangesAsync();
+        }
+
+        using HttpClient anonymous = factory.CreateClient();
+        using HttpClient owner = CreateAuthenticatedClient(factory, ownerId, "customer");
+        using HttpClient other = CreateAuthenticatedClient(factory, otherId, "customer");
+        string route = $"/api/v1/auth/organizations/{activeId}/supplier-contact";
+        foreach (HttpClient client in new[] { anonymous, owner, other })
+        {
+            using HttpResponseMessage response = await client.GetAsync(route);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.True(response.Headers.CacheControl?.NoStore);
+            using JsonDocument doc = await response.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+            Assert.Equal("Supplier A", doc.RootElement.GetProperty("name").GetString());
+            Assert.Equal("0281234567", doc.RootElement.GetProperty("contactPhone").GetString());
+            Assert.Equal(2, doc.RootElement.EnumerateObject().Count());
+        }
+        foreach (Guid id in new[] { pendingId, suspendedId, renterId, Guid.NewGuid(), Guid.Empty })
+        {
+            Assert.Equal(HttpStatusCode.NotFound,
+                (await other.GetAsync($"/api/v1/auth/organizations/{id}/supplier-contact")).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound,
+                (await anonymous.GetAsync($"/api/v1/auth/organizations/{id}/supplier-contact")).StatusCode);
+        }
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await other.GetAsync($"/api/v1/auth/organizations/{activeId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await owner.GetAsync($"/api/v1/auth/organizations/{activeId}")).StatusCode);
+    }
+
+    [Fact]
     public async Task RegisterApproveLifecycleEndToEnd()
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
