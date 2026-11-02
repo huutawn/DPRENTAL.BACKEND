@@ -315,6 +315,19 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, pendingRefunds.StatusCode);
         var pendingPayouts = await client.GetAsync("/api/v1/admin/payouts");
         Assert.Equal(HttpStatusCode.OK, pendingPayouts.StatusCode);
+        using (var payload = await pendingPayouts.Content.ReadFromJsonAsync<JsonDocument>())
+        {
+            var payout = payload!.RootElement.GetProperty("items").EnumerateArray()
+                .Single(x => x.GetProperty("rentalItemId").GetGuid() == item.RentalItemId);
+            Assert.Equal(invoice.RentalOrderId, payout.GetProperty("rentalOrderId").GetGuid());
+            Assert.Equal(invoice.OrderCode, payout.GetProperty("orderCode").GetString());
+            Assert.Equal(item.RentalAmount, payout.GetProperty("rentalAmount").GetDecimal());
+            Assert.Equal(Math.Round(item.RentalAmount * 0.10m, 0, MidpointRounding.AwayFromZero),
+                payout.GetProperty("platformFeeAmount").GetDecimal());
+            Assert.Equal(payout.GetProperty("amount").GetDecimal(),
+                item.RentalAmount - payout.GetProperty("platformFeeAmount").GetDecimal()
+                    + payout.GetProperty("finalDeductionAmount").GetDecimal());
+        }
         await using (var checkDb = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
         {
             var checkRepository = new Dprental.PaymentService.Domain.Repositories.EfFinancialReadRepository(checkDb);
