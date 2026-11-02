@@ -459,4 +459,32 @@ public sealed class SpecificationValuesValidatorTests
         Assert.Contains("\"schemaVersion\":2", serialized);
         Assert.Contains("\"resolution\":\"4K\"", serialized);
     }
+
+    [Fact]
+    public void SpecificationValidationResult_JsonContract_SerializesAndDeserializesWithExpectedNamesAndOrder()
+    {
+        var error = new Dprental.CatalogService.Domain.DTOs.EquipmentTypes.SpecificationValidationError("fieldA", "ERR_CODE", "Message text");
+        var model = new Dprental.CatalogService.Domain.DTOs.EquipmentTypes.SpecificationValidationResult(false, [error], 1);
+
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        string json = JsonSerializer.Serialize(model, options);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.True(root.TryGetProperty("valid", out var validProp) && !validProp.GetBoolean());
+        Assert.True(root.TryGetProperty("schemaVersion", out var versionProp) && versionProp.GetInt32() == 1);
+        Assert.True(root.TryGetProperty("errors", out var errorsProp) && errorsProp.GetArrayLength() == 1);
+
+        var errElem = errorsProp[0];
+        Assert.Equal("fieldA", errElem.GetProperty("field").GetString());
+        Assert.Equal("ERR_CODE", errElem.GetProperty("code").GetString());
+        Assert.Equal("Message text", errElem.GetProperty("message").GetString());
+
+        var deserialized = JsonSerializer.Deserialize<Dprental.CatalogService.Domain.DTOs.EquipmentTypes.SpecificationValidationResult>(json, options);
+        Assert.NotNull(deserialized);
+        Assert.False(deserialized.Valid);
+        Assert.Equal(1, deserialized.SchemaVersion);
+        Assert.Single(deserialized.Errors);
+        Assert.Equal("fieldA", deserialized.Errors[0].Field);
+    }
 }

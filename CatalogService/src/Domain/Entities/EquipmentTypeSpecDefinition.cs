@@ -8,7 +8,6 @@ public sealed record EquipmentTypeSpecDefinition
 {
     private readonly IReadOnlyList<EquipmentTypeSpecField> fields = Array.Empty<EquipmentTypeSpecField>();
 
-    [JsonPropertyName("fields")]
     public IReadOnlyList<EquipmentTypeSpecField> Fields
     {
         get => fields;
@@ -34,36 +33,26 @@ public sealed record EquipmentTypeSpecField
 {
     private readonly IReadOnlyList<EquipmentTypeSpecOption>? options;
 
-    [JsonPropertyName("key")]
     public string Key { get; init; } = string.Empty;
 
-    [JsonPropertyName("label")]
     public string Label { get; init; } = string.Empty;
 
-    [JsonPropertyName("dataType")]
     public string DataType { get; init; } = string.Empty;
 
-    [JsonPropertyName("required")]
     public bool Required { get; init; }
 
-    [JsonPropertyName("filterable")]
     public bool Filterable { get; init; }
 
-    [JsonPropertyName("primary")]
     public bool Primary { get; init; }
 
-    [JsonPropertyName("displayOrder")]
     public int DisplayOrder { get; init; }
 
-    [JsonPropertyName("min")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public decimal? Min { get; init; }
 
-    [JsonPropertyName("max")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public decimal? Max { get; init; }
 
-    [JsonPropertyName("options")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<EquipmentTypeSpecOption>? Options
     {
@@ -71,24 +60,19 @@ public sealed record EquipmentTypeSpecField
         init => options = value != null ? value.Select(o => o is not null ? o with { } : null!).ToArray() : null;
     }
 
-    [JsonPropertyName("unit")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Unit { get; init; }
 
-    [JsonPropertyName("description")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Description { get; init; }
 
-    [JsonPropertyName("metadata")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Metadata { get; init; }
 }
 
 public sealed record EquipmentTypeSpecOption
 {
-    [JsonPropertyName("value")]
     public string Value { get; init; } = string.Empty;
 
-    [JsonPropertyName("label")]
     public string Label { get; init; } = string.Empty;
 }

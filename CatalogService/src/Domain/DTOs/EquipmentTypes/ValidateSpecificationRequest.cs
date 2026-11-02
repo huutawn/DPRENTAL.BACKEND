@@ -6,10 +6,8 @@ namespace Dprental.CatalogService.Domain.DTOs.EquipmentTypes;
 [JsonConverter(typeof(ValidateSpecificationRequestJsonConverter))]
 public sealed record ValidateSpecificationRequest
 {
-    [JsonPropertyName("schemaVersion")]
     public int SchemaVersion { get; init; }
 
-    [JsonPropertyName("values")]
     public JsonElement Values { get; init; }
 
     [JsonIgnore]
