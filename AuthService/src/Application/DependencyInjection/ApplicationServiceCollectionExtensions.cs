@@ -57,6 +57,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IFirebaseLoginService, FirebaseLoginService>();
         services.AddScoped<IOrganizationService, OrganizationService>();
         services.AddScoped<SupplierContactService>();
+        services.AddScoped<OrganizationLookupService>();
         services.AddScoped<IOrganizationRegistrationService, OrganizationRegistrationService>();
         services.AddScoped<IOrganizationReviewService, OrganizationReviewService>();
         services.AddScoped<IUserAccountService, UserAccountService>();

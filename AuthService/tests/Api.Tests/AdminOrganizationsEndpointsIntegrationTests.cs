@@ -525,9 +525,11 @@ public sealed partial class AdminOrganizationsEndpointsIntegrationTests
         using HttpResponseMessage ownerGetRes = await ownerClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
         Assert.Equal(HttpStatusCode.OK, ownerGetRes.StatusCode);
 
-        // 6. GET /organizations/{id}: Admin (not owner) gets 403 Forbidden
+        // 6. Admin không phải owner chỉ nhận thông tin công khai giới hạn.
         using HttpResponseMessage adminGetOldRes = await adminClient.GetAsync($"/api/v1/auth/organizations/{orgId}");
-        Assert.Equal(HttpStatusCode.Forbidden, adminGetOldRes.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, adminGetOldRes.StatusCode);
+        using JsonDocument publicDoc = (await adminGetOldRes.Content.ReadFromJsonAsync<JsonDocument>())!;
+        Assert.False(publicDoc.RootElement.TryGetProperty("taxCode", out _));
     }
 
     // =========================================================================
