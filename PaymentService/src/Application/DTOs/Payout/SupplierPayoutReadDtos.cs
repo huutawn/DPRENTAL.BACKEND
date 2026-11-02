@@ -13,5 +13,7 @@ namespace Dprental.PaymentService.Application.DTOs.Payout
         Guid PayoutId, string PayoutRef, Guid SettlementId, string SettlementRef, Guid RentalItemId, Guid SupplierId,
         decimal Amount, string Currency, string Status, string? DestinationRef, string? ExternalTransferReference,
         Guid? CompletedBy, DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt,
-        Guid? DestinationId, int? DestinationVersion);
+        Guid? DestinationId, int? DestinationVersion,
+        Guid RentalOrderId, string OrderCode,
+        decimal RentalAmount, decimal PlatformFeeAmount, decimal FinalDeductionAmount);
 }
