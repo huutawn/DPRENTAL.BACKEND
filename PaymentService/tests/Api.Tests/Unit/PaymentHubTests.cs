@@ -163,7 +163,7 @@ public sealed class PaymentHubTests
     {
         var options = Options.Create(new PaymentHubOptions
         {
-            HubPath = "/hubs/payments",
+            HubPath = "/api/v1/payment/hubs/payments",
             AllowedOrigins = ["http://localhost:3000"]
         });
 
@@ -171,7 +171,7 @@ public sealed class PaymentHubTests
             _ => Task.CompletedTask, options, NullLogger<PaymentHubOriginGuardMiddleware>.Instance);
 
         var context = new DefaultHttpContext();
-        context.Request.Path = "/hubs/payments";
+        context.Request.Path = "/api/v1/payment/hubs/payments";
         context.Request.Headers["Origin"] = "http://evil.com";
 
         await middleware.InvokeAsync(context);
@@ -184,7 +184,7 @@ public sealed class PaymentHubTests
     {
         var options = Options.Create(new PaymentHubOptions
         {
-            HubPath = "/hubs/payments",
+            HubPath = "/api/v1/payment/hubs/payments",
             AllowedOrigins = ["http://localhost:3000"]
         });
 
@@ -194,7 +194,7 @@ public sealed class PaymentHubTests
             options, NullLogger<PaymentHubOriginGuardMiddleware>.Instance);
 
         var context = new DefaultHttpContext();
-        context.Request.Path = "/hubs/payments/negotiate";
+        context.Request.Path = "/api/v1/payment/hubs/payments/negotiate";
         context.Request.Headers["Origin"] = "http://localhost:3000";
 
         await middleware.InvokeAsync(context);

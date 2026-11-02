@@ -10,7 +10,7 @@ Status: **Contract v1 đang triển khai — chờ Rental/Payment cùng freeze**
 
 ## Contract Rental hiện đã đề xuất
 
-`POST /api/v1/settlements` với service token `aud=payment-api`, scope `payment.settlement.write`. Request hiện có trên Rental:
+`POST /api/v1/payment/settlements` với service token `aud=payment-api`, scope `payment.settlement.write`. Request hiện có trên Rental:
 
 ```text
 RentalOrderId, RentalItemId, InvoiceRef, PaymentRef, SupplierId,
@@ -51,12 +51,12 @@ Các mã chưa có trong `PaymentContractSpec` là **đề xuất**, cần Renta
 1. **Đã chốt:** giữ `RefundedDepositAmount`; tiền phải hoàn trên request được phân biệt với tiền đã hoàn bằng trạng thái và event. Khi refund due bằng 0, event mang giá trị 0.
 2. **Đã chốt:** làm tròn phí đến VND gần nhất. Quy ước chi tiết để code nhất quán là `MidpointRounding.AwayFromZero` trên từng RentalItem; nếu team muốn kiểu xử lý đúng nửa VND khác thì cần thay trước khi freeze.
 3. **Đã chốt:** ghi nhận `SupplierPayable` vào ledger là đủ cho MVP; chỉ còn chờ hoàn cọc thủ công (nếu > 0) trước `RentalSettled`.
-4. **Admin confirmation contract:** đề xuất `POST /api/v1/manual-refunds/{requirementId}/complete`, admin gửi `ExternalTransferReference`; server lấy `CompletedAt` từ UTC clock và `CompletedBy` từ token, không cho client tự đặt. Route và quyền admin sẽ được xác nhận khi triển khai subtask 5 theo claim Auth hiện hành.
+4. **Admin confirmation contract:** đề xuất `POST /api/v1/payment/manual-refunds/{requirementId}/complete`, admin gửi `ExternalTransferReference`; server lấy `CompletedAt` từ UTC clock và `CompletedBy` từ token, không cho client tự đặt. Route và quyền admin sẽ được xác nhận khi triển khai subtask 5 theo claim Auth hiện hành.
 5. **Response status:** đề xuất `PENDING_MANUAL_REFUND` và `COMPLETED`. `COMPLETED` chỉ có khi financial closure đã được commit; `RentalSettled` outbox được ghi cùng transaction. Các tên này cần Rental xác nhận trước khi freeze.
 
 ## Phạm vi triển khai sau khi freeze
 
-Subtask 2–6 đã có domain calculation, persistence/migration, API, manual refund confirmation và outbox publisher. Admin phải chuyển khoản thật trước khi gọi `POST /api/v1/manual-refunds/{requirementId}/complete`; token phải có audience `dprental-clients` và role Auth `adm` hoặc `adp`. Cùng mã chuyển khoản được replay; mã khác bị từ chối. Xác nhận và `RentalSettled` outbox commit cùng transaction.
+Subtask 2–6 đã có domain calculation, persistence/migration, API, manual refund confirmation và outbox publisher. Admin phải chuyển khoản thật trước khi gọi `POST /api/v1/payment/manual-refunds/{requirementId}/complete`; token phải có audience `dprental-clients` và role Auth `adm` hoặc `adp`. Cùng mã chuyển khoản được replay; mã khác bị từ chối. Xác nhận và `RentalSettled` outbox commit cùng transaction.
 
 Publisher hợp nhất từ `payment/develop` đọc toàn bộ Payment outbox, gồm `InvoicePaid` và `RentalSettled`. Để phát event, cấu hình `Kafka:Enabled=true`, `Kafka:BootstrapServers` và `Kafka:Topic=payment.events.v1` (nếu broker yêu cầu xác thực, cấu hình thêm SecurityProtocol/SaslMechanism/SaslUsername/SaslPassword hoặc SslCaLocation). Publisher chỉ đánh dấu `PublishedAt` sau khi broker xác nhận persist. Lỗi gửi giữ message pending để retry theo lease/backoff; nếu broker đã nhận nhưng DB chưa commit thì message có thể được gửi lại, vì vậy consumer phải deduplicate bằng `messageId`. Cần broker Kafka thực và Rental consumer để xác nhận end-to-end ngoài test với transport fake.
 

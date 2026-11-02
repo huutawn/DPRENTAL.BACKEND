@@ -149,17 +149,17 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         using var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Remove("X-Api-Key");
         Assert.Equal(HttpStatusCode.Unauthorized,
-            (await client.PostAsJsonAsync("/api/v1/settlements", request)).StatusCode);
+            (await client.PostAsJsonAsync("/api/v1/payment/settlements", request)).StatusCode);
 
         client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
-        var created = await client.PostAsJsonAsync("/api/v1/settlements", request);
+        var created = await client.PostAsJsonAsync("/api/v1/payment/settlements", request);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var body = await created.Content.ReadFromJsonAsync<SettleRentalResponse>();
         Assert.NotNull(body);
         Assert.Equal(SettlementStatus.PendingManualRefund, body.Status);
         Assert.False(body.IsReplay);
 
-        var replay = await client.PostAsJsonAsync("/api/v1/settlements", request);
+        var replay = await client.PostAsJsonAsync("/api/v1/payment/settlements", request);
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
         var replayBody = await replay.Content.ReadFromJsonAsync<SettleRentalResponse>();
         Assert.NotNull(replayBody);
@@ -181,7 +181,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         }
         await h.ConfirmAsync();
         using var client = _factory.CreateClient();
-        var url = $"/api/v1/manual-refunds/{requirementId}/complete";
+        var url = $"/api/v1/payment/manual-refunds/{requirementId}/complete";
         var request = new CompleteManualRefundRequest(
             "BANK-ADMIN-001", "confirm-admin-001", "Đã đối chiếu chứng từ chuyển khoản.");
 
@@ -193,11 +193,11 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(url, request)).StatusCode);
 
         // Manual refunds GET endpoints also reject renter, supplier, and service tokens
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/v1/manual-refunds/{requirementId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/v1/payment/manual-refunds/{requirementId}")).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("cus"));
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/v1/manual-refunds/{requirementId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/v1/payment/manual-refunds/{requirementId}")).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token("payment.settlement.write"));
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/v1/manual-refunds/{requirementId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/v1/payment/manual-refunds/{requirementId}")).StatusCode);
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("adm"));
         var response = await client.PostAsJsonAsync(url, request);
@@ -261,22 +261,22 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
 
         using var client = _factory.CreateClient();
         Assert.Equal(HttpStatusCode.Unauthorized,
-            (await client.GetAsync($"/api/v1/invoices/{invoice.InvoiceRef}/status")).StatusCode);
+            (await client.GetAsync($"/api/v1/payment/invoices/{invoice.InvoiceRef}/status")).StatusCode);
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("cus", Guid.NewGuid()));
         Assert.Equal(HttpStatusCode.NotFound,
-            (await client.GetAsync($"/api/v1/invoices/{invoice.InvoiceRef}/status")).StatusCode);
+            (await client.GetAsync($"/api/v1/payment/invoices/{invoice.InvoiceRef}/status")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound,
-            (await client.GetAsync($"/api/v1/settlements/{settlementId}")).StatusCode);
+            (await client.GetAsync($"/api/v1/payment/settlements/{settlementId}")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden,
-            (await client.GetAsync("/api/v1/admin/payouts")).StatusCode);
+            (await client.GetAsync("/api/v1/payment/admin/payouts")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden,
-            (await client.GetAsync($"/api/v1/transactions/{transactionId}")).StatusCode);
+            (await client.GetAsync($"/api/v1/payment/transactions/{transactionId}")).StatusCode);
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("cus", renterId));
-        var invoiceStatus = await client.GetAsync($"/api/v1/invoices/{invoice.InvoiceRef}/status");
+        var invoiceStatus = await client.GetAsync($"/api/v1/payment/invoices/{invoice.InvoiceRef}/status");
         Assert.Equal(HttpStatusCode.OK, invoiceStatus.StatusCode);
-        var renterSettlement = await client.GetAsync($"/api/v1/settlements/{settlementId}");
+        var renterSettlement = await client.GetAsync($"/api/v1/payment/settlements/{settlementId}");
         Assert.Equal(HttpStatusCode.OK, renterSettlement.StatusCode);
         using (var payload = await renterSettlement.Content.ReadFromJsonAsync<JsonDocument>())
         {
@@ -285,14 +285,14 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         }
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("sup", supplierId));
-        var supplierSettlement = await client.GetAsync($"/api/v1/settlements/{settlementId}");
+        var supplierSettlement = await client.GetAsync($"/api/v1/payment/settlements/{settlementId}");
         Assert.Equal(HttpStatusCode.OK, supplierSettlement.StatusCode);
         using (var payload = await supplierSettlement.Content.ReadFromJsonAsync<JsonDocument>())
         {
             Assert.Equal(JsonValueKind.Null, payload!.RootElement.GetProperty("refund").ValueKind);
             Assert.NotEqual(JsonValueKind.Null, payload.RootElement.GetProperty("supplier").ValueKind);
         }
-        var supplierPayouts = await client.GetAsync("/api/v1/supplier/payouts");
+        var supplierPayouts = await client.GetAsync("/api/v1/payment/supplier/payouts");
         Assert.Equal(HttpStatusCode.OK, supplierPayouts.StatusCode);
         using (var payload = await supplierPayouts.Content.ReadFromJsonAsync<JsonDocument>())
         {
@@ -302,7 +302,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         }
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("sup", otherSupplierId));
-        var otherSupplierPayouts = await client.GetAsync("/api/v1/supplier/payouts");
+        var otherSupplierPayouts = await client.GetAsync("/api/v1/payment/supplier/payouts");
         Assert.Equal(HttpStatusCode.OK, otherSupplierPayouts.StatusCode);
         using (var payload = await otherSupplierPayouts.Content.ReadFromJsonAsync<JsonDocument>())
         {
@@ -311,9 +311,9 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         }
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("adm"));
-        var pendingRefunds = await client.GetAsync("/api/v1/admin/manual-refunds");
+        var pendingRefunds = await client.GetAsync("/api/v1/payment/admin/manual-refunds");
         Assert.Equal(HttpStatusCode.OK, pendingRefunds.StatusCode);
-        var pendingPayouts = await client.GetAsync("/api/v1/admin/payouts");
+        var pendingPayouts = await client.GetAsync("/api/v1/payment/admin/payouts");
         Assert.Equal(HttpStatusCode.OK, pendingPayouts.StatusCode);
         using (var payload = await pendingPayouts.Content.ReadFromJsonAsync<JsonDocument>())
         {
@@ -337,15 +337,15 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
                 new Dprental.PaymentService.Domain.IRepositories.PageRequest(1, 20), CancellationToken.None);
             Assert.Equal(1, directQueue.TotalCount);
         }
-        var pendingClose = await client.GetAsync("/api/v1/admin/payments/review?kind=SettlementPendingClose");
+        var pendingClose = await client.GetAsync("/api/v1/payment/admin/payments/review?kind=SettlementPendingClose");
         Assert.Equal(HttpStatusCode.OK, pendingClose.StatusCode);
         using var review = await pendingClose.Content.ReadFromJsonAsync<JsonDocument>();
         Assert.Equal(1, review!.RootElement.GetProperty("totalCount").GetInt64());
         Assert.Equal(HttpStatusCode.OK,
-            (await client.GetAsync($"/api/v1/transactions/{transactionId}")).StatusCode);
+            (await client.GetAsync($"/api/v1/payment/transactions/{transactionId}")).StatusCode);
         foreach (var kind in new[] { "AwaitingPayment", "UnmatchedTransaction", "LateTransaction", "ReviewRequiredTransaction" })
         {
-            var queue = await client.GetAsync($"/api/v1/admin/payments/review?kind={kind}&pageSize=1");
+            var queue = await client.GetAsync($"/api/v1/payment/admin/payments/review?kind={kind}&pageSize=1");
             Assert.Equal(HttpStatusCode.OK, queue.StatusCode);
             using var payload = await queue.Content.ReadFromJsonAsync<JsonDocument>();
             Assert.Equal(1, payload!.RootElement.GetProperty("totalCount").GetInt64());
@@ -371,7 +371,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        var url = $"/api/v1/admin/payments/unmatched/{bankTransaction.Id}/resolve";
+        var url = $"/api/v1/payment/admin/payments/unmatched/{bankTransaction.Id}/resolve";
         var request = new ResolveUnmatchedTransactionRequest(
             invoice.InvoiceRef, "resolve-unmatched-001", bankTransaction.ProviderTransactionId,
             "Đã đối chiếu giao dịch ngân hàng với hóa đơn.");
@@ -401,7 +401,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         Assert.Equal(InvoiceStatus.Paid, (await verify.Invoices.SingleAsync(i => i.Id == invoice.Id)).Status);
         Assert.Single(await verify.PaymentTransactionResolutions.ToListAsync());
         Assert.Equal(2, await verify.OutboxMessages.CountAsync());
-        var queue = await client.GetAsync("/api/v1/admin/payments/review?kind=UnmatchedTransaction");
+        var queue = await client.GetAsync("/api/v1/payment/admin/payments/review?kind=UnmatchedTransaction");
         Assert.Equal(HttpStatusCode.OK, queue.StatusCode);
         using var queueBody = await queue.Content.ReadFromJsonAsync<JsonDocument>();
         Assert.Equal(0, queueBody!.RootElement.GetProperty("totalCount").GetInt64());
@@ -440,7 +440,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
             scenario == "reference" ? "WRONG-REFERENCE" : transaction.ProviderTransactionId,
             "Đối chiếu nhưng dữ liệu không đủ điều kiện ghi nhận.");
         var response = await client.PostAsJsonAsync(
-            $"/api/v1/admin/payments/unmatched/{transaction.Id}/resolve", request);
+            $"/api/v1/payment/admin/payments/unmatched/{transaction.Id}/resolve", request);
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
         await using var verify = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
@@ -467,7 +467,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        var url = $"/api/v1/admin/payments/unmatched/{transaction.Id}/resolve";
+        var url = $"/api/v1/payment/admin/payments/unmatched/{transaction.Id}/resolve";
         var request = new ResolveUnmatchedTransactionRequest(
             invoice.InvoiceRef, "resolve-concurrent", transaction.ProviderTransactionId,
             "Đã đối chiếu giao dịch với hóa đơn.");
@@ -508,11 +508,11 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
 
         using var admin = _factory.CreateClient();
         admin.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("adm"));
-        var completeUrl = $"/api/v1/admin/payouts/{payoutId}/complete";
+        var completeUrl = $"/api/v1/payment/admin/payouts/{payoutId}/complete";
         var completion = new CompleteSupplierPayoutRequest("dest-complete-key", "BANK-DEST-001", "Đã đối chiếu chuyển khoản.");
         Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync(completeUrl, completion)).StatusCode);
 
-        var registerUrl = $"/api/v1/admin/suppliers/{supplierId}/payout-destinations";
+        var registerUrl = $"/api/v1/payment/admin/suppliers/{supplierId}/payout-destinations";
         var registration = new RegisterPayoutDestinationRequest("dest-register-1", null,
             "VCB", "SUPPLIER NAME", "1234567890", "VERIFY-001", "Đã đối chiếu hồ sơ ngân hàng.");
         var created = await admin.PostAsJsonAsync(registerUrl, registration);
@@ -524,11 +524,11 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         var replay = await admin.PostAsJsonAsync(registerUrl, registration);
         Assert.True((await replay.Content.ReadFromJsonAsync<PayoutDestinationResponse>())!.IsReplay);
 
-        var attachUrl = $"/api/v1/admin/payouts/{payoutId}/destination";
+        var attachUrl = $"/api/v1/payment/admin/payouts/{payoutId}/destination";
         Assert.Equal(HttpStatusCode.NotFound,
             (await admin.PostAsJsonAsync(attachUrl, new AttachPayoutDestinationRequest(
                 "attach-unknown", "arbitrary-ref", "Không có hồ sơ.", 1))).StatusCode);
-        var otherUrl = $"/api/v1/admin/suppliers/{otherSupplierId}/payout-destinations";
+        var otherUrl = $"/api/v1/payment/admin/suppliers/{otherSupplierId}/payout-destinations";
         var otherCreated = await admin.PostAsJsonAsync(otherUrl, registration with { OperationKey = "dest-register-other", AccountNumber = "9999999999" });
         Assert.Equal(HttpStatusCode.OK, otherCreated.StatusCode);
         var other = await otherCreated.Content.ReadFromJsonAsync<PayoutDestinationResponse>();
@@ -539,7 +539,7 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         var attach = new AttachPayoutDestinationRequest("attach-own", destination.DestinationRef,
             "Đã đối chiếu supplier.", destination.Version);
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(attachUrl, attach)).StatusCode);
-        using (var queue = await admin.GetFromJsonAsync<JsonDocument>("/api/v1/admin/payouts"))
+        using (var queue = await admin.GetFromJsonAsync<JsonDocument>("/api/v1/payment/admin/payouts"))
         {
             var row = queue!.RootElement.GetProperty("items")[0];
             Assert.Equal(destination.Id, row.GetProperty("destinationId").GetGuid());
@@ -584,6 +584,32 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         Assert.NotNull(proof.Value.PublicationProof);
         using var proofJson = JsonDocument.Parse(proof.Value.PublicationProof.Payload);
         Assert.Equal(OutboxTopics.AnalyticsAudience, proofJson.RootElement.GetProperty("audience").GetString());
+    }
+
+    [Fact]
+    public async Task OldPaymentUrls_Return404NotFound()
+    {
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
+
+        var settlementResp = await client.PostAsJsonAsync("/api/v1/settlements", new { });
+        Assert.Equal(HttpStatusCode.NotFound, settlementResp.StatusCode);
+
+        var refundResp = await client.PostAsJsonAsync("/api/v1/refunds", new { });
+        Assert.Equal(HttpStatusCode.NotFound, refundResp.StatusCode);
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("adm"));
+        var manualRefundResp = await client.GetAsync("/api/v1/manual-refunds");
+        Assert.Equal(HttpStatusCode.NotFound, manualRefundResp.StatusCode);
+
+        var payoutsResp = await client.GetAsync("/api/v1/admin/payouts");
+        Assert.Equal(HttpStatusCode.NotFound, payoutsResp.StatusCode);
+
+        var supplierPayoutsResp = await client.GetAsync("/api/v1/supplier/payouts");
+        Assert.Equal(HttpStatusCode.NotFound, supplierPayoutsResp.StatusCode);
+
+        var transactionResp = await client.GetAsync($"/api/v1/transactions/{Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.NotFound, transactionResp.StatusCode);
     }
 
     private string Token(string scope)

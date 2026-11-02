@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 namespace Dprental.PaymentService.Api.Controllers;
 
 [ApiController]
-[Route("api/v1/invoices")]
+[Route("api/v1/payment/invoices")]
 public sealed class InvoicesController : ControllerBase
 {
     private const string InvoiceWriteScope = "payment.invoice.write";

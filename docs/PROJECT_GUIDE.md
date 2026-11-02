@@ -10,7 +10,7 @@ Tài liệu này là nguồn ngữ cảnh chính thức về nghiệp vụ, ranh
 |---|---|---|
 | **Đặt thuê & Giá gốc** | Tạo đơn hàng, xác định thời gian thuê, tính tiền thuê và tiền cọc cơ bản. | Lưu snapshot hóa đơn cố định (`InvoiceItem`), cấp mã thanh toán (`PaymentCode`), sinh ảnh VietQR. |
 | **Thanh toán ngân hàng** | Nhận thông báo trạng thái đơn hàng (qua sự kiện `InvoicePaid`). | Tiếp nhận Webhook SePay, chuẩn hóa dữ liệu ngân hàng, đối soát mã thanh toán, chuyển trạng thái `PAID` hoặc `EXPIRED` (thanh toán trễ). |
-| **Quyết định Settlement** | Đánh giá hư hỏng, quyết định khấu trừ (`FinalDeductionAmount`), tiền phải hoàn (`RefundedDepositAmount`), số quyết định (`DecisionRef`), gửi `POST /api/v1/settlements`. | Đối chiếu quyết định với snapshot hóa đơn gốc, tính phí sàn (`PlatformFeeAmount`), xác định nghĩa vụ nhà cung cấp (`SupplierPayable`), tạo sổ cái và yêu cầu hoàn cọc (`ManualRefundRequirement`). |
+| **Quyết định Settlement** | Đánh giá hư hỏng, quyết định khấu trừ (`FinalDeductionAmount`), tiền phải hoàn (`RefundedDepositAmount`), số quyết định (`DecisionRef`), gửi `POST /api/v1/payment/settlements`. | Đối chiếu quyết định với snapshot hóa đơn gốc, tính phí sàn (`PlatformFeeAmount`), xác định nghĩa vụ nhà cung cấp (`SupplierPayable`), tạo sổ cái và yêu cầu hoàn cọc (`ManualRefundRequirement`). |
 | **Hoàn cọc thủ công** | Nhận sự kiện `RentalSettled` để cập nhật trạng thái kết thúc đơn hàng. | Quản lý yêu cầu hoàn cọc, ghi nhận xác nhận chuyển khoản của Admin (`ExternalTransferReference`), phát sự kiện `RentalSettled`. |
 
 **Quy tắc bất biến:**
@@ -51,7 +51,7 @@ Tài liệu này là nguồn ngữ cảnh chính thức về nghiệp vụ, ranh
 ## 3. Hoàn Tiền Thủ Công (Manual Refund)
 
 - Nếu `DepositRefundDue > 0`: Hệ thống tạo bản ghi `ManualRefundRequirement` trạng thái `PENDING_MANUAL_REFUND`.
-- Admin thực hiện chuyển khoản ngoài hệ thống cho người thuê, sau đó gọi `POST /api/v1/manual-refunds/{id}/complete` kèm `ExternalTransferReference`.
+- Admin thực hiện chuyển khoản ngoài hệ thống cho người thuê, sau đó gọi `POST /api/v1/payment/manual-refunds/{id}/complete` kèm `ExternalTransferReference`.
 - Sự kiện Kafka `RentalSettled` **chỉ được phép ghi vào outbox** khi:
   1. Khoản hoàn cọc bằng 0 (`DepositRefundDue == 0`), HOẶC
   2. Yêu cầu hoàn cọc thủ công đã được Admin xác nhận `COMPLETED`.
@@ -98,11 +98,11 @@ Tài liệu này là nguồn ngữ cảnh chính thức về nghiệp vụ, ranh
 
 | Phương thức | Đường dẫn | Scopes / Quyền | Mục đích |
 |---|---|---|---|
-| `POST` | `/api/v1/invoices` | `u=svc`, `payment.invoice.write` | Tạo mới hoặc replay hóa đơn từ đơn hàng Rental. |
-| `POST` | `/api/v1/invoices/{ref}/cancel` | `u=svc`, `payment.invoice.write` | Hủy hóa đơn chưa thanh toán. |
-| `GET` | `/api/v1/invoices/{ref}` | `aud=dprental-clients`, `sub == RenterId` | Lấy thông tin hóa đơn và ảnh VietQR SePay. |
+| `POST` | `/api/v1/payment/invoices` | `u=svc`, `payment.invoice.write` | Tạo mới hoặc replay hóa đơn từ đơn hàng Rental. |
+| `POST` | `/api/v1/payment/invoices/{ref}/cancel` | `u=svc`, `payment.invoice.write` | Hủy hóa đơn chưa thanh toán. |
+| `GET` | `/api/v1/payment/invoices/{ref}` | `aud=dprental-clients`, `sub == RenterId` | Lấy thông tin hóa đơn và ảnh VietQR SePay. |
 | `POST` | `/api/v1/payment/webhooks` | `Authorization: Apikey <key>` | Tiếp nhận webhook chuyển khoản từ cổng SePay. |
-| `POST` | `/api/v1/settlements` | `u=svc`, `payment.settlement.write` | Tiếp nhận lệnh settlement và ghi sổ nghĩa vụ tài chính. |
-| `POST` | `/api/v1/manual-refunds/{id}/complete` | `aud=dprental-clients`, role `adm`/`adp` | Admin xác nhận đã hoàn cọc thủ công. |
+| `POST` | `/api/v1/payment/settlements` | `u=svc`, `payment.settlement.write` | Tiếp nhận lệnh settlement và ghi sổ nghĩa vụ tài chính. |
+| `POST` | `/api/v1/payment/manual-refunds/{id}/complete` | `aud=dprental-clients`, role `adm`/`adp` | Admin xác nhận đã hoàn cọc thủ công. |
 | `POST` | `/api/v1/payment/verifications` | `u=svc`, `payment.transaction.verify` | Kiểm chứng tính toàn vẹn và khả năng sử dụng của giao dịch. |
 | `GET` | `/api/v1/payment/history` | `payment.transaction.history` hoặc Admin | Tra cứu lịch sử journal phân trang cursor. |

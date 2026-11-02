@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Dprental.PaymentService.Api.Controllers;
 
 [ApiController]
-[Route("api/v1/refunds")]
+[Route("api/v1/payment/refunds")]
 public sealed class RefundsController(IManualRefundService refunds) : ControllerBase
 {
     [HttpPost]

@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Dprental.PaymentService.Api.Controllers;
 
 [ApiController]
-[Route("api/v1/settlements")]
+[Route("api/v1/payment/settlements")]
 public sealed class SettlementsController : ControllerBase
 {
     private readonly ISettlementService _settlements;
