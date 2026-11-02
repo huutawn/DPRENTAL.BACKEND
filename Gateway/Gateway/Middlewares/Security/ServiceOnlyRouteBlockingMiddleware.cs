@@ -42,9 +42,12 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
         string path = context.Request.Path.Value ?? string.Empty;
         string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
-        bool isPaymentHub = segments.Length >= 2 &&
-            segments[0].Equals("hubs", StringComparison.OrdinalIgnoreCase) &&
-            segments[1].Equals("payments", StringComparison.OrdinalIgnoreCase);
+        bool isPaymentHub = segments.Length >= 5 &&
+            segments[0].Equals("api", StringComparison.OrdinalIgnoreCase) &&
+            segments[1].Equals("v1", StringComparison.OrdinalIgnoreCase) &&
+            segments[2].Equals("payment", StringComparison.OrdinalIgnoreCase) &&
+            segments[3].Equals("hubs", StringComparison.OrdinalIgnoreCase) &&
+            segments[4].Equals("payments", StringComparison.OrdinalIgnoreCase);
 
         bool isRentalOrderHub = segments.Length >= 5 &&
             segments[0].Equals("api", StringComparison.OrdinalIgnoreCase) &&
@@ -163,33 +166,47 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
     /// <summary>Nhận diện route chỉ dành cho service theo method và từng segment để tránh khớp nhầm tiền tố.</summary>
     public static bool IsServiceOnlyRoute(string method, string[] segments)
     {
-        // POST /api/v1/invoices
+        // POST /api/v1/payment/invoices
         if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase) &&
-            segments.Length == 3 &&
+            segments.Length == 4 &&
             segments[0].Equals("api", StringComparison.OrdinalIgnoreCase) &&
             segments[1].Equals("v1", StringComparison.OrdinalIgnoreCase) &&
-            segments[2].Equals("invoices", StringComparison.OrdinalIgnoreCase))
+            segments[2].Equals("payment", StringComparison.OrdinalIgnoreCase) &&
+            segments[3].Equals("invoices", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        // POST /api/v1/invoices/{invoiceRef}/cancel
+        // POST /api/v1/payment/invoices/{invoiceRef}/cancel
         if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase) &&
-            segments.Length == 5 &&
+            segments.Length == 6 &&
             segments[0].Equals("api", StringComparison.OrdinalIgnoreCase) &&
             segments[1].Equals("v1", StringComparison.OrdinalIgnoreCase) &&
-            segments[2].Equals("invoices", StringComparison.OrdinalIgnoreCase) &&
-            segments[4].Equals("cancel", StringComparison.OrdinalIgnoreCase))
+            segments[2].Equals("payment", StringComparison.OrdinalIgnoreCase) &&
+            segments[3].Equals("invoices", StringComparison.OrdinalIgnoreCase) &&
+            segments[5].Equals("cancel", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        // POST /api/v1/settlements
+        // POST /api/v1/payment/settlements
         if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase) &&
-            segments.Length == 3 &&
+            segments.Length == 4 &&
             segments[0].Equals("api", StringComparison.OrdinalIgnoreCase) &&
             segments[1].Equals("v1", StringComparison.OrdinalIgnoreCase) &&
-            segments[2].Equals("settlements", StringComparison.OrdinalIgnoreCase))
+            segments[2].Equals("payment", StringComparison.OrdinalIgnoreCase) &&
+            segments[3].Equals("settlements", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // POST /api/v1/payment/refunds
+        if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase) &&
+            segments.Length == 4 &&
+            segments[0].Equals("api", StringComparison.OrdinalIgnoreCase) &&
+            segments[1].Equals("v1", StringComparison.OrdinalIgnoreCase) &&
+            segments[2].Equals("payment", StringComparison.OrdinalIgnoreCase) &&
+            segments[3].Equals("refunds", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
