@@ -67,7 +67,7 @@ public sealed class PaymentIngestionTests
         Assert.Equal(DispatchOutcome.Duplicate, replay.Outcome);
         Assert.Equal(DispatchOutcome.Processed, completed.Outcome);
         await using AnalyticsServiceDbContext db = h.Read();
-        var query = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db));
+        var query = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db), new SupplierDashboardQueryRepository(db));
         OverviewResponse overview = await query.OverviewAsync(
             DashboardDateRange.Create(new DateOnly(2026, 11, 16), new DateOnly(2026, 11, 16)), null, CancellationToken.None);
         Assert.Equal(600m, overview.Financial.PendingRefund);

@@ -23,6 +23,7 @@ public static class DomainRepositoriesServiceCollectionExtensions
 
         // Scoped: cùng vòng đời với DbContext; worker tạo một scope cho mỗi message
         services.AddScoped<IRentalFactRepository, RentalFactRepository>();
+        services.AddScoped<ISupplierDashboardQueryRepository, SupplierDashboardQueryRepository>();
         services.AddScoped<IProcessedRentalEventRepository, ProcessedRentalEventRepository>();
         services.AddScoped<IPaymentFinancialEventRepository, PaymentFinancialEventRepository>();
         services.AddScoped<IDeadLetterRepository, DeadLetterRepository>();

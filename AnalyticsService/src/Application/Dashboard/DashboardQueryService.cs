@@ -4,7 +4,8 @@ namespace Dprental.AnalyticsService.Application.Dashboard;
 
 public sealed class DashboardQueryService(
     IRentalFactRepository rentalRepo,
-    IPaymentFinancialEventRepository paymentRepo)
+    IPaymentFinancialEventRepository paymentRepo,
+    ISupplierDashboardQueryRepository supplierRepo)
 {
     public async Task<OverviewResponse> OverviewAsync(
         DashboardDateRange range,
@@ -65,18 +66,16 @@ public sealed class DashboardQueryService(
     public async Task<SuppliersResponse> SuppliersAsync(
         DashboardDateRange range, int page, int pageSize, CancellationToken ct)
     {
-        if (page < 1 || pageSize is < 1 or > 100)
+        if (page < 1 || pageSize is < 1 or > 100 || (long)(page - 1) * pageSize > int.MaxValue)
         {
             throw new ArgumentOutOfRangeException(nameof(page), "Pagination must use page >= 1 and pageSize 1..100.");
         }
 
-        var rentalCandidates = await rentalRepo.GetSupplierCandidatesAsync(range.StartUtc, range.EndUtc, ct);
-        var paymentCandidates = await paymentRepo.GetSupplierCandidatesAsync(range.StartUtc, range.EndUtc, ct);
-        var candidates = rentalCandidates.Union(paymentCandidates).OrderBy(x => x).ToList();
-
-        int total = candidates.Count;
-        Guid[] ids = candidates.Skip((page - 1) * pageSize).Take(pageSize).ToArray();
-        if (ids.Length == 0)
+        var candidates = await supplierRepo.GetCandidatesAsync(
+            range.StartUtc, range.EndUtc, (page - 1) * pageSize, pageSize, ct);
+        int total = candidates.Total;
+        var ids = candidates.SupplierIds;
+        if (ids.Count == 0)
         {
             return new SuppliersResponse(range.From, range.To, page, pageSize, total, []);
         }
