@@ -1,5 +1,10 @@
 # Tài liệu AuthService
 
+`GET /api/v1/auth/organizations/{organizationId}/supplier-contact` công khai tên và số
+điện thoại liên hệ của nhà cung cấp đang hoạt động. Tổ chức chưa hoạt động, không phải
+nhà cung cấp hoặc không tồn tại trả 404. Owner tiếp tục dùng
+`GET /api/v1/auth/organizations/{id}` để xem hồ sơ chi tiết của mình.
+
 ## Ranh giới các lớp
 
 | Lớp | Trách nhiệm | Không được chứa |
