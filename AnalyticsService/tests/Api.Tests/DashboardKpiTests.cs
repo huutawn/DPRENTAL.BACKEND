@@ -15,7 +15,7 @@ public sealed class DashboardKpiTests
         await using var db = CreateDb();
         Seed(db);
         var range = DashboardDateRange.Create(new DateOnly(2026, 10, 26), new DateOnly(2026, 10, 26));
-        var service = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db));
+        var service = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db), new SupplierDashboardQueryRepository(db));
 
         OverviewResponse overview = await service.OverviewAsync(range, null, CancellationToken.None);
 
@@ -38,7 +38,7 @@ public sealed class DashboardKpiTests
         await using var db = CreateDb();
         Guid supplierId = Seed(db);
         var range = DashboardDateRange.Create(new DateOnly(2026, 10, 26), new DateOnly(2026, 10, 26));
-        var service = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db));
+        var service = new DashboardQueryService(new RentalFactRepository(db), new PaymentFinancialEventRepository(db), new SupplierDashboardQueryRepository(db));
         EquipmentResponse equipment = await service.EquipmentAsync(range, 10, CancellationToken.None);
         SuppliersResponse suppliers = await service.SuppliersAsync(range, 1, 10, CancellationToken.None);
 

@@ -28,11 +28,6 @@ public interface IPaymentFinancialEventRepository
         Guid? supplierId = null,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<Guid>> GetSupplierCandidatesAsync(
-        DateTimeOffset startUtc,
-        DateTimeOffset endUtc,
-        CancellationToken cancellationToken = default);
-
     Task<IReadOnlyDictionary<Guid, SupplierFinancialStatRow>> GetSupplierFinancialStatsAsync(
         IReadOnlyCollection<Guid> supplierIds,
         DateTimeOffset startUtc,

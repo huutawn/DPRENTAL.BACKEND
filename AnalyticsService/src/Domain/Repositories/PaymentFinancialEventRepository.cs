@@ -378,16 +378,6 @@ public sealed class PaymentFinancialEventRepository : IPaymentFinancialEventRepo
         };
     }
 
-    public async Task<IReadOnlyList<Guid>> GetSupplierCandidatesAsync(
-        DateTimeOffset startUtc,
-        DateTimeOffset endUtc,
-        CancellationToken cancellationToken = default) =>
-        await _context.PaymentFinancialEvents.AsNoTracking()
-            .Where(x => x.SupplierId != null && x.CompletedAt >= startUtc && x.CompletedAt < endUtc)
-            .Select(x => x.SupplierId!.Value)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-
     public async Task<IReadOnlyDictionary<Guid, SupplierFinancialStatRow>> GetSupplierFinancialStatsAsync(
         IReadOnlyCollection<Guid> supplierIds,
         DateTimeOffset startUtc,
