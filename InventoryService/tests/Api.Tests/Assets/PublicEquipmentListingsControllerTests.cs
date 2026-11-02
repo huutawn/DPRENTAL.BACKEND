@@ -152,6 +152,7 @@ public sealed class PublicEquipmentListingsControllerTests
             id,
             Guid.NewGuid(),
             Guid.NewGuid(),
+            Guid.NewGuid(),
             "Name X",
             "Desc X",
             "Model X",

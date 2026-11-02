@@ -1,5 +1,9 @@
 # Tài liệu Kỹ thuật InventoryService
 
+Danh sách và chi tiết listing công khai trả `ownerUserId` từ chủ sở hữu listing để
+client tra thông tin nhà cung cấp qua Auth. Trường cùng tên trong `specValues` vẫn bị
+loại bỏ và không được dùng làm bộ lọc; ID không được phép gửi để mạo danh khi ghi.
+
 Public listing trả `organizationId` từ claim tổ chức duy nhất đã xác thực khi tạo listing;
 listing cũ hoặc token không xác định được một tổ chức duy nhất trả `null`. Quyền quản lý
 vẫn dựa trên owner. `categoryIds` được đọc từ loại thiết bị Catalog; `null` nghĩa là

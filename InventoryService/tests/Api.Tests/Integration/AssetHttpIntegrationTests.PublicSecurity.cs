@@ -63,14 +63,20 @@ public sealed partial class AssetHttpIntegrationTests
         Assert.Equal(HttpStatusCode.OK, resList.StatusCode);
         var listJson = await resList.Content.ReadAsStringAsync();
         using var docList = JsonDocument.Parse(listJson);
-        AssertZeroForbiddenProperties(docList.RootElement);
+        AssertZeroForbiddenProperties(docList.RootElement, isListEnvelope: true);
+        var listed = docList.RootElement.GetProperty("items").EnumerateArray()
+            .Single(item => item.GetProperty("id").GetGuid() == asset.EquipmentListingId);
+        Assert.Equal(owner, listed.GetProperty("ownerUserId").GetGuid());
+        Assert.False(listed.GetProperty("specValues").TryGetProperty("ownerUserId", out var _ignoredListOwner));
 
         // 2. Detail
         var resDetail = await client.GetAsync($"api/v1/inventory/public/equipment-listings/{asset.EquipmentListingId:D}");
         Assert.Equal(HttpStatusCode.OK, resDetail.StatusCode);
         var detailJson = await resDetail.Content.ReadAsStringAsync();
         using var docDetail = JsonDocument.Parse(detailJson);
-        AssertZeroForbiddenProperties(docDetail.RootElement);
+        AssertZeroForbiddenProperties(docDetail.RootElement, isListing: true);
+        Assert.Equal(owner, docDetail.RootElement.GetProperty("ownerUserId").GetGuid());
+        Assert.False(docDetail.RootElement.GetProperty("specValues").TryGetProperty("ownerUserId", out var _ignoredDetailOwner));
     }
 
     [Fact]
@@ -132,28 +138,26 @@ public sealed partial class AssetHttpIntegrationTests
         Assert.Equal("INVALID_QUERY_PARAMETER", problem.Title);
     }
 
-    private static void AssertZeroForbiddenProperties(JsonElement element)
+    private static void AssertZeroForbiddenProperties(JsonElement element, bool isListing = false, bool isListEnvelope = false)
     {
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
                 foreach (var prop in element.EnumerateObject())
                 {
-                    bool isPublicListingOrganization = prop.NameEquals("organizationId")
-                        && element.TryGetProperty("equipmentTypeId", out _)
-                        && element.TryGetProperty("id", out _);
-                    if (!isPublicListingOrganization)
+                    bool isAllowedListingId = isListing && (prop.NameEquals("organizationId") || prop.NameEquals("ownerUserId"));
+                    if (!isAllowedListingId)
                     {
                         Assert.DoesNotContain(prop.Name, ForbiddenFieldNames, StringComparer.OrdinalIgnoreCase);
                     }
-                    AssertZeroForbiddenProperties(prop.Value);
+                    AssertZeroForbiddenProperties(prop.Value, isListEnvelope: isListEnvelope && prop.NameEquals("items"));
                 }
                 break;
 
             case JsonValueKind.Array:
                 foreach (var item in element.EnumerateArray())
                 {
-                    AssertZeroForbiddenProperties(item);
+                    AssertZeroForbiddenProperties(item, isListing: isListEnvelope);
                 }
                 break;
         }
