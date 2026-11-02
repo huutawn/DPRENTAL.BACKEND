@@ -15,8 +15,10 @@ public sealed record EquipmentListingSearchCriteria
     public DateTimeOffset AvailabilityEvaluationUtc { get; init; }
     public int Skip { get; init; }
     public int Take { get; init; }
+    public IReadOnlyList<EquipmentTypeInterestScore>? PersonalScores { get; init; }
+    public IReadOnlyList<ListingPopularityScore>? GlobalScores { get; init; }
     public Guid? ExcludedOwnerUserId { get; init; }
-    public RecommendationPriority? Recommendation { get; init; }
+    public string? Seed { get; init; }
 
     public EquipmentListingSearchCriteria(
         AssetSearchFilters? filters = null,
@@ -25,7 +27,11 @@ public sealed record EquipmentListingSearchCriteria
         int? requestedQuantity = null,
         DateTimeOffset? availabilityEvaluationUtc = null,
         int skip = 0,
-        int take = 20)
+        int take = 20,
+        IReadOnlyList<EquipmentTypeInterestScore>? personalScores = null,
+        IReadOnlyList<ListingPopularityScore>? globalScores = null,
+        Guid? excludedOwnerUserId = null,
+        string? seed = null)
     {
         bool hasFrom = availabilityFrom.HasValue;
         bool hasTo = availabilityTo.HasValue;
@@ -46,6 +52,10 @@ public sealed record EquipmentListingSearchCriteria
         AvailabilityEvaluationUtc = availabilityEvaluationUtc ?? DateTimeOffset.UtcNow;
         Skip = skip;
         Take = take;
+        PersonalScores = personalScores;
+        GlobalScores = globalScores;
+        Seed = seed;
+        ExcludedOwnerUserId = excludedOwnerUserId;
     }
 
     public EquipmentListingSearchCriteria(int skip, int take)
@@ -69,8 +79,7 @@ public sealed record PublicEquipmentListingSearchResult(
     IReadOnlyList<PublicEquipmentListingItem> Items,
     int TotalCount,
     DateTimeOffset? NextAvailabilityChangeAtUtc = null,
-    int PriorityCandidateCount = 0);
-
+    string? EffectiveTier = null);
 /// <summary>
 /// Tiêu chí tìm kiếm và phân trang EquipmentListing của người sở hữu (Owner Listings).
 /// </summary>
@@ -98,13 +107,3 @@ public sealed record OwnerEquipmentListingItem(
 public sealed record OwnerEquipmentListingSearchResult(
     IReadOnlyList<OwnerEquipmentListingItem> Items,
     int TotalCount);
-
-public enum RecommendationPriorityKind
-{
-    PersonalTypes,
-    GlobalListings,
-}
-
-public sealed record RecommendationPriority(
-    RecommendationPriorityKind Kind,
-    IReadOnlyList<Guid> RankedIds);

@@ -18,13 +18,68 @@ public sealed class InventoryCallerContext : IInventoryCallerContext
         var context = httpContextAccessor.HttpContext;
         _user = context?.User;
         _hasValidApiKey = context?.Items.ContainsKey("InternalApiKeyVerified") == true;
+
+        if (context != null)
+        {
+            var headers = context.Request.Headers;
+            string? corrId = headers["X-Correlation-Id"].FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(corrId))
+            {
+                corrId = context.TraceIdentifier;
+            }
+            CorrelationId = corrId;
+
+            IsPrefetch = CheckPrefetch(headers);
+        }
     }
 
     // Constructor phục vụ testing trực tiếp với ClaimsPrincipal
-    public InventoryCallerContext(ClaimsPrincipal? user, bool hasValidApiKey = false)
+    public InventoryCallerContext(
+        ClaimsPrincipal? user,
+        bool hasValidApiKey = false,
+        string? correlationId = null,
+        bool isPrefetch = false)
     {
         _user = user;
         _hasValidApiKey = hasValidApiKey || user?.FindFirst("u")?.Value == "svc";
+        CorrelationId = correlationId;
+        IsPrefetch = isPrefetch;
+    }
+
+    /// <inheritdoc />
+    public bool HasServiceTokenClaim => _user?.Identity?.IsAuthenticated == true && _user?.FindFirst("u")?.Value == "svc";
+
+    /// <inheritdoc />
+    public string? CorrelationId { get; }
+
+    /// <inheritdoc />
+    public bool IsPrefetch { get; }
+
+    private static bool CheckPrefetch(IHeaderDictionary? headers)
+    {
+        if (headers == null) return false;
+        string[] prefetchHeaderNames = ["Purpose", "Sec-Purpose", "X-Purpose"];
+        char[] separators = [',', ';', ' ', '\t'];
+
+        foreach (var headerName in prefetchHeaderNames)
+        {
+            if (headers.TryGetValue(headerName, out var values))
+            {
+                foreach (var val in values)
+                {
+                    if (string.IsNullOrWhiteSpace(val)) continue;
+                    var tokens = val.Split(separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    foreach (var token in tokens)
+                    {
+                        if (string.Equals(token, "prefetch", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /// <inheritdoc />
@@ -101,8 +156,13 @@ public sealed class InventoryCallerContext : IInventoryCallerContext
         get
         {
             if (!IsAuthenticated) return null;
-            string? org = _user?.FindFirst("o")?.Value;
-            return Guid.TryParse(org, out Guid id) && id != Guid.Empty ? id : null;
+            var organizations = _user?.FindAll("o")
+                .Select(claim => Guid.TryParse(claim.Value, out var id) ? id : Guid.Empty)
+                .Where(id => id != Guid.Empty)
+                .Distinct()
+                .Take(2)
+                .ToArray() ?? [];
+            return organizations.Length == 1 ? organizations[0] : null;
         }
     }
 }

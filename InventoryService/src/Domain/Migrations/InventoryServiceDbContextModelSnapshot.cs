@@ -483,6 +483,10 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
 
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
                     b.Property<Guid>("OwnerUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("owner_user_id");
@@ -761,6 +765,10 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnName("topic");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("PublishedAt", "Id")
+                        .HasDatabaseName("ix_outbox_messages_behavior_cleanup")
+                        .HasFilter("topic = 'inventory.behavior.events.v1' AND published_at IS NOT NULL");
 
                     b.HasIndex("KafkaKey", "PublishedAt", "CreatedAt")
                         .HasDatabaseName("ix_outbox_messages_key_ordering");

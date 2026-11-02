@@ -14,5 +14,6 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Locations/vietnam-divisions.json" />
+    <InternalsVisibleTo Include="InventoryService.Api.Tests" />
   </ItemGroup>
 </Project>

@@ -73,6 +73,7 @@ public sealed partial class CatalogServiceClientTests
     public async Task GetPublishedEquipmentTypeAsync_Success200_ReturnsPublishedType()
     {
         var equipmentTypeId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
         HttpRequestMessage? captured = null;
 
         var (client, _) = CreateTestClient((req, ct) =>
@@ -87,7 +88,8 @@ public sealed partial class CatalogServiceClientTests
                 status = 1, // Published
                 createdAt = "2026-09-01T00:00:00Z",
                 updatedAt = (string?)null,
-                publishedAt = "2026-09-02T00:00:00Z"
+                publishedAt = "2026-09-02T00:00:00Z",
+                categories = new[] { new { id = categoryId, name = "Category" } }
             });
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -106,6 +108,7 @@ public sealed partial class CatalogServiceClientTests
         Assert.Equal("EQ-FX3", result.Value.Code);
         Assert.Equal("Sony FX3 Cinema Line", result.Value.Name);
         Assert.Equal(1, result.Value.Status);
+        Assert.Equal(new[] { categoryId }, result.Value.CategoryIds);
     }
 
     [Fact]

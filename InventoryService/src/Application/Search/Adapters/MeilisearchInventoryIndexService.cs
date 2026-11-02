@@ -1,4 +1,4 @@
-using System.Text;
+using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Application.Options;
 using Dprental.InventoryService.Application.Search;
 using Dprental.InventoryService.Application.Search.Models;
@@ -50,12 +50,13 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
 
         try
         {
+            // Chỉ đọc thế hệ chỉ mục đã sẵn sàng; lớp gọi quyết định fallback khi đang dựng lại.
             var generation = await _store.GetGenerationAsync(cancellationToken);
             if (generation?.ErrorCode is "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
                 return Error.Unavailable(generation.ErrorCode, "Dịch vụ tìm kiếm chưa được cấu hình hợp lệ.");
             if (generation?.IsReady != true)
                 return Error.Unavailable("SEARCH_NOT_READY", "Chỉ mục tìm kiếm chưa sẵn sàng.");
-            var normalizedQ = NormalizeSearchText(query.Keyword);
+            var normalizedQ = AssetSearchQueryValidator.NormalizeKeyword(query.Keyword);
             var filterClauses = new List<string>();
 
             if (query.EquipmentTypeId.HasValue)
@@ -75,8 +76,10 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
             var searchQuery = new SearchQuery
             {
                 Filter = filterString,
+                // Chỉ lấy ID để PostgreSQL tải dữ liệu hiện tại; all yêu cầu khớp tất cả từ khóa.
                 AttributesToRetrieve = ["id"],
-                Limit = candidateLimit
+                Limit = candidateLimit,
+                MatchingStrategy = "all"
             };
 
             var searchResult = await index.SearchAsync<PublicListingIndexDocument>(normalizedQ, searchQuery, cancellationToken);
@@ -119,12 +122,14 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
 
         try
         {
+            // Chỉ đọc thế hệ chỉ mục đã sẵn sàng; lớp gọi quyết định fallback khi đang dựng lại.
             var generation = await _store.GetGenerationAsync(cancellationToken);
             if (generation?.ErrorCode is "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
                 return Error.Unavailable(generation.ErrorCode, "Dịch vụ tìm kiếm chưa được cấu hình hợp lệ.");
             if (generation?.IsReady != true)
                 return Error.Unavailable("SEARCH_NOT_READY", "Chỉ mục tìm kiếm chưa sẵn sàng.");
-            var normalizedQ = NormalizeSearchText(query.Keyword);
+            var normalizedQ = AssetSearchQueryValidator.NormalizeKeyword(query.Keyword);
+            // Ràng buộc owner ngay tại chỉ mục để ứng viên không lẫn dữ liệu của chủ khác.
             var filterClauses = new List<string>
             {
                 $"ownerUserId = \"{query.OwnerUserId}\""
@@ -152,8 +157,10 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
             var searchQuery = new SearchQuery
             {
                 Filter = filterString,
+                // Chỉ lấy ID để PostgreSQL tải dữ liệu hiện tại; all yêu cầu khớp tất cả từ khóa.
                 AttributesToRetrieve = ["id"],
-                Limit = candidateLimit
+                Limit = candidateLimit,
+                MatchingStrategy = "all"
             };
 
             var searchResult = await index.SearchAsync<OwnerListingIndexDocument>(normalizedQ, searchQuery, cancellationToken);
@@ -196,12 +203,14 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
 
         try
         {
+            // Chỉ đọc thế hệ chỉ mục đã sẵn sàng; lớp gọi quyết định fallback khi đang dựng lại.
             var generation = await _store.GetGenerationAsync(cancellationToken);
             if (generation?.ErrorCode is "SEARCH_CREDENTIALS_INVALID" or "SEARCH_CONFIGURATION_INVALID")
                 return Error.Unavailable(generation.ErrorCode, "Dịch vụ tìm kiếm chưa được cấu hình hợp lệ.");
             if (generation?.IsReady != true)
                 return Error.Unavailable("SEARCH_NOT_READY", "Chỉ mục tìm kiếm chưa sẵn sàng.");
-            var normalizedQ = NormalizeSearchText(query.Keyword);
+            var normalizedQ = AssetSearchQueryValidator.NormalizeKeyword(query.Keyword);
+            // Ràng buộc owner ngay tại chỉ mục để ứng viên không lẫn dữ liệu của chủ khác.
             var filterClauses = new List<string>
             {
                 $"ownerUserId = \"{query.OwnerUserId}\""
@@ -239,6 +248,7 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
             var searchQuery = new SearchQuery
             {
                 Filter = filterString,
+                // Chỉ lấy ID để PostgreSQL tải dữ liệu hiện tại; all yêu cầu khớp tất cả từ khóa.
                 AttributesToRetrieve = ["id"],
                 Limit = candidateLimit,
                 MatchingStrategy = "all"
@@ -282,11 +292,6 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
         }
     }
 
-    private static string NormalizeSearchText(string text)
-    {
-        return text.Trim().Normalize(NormalizationForm.FormC);
-    }
-
     private static bool IsCredentialOrPermissionError(MeilisearchApiError ex)
     {
         return string.Equals(ex.Code, "invalid_api_key", StringComparison.OrdinalIgnoreCase) ||
@@ -320,7 +325,8 @@ public sealed class MeilisearchInventoryIndexService : IInventorySearchIndexServ
         }
 
         int reportedTotal = totalHits ?? estimatedTotalHits ?? hits.Count;
-        // Nếu số hits chạm hoặc vượt limit, hoặc tổng ước tính lớn hơn limit -> kết quả bị cắt
+        // Chạm giới hạn cũng coi là có nguy cơ bị cắt vì tổng ước tính không bảo đảm chính xác.
+        // Bên gọi sẽ dùng SQL đầy đủ thay vì phân trang trên một tập ID thiếu.
         bool isTruncated = hits.Count >= candidateLimit || (reportedTotal > candidateLimit);
 
         return AppResult.Success(new CandidateSearchResult(

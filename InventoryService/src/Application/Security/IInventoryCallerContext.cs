@@ -49,4 +49,19 @@ public interface IInventoryCallerContext
     /// Định danh tổ chức liên kết từ claim o (nếu có).
     /// </summary>
     Guid? OrganizationId { get; }
+
+    /// <summary>
+    /// Service JWT có claim u=svc (danh tính service principal qua JWT, khác với API key nội bộ).
+    /// </summary>
+    bool HasServiceTokenClaim => false;
+
+    /// <summary>
+    /// Correlation ID trích xuất từ header X-Correlation-Id hoặc TraceIdentifier.
+    /// </summary>
+    string? CorrelationId => null;
+
+    /// <summary>
+    /// Yêu cầu có dấu hiệu prefetch rõ ràng (Purpose/Sec-Purpose/X-Purpose: prefetch).
+    /// </summary>
+    bool IsPrefetch => false;
 }

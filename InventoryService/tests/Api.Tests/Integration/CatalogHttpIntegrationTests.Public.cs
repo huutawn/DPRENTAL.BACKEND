@@ -18,7 +18,7 @@ public sealed partial class CatalogHttpIntegrationTests
     };
 
     [Fact]
-    public async Task GetPublicAssets_WithoutDynamicFilters_MakesZeroCatalogCalls_EvenDuringOutage()
+    public async Task GetPublicAssets_WithoutDynamicFilters_StillWorksDuringCatalogOutage()
     {
         await using var catalogServer = new LocalCatalogServer();
         catalogServer.Handler = _ => Task.FromResult(new MockHttpResponse(503, "Catalog is down"));
@@ -37,12 +37,13 @@ public sealed partial class CatalogHttpIntegrationTests
         // 1. Public list without dynamic filters succeeds despite Catalog outage!
         var listRes = await client.GetAsync("api/v1/inventory/public/equipment-listings");
         Assert.Equal(HttpStatusCode.OK, listRes.StatusCode);
-        Assert.Empty(catalogServer.CapturedRequests);
+        Assert.NotEmpty(catalogServer.CapturedRequests);
+        var listRequestCount = catalogServer.CapturedRequests.Count;
 
         // 2. Public detail succeeds despite Catalog outage!
         var detailRes = await client.GetAsync($"api/v1/inventory/public/equipment-listings/{listing.Id:D}");
         Assert.Equal(HttpStatusCode.OK, detailRes.StatusCode);
-        Assert.Empty(catalogServer.CapturedRequests);
+        Assert.Equal(listRequestCount + 1, catalogServer.CapturedRequests.Count);
     }
 
     [Fact]
@@ -50,6 +51,7 @@ public sealed partial class CatalogHttpIntegrationTests
     {
         await using var catalogServer = new LocalCatalogServer();
         var eqTypeId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
 
         catalogServer.Handler = req =>
         {
@@ -64,6 +66,12 @@ public sealed partial class CatalogHttpIntegrationTests
                         ])
                     ]);
                 var json = JsonSerializer.Serialize(resp, CamelCaseJsonOptions);
+                return Task.FromResult(new MockHttpResponse(200, json));
+            }
+            if (req.Url?.AbsolutePath.EndsWith($"/equipment-types/{eqTypeId:D}", StringComparison.Ordinal) == true)
+            {
+                var json = JsonSerializer.Serialize(new { id = eqTypeId, code = "TYPE", name = "Type", status = 1,
+                    createdAt = FixedNow, categories = new[] { new { id = categoryId, name = "Category" } } });
                 return Task.FromResult(new MockHttpResponse(200, json));
             }
             return Task.FromResult(new MockHttpResponse(404));
@@ -86,9 +94,10 @@ public sealed partial class CatalogHttpIntegrationTests
         var paged = await response.Content.ReadFromJsonAsync<PagedResponse<PublicEquipmentListingResponse>>();
         Assert.NotNull(paged);
         Assert.Single(paged.Items);
+        Assert.Equal(new[] { categoryId }, paged.Items[0].CategoryIds);
 
-        // Exactly one batch request sent!
-        var batchReq = Assert.Single(catalogServer.CapturedRequests);
+        // Schema validation uses one batch call; the type detail call supplies categories.
+        var batchReq = Assert.Single(catalogServer.CapturedRequests, r => r.PathAndQuery.Contains("/schemas/batch", StringComparison.Ordinal));
         Assert.Equal("POST", batchReq.Method);
         Assert.Contains($"/equipment-types/{eqTypeId:D}/schemas/batch", batchReq.PathAndQuery, StringComparison.Ordinal);
         Assert.Null(batchReq.Authorization); // Anonymous request!

@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.InventoryService.Application.Search.Workers;
 
-/// <summary>Host-owned, cancellable bootstrap and periodic index-loss detection.</summary>
+/// <summary>Khởi tạo chỉ mục và kiểm tra mất chỉ mục định kỳ; dừng cùng vòng đời host.</summary>
 public sealed class SearchBootstrapHostedService(IServiceScopeFactory scopes,
     IOptions<MeilisearchOptions> options, ILogger<SearchBootstrapHostedService> logger) : BackgroundService
 {
@@ -21,32 +21,11 @@ public sealed class SearchBootstrapHostedService(IServiceScopeFactory scopes,
         {
             try
             {
-                await using var scope = scopes.CreateAsyncScope();
-                var store = scope.ServiceProvider.GetRequiredService<ISearchProjectionStore>();
-                var generation = await store.GetGenerationAsync(stoppingToken);
-                if (generation?.ErrorCode == "SEARCH_SUBMISSION_UNKNOWN")
-                    throw new InvalidOperationException("Unresolved live submission requires task reconciliation.");
-                var provisioner = scope.ServiceProvider.GetRequiredService<IInventoryIndexProvisioner>();
-                var active = await store.GetActiveBackfillRunAsync(stoppingToken);
-                bool rebuild = generation?.IsReady != true || active is not null;
-                if (active?.Status != SearchBackfillRun.StatusSwapping)
+                if (!await SynchronizeAsync(stoppingToken))
                 {
-                    await using (var writer = await store.TryAcquireCoordinationAsync(SearchCoordination.WriterKey, stoppingToken))
-                    {
-                        if (writer is null) { await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken); continue; }
-                        if (!await provisioner.LiveIndexesExistAsync(stoppingToken))
-                        {
-                            generation ??= SearchGeneration.CreateInitial(options.Value.PublicListingsIndex,
-                                options.Value.OwnerListingsIndex, options.Value.OwnerAssetsIndex, DateTimeOffset.UtcNow);
-                            generation.MarkUnavailable(null, DateTimeOffset.UtcNow);
-                            await store.SaveGenerationAsync(generation, stoppingToken);
-                            rebuild = true;
-                        }
-                        await provisioner.EnsureIndexesAndSettingsAsync(stoppingToken);
-                    }
+                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                    continue;
                 }
-                if (rebuild)
-                    await scope.ServiceProvider.GetRequiredService<IInventorySearchBackfillService>().BackfillAsync(stoppingToken);
                 attempt = 0;
                 await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
             }
@@ -64,6 +43,38 @@ public sealed class SearchBootstrapHostedService(IServiceScopeFactory scopes,
                 await Task.Delay(TimeSpan.FromSeconds(Math.Min(60, Math.Pow(2, Math.Min(++attempt, 6)))), stoppingToken);
             }
         }
+    }
+
+    internal async Task<bool> SynchronizeAsync(CancellationToken stoppingToken)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<ISearchProjectionStore>();
+        var generation = await store.GetGenerationAsync(stoppingToken);
+        if (generation?.ErrorCode == "SEARCH_SUBMISSION_UNKNOWN")
+            throw new InvalidOperationException("Unresolved live submission requires task reconciliation.");
+        var provisioner = scope.ServiceProvider.GetRequiredService<IInventoryIndexProvisioner>();
+        var active = await store.GetActiveBackfillRunAsync(stoppingToken);
+        // Thế hệ chưa sẵn sàng hoặc backfill dở dang cần phục hồi trước khi phục vụ qua chỉ mục.
+        bool rebuild = generation?.IsReady != true || active is not null;
+        if (active?.Status != SearchBackfillRun.StatusSwapping)
+        {
+            await using (var writer = await store.TryAcquireCoordinationAsync(SearchCoordination.WriterKey, stoppingToken))
+            {
+                if (writer is null) return false;
+                if (!await provisioner.LiveIndexesExistAsync(stoppingToken))
+                {
+                    generation ??= SearchGeneration.CreateInitial(options.Value.PublicListingsIndex,
+                        options.Value.OwnerListingsIndex, options.Value.OwnerAssetsIndex, DateTimeOffset.UtcNow);
+                    generation.MarkUnavailable(null, DateTimeOffset.UtcNow);
+                    await store.SaveGenerationAsync(generation, stoppingToken);
+                    rebuild = true;
+                }
+                await provisioner.EnsureIndexesAndSettingsAsync(stoppingToken);
+            }
+        }
+        if (rebuild)
+            await scope.ServiceProvider.GetRequiredService<IInventorySearchBackfillService>().BackfillAsync(stoppingToken);
+        return true;
     }
 
     private async Task RecordConfigurationErrorAsync(string error, CancellationToken ct)

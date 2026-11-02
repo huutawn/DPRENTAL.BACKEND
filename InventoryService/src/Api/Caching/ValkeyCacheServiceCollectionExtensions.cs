@@ -1,7 +1,6 @@
 using Dprental.InventoryService.Application.Caching;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -15,44 +14,6 @@ namespace Dprental.InventoryService.Api.Caching;
 public static class ValkeyCacheServiceCollectionExtensions
 {
     public const string RedisConnectionStringName = "Redis";
-
-    public static IServiceCollection AddInventoryRecommendationReader(
-        this IServiceCollection services,
-        IConfiguration configuration)
-    {
-        var connectionString = configuration.GetConnectionString(RedisConnectionStringName);
-        if (!string.IsNullOrWhiteSpace(connectionString))
-        {
-            services.TryAddSingleton<IConnectionMultiplexer>(_ =>
-            {
-                var options = ConfigurationOptions.Parse(connectionString);
-                options.AbortOnConnectFail = false;
-                options.ConnectTimeout = 100;
-                options.AsyncTimeout = 100;
-                options.ConnectRetry = 0;
-                return ConnectionMultiplexer.Connect(options);
-            });
-        }
-
-        services.AddSingleton<IRecommendationSnapshotReader>(sp =>
-        {
-            IConnectionMultiplexer? GetConnection()
-            {
-                try
-                {
-                    return sp.GetService<IConnectionMultiplexer>();
-                }
-                catch (Exception ex) when (ex is RedisException or TimeoutException or System.Net.Sockets.SocketException)
-                {
-                    return null;
-                }
-            }
-            return new ValkeyRecommendationSnapshotReader(
-                GetConnection,
-                sp.GetRequiredService<TimeProvider>());
-        });
-        return services;
-    }
 
     public static IServiceCollection AddInventoryValkeyCache(
         this IServiceCollection services,

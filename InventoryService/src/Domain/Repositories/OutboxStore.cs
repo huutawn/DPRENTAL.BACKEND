@@ -197,4 +197,34 @@ public sealed class OutboxStore : IOutboxStore
         await _context.SaveChangesAsync(cancellationToken);
         return true;
     }
+
+    /// <inheritdoc />
+    public async Task<int> CleanupPublishedBehaviorMessagesAsync(
+        DateTimeOffset publishedBefore,
+        int maxBatchSize,
+        CancellationToken cancellationToken = default)
+    {
+        if (maxBatchSize <= 0) return 0;
+
+        const string behaviorTopic = "inventory.behavior.events.v1";
+
+        if (_context.Database.IsNpgsql())
+        {
+            return await _context.Database.ExecuteSqlInterpolatedAsync($"""
+                WITH targets AS (
+                    SELECT id FROM inventory.outbox_messages
+                    WHERE topic = {behaviorTopic}
+                      AND published_at IS NOT NULL
+                      AND published_at < {publishedBefore}
+                    ORDER BY published_at ASC, id ASC
+                    LIMIT {maxBatchSize}
+                )
+                DELETE FROM inventory.outbox_messages m
+                USING targets t
+                WHERE m.id = t.id
+                """, cancellationToken);
+        }
+
+        throw new NotSupportedException("Behavior outbox cleanup requires PostgreSQL.");
+    }
 }

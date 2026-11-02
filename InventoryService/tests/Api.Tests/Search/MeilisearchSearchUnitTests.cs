@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
+using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.Search.Adapters;
 using Dprental.InventoryService.Application.Search.Workers;
 using Dprental.InventoryService.Application.Search.DependencyInjection;
@@ -191,5 +193,72 @@ public sealed class MeilisearchSearchUnitTests
 
         var truncatedResult = new CandidateSearchResult(candidateIds, TotalHits: 5000, IsTruncated: true);
         Assert.True(truncatedResult.IsTruncated);
+    }
+
+    [Fact]
+    public void SearchIndexDefinition_SearchableAttributes_ExcludeDescription_IncludeNameForAssets()
+    {
+        Assert.Equal(["name", "model"], SearchIndexDefinition.PublicSearchableAttributes);
+        Assert.DoesNotContain("description", SearchIndexDefinition.PublicSearchableAttributes);
+
+        Assert.Equal(["name", "model"], SearchIndexDefinition.OwnerListingSearchableAttributes);
+        Assert.DoesNotContain("description", SearchIndexDefinition.OwnerListingSearchableAttributes);
+
+        Assert.Equal(["name", "model", "serialNumber"], SearchIndexDefinition.OwnerAssetSearchableAttributes);
+        Assert.DoesNotContain("description", SearchIndexDefinition.OwnerAssetSearchableAttributes);
+    }
+
+    [Fact]
+    public void SearchProjectionMapper_ToOwnerAssetDocument_MapsListingName()
+    {
+        var listingId = Guid.NewGuid();
+        var ownerId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(),
+            "Xe nâng Komatsu", "Mô tả", "FD30T", 1, "{}", 500000, null, null, "VND", now, 2024).Value;
+
+        var asset = InventoryAsset.Create(Guid.NewGuid(), listingId, "SN-KM-01", now, 2024).Value;
+        typeof(InventoryAsset).GetProperty("Listing")!.SetValue(asset, listing);
+
+        var doc = SearchProjectionMapper.ToOwnerAssetDocument(asset);
+        Assert.Equal(asset.Id.ToString("D"), doc.Id);
+        Assert.Equal("Xe nâng Komatsu", doc.Name);
+        Assert.Equal("FD30T", doc.Model);
+        Assert.Equal("SN-KM-01", doc.SerialNumber);
+    }
+
+    [Fact]
+    public void NormalizeKeyword_StripsExtraWhitespace_AndNormalizesUnicodeNfc()
+    {
+        string raw = "   xe    \t  lu   ABC  \n ";
+        string normalized = AssetSearchQueryValidator.NormalizeKeyword(raw);
+        Assert.Equal("xe lu ABC", normalized);
+
+        string nfd = "xe nâng".Normalize(NormalizationForm.FormD);
+        string nfc = AssetSearchQueryValidator.NormalizeKeyword(nfd);
+        Assert.Equal("xe nâng", nfc);
+        Assert.True(nfc.IsNormalized(NormalizationForm.FormC));
+    }
+
+    [Fact]
+    public void CacheKeyHelper_AssetNameUpgrade_DoesNotReusePreviousEmptyResults()
+    {
+        var previousDescriptor = new
+        {
+            version = 2,
+            page = 1,
+            pageSize = 20,
+            q = "xe nâng",
+            equipmentTypeId = (Guid?)null,
+            brandId = (Guid?)null,
+            status = (string?)null,
+            sort = (string?)null
+        };
+        string previousKey = CacheKeyHelper.ComputeSha256(JsonSerializer.Serialize(previousDescriptor));
+        string currentKey = CacheKeyHelper.ComputeOwnerListingSearchHash(1, 20, "xe nâng", null, null, null, null);
+        Assert.NotEqual(previousKey, currentKey);
+        Assert.Equal(currentKey, CacheKeyHelper.ComputeOwnerListingSearchHash(1, 20,
+            "  xe   nâng ".Normalize(NormalizationForm.FormD), null, null, null, null));
     }
 }

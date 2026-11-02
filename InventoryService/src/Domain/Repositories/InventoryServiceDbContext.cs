@@ -394,6 +394,10 @@ public sealed class InventoryServiceDbContext : DbContext
 
             b.HasIndex(o => new { o.KafkaKey, o.PublishedAt, o.CreatedAt })
                 .HasDatabaseName("ix_outbox_messages_key_ordering");
+
+            b.HasIndex(o => new { o.PublishedAt, o.Id })
+                .HasDatabaseName("ix_outbox_messages_behavior_cleanup")
+                .HasFilter("topic = 'inventory.behavior.events.v1' AND published_at IS NOT NULL");
         });
 
         // 6. Cấu hình thực thể InboxMessage

@@ -17,14 +17,23 @@ public static class KafkaEnvelopeSerializer
         WriteIndented = false
     };
 
+    public static readonly JsonSerializerOptions BehaviorOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
+        WriteIndented = false,
+        Converters = { new UtcIso8601DateTimeOffsetConverter() }
+    };
+
     /// <summary>
     /// Serialize MessageEnvelope thành chuỗi wire JSON UTF-8 camelCase.
     /// </summary>
-    public static string Serialize<T>(MessageEnvelope<T> envelope)
+    public static string Serialize<T>(MessageEnvelope<T> envelope, JsonSerializerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(envelope);
         envelope.Validate();
-        return JsonSerializer.Serialize(envelope, DefaultOptions);
+        return JsonSerializer.Serialize(envelope, options ?? DefaultOptions);
     }
 
     /// <summary>

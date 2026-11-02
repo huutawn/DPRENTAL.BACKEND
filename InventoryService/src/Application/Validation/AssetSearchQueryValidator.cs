@@ -197,33 +197,39 @@ public sealed class AssetSearchQueryValidator
             return Error.Validation("INVALID_QUERY_PARAMETER", "CategoryId không hợp lệ.");
         }
 
-        AssetSortOption sortOption = !string.IsNullOrWhiteSpace(searchKeyword)
-            ? AssetSortOption.Relevance
-            : AssetSortOption.CreatedDesc;
-
+        AssetSortOption sortOption;
         if (!string.IsNullOrWhiteSpace(sort))
         {
             string sortStr = sort.Trim().ToLowerInvariant();
-            sortOption = sortStr switch
+            if (sortStr == "recommended")
             {
-                "created_desc" => AssetSortOption.CreatedDesc,
-                "created_asc" => AssetSortOption.CreatedAsc,
-                "model_desc" => AssetSortOption.ModelDesc,
-                "model_asc" => AssetSortOption.ModelAsc,
-                "relevance" => AssetSortOption.Relevance,
-                "recommended" => AssetSortOption.Recommended,
-                _ => (AssetSortOption)(-1)
-            };
+                sortOption = !string.IsNullOrWhiteSpace(searchKeyword)
+                    ? AssetSortOption.Relevance
+                    : AssetSortOption.Recommended;
+            }
+            else
+            {
+                sortOption = sortStr switch
+                {
+                    "created_desc" => AssetSortOption.CreatedDesc,
+                    "created_asc" => AssetSortOption.CreatedAsc,
+                    "model_desc" => AssetSortOption.ModelDesc,
+                    "model_asc" => AssetSortOption.ModelAsc,
+                    "relevance" => AssetSortOption.Relevance,
+                    _ => (AssetSortOption)(-1)
+                };
 
-            if ((int)sortOption == -1)
-            {
-                return Error.Validation("INVALID_QUERY_PARAMETER", "Tùy chọn sắp xếp (sort) không hợp lệ.");
+                if ((int)sortOption == -1)
+                {
+                    return Error.Validation("INVALID_QUERY_PARAMETER", "Tùy chọn sắp xếp (sort) không hợp lệ.");
+                }
             }
         }
-
-        if (searchKeyword is not null && sortOption == AssetSortOption.Recommended)
+        else
         {
-            sortOption = AssetSortOption.Relevance;
+            sortOption = !string.IsNullOrWhiteSpace(searchKeyword)
+                ? AssetSortOption.Relevance
+                : AssetSortOption.CreatedDesc;
         }
 
         return Result.Success(new ValidatedAssetSearchQuery(
@@ -241,7 +247,7 @@ public sealed class AssetSearchQueryValidator
     }
 
     /// <summary>
-    /// Xác thực và chuẩn hóa từ khóa tìm kiếm (q): trim, tối đa 200 ký tự; thiếu hoặc rỗng trả về null.
+    /// Xác thực và chuẩn hóa từ khóa tìm kiếm (q): trim, bỏ khoảng trắng thừa, Unicode NFC, tối đa 200 ký tự; thiếu hoặc rỗng trả về null.
     /// </summary>
     public static Result<string?> ValidateSearchKeyword(string? q)
     {
@@ -250,12 +256,23 @@ public sealed class AssetSearchQueryValidator
             return Result.Success<string?>(null);
         }
 
-        string trimmed = q.Trim();
-        if (trimmed.Length > 200)
+        string normalized = NormalizeKeyword(q);
+        if (normalized.Length > 200)
         {
             return Error.Validation("INVALID_QUERY_PARAMETER", "Từ khóa tìm kiếm tối đa 200 ký tự.");
         }
 
-        return Result.Success<string?>(trimmed.Length > 0 ? trimmed : null);
+        return Result.Success<string?>(normalized.Length > 0 ? normalized : null);
+    }
+
+    public static string NormalizeKeyword(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var normalized = text.Normalize(System.Text.NormalizationForm.FormC);
+        return System.Text.RegularExpressions.Regex.Replace(normalized.Trim(), @"\s+", " ");
     }
 }

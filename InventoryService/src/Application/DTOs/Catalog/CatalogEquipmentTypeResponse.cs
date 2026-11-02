@@ -11,5 +11,6 @@ public sealed record CatalogEquipmentTypeResponse(
     int Status,
     DateTime CreatedAt,
     DateTime? UpdatedAt,
-    DateTime? PublishedAt
+    DateTime? PublishedAt,
+    IReadOnlyList<Guid>? CategoryIds = null
 );

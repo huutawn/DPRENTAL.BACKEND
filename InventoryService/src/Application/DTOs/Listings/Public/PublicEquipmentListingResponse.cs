@@ -25,5 +25,7 @@ public sealed record PublicEquipmentListingResponse(
     [property: JsonPropertyName("thumbnailUrl")] string? ThumbnailUrl,
     [property: JsonPropertyName("totalQuantity")] int TotalQuantity,
     [property: JsonPropertyName("availableQuantity")] int AvailableQuantity,
-    [property: JsonPropertyName("warehouseArea")] WarehouseAreaDto? WarehouseArea = null
+    [property: JsonPropertyName("warehouseArea")] WarehouseAreaDto? WarehouseArea = null,
+    [property: JsonPropertyName("organizationId")] Guid? OrganizationId = null,
+    [property: JsonPropertyName("categoryIds")] IReadOnlyList<Guid>? CategoryIds = null
 );

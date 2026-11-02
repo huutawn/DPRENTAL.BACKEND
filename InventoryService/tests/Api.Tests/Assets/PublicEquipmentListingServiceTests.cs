@@ -5,6 +5,7 @@ using Dprental.InventoryService.Application.DTOs.Catalog;
 using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.Options;
+using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Common;
@@ -130,8 +131,9 @@ public sealed class PublicEquipmentListingServiceTests
 
     private sealed class FakeCatalogClient : ICatalogServiceClient
     {
+        public IReadOnlyList<Guid>? CategoryIds { get; set; }
         public Task<Result<CatalogEquipmentTypeResponse>> GetPublishedEquipmentTypeAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(new CatalogEquipmentTypeResponse(id, "CAM", "Camera", null, 1, DateTime.UtcNow, null, DateTime.UtcNow)));
+            Task.FromResult(Result.Success(new CatalogEquipmentTypeResponse(id, "CAM", "Camera", null, 1, DateTime.UtcNow, null, DateTime.UtcNow, CategoryIds)));
 
         public Task<Result<CatalogBrandResponse>> GetBrandAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new CatalogBrandResponse(id, "SONY", "Sony", true)));
@@ -179,7 +181,7 @@ public sealed class PublicEquipmentListingServiceTests
     public async Task GetById_EmptyId_Returns404()
     {
         var service = CreateService();
-        var result = await service.GetPublicListingByIdAsync(Guid.Empty);
+        var result = await service.GetPublicListingByIdAsync(Guid.Empty, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsFailure);
         Assert.Equal("LISTING_NOT_FOUND", result.Error.Code);
@@ -189,7 +191,7 @@ public sealed class PublicEquipmentListingServiceTests
     public async Task GetById_NotFound_Returns404()
     {
         var service = CreateService();
-        var result = await service.GetPublicListingByIdAsync(Guid.NewGuid());
+        var result = await service.GetPublicListingByIdAsync(Guid.NewGuid(), AnonymousCallerContext.Instance);
 
         Assert.True(result.IsFailure);
         Assert.Equal("LISTING_NOT_FOUND", result.Error.Code);
@@ -205,7 +207,7 @@ public sealed class PublicEquipmentListingServiceTests
             "Model Draft", null, "Model Draft", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
         _repo.Add(listing);
 
-        var result = await service.GetPublicListingByIdAsync(id);
+        var result = await service.GetPublicListingByIdAsync(id, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsFailure);
         Assert.Equal("LISTING_NOT_FOUND", result.Error.Code);
@@ -216,20 +218,26 @@ public sealed class PublicEquipmentListingServiceTests
     {
         var service = CreateService();
         var id = Guid.NewGuid();
+        var organizationId = Guid.NewGuid();
+        var categoryIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
+        _catalogClient.CategoryIds = categoryIds;
         var listing = EquipmentListing.Create(
             id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            "Model Active", null, "Model Active", 1, "{\"spec\":\"val\"}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+            "Model Active", null, "Model Active", 1, "{\"spec\":\"val\"}", 100_000m, null, null, "VND", FixedNow, 2024,
+            organizationId: organizationId).Value;
         listing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
 
         var asset1 = InventoryAsset.Create(Guid.NewGuid(), id, "SN-PUB-1", FixedNow).Value;
         listing.Assets.Add(asset1);
         _repo.Add(listing);
 
-        var result = await service.GetPublicListingByIdAsync(id);
+        var result = await service.GetPublicListingByIdAsync(id, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsSuccess);
         var response = result.Value;
         Assert.Equal(id, response.Id);
+        Assert.Equal(organizationId, response.OrganizationId);
+        Assert.Equal(categoryIds, response.CategoryIds);
         Assert.Equal("Model Active", response.Model);
         Assert.Equal(1, response.TotalQuantity);
         Assert.Equal(1, response.AvailableQuantity);
@@ -241,7 +249,7 @@ public sealed class PublicEquipmentListingServiceTests
         var service = CreateService();
         var request = new ListPublicEquipmentListingsRequest { RequestedQuantity = 2 };
 
-        var result = await service.ListPublicListingsAsync(request);
+        var result = await service.ListPublicListingsAsync(request, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_QUERY_PARAMETER", result.Error.Code);
@@ -292,7 +300,7 @@ public sealed class PublicEquipmentListingServiceTests
             CategoryId: categoryId,
             EquipmentTypeId: typeNotInCate);
 
-        var result = await service.ListPublicListingsAsync(request);
+        var result = await service.ListPublicListingsAsync(request, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.Value.TotalCount);
@@ -326,7 +334,7 @@ public sealed class PublicEquipmentListingServiceTests
             CategoryId: categoryId,
             EquipmentTypeId: typeA);
 
-        var result = await service.ListPublicListingsAsync(request);
+        var result = await service.ListPublicListingsAsync(request, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value.Value.TotalCount);
@@ -364,7 +372,7 @@ public sealed class PublicEquipmentListingServiceTests
         var request = new ListPublicEquipmentListingsRequest(
             CategoryId: categoryId);
 
-        var result = await service.ListPublicListingsAsync(request);
+        var result = await service.ListPublicListingsAsync(request, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(2, result.Value.Value.TotalCount);
@@ -384,7 +392,7 @@ public sealed class PublicEquipmentListingServiceTests
             From: new DateOnly(2026, 10, 20),
             To: new DateOnly(2026, 10, 10));
 
-        var resultDates = await service.ListPublicListingsAsync(requestInvalidDates);
+        var resultDates = await service.ListPublicListingsAsync(requestInvalidDates, AnonymousCallerContext.Instance);
         Assert.True(resultDates.IsFailure);
         Assert.Equal("INVALID_DATE_ORDER", resultDates.Error.Code);
 
@@ -395,7 +403,7 @@ public sealed class PublicEquipmentListingServiceTests
             To: new DateOnly(2026, 10, 15),
             RequestedQuantity: 0);
 
-        var resultQty = await service.ListPublicListingsAsync(requestInvalidQty);
+        var resultQty = await service.ListPublicListingsAsync(requestInvalidQty, AnonymousCallerContext.Instance);
         Assert.True(resultQty.IsFailure);
         Assert.Equal("INVALID_QUERY_PARAMETER", resultQty.Error.Code);
     }
@@ -406,7 +414,7 @@ public sealed class PublicEquipmentListingServiceTests
         var service = CreateService();
         var req = new ListPublicEquipmentListingsRequest(ProvinceCode: "INVALID_PROVINCE_999");
 
-        var result = await service.ListPublicListingsAsync(req);
+        var result = await service.ListPublicListingsAsync(req, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_LOCATION", result.Error.Code);
@@ -419,7 +427,7 @@ public sealed class PublicEquipmentListingServiceTests
         // Province 79 is HCM, ward 00070 is Hoan Kiem in Ha Noi
         var req = new ListPublicEquipmentListingsRequest(ProvinceCode: "79", WardCode: "00070");
 
-        var result = await service.ListPublicListingsAsync(req);
+        var result = await service.ListPublicListingsAsync(req, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_LOCATION", result.Error.Code);
@@ -431,7 +439,7 @@ public sealed class PublicEquipmentListingServiceTests
         var service = CreateService();
         var req = new ListPublicEquipmentListingsRequest(WardCode: "00070");
 
-        var result = await service.ListPublicListingsAsync(req);
+        var result = await service.ListPublicListingsAsync(req, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsFailure);
         Assert.Equal("INVALID_LOCATION", result.Error.Code);
@@ -443,7 +451,7 @@ public sealed class PublicEquipmentListingServiceTests
         var service = CreateService();
         var req = new ListPublicEquipmentListingsRequest(ProvinceCode: "01", WardCode: "00070");
 
-        var result = await service.ListPublicListingsAsync(req);
+        var result = await service.ListPublicListingsAsync(req, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(_repo.LastCapturedCriteria);
@@ -465,7 +473,7 @@ public sealed class PublicEquipmentListingServiceTests
         typeof(EquipmentListing).GetProperty(nameof(EquipmentListing.Status))!.SetValue(listing, EquipmentListingStatus.Active);
         _repo.Store[listingId] = listing;
 
-        var result = await service.GetPublicListingByIdAsync(listingId);
+        var result = await service.GetPublicListingByIdAsync(listingId, AnonymousCallerContext.Instance);
 
         Assert.True(result.IsSuccess);
         var response = result.Value;

@@ -62,6 +62,24 @@ public sealed class InventoryAllocationsControllerTests
                 : Task.FromResult(Result.Success(CreateSampleResponse(Guid.NewGuid(), "Allocated")));
         }
 
+        public Func<string, ConfirmAllocationRequest, Task<Result<ConfirmAllocationResponse>>>? ConfirmAllocationGroupHandler { get; set; }
+
+        public Task<Result<ConfirmAllocationResponse>> ConfirmAllocationGroupAsync(
+            string allocationGroupId,
+            ConfirmAllocationRequest request,
+            IInventoryCallerContext caller,
+            CancellationToken cancellationToken = default)
+        {
+            return ConfirmAllocationGroupHandler is not null
+                ? ConfirmAllocationGroupHandler(allocationGroupId, request)
+                : Task.FromResult(Result.Success(new ConfirmAllocationResponse(
+                    Guid.NewGuid().ToString("D"),
+                    allocationGroupId,
+                    DateTimeOffset.UtcNow,
+                    false,
+                    new List<ConfirmedAllocationUnitDto>())));
+        }
+
         private static AllocationResponse CreateSampleResponse(Guid assetId, string status) =>
             new(
                 Id: Guid.NewGuid(),

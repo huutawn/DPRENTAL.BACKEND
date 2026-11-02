@@ -1,4 +1,5 @@
 using Dprental.InventoryService.Application.Kafka.Contracts;
+using Dprental.InventoryService.Application.DTOs.Allocations;
 using Dprental.InventoryService.Application.Kafka.Outbox;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
@@ -321,6 +322,201 @@ public sealed partial class InventoryAllocationService
             cancellationToken: cancellationToken);
     }
 
+    /// <summary>
+    /// Core use case xác nhận nhóm phân bổ (Hold -> Allocated).
+    /// Dùng chung hoàn toàn giữa HTTP endpoint ConfirmAllocationGroupAsync và Kafka command ProcessConfirmAllocationCommandAsync.
+    /// </summary>
+    public static async Task<Result<(string ReceiptRef, string AllocationGroupId, DateTimeOffset AppliedAt, bool IsReplay, IReadOnlyList<ConfirmedAllocationUnitDto> Units)>> ExecuteConfirmGroupAllocationCoreAsync(
+        IInventoryWriteContext ctx,
+        string groupReference,
+        string operationKey,
+        Guid rentalOrderId,
+        Guid rentalItemId,
+        string? sourceMessageId,
+        string? correlationId,
+        DateTimeOffset nowUtc,
+        CancellationToken ct)
+    {
+        var groupAllocations = await ctx.Allocations.GetByGroupReferenceAsync(RentalSourceSystem, groupReference, ct);
+        if (groupAllocations.Count == 0)
+        {
+            return Error.NotFound("GROUP_NOT_FOUND", "Không tìm thấy nhóm phân bổ tương ứng để xác nhận.");
+        }
+
+        await ctx.AcquireAssetLocksAsync(groupAllocations.Select(a => a.AssetId), ct);
+
+        foreach (var alloc in groupAllocations)
+        {
+            if (alloc.Status != AllocationStatus.Held || (alloc.HoldExpiresAt.HasValue && nowUtc >= alloc.HoldExpiresAt.Value))
+            {
+                return Error.Conflict("HOLD_EXPIRED", "Lượt giữ chỗ đã hết hạn hoặc không ở trạng thái Held.");
+            }
+
+            var allocateRes = alloc.Allocate(nowUtc, "system", operationKey);
+            if (allocateRes.IsFailure) return allocateRes.Error;
+        }
+
+        var confirmScopes = new HashSet<string>(StringComparer.Ordinal) { "public-discovery" };
+        foreach (var a in groupAllocations)
+        {
+            confirmScopes.Add($"asset:{a.AssetId:D}");
+            confirmScopes.Add($"listing:{a.Asset.EquipmentListingId:D}");
+        }
+        ctx.StageCacheInvalidation(confirmScopes);
+
+        var mapping = groupAllocations.Select(a => new AllocationAssetMappingPayload(
+            a.Id, a.AssetId, a.Asset.AssetCode)).ToList();
+
+        var confirmedUnits = groupAllocations.Select(a => new ConfirmedAllocationUnitDto(
+            a.Id, a.AssetId, "Confirmed")).ToList();
+
+        return Result.Success<(string, string, DateTimeOffset, bool, IReadOnlyList<ConfirmedAllocationUnitDto>)>(
+            (string.Empty, groupReference, nowUtc, false, confirmedUnits));
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<ConfirmAllocationResponse>> ConfirmAllocationGroupAsync(
+        string allocationGroupId,
+        ConfirmAllocationRequest request,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated) return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
+        if (!InventoryAccessEvaluator.CanWriteAllocations(caller))
+        {
+            return Error.Forbidden("FORBIDDEN", "Chỉ service có quyền allocation.write mới được xác nhận phân bổ.");
+        }
+
+        if (string.IsNullOrWhiteSpace(allocationGroupId) || allocationGroupId.Trim().Length > 100)
+        {
+            return Error.Validation("INVALID_ALLOCATION_GROUP_ID", "AllocationGroupId không hợp lệ.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.OperationKey) || request.OperationKey.Trim().Length > 100)
+        {
+            return Error.Validation("INVALID_OPERATION_KEY", "Operation key không hợp lệ.");
+        }
+
+        string groupRef = allocationGroupId.Trim();
+        string opKey = request.OperationKey.Trim();
+
+        return await _writeTransaction.ExecuteAllocationCommandAsync(RentalSourceSystem, opKey, groupRef, async (ctx, ct) =>
+        {
+            var nowUtc = BusinessDateTime.NormalizeUtc(_timeProvider.GetUtcNow());
+
+            // 1. Kiểm tra Idempotent Replay bằng receipt
+            var existingReceipt = await ctx.GetReceiptAsync(RentalSourceSystem, opKey, ct);
+            if (existingReceipt is not null)
+            {
+                if (existingReceipt.Status == AllocationReceiptStatus.Succeeded)
+                {
+                    if (string.IsNullOrWhiteSpace(existingReceipt.ResultPayloadJson))
+                    {
+                        return Error.Failure("CORRUPTED_RECEIPT_PAYLOAD", "Receipt không chứa kết quả hợp lệ để replay.");
+                    }
+                    var succeeded = System.Text.Json.JsonSerializer.Deserialize<InventoryAllocationCommandSucceededPayload>(existingReceipt.ResultPayloadJson);
+                    if (succeeded is null) return Error.Failure("CORRUPTED_RECEIPT_PAYLOAD", "Payload succeeded đã lưu bị hỏng.");
+
+                    // Đối chiếu fingerprint nếu cần
+                    if (existingReceipt.GroupReference != null && !string.Equals(existingReceipt.GroupReference, groupRef, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Error.Conflict("IDEMPOTENCY_KEY_REUSED", "Operation key đã được dùng cho nhóm phân bổ khác.");
+                    }
+
+                    var replayedUnits = succeeded.Allocations?.Select(a => new ConfirmedAllocationUnitDto(a.AllocationId, a.AssetId, "Confirmed")).ToList()
+                        ?? new List<ConfirmedAllocationUnitDto>();
+
+                    return Result.Success(new ConfirmAllocationResponse(
+                        existingReceipt.Id.ToString("D"),
+                        groupRef,
+                        existingReceipt.CreatedAt,
+                        IsReplay: true,
+                        replayedUnits));
+                }
+                else
+                {
+                    return Error.Conflict(existingReceipt.ErrorCode ?? "OPERATION_REJECTED", existingReceipt.ErrorMessage ?? "Thao tác trước đó đã bị từ chối.");
+                }
+            }
+
+            // 2. Tra cứu nhóm để lấy rentalOrderId / rentalItemId nếu có
+            var groupAllocations = await ctx.Allocations.GetByGroupReferenceAsync(RentalSourceSystem, groupRef, ct);
+            if (groupAllocations.Count == 0)
+            {
+                return Error.NotFound("GROUP_NOT_FOUND", "Không tìm thấy nhóm phân bổ tương ứng để xác nhận.");
+            }
+
+            Guid rentalOrderId = Guid.Empty;
+            Guid rentalItemId = Guid.Empty;
+            if (groupRef.StartsWith("rental-item:", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = groupRef.Split(':');
+                if (parts.Length > 1 && Guid.TryParse(parts[1], out var parsedItemId))
+                {
+                    rentalItemId = parsedItemId;
+                }
+            }
+
+            // 3. Thực thi use case core
+            var coreResult = await ExecuteConfirmGroupAllocationCoreAsync(
+                ctx, groupRef, opKey, rentalOrderId, rentalItemId, null, null, nowUtc, ct);
+            if (coreResult.IsFailure) return coreResult.Error;
+
+            var (_, _, _, _, units) = coreResult.Value;
+            var mapping = units.Select(u => new AllocationAssetMappingPayload(u.AllocationId, u.AssetId, string.Empty)).ToList();
+            var successPayload = new InventoryAllocationCommandSucceededPayload(
+                rentalOrderId,
+                rentalItemId,
+                opKey,
+                AllocationMessageTypes.ConfirmAllocation,
+                Status: "Allocated",
+                HoldExpiresAt: null,
+                Allocations: mapping,
+                OccurredAt: nowUtc,
+                AllocationGroupId: groupRef);
+
+            var resultJson = System.Text.Json.JsonSerializer.Serialize(successPayload);
+            var hashPayload = new
+            {
+                RentalOrderId = rentalOrderId,
+                RentalItemId = rentalItemId,
+                AllocationGroupId = groupRef
+            };
+            var fingerprintWrapper = new { CommandType = AllocationMessageTypes.ConfirmAllocation, Payload = hashPayload };
+            var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(fingerprintWrapper)));
+
+            var receiptId = Guid.NewGuid();
+            var receipt = AllocationOperationReceipt.CreateSucceeded(
+                id: receiptId,
+                sourceSystem: RentalSourceSystem,
+                operationKey: opKey,
+                rentalOrderId: rentalOrderId,
+                groupReference: groupRef,
+                commandType: AllocationMessageTypes.ConfirmAllocation,
+                payloadFingerprint: fingerprint,
+                closesGroup: false,
+                resultPayloadJson: resultJson,
+                createdAt: nowUtc);
+
+            ctx.AddReceipt(receipt);
+
+            // Lưu outbox để Rental có thể phục hồi khi HTTP mất response
+            var outboxReply = InventoryAllocationOutboxEvents.CreateSucceededOutboxMessage(
+                rentalOrderId, successPayload, groupRef, null, nowUtc);
+            ctx.StageOutbox(outboxReply);
+
+            return Result.Success(new ConfirmAllocationResponse(
+                receiptId.ToString("D"),
+                groupRef,
+                nowUtc,
+                IsReplay: false,
+                units));
+        }, cancellationToken);
+    }
+
     /// <inheritdoc />
     public async Task<Result<AllocationCommandOutcome>> ProcessConfirmAllocationCommandAsync(
         MessageEnvelope<ConfirmAllocationPayload> envelope,
@@ -356,34 +552,12 @@ public sealed partial class InventoryAllocationService
             handlerName,
             async (ctx, nowUtc, ct) =>
             {
-                var groupAllocations = await ctx.Allocations.GetByGroupReferenceAsync(RentalSourceSystem, groupReference, ct);
-                if (groupAllocations.Count == 0)
-                {
-                    return Error.NotFound("GROUP_NOT_FOUND", "Không tìm thấy nhóm phân bổ tương ứng để xác nhận.");
-                }
+                var coreResult = await ExecuteConfirmGroupAllocationCoreAsync(
+                    ctx, groupReference, command.OperationKey, command.RentalOrderId, command.RentalItemId, envelope.MessageId.ToString("D"), envelope.CorrelationId, nowUtc, ct);
+                if (coreResult.IsFailure) return coreResult.Error;
 
-                await ctx.AcquireAssetLocksAsync(groupAllocations.Select(a => a.AssetId), ct);
-
-                foreach (var alloc in groupAllocations)
-                {
-                    if (alloc.Status != AllocationStatus.Held || (alloc.HoldExpiresAt.HasValue && nowUtc >= alloc.HoldExpiresAt.Value))
-                    {
-                        return Error.Conflict("HOLD_EXPIRED", "Lượt giữ chỗ đã hết hạn hoặc không ở trạng thái Held.");
-                    }
-
-                    var allocateRes = alloc.Allocate(nowUtc, "system", command.OperationKey);
-                    if (allocateRes.IsFailure) return allocateRes.Error;
-                }
-                var confirmScopes = new HashSet<string>(StringComparer.Ordinal) { "public-discovery" };
-                foreach (var a in groupAllocations)
-                {
-                    confirmScopes.Add($"asset:{a.AssetId:D}");
-                    confirmScopes.Add($"listing:{a.Asset.EquipmentListingId:D}");
-                }
-                ctx.StageCacheInvalidation(confirmScopes);
-
-                var mapping = groupAllocations.Select(a => new AllocationAssetMappingPayload(
-                    a.Id, a.AssetId, a.Asset.AssetCode)).ToList();
+                var (_, _, _, _, units) = coreResult.Value;
+                var mapping = units.Select(u => new AllocationAssetMappingPayload(u.AllocationId, u.AssetId, string.Empty)).ToList();
 
                 var successPayload = new InventoryAllocationCommandSucceededPayload(
                     command.RentalOrderId,
