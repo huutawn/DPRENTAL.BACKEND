@@ -87,7 +87,7 @@ Codebase tuân thủ cấu trúc phân tầng sạch (Clean Architecture) tươn
 ### 6.3. Snapshot Hóa Đơn & Quyết Định Settlement
 - PaymentService hoàn toàn độc lập với Rental database; không truy vấn trực tiếp bảng của Rental.
 - Mọi thông tin đơn hàng được snapshot cố định tại thời điểm tạo hóa đơn (`InvoiceItem`: `RentalItemId`, `SupplierId`, `RentalAmount`, `DepositAmount`).
-- Khi tiếp nhận yêu cầu settlement (`POST /api/v1/settlements`), Application Service đối chiếu nghiêm ngặt dữ liệu request với snapshot `InvoiceItem` của hóa đơn đã thanh toán.
+- Khi tiếp nhận yêu cầu settlement (`POST /api/v1/payment/settlements`), Application Service đối chiếu nghiêm ngặt dữ liệu request với snapshot `InvoiceItem` của hóa đơn đã thanh toán.
 - Công thức settlement:
   - `DepositRefundDue = DepositAmount - FinalDeductionAmount` (với `0 <= FinalDeductionAmount <= DepositAmount`).
   - `PlatformFeeAmount = Round(RentalAmount * 0.10, 0, AwayFromZero)`.
@@ -97,8 +97,8 @@ Codebase tuân thủ cấu trúc phân tầng sạch (Clean Architecture) tươn
 ### 6.4. Hoàn Tiền Thủ Công (Manual Refund)
 - Nếu `DepositRefundDue > 0`: Trạng thái settlement là `PENDING_MANUAL_REFUND`. Hệ thống tạo một bản ghi `ManualRefundRequirement` với mã `MRF-{id:N}`, gắn `RentalItemId`, `RenterId`, `PaymentRef`, `Amount`.
 - Quá trình chuyển khoản hoàn tiền được thực hiện thủ công ngoài hệ thống bởi nhân viên quản trị (Admin).
-- Rental đăng ký refund cần chuyển khoản thủ công qua `POST /api/v1/refunds` với `OperationKey`; endpoint không gọi dịch vụ chi tiền.
-- Admin tra cứu qua `GET /api/v1/manual-refunds` và `GET /api/v1/manual-refunds/{id}`; sau khi chuyển khoản ngoài hệ thống, xác nhận qua `POST /api/v1/manual-refunds/{id}/complete` kèm `ExternalTransferReference`, `OperationKey` và danh tính admin từ JWT.
+- Rental đăng ký refund cần chuyển khoản thủ công qua `POST /api/v1/payment/refunds` với `OperationKey`; endpoint không gọi dịch vụ chi tiền.
+- Admin tra cứu qua `GET /api/v1/payment/manual-refunds` và `GET /api/v1/payment/manual-refunds/{id}`; sau khi chuyển khoản ngoài hệ thống, xác nhận qua `POST /api/v1/payment/manual-refunds/{id}/complete` kèm `ExternalTransferReference`, `OperationKey` và danh tính admin từ JWT.
 - Sự kiện Kafka `RentalSettled` **chỉ được phép phát** khi:
   - Settlement không có tiền hoàn cọc (`DepositRefundDue == 0`), HOẶC
   - Yêu cầu hoàn cọc thủ công đã được xác nhận hoàn tất thành công (`ManualRefundStatus.Completed`).
@@ -143,9 +143,9 @@ Codebase tuân thủ cấu trúc phân tầng sạch (Clean Architecture) tươn
 - **Mã Hóa Cột Nhạy Cảm**: Số tài khoản ngân hàng (`AccountNumber`), tiểu tài khoản (`SubAccount`) và nội dung chuyển khoản (`Content`) của `PaymentTransaction` bắt buộc phải được mã hóa tại tầng lưu trữ thông qua `SensitiveFieldEncryptor` và `IPaymentDataEncryptor`.
 - **Bảo Vệ Log**: Tuyệt đối không ghi log số tài khoản ngân hàng đầy đủ, khóa bí mật, private key base64, API keys hoặc webhook raw payloads chứa thông tin tài chính nhạy cảm.
 - **Phân Quyền API**:
-  - Rental→Payment service-to-service endpoints (`CreateInvoice`, `CancelInvoice`, `Settlements`, `POST /api/v1/refunds`): Yêu cầu `X-Api-Key` riêng, so sánh constant-time và policy scope tương ứng. Không dùng chung key Rental→Inventory hoặc key Payment→IntegrityHost.
+  - Rental→Payment service-to-service endpoints (`CreateInvoice`, `CancelInvoice`, `Settlements`, `POST /api/v1/payment/refunds`): Yêu cầu `X-Api-Key` riêng, so sánh constant-time và policy scope tương ứng. Không dùng chung key Rental→Inventory hoặc key Payment→IntegrityHost.
   - Customer endpoints (`GetInvoice`): Kiểm tra quyền sở hữu IDOR (`sub == RenterId`).
-  - Admin endpoints (`GET /api/v1/manual-refunds`, `POST .../{id}/complete`, `POST /api/v1/admin/payments/unmatched/{id}/resolve`): Yêu cầu JWT client quản trị viên (role admin) và danh tính từ `sub` (không dùng service token, renter hoặc supplier).
+  - Admin endpoints (`GET /api/v1/payment/manual-refunds`, `POST .../{id}/complete`, `POST /api/v1/payment/admin/payments/unmatched/{id}/resolve`): Yêu cầu JWT client quản trị viên (role admin) và danh tính từ `sub` (không dùng service token, renter hoặc supplier).
 
 ---
 

@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Dprental.PaymentService.Api.Controllers;
 
 [ApiController]
-[Route("api/v1/admin/suppliers/{supplierId:guid}/payout-destinations")]
+[Route("api/v1/payment/admin/suppliers/{supplierId:guid}/payout-destinations")]
 [Authorize(Policy = PayoutPolicies.Admin)]
 public sealed class AdminPayoutDestinationsController(ISupplierPayoutDestinationService service) : ControllerBase
 {

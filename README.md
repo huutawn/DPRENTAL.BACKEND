@@ -101,9 +101,9 @@ không trả exception message hoặc payload; request bị hủy không chuyể
 
 ## API Hóa đơn, QR & Webhook SePay (Payment Contract v1)
 
-- `POST /api/v1/invoices`: Tạo hóa đơn từ items `RentalOrder` (tính tiền độc lập, không truy cập Rental DB). Tự động replay an toàn bằng `OperationKey` và snapshot fingerprint. Hóa đơn tổng 0 khởi tạo `PAID` kèm outbox message `InvoicePaid`. Response tạo mới và replay gồm trạng thái, QR và thông tin nhận tiền từ snapshot hóa đơn. Replay receipt cũ khôi phục phần lẻ deadline gốc khi request chỉ mất độ chính xác do PostgreSQL (microsecond); fingerprint vẫn kiểm tra toàn bộ các trường còn lại và receipt không bị sửa.
-- `POST /api/v1/invoices/{invoiceRef}/cancel`: Hủy hóa đơn chưa thanh toán. Trả về 409 `INVOICE_ALREADY_PAID` nếu đã thanh toán. Hóa đơn `EXPIRED` được xác nhận đóng và giữ nguyên trạng thái.
-- `GET /api/v1/invoices/{invoiceRef}`: Trả về thông tin hóa đơn và ảnh VietQR SePay (`https://vietqr.app/img?acc=...&bank=...&amount=...&des=...&template=compact`). Chỉ renter sở hữu mới được xem (404 nếu không khớp hoặc không tìm thấy). `qrUrl` là null khi không ở trạng thái PENDING hoặc tổng 0.
+- `POST /api/v1/payment/invoices`: Tạo hóa đơn từ items `RentalOrder` (tính tiền độc lập, không truy cập Rental DB). Tự động replay an toàn bằng `OperationKey` và snapshot fingerprint. Hóa đơn tổng 0 khởi tạo `PAID` kèm outbox message `InvoicePaid`. Response tạo mới và replay gồm trạng thái, QR và thông tin nhận tiền từ snapshot hóa đơn. Replay receipt cũ khôi phục phần lẻ deadline gốc khi request chỉ mất độ chính xác do PostgreSQL (microsecond); fingerprint vẫn kiểm tra toàn bộ các trường còn lại và receipt không bị sửa.
+- `POST /api/v1/payment/invoices/{invoiceRef}/cancel`: Hủy hóa đơn chưa thanh toán. Trả về 409 `INVOICE_ALREADY_PAID` nếu đã thanh toán. Hóa đơn `EXPIRED` được xác nhận đóng và giữ nguyên trạng thái.
+- `GET /api/v1/payment/invoices/{invoiceRef}`: Trả về thông tin hóa đơn và ảnh VietQR SePay (`https://vietqr.app/img?acc=...&bank=...&amount=...&des=...&template=compact`). Chỉ renter sở hữu mới được xem (404 nếu không khớp hoặc không tìm thấy). `qrUrl` là null khi không ở trạng thái PENDING hoặc tổng 0.
 - `POST /api/v1/payment/webhooks`: Tiếp nhận webhook chuyển khoản từ SePay với xác thực `Authorization: Apikey <key>` (constant-time). Controller mỏng chỉ làm model binding DTO `SePayWebhookPayload` và map ProblemDetails qua `ToProblem()`; Application (`InvoicePaymentProcessor`, `SePayTransactionNormalizer`) sở hữu toàn bộ use case validation, chuẩn hóa, deduplicate và matching transaction.
 
 ### Cấu hình SePay Webhook (`Payment:SePay`)
@@ -146,10 +146,10 @@ SePay gửi webhook JSON với các trường: `id`, `gateway`, `transactionDate
 
 ### Settlement và refund
 
-- `POST /api/v1/settlements`: ghi đủ ba ledger entries và journal `RentalSettled`; nếu cần hoàn cọc thì chờ admin hoàn tiền và xác nhận trước khi phát sự kiện settlement.
-- `POST /api/v1/refunds`: Rental đăng ký khoản refund cần chuyển khoản thủ công. Đây là thao tác ghi idempotent theo `OperationKey`; endpoint không thực hiện chuyển tiền.
-- `GET /api/v1/manual-refunds` và `GET /api/v1/manual-refunds/{id}`: admin truy vấn các yêu cầu cần xử lý.
-- `POST /api/v1/manual-refunds/{id}/complete`: admin xác nhận chuyển khoản ngoài hệ thống bằng `ExternalTransferReference` và `OperationKey`. Payment phát `RefundCompleted` hoặc `RentalSettled` sau khi journal được xác nhận.
+- `POST /api/v1/payment/settlements`: ghi đủ ba ledger entries và journal `RentalSettled`; nếu cần hoàn cọc thì chờ admin hoàn tiền và xác nhận trước khi phát sự kiện settlement.
+- `POST /api/v1/payment/refunds`: Rental đăng ký khoản refund cần chuyển khoản thủ công. Đây là thao tác ghi idempotent theo `OperationKey`; endpoint không thực hiện chuyển tiền.
+- `GET /api/v1/payment/manual-refunds` và `GET /api/v1/payment/manual-refunds/{id}`: admin truy vấn các yêu cầu cần xử lý.
+- `POST /api/v1/payment/manual-refunds/{id}/complete`: admin xác nhận chuyển khoản ngoài hệ thống bằng `ExternalTransferReference` và `OperationKey`. Payment phát `RefundCompleted` hoặc `RentalSettled` sau khi journal được xác nhận.
 - Service-to-service ghi hóa đơn, settlement và refund dùng `X-Api-Key` riêng cho Rental→Payment. JWT vẫn bảo vệ endpoint khách hàng và thao tác admin.
 
 ## Lịch sử và kiểm chứng giao dịch Payment theo SOLID

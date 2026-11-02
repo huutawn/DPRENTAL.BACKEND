@@ -401,7 +401,7 @@ public sealed class PaymentWebhooksProxyHttpTests : IAsyncLifetime
             [new Dprental.PaymentService.Application.DTOs.Invoice.CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
             "op-jwt-proxy");
 
-        var res = await client.PostAsJsonAsync("/api/v1/invoices", req);
+        var res = await client.PostAsJsonAsync("/api/v1/payment/invoices", req);
         Assert.Equal(HttpStatusCode.Created, res.StatusCode);
 
         // Verify logs do not leak credentials

@@ -5,7 +5,7 @@ namespace Dprental.PaymentService.Application.Hub.Options;
 public sealed class PaymentHubOptions : IValidatableObject
 {
     public const string SectionName = "PaymentHub";
-    public const string DefaultHubPath = "/hubs/payments";
+    public const string DefaultHubPath = "/api/v1/payment/hubs/payments";
 
     public string HubPath { get; set; } = DefaultHubPath;
 

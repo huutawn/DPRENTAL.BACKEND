@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Dprental.PaymentService.Api.Controllers;
 
 [ApiController]
-[Route("api/v1/supplier/payouts")]
+[Route("api/v1/payment/supplier/payouts")]
 [Authorize(Policy = "FinancialReadClientPolicy")]
 public sealed class SupplierPayoutsController(IFinancialReadService financialRead) : ControllerBase
 {

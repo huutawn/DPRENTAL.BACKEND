@@ -68,7 +68,7 @@ public static class PaymentJwtAuthenticationExtensions
                             return Task.CompletedTask;
                         }
 
-                        if (context.Request.Path.StartsWithSegments("/hubs/payments", StringComparison.OrdinalIgnoreCase) ||
+                        if (context.Request.Path.StartsWithSegments("/api/v1/payment/hubs/payments", StringComparison.OrdinalIgnoreCase) ||
                             IsInvoiceReadRequest(context.Request))
                         {
                             if (string.IsNullOrWhiteSpace(context.Token) &&
@@ -110,16 +110,17 @@ public static class PaymentJwtAuthenticationExtensions
         string[] segments = request.Path.Value?
             .Split('/', StringSplitOptions.RemoveEmptyEntries) ?? [];
 
-        if (segments.Length is not (4 or 5) ||
+        if (segments.Length is not (5 or 6) ||
             !string.Equals(segments[0], "api", StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(segments[1], "v1", StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(segments[2], "invoices", StringComparison.OrdinalIgnoreCase) ||
-            string.IsNullOrWhiteSpace(segments[3]))
+            !string.Equals(segments[2], "payment", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(segments[3], "invoices", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(segments[4]))
         {
             return false;
         }
 
-        return segments.Length == 4 ||
-               string.Equals(segments[4], "status", StringComparison.OrdinalIgnoreCase);
+        return segments.Length == 5 ||
+               string.Equals(segments[5], "status", StringComparison.OrdinalIgnoreCase);
     }
 }

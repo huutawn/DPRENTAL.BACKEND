@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Dprental.PaymentService.Api.Controllers;
 
 [ApiController]
-[Route("api/v1/manual-refunds")]
+[Route("api/v1/payment/manual-refunds")]
 public sealed class ManualRefundsController(IManualRefundService refunds) : ControllerBase
 {
     [HttpGet]

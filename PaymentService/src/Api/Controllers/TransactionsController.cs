@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Dprental.PaymentService.Api.Controllers;
 
 [ApiController]
-[Route("api/v1/transactions")]
+[Route("api/v1/payment/transactions")]
 [Authorize(Policy = "FinancialReadAdminPolicy")]
 public sealed class TransactionsController(IFinancialReadService financialRead) : ControllerBase
 {

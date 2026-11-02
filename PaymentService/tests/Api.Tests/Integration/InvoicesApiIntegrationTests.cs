@@ -146,7 +146,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 1_000_000m)],
             "op-http-create-1");
 
-        using var response = await client.PostAsJsonAsync("/api/v1/invoices", req);
+        using var response = await client.PostAsJsonAsync("/api/v1/payment/invoices", req);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
         var body = await response.Content.ReadFromJsonAsync<CreateInvoiceResponse>();
@@ -174,7 +174,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             [new CreateInvoiceItemRequest(itemId, supplierId, 500_000m, 1_000_000m)],
             "op-http-tz-001");
 
-        using var createResp = await client.PostAsJsonAsync("/api/v1/invoices", reqPlus7);
+        using var createResp = await client.PostAsJsonAsync("/api/v1/payment/invoices", reqPlus7);
         Assert.Equal(HttpStatusCode.Created, createResp.StatusCode);
 
         var createBody = await createResp.Content.ReadFromJsonAsync<CreateInvoiceResponse>();
@@ -188,7 +188,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             [new CreateInvoiceItemRequest(itemId, supplierId, 500_000m, 1_000_000m)],
             "op-http-tz-001");
 
-        using var replayResp = await client.PostAsJsonAsync("/api/v1/invoices", reqUtc);
+        using var replayResp = await client.PostAsJsonAsync("/api/v1/payment/invoices", reqUtc);
         Assert.Equal(HttpStatusCode.OK, replayResp.StatusCode);
 
         var replayBody = await replayResp.Content.ReadFromJsonAsync<CreateInvoiceResponse>();
@@ -209,10 +209,10 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 300_000m, 200_000m)],
             "op-http-replay-1");
 
-        using var first = await client.PostAsJsonAsync("/api/v1/invoices", req);
+        using var first = await client.PostAsJsonAsync("/api/v1/payment/invoices", req);
         Assert.Equal(HttpStatusCode.Created, first.StatusCode);
 
-        using var replay = await client.PostAsJsonAsync("/api/v1/invoices", req);
+        using var replay = await client.PostAsJsonAsync("/api/v1/payment/invoices", req);
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
 
         var body = await replay.Content.ReadFromJsonAsync<CreateInvoiceResponse>();
@@ -255,7 +255,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         """;
 
         using var content = new StringContent(rawJson, Encoding.UTF8, "application/json");
-        using var response = await client.PostAsync("/api/v1/invoices", content);
+        using var response = await client.PostAsync("/api/v1/payment/invoices", content);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<CreateInvoiceResponse>();
@@ -280,7 +280,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
                 [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 250_000m, 500_000m)],
                 "op-get-001");
 
-            var createResp = await svcClient.PostAsJsonAsync("/api/v1/invoices", createReq);
+            var createResp = await svcClient.PostAsJsonAsync("/api/v1/payment/invoices", createReq);
             Assert.Equal(HttpStatusCode.Created, createResp.StatusCode);
             var createBody = await createResp.Content.ReadFromJsonAsync<CreateInvoiceResponse>();
             invoiceRef = createBody!.InvoiceRef;
@@ -291,7 +291,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         userClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer", CreateUserToken(renterId));
 
-        using var getResp = await userClient.GetAsync($"/api/v1/invoices/{invoiceRef}");
+        using var getResp = await userClient.GetAsync($"/api/v1/payment/invoices/{invoiceRef}");
         Assert.Equal(HttpStatusCode.OK, getResp.StatusCode);
 
         var getBody = await getResp.Content.ReadFromJsonAsync<GetInvoiceResponse>();
@@ -325,7 +325,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         using (var svcClient = _factory.CreateClient())
         {
             svcClient.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
-            var createResp = await svcClient.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
+            var createResp = await svcClient.PostAsJsonAsync("/api/v1/payment/invoices", new CreateInvoiceRequest(
                 Guid.NewGuid(), "ORD-404-001", actualRenterId, "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                 [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 100_000m, 0m)],
                 "op-diff-renter-1"));
@@ -338,7 +338,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         userClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer", CreateUserToken(otherRenterId));
 
-        using var getResp = await userClient.GetAsync($"/api/v1/invoices/{invoiceRef}");
+        using var getResp = await userClient.GetAsync($"/api/v1/payment/invoices/{invoiceRef}");
         Assert.Equal(HttpStatusCode.NotFound, getResp.StatusCode);
 
         var problem = await getResp.Content.ReadFromJsonAsync<ProblemDetails>();
@@ -357,7 +357,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             serviceClient.DefaultRequestHeaders.Add(
                 "X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
             var createResponse = await serviceClient.PostAsJsonAsync(
-                "/api/v1/invoices",
+                "/api/v1/payment/invoices",
                 new CreateInvoiceRequest(
                     Guid.NewGuid(),
                     "ORD-STATUS-COOKIE-001",
@@ -375,7 +375,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             "Cookie", $"accessToken={CreateUserToken(renterId)}");
 
         using var statusResponse = await renterClient.GetAsync(
-            $"/api/v1/invoices/{invoiceRef}/status");
+            $"/api/v1/payment/invoices/{invoiceRef}/status");
 
         Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
 
@@ -383,7 +383,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         otherRenterClient.DefaultRequestHeaders.Add(
             "Cookie", $"accessToken={CreateUserToken(Guid.NewGuid())}");
         using var otherRenterResponse = await otherRenterClient.GetAsync(
-            $"/api/v1/invoices/{invoiceRef}/status");
+            $"/api/v1/payment/invoices/{invoiceRef}/status");
         Assert.Equal(HttpStatusCode.NotFound, otherRenterResponse.StatusCode);
     }
 
@@ -394,28 +394,28 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
 
         // 1. Missing API key -> 401
         client.DefaultRequestHeaders.Remove("X-Api-Key");
-        using var anonResp = await client.PostAsJsonAsync("/api/v1/invoices", new { });
+        using var anonResp = await client.PostAsJsonAsync("/api/v1/payment/invoices", new { });
         Assert.Equal(HttpStatusCode.Unauthorized, anonResp.StatusCode);
 
         // A service JWT alone does not replace the dedicated Rental API key.
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateServiceToken());
-        using var jwtOnlyResp = await client.PostAsJsonAsync("/api/v1/invoices", new { });
+        using var jwtOnlyResp = await client.PostAsJsonAsync("/api/v1/payment/invoices", new { });
         Assert.Equal(HttpStatusCode.Unauthorized, jwtOnlyResp.StatusCode);
         client.DefaultRequestHeaders.Authorization = null;
 
         // 2. Key present, invalid JWT on user endpoint -> 401
         client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "invalid-token");
-        using var badJwtResp = await client.GetAsync("/api/v1/invoices/INV-TEST");
+        using var badJwtResp = await client.GetAsync("/api/v1/payment/invoices/INV-TEST");
         Assert.Equal(HttpStatusCode.Unauthorized, badJwtResp.StatusCode);
 
         // 3. GET endpoint without user JWT -> 401
         client.DefaultRequestHeaders.Authorization = null;
-        using var noUserJwtResp = await client.GetAsync("/api/v1/invoices/INV-TEST");
+        using var noUserJwtResp = await client.GetAsync("/api/v1/payment/invoices/INV-TEST");
         Assert.Equal(HttpStatusCode.Unauthorized, noUserJwtResp.StatusCode);
 
         client.DefaultRequestHeaders.Add("Cookie", "accessToken=invalid-token");
-        using var invalidCookieResp = await client.GetAsync("/api/v1/invoices/INV-TEST/status");
+        using var invalidCookieResp = await client.GetAsync("/api/v1/payment/invoices/INV-TEST/status");
         Assert.Equal(HttpStatusCode.Unauthorized, invalidCookieResp.StatusCode);
     }
 
@@ -429,7 +429,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
 
         // 1. Create invoice
-        var createResp = await client.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
+        var createResp = await client.PostAsJsonAsync("/api/v1/payment/invoices", new CreateInvoiceRequest(
             orderId, "ORD-CANCEL-001", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
             [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 200_000m, 0m)],
             "op-create-for-cancel"));
@@ -437,12 +437,12 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         invoiceRef = createBody!.InvoiceRef;
         // 2. Mismatched route vs body -> 400
         var mismatchReq = new CancelInvoiceRequest(orderId, "INV-DIFFERENT", "Reason", "op-cancel-1");
-        using var mismatchResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/cancel", mismatchReq);
+        using var mismatchResp = await client.PostAsJsonAsync($"/api/v1/payment/invoices/{invoiceRef}/cancel", mismatchReq);
         Assert.Equal(HttpStatusCode.BadRequest, mismatchResp.StatusCode);
 
         // 3. Successful cancel -> 200
         var validReq = new CancelInvoiceRequest(orderId, invoiceRef, "Renter requested", "op-cancel-valid");
-        using var cancelResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/cancel", validReq);
+        using var cancelResp = await client.PostAsJsonAsync($"/api/v1/payment/invoices/{invoiceRef}/cancel", validReq);
         Assert.Equal(HttpStatusCode.OK, cancelResp.StatusCode);
         var cancelBody = await cancelResp.Content.ReadFromJsonAsync<CancelInvoiceResponse>();
         Assert.NotNull(cancelBody);
@@ -450,7 +450,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         Assert.False(cancelBody.IsReplay);
 
         // 4. Replay cancel -> 200 with IsReplay true
-        using var replayResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/cancel", validReq);
+        using var replayResp = await client.PostAsJsonAsync($"/api/v1/payment/invoices/{invoiceRef}/cancel", validReq);
         Assert.Equal(HttpStatusCode.OK, replayResp.StatusCode);
         var replayBody = await replayResp.Content.ReadFromJsonAsync<CancelInvoiceResponse>();
         Assert.NotNull(replayBody);
@@ -466,7 +466,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
 
         // Create zero-total invoice (initializes directly to PAID)
-        var createResp = await client.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
+        var createResp = await client.PostAsJsonAsync("/api/v1/payment/invoices", new CreateInvoiceRequest(
             orderId, "ORD-PAID-001", Guid.NewGuid(), "VND", DateTimeOffset.UtcNow.AddMinutes(30),
             [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 0m, 0m)],
             "op-create-paid-cancel"));
@@ -475,7 +475,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
 
         // Attempt to cancel paid invoice
         var cancelReq = new CancelInvoiceRequest(orderId, invoiceRef, "Try to cancel", "op-cancel-paid-attempt");
-        using var cancelResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/cancel", cancelReq);
+        using var cancelResp = await client.PostAsJsonAsync($"/api/v1/payment/invoices/{invoiceRef}/cancel", cancelReq);
         Assert.Equal(HttpStatusCode.Conflict, cancelResp.StatusCode);
 
         var problem = await cancelResp.Content.ReadFromJsonAsync<ProblemDetails>();
@@ -492,7 +492,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         using (var svcClient = _factory.CreateClient())
         {
             svcClient.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
-            var createResp = await svcClient.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
+            var createResp = await svcClient.PostAsJsonAsync("/api/v1/payment/invoices", new CreateInvoiceRequest(
                 Guid.NewGuid(), "ORD-PAID-QR-001", renterId, "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                 [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 0m, 0m)],
                 "op-paid-qr-1"));
@@ -504,7 +504,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         userClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer", CreateUserToken(renterId));
 
-        using var getResp = await userClient.GetAsync($"/api/v1/invoices/{invoiceRef}");
+        using var getResp = await userClient.GetAsync($"/api/v1/payment/invoices/{invoiceRef}");
         Assert.Equal(HttpStatusCode.OK, getResp.StatusCode);
 
         var getBody = await getResp.Content.ReadFromJsonAsync<GetInvoiceResponse>();
@@ -522,7 +522,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         using (var svcClient = _factory.CreateClient())
         {
             svcClient.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
-            var createResp = await svcClient.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
+            var createResp = await svcClient.PostAsJsonAsync("/api/v1/payment/invoices", new CreateInvoiceRequest(
                 Guid.NewGuid(), "ORD-SNAPSHOT-001", renterId, "VND", DateTimeOffset.UtcNow.AddMinutes(30),
                 [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 0m)],
                 "op-snapshot-test"));
@@ -544,7 +544,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             userClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
                 "Bearer", CreateUserToken(renterId));
 
-            using var getResp = await userClient.GetAsync($"/api/v1/invoices/{invoiceRef}");
+            using var getResp = await userClient.GetAsync($"/api/v1/payment/invoices/{invoiceRef}");
             Assert.Equal(HttpStatusCode.OK, getResp.StatusCode);
 
             var getBody = await getResp.Content.ReadFromJsonAsync<GetInvoiceResponse>();
@@ -582,7 +582,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
             paymentRef,
             "rec-order-1");
 
-        var acceptResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/accept-late-payment", acceptReq);
+        var acceptResp = await client.PostAsJsonAsync($"/api/v1/payment/invoices/{invoiceRef}/accept-late-payment", acceptReq);
         Assert.True(acceptResp.StatusCode == HttpStatusCode.OK,
             $"Expected OK, got {acceptResp.StatusCode}: {await acceptResp.Content.ReadAsStringAsync()}");
         var acceptBody = await acceptResp.Content.ReadFromJsonAsync<AcceptLatePaymentResponse>();
@@ -595,7 +595,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         Assert.Equal("rec-order-1", acceptBody.RecoveryId);
 
         // 2. Replay with same operation key
-        var replayResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/accept-late-payment", acceptReq);
+        var replayResp = await client.PostAsJsonAsync($"/api/v1/payment/invoices/{invoiceRef}/accept-late-payment", acceptReq);
         Assert.Equal(HttpStatusCode.OK, replayResp.StatusCode);
         var replayBody = await replayResp.Content.ReadFromJsonAsync<AcceptLatePaymentResponse>();
         Assert.NotNull(replayBody);
@@ -604,7 +604,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
 
         // 3. Conflict when replaying with same key and different payload
         var conflictReq = acceptReq with { RecoveryId = "rec-order-different" };
-        var conflictResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/accept-late-payment", conflictReq);
+        var conflictResp = await client.PostAsJsonAsync($"/api/v1/payment/invoices/{invoiceRef}/accept-late-payment", conflictReq);
         Assert.Equal(HttpStatusCode.Conflict, conflictResp.StatusCode);
 
         // 4. Verify in DB: invoice status is Paid
@@ -634,14 +634,14 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         using var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
 
-        var createResp = await client.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
+        var createResp = await client.PostAsJsonAsync("/api/v1/payment/invoices", new CreateInvoiceRequest(
             orderId, "ORD-CUST-001", renterId, "VND", DateTimeOffset.UtcNow.AddMinutes(20),
             [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 100_000m)],
             "op-cust-create"));
         invoiceRef = (await createResp.Content.ReadFromJsonAsync<CreateInvoiceResponse>())!.InvoiceRef;
 
         // Cancel invoice with CustomerRequested origin
-        var cancelResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/cancel", new CancelInvoiceRequest(
+        var cancelResp = await client.PostAsJsonAsync($"/api/v1/payment/invoices/{invoiceRef}/cancel", new CancelInvoiceRequest(
             orderId, invoiceRef, "Customer decided not to rent", "op-cust-cancel", InvoiceCancellationOrigins.CustomerRequested));
         Assert.Equal(HttpStatusCode.OK, cancelResp.StatusCode);
 
@@ -656,7 +656,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
 
         // Attempt accept late payment -> must fail
         var acceptReq = new AcceptLatePaymentRequest("op-cust-accept", orderId, paymentRef, "rec-cust-1");
-        var acceptResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/accept-late-payment", acceptReq);
+        var acceptResp = await client.PostAsJsonAsync($"/api/v1/payment/invoices/{invoiceRef}/accept-late-payment", acceptReq);
         Assert.Equal(HttpStatusCode.Conflict, acceptResp.StatusCode);
     }
 
@@ -672,7 +672,7 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
 
         // 1. Create invoice with valid deadline
-        var createResp = await client.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
+        var createResp = await client.PostAsJsonAsync("/api/v1/payment/invoices", new CreateInvoiceRequest(
             orderId, "ORD-EXPW-001", renterId, "VND", DateTimeOffset.UtcNow.AddMinutes(30),
             [new CreateInvoiceItemRequest(Guid.NewGuid(), Guid.NewGuid(), 500_000m, 100_000m)],
             "op-expw-create"));
@@ -691,8 +691,24 @@ public sealed class InvoicesApiIntegrationTests : IAsyncLifetime
         }
 
         var acceptReq = new AcceptLatePaymentRequest("op-expw-accept", orderId, paymentRef, "rec-expw-1");
-        var acceptResp = await client.PostAsJsonAsync($"/api/v1/invoices/{invoiceRef}/accept-late-payment", acceptReq);
+        var acceptResp = await client.PostAsJsonAsync($"/api/v1/payment/invoices/{invoiceRef}/accept-late-payment", acceptReq);
         Assert.Equal(HttpStatusCode.Conflict, acceptResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task OldInvoiceUrls_Return404NotFound()
+    {
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
+
+        var responsePost = await client.PostAsJsonAsync("/api/v1/invoices", new { });
+        Assert.Equal(HttpStatusCode.NotFound, responsePost.StatusCode);
+
+        var responseGet = await client.GetAsync("/api/v1/invoices/INV-OLD");
+        Assert.Equal(HttpStatusCode.NotFound, responseGet.StatusCode);
+
+        var responseStatus = await client.GetAsync("/api/v1/invoices/INV-OLD/status");
+        Assert.Equal(HttpStatusCode.NotFound, responseStatus.StatusCode);
     }
 
     private string CreateServiceToken(string scope = WriteScope)
