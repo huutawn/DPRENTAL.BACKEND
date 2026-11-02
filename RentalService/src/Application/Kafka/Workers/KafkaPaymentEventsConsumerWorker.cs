@@ -11,6 +11,11 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Kafka.Workers;
 
+/// <remarks>
+/// Luồng nhận chung cho topic Payment và kết quả Inventory, dù tên class nhắc Payment.
+/// Tắt tự lưu/commit offset; chuyển bản tin và proof cho dispatcher để tiếp nhận trước khi commit offset.
+/// Nếu intake lỗi, seek lại offset hoặc tạo lại consumer từ offset đã commit; không bỏ qua bản tin chưa lưu an toàn.
+/// </remarks>
 public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
@@ -48,7 +53,7 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
             BrokerAddressFamily = BrokerAddressFamily.V4,
             BootstrapServers = _options.BootstrapServers,
             GroupId = _options.ConsumerGroupId,
-            EnableAutoCommit = false, // Critical: commit offset ONLY after durable inbox/dlq storage
+            EnableAutoCommit = false, // Chỉ commit offset sau khi dispatcher tiếp nhận an toàn.
             EnableAutoOffsetStore = false,
             AutoOffsetReset = AutoOffsetReset.Earliest,
             EnablePartitionEof = false
@@ -92,7 +97,7 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
         _consumer = BuildConsumer(_consumerConfig);
     }
 
-    // Overload for direct testing with injected IConsumer
+    // Constructor phục vụ kiểm thử, cho phép truyền consumer giả lập.
     internal KafkaPaymentEventsConsumerWorker(
         IServiceScopeFactory scopeFactory,
         IConsumer<string, string> consumer,
@@ -273,8 +278,8 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
     }
 
     /// <summary>
-    /// Consumes the next message from the broker, durably stores to Inbox or DLQ, and commits offset only on success.
-    /// If storage fails, seeks back to the failing record's offset and retries without advancing past it.
+    /// Nhận một bản tin, giao dispatcher lưu Inbox/DLQ hoặc xác nhận trùng/loại không xử lý, rồi mới commit offset.
+    /// Nếu tiếp nhận thất bại, seek về bản ghi lỗi để retry; không commit vượt qua bản tin chưa an toàn.
     /// </summary>
     public async Task<Result> ConsumeNextMessageAsync(CancellationToken cancellationToken)
     {
@@ -358,6 +363,8 @@ public sealed class KafkaPaymentEventsConsumerWorker : BackgroundService
         {
             return Result.Failure(CommonError.Failure("CANCELLED", "Consumer stopped."));
         }
+        // Đã tiếp nhận an toàn mới xem xét commit; kiểm tra lại partition còn thuộc consumer sau khi chờ database.
+        // Mất quyền partition hoặc commit lỗi thì tạo lại consumer để tiếp tục từ offset đã được broker ghi nhận.
         if (receiveResult.IsSuccess)
         {
             if (IsPartitionOwned(consumeResult.TopicPartition))

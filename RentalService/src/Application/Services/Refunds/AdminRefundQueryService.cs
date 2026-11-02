@@ -19,6 +19,7 @@ public sealed partial class AdminRefundQueryService(
     IRentalRefundRepository refunds,
     ILogger<AdminRefundQueryService> logger) : IAdminRefundQueryService
 {
+    // Kiểm tra quyền admin, validate trạng thái hàng đợi và phân trang tại repository; ghi audit lần xem danh sách.
     public async Task<Result<PagedResponse<AdminRefundQueueItemResponse>>> GetRefundsAsync(
         string? status,
         int page,
@@ -26,18 +27,23 @@ public sealed partial class AdminRefundQueryService(
         IRentalCallerContext caller,
         CancellationToken cancellationToken = default)
     {
+        // Kiểm tra danh tính/quyền của caller trước khi trả dữ liệu hoặc áp dụng quyết định trong phạm vi tài nguyên.
         Result access = RentalAuthorizationPolicy.AuthorizeAdminOrderRead(caller);
+        // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (access.IsFailure)
         {
             return access.Error;
         }
 
+        // Chuẩn hóa bộ lọc và phân trang trước khi gọi repository để phạm vi truy vấn và kích thước response được xác định rõ.
         Result<AdminRefundQueueState?> state = OrderQueryMapper.ParseStatusFilter<AdminRefundQueueState>(status);
+        // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (state.IsFailure)
         {
             return state.Error;
         }
 
+        // Chuẩn hóa bộ lọc và phân trang trước khi gọi repository để phạm vi truy vấn và kích thước response được xác định rõ.
         (int normalizedPage, int normalizedPageSize) = OrderQueryMapper.NormalizePaging(page, pageSize);
         RecordPage<RefundQueueRecord> records = await refunds.GetQueuePageAsync(
             state.Value is { } s ? s == AdminRefundQueueState.Completed : null,
@@ -48,12 +54,15 @@ public sealed partial class AdminRefundQueryService(
         // Danh sách hiện đủ số tài khoản ngân hàng của người thuê: ghi lại ai đã xem.
         LogAdminViewedRefunds(logger, caller.UserId, status, normalizedPage, records.Items.Count);
 
+        // Chọn, sắp xếp hoặc chiếu dữ liệu đã có thành tập phục vụ bước tiếp theo; không thay đổi nguồn dữ liệu gốc.
         List<AdminRefundQueueItemResponse> items = records.Items.Select(ToResponse).ToList();
         return OrderQueryMapper.ToPage(items, normalizedPage, normalizedPageSize, records.TotalCount);
     }
 
+    // Dùng policy xác định loại/số tiền refund và ghép xác nhận chuyển khoản; không xem receipt ACK là đã hoàn tiền.
     private static AdminRefundQueueItemResponse ToResponse(RefundQueueRecord record)
     {
+        // Dùng policy/mapper hiện có để dựng dữ liệu response nhất quán với các điểm đọc khác của cùng nghiệp vụ.
         RentalRefundKind kind = RentalRefundPolicy.KindOf(record.RequestAction) ?? RentalRefundKind.FullRefund;
         decimal deduction = RentalRefundPolicy.DeductionOf(kind, record.FinalDeductionAmount);
         AdminRefundConfirmationResponse? confirmation = record.Confirmation is { } c
@@ -82,6 +91,7 @@ public sealed partial class AdminRefundQueryService(
             confirmation);
     }
 
+    // Ghi audit truy cập hàng đợi bằng metadata phân trang/trạng thái, tránh log payload tài khoản hoàn tiền.
     [LoggerMessage(Level = LogLevel.Information, Message = "Admin {AdminId} viewed refund queue (status {Status}, page {Page}, {Count} items)")]
     private static partial void LogAdminViewedRefunds(ILogger logger, Guid? adminId, string? status, int page, int count);
 }

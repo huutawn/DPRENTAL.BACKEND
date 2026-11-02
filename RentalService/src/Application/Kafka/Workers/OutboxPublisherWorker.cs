@@ -10,6 +10,11 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Kafka.Workers;
 
+/// <remarks>
+/// Luồng gửi: đọc Outbox đã commit → claim từng bản tin bằng lease → gửi qua transport → chờ broker xác nhận Persisted
+/// → đánh dấu Published bằng claim token. Lỗi được ghi lại với lịch retry hoặc trạng thái DeadLettered trong Outbox.
+/// Broker nhận rồi process dừng trước khi đánh dấu có thể làm gửi lại; phía nhận vẫn cần chống xử lý trùng.
+/// </remarks>
 public sealed class OutboxPublisherWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
@@ -79,9 +84,9 @@ public sealed class OutboxPublisherWorker : BackgroundService
     }
 
     /// <summary>
-    /// Processes up to MaxBatchPerRound (default 50) messages per round by claiming one message
-    /// at a time immediately before publishing, ensuring leases do not expire during the batch.
-    /// When Kafka is disabled, does not process backlog, claim messages, increment retries or touch Outbox.
+    /// Xử lý tối đa MaxBatchPerRound bản tin mỗi vòng, claim từng bản tin ngay trước khi gửi
+    /// để tránh giữ lease của cả batch trong lúc chờ broker.
+    /// Khi Kafka tắt, không claim, không tăng retry và không thay đổi backlog Outbox.
     /// </summary>
     public async Task<int> ProcessBatchAsync(CancellationToken cancellationToken)
     {
@@ -105,17 +110,17 @@ public sealed class OutboxPublisherWorker : BackgroundService
             var outboxRepository = scope.ServiceProvider.GetRequiredService<IOutboxRepository>();
             string claimToken = Guid.NewGuid().ToString("N");
 
-            // Claim exactly ONE message immediately before sending
+            // Claim đúng một bản tin ngay trước khi gửi; claim token bảo vệ quyền cập nhật kết quả.
             var msg = await outboxRepository.ClaimNextPendingAsync(claimToken, leaseDuration, cancellationToken);
             if (msg == null)
             {
-                // No more pending messages available
+                // Không còn bản tin đủ điều kiện để claim trong vòng này.
                 break;
             }
 
             try
             {
-                // Pre-publish lease check: verify lease is still valid
+                // Kiểm tra lease trước khi gửi; hết hạn thì worker khác có thể đã nhận quyền xử lý.
                 DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
                 if (msg.LockedUntilUtc == null || msg.LockedUntilUtc <= nowUtc)
                 {
@@ -142,7 +147,8 @@ public sealed class OutboxPublisherWorker : BackgroundService
                     throw new InvalidOperationException($"Kafka broker chưa xác nhận persist message: {deliveryResult.Status}");
                 }
 
-                // MarkPublished only AFTER broker acknowledgment, returns true only if lease was still valid
+                // Chỉ đánh dấu Published sau xác nhận broker và khi claim vẫn còn hợp lệ.
+                // Nếu broker đã nhận nhưng không lưu được dấu Published, lần sau có thể gửi lại cùng bản tin.
                 bool published = await outboxRepository.MarkPublishedAsync(msg.Id, claimToken, DateTimeOffset.UtcNow, cancellationToken);
                 if (published)
                 {

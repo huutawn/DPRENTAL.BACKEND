@@ -2,6 +2,11 @@ using System.Diagnostics.Metrics;
 
 namespace Dprental.RentalService.Application.Observability;
 
+/// <remarks>
+/// Chỉ ghi số liệu vận hành bằng System.Diagnostics.Metrics: retry, phục hồi, DLQ, lỗi release/refund và tác vụ chưa rõ kết quả.
+/// Service/worker gọi Record... tại điểm cần đo; counter không thực thi retry, hoàn tiền hay thay đổi trạng thái.
+/// Meter cần được hệ thống thu thập đăng ký/đọc để đưa lên công cụ giám sát; class này không tự tạo dashboard.
+/// </remarks>
 public sealed class RentalMetrics
 {
     public const string MeterName = "Dprental.RentalService";

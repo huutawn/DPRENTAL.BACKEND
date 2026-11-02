@@ -25,3 +25,14 @@ public sealed record RenterBankAccountResponse(
     string AccountNumber,
     string AccountHolderName,
     bool IsDefault);
+
+/// <summary>
+/// Tài khoản nhận tiền của nhà cung cấp, chỉ Admin được xem để chuyển tiền quyết toán.
+/// </summary>
+/// <param name="BankCode">Mã ngân hàng.</param>
+/// <param name="AccountNumber">Số tài khoản đầy đủ.</param>
+/// <param name="AccountHolderName">Tên chủ tài khoản.</param>
+public sealed record AdminSupplierBankAccountResponse(
+    string BankCode,
+    string AccountNumber,
+    string AccountHolderName);

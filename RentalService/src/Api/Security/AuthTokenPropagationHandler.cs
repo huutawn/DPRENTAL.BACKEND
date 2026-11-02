@@ -4,6 +4,10 @@ using Microsoft.AspNetCore.Http;
 
 namespace Dprental.RentalService.Api.Security;
 
+/// <remarks>
+/// Handler của HTTP client Auth: giữ Authorization đã có; nếu chưa có thì lấy Bearer từ request hiện tại
+/// hoặc token do authentication lưu để truyền tiếp. Không tự cấp token hoặc quyết định quyền nghiệp vụ.
+/// </remarks>
 public sealed class AuthTokenPropagationHandler : DelegatingHandler
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
@@ -29,7 +33,7 @@ public sealed class AuthTokenPropagationHandler : DelegatingHandler
                     }
                     catch
                     {
-                        // Ignore authentication provider resolution errors if not configured
+                        // Không lấy thêm được token khi authentication provider chưa được cấu hình; tiếp tục request hiện tại.
                     }
                 }
 

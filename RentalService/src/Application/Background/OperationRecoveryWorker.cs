@@ -9,6 +9,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Background;
 
+/// <remarks>
+/// Vòng phục hồi receipt: đọc ứng viên đến lịch → tạo scope cho từng receipt → gọi executor kiểm tra lại dưới khóa.
+/// Loại các action chờ kết quả Kafka khỏi danh sách retry chung; publisher và result handler sở hữu các bước đó.
+/// Receipt bàn giao/trả quá 30 phút chưa có xác nhận được chuyển sang đối soát thủ công, không suy diễn thất bại hoặc thành công.
+/// </remarks>
 public sealed class OperationRecoveryWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
@@ -131,7 +136,7 @@ public sealed class OperationRecoveryWorker : BackgroundService
             }
         }
 
-        // Reconcile handover/return commands pending > 30 minutes without acknowledgement
+        // Các lệnh bàn giao/trả máy chờ quá 30 phút chưa được xác nhận cần đối soát thủ công; không tự đóng allocation.
         try
         {
             using var scope = _scopeFactory.CreateScope();

@@ -8,6 +8,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Kafka.Producers;
 
+/// <remarks>
+/// Đường ghi Outbox dùng chung: serialize envelope → enqueue nguyên tử qua repository → kiểm tra replay có cùng nội dung.
+/// Caller sở hữu transaction với thay đổi nghiệp vụ; writer không gửi broker và không tự commit transaction.
+/// Cùng MessageId nhưng khác routing hoặc payload là conflict, không ghi đè bản tin đã lưu.
+/// </remarks>
 public sealed class KafkaOutboxWriter : IKafkaOutboxWriter
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -46,6 +51,8 @@ public sealed class KafkaOutboxWriter : IKafkaOutboxWriter
             candidateEnvelopeJson,
             candidateEnvelope.OccurredAt);
 
+        // Repository quyết định chèn mới hay trả bản tin đã có theo MessageId trong transaction của caller.
+        // Nếu là replay, tiếp tục đối chiếu routing và payload để không chấp nhận cùng ID nhưng khác nội dung.
         var enqueueResult = await _outboxRepository.EnqueueAtomicAsync(candidateMessage, cancellationToken);
         if (enqueueResult.IsFailure)
         {

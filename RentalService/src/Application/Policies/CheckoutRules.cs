@@ -9,6 +9,10 @@ namespace Dprental.RentalService.Application.Policies;
 /// (SRS cũ ghi "từ ngày mai"), trong 6 tháng, tối đa 30 ngày.
 /// Giỏ lưu ngày trả có tính (giao 10, trả 12 là 3 ngày); đơn hàng lưu khoảng [từ, đến) không tính ngày cuối.
 /// </summary>
+/// <remarks>
+/// Các quy tắc và định danh dùng chung cho checkout: thời hạn, kỳ thuê, quy đổi khoảng ngày và khóa nghiệp vụ.
+/// Preparation/service gọi các hàm này; policy không gọi Inventory/Payment hoặc tự lưu order.
+/// </remarks>
 public static class CheckoutRules
 {
     public const int MaxRentalDays = 30;

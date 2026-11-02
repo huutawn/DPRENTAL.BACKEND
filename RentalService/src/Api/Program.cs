@@ -19,6 +19,8 @@ using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Khởi tạo các phụ thuộc: persistence trước, sau đó các use case và worker Application (bao gồm Kafka).
+// Đây là nơi ghép implementation qua DI; controller/worker lấy service từ container.
 builder.Services.AddRentalServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddRentalServiceApplication(builder.Configuration);
 
@@ -31,6 +33,8 @@ builder.Services.AddHealthChecks()
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddOrderHub(builder.Configuration);
 builder.Services.AddRentalJwtAuthentication(builder.Configuration);
+// Chuyển identity từ JWT đã được middleware xác thực sang context của Application theo từng request.
+// Các use case dùng context này để kiểm tra quyền, không tự đọc token từ header.
 builder.Services.AddScoped<IRentalCallerContext>(sp =>
 {
     var http = sp.GetRequiredService<IHttpContextAccessor>();
@@ -65,7 +69,7 @@ builder.Services.AddSwaggerGen(options =>
         Version = "v1"
     });
 
-    // The cart alias remains routable; document each operation only at its canonical URL.
+    // Alias của giỏ vẫn truy cập được; Swagger chỉ hiển thị mỗi operation ở URL chính thức.
     options.DocInclusionPredicate((_, api) =>
         api.RelativePath is not null &&
         api.RelativePath.StartsWith(ApiRoutes.Prefix + "/", StringComparison.Ordinal));
@@ -131,6 +135,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// Luồng request: bắt lỗi → API key nội bộ → Origin của Hub → JWT → chặn Bearer không hợp lệ
+// → authorization → controller/Hub → Application Service. Quyền sở hữu tài nguyên vẫn kiểm tra tại Application.
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseMiddleware<InternalApiKeyMiddleware>();
@@ -172,6 +178,8 @@ HealthCheckOptions readinessOptions = new()
 };
 app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
 
+// Map điểm vào HTTP và realtime sau khi cấu hình middleware; hosted worker chạy theo vòng đời host,
+// không cần request HTTP kích hoạt từng vòng quét.
 app.MapControllers();
 app.MapOrderHub();
 

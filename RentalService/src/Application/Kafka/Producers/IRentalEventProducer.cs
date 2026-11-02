@@ -4,7 +4,8 @@ using Dprental.RentalService.Common;
 namespace Dprental.RentalService.Application.Kafka.Producers;
 
 /// <summary>
-/// Business producer for staging Rental domain events into the durable Outbox.
+/// Ghi sự kiện nghiệp vụ Rental vào Outbox trong transaction của use case.
+/// Event thông báo kết quả đã ghi nhận; khác command yêu cầu service khác thực hiện một việc.
 /// </summary>
 public interface IRentalEventProducer
 {

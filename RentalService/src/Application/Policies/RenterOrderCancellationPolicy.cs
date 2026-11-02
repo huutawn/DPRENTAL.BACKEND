@@ -6,6 +6,9 @@ using Dprental.RentalService.Common.Enums;
 /// Người thuê được hủy cả đơn khi đơn chưa thanh toán, hoặc đã thanh toán nhưng chưa nhà cung cấp nào xác nhận.
 /// Dùng chung cho lệnh hủy và cờ CanCancel trả cho client để hai nơi không lệch nhau.
 /// </summary>
+/// <remarks>
+/// Chỉ đánh giá điều kiện trạng thái để hủy; Application Service/executor vẫn kiểm tra caller, sở hữu, khóa và tác vụ đang chạy.
+/// </remarks>
 public static class RenterOrderCancellationPolicy
 {
     public static bool CanCancel(RentalOrderStatus orderStatus, IEnumerable<RentalItemStatus> itemStatuses) =>

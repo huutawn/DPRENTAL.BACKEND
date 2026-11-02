@@ -6,6 +6,10 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 namespace Dprental.RentalService.Application.Background;
 
+/// <remarks>
+/// Kích hoạt ReturnConfirmationOverdueService theo chu kỳ và batch đã cấu hình.
+/// Các quyết định về yêu cầu trả đến hạn nằm trong Application Service, không nằm trong vòng lặp worker.
+/// </remarks>
 public sealed class ReturnConfirmationOverdueWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;

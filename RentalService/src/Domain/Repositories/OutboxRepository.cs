@@ -24,6 +24,9 @@ public sealed class OutboxRepository : IOutboxRepository
         DateTimeOffset utcNow = DateTimeOffset.UtcNow;
         DateTimeOffset leaseUntil = utcNow.Add(leaseDuration);
 
+        // SKIP LOCKED là ngoại lệ SQL đặc thù PostgreSQL: EF không có LINQ tương đương.
+        // Chọn và khóa message trong cùng thao tác, tránh hai worker nhận cùng message.
+        // NOT EXISTS giữ thứ tự theo topic/partition; message trước chưa Published sẽ chặn.
         if (_dbContext.Database.IsNpgsql())
         {
             await using var tx = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
@@ -68,6 +71,8 @@ public sealed class OutboxRepository : IOutboxRepository
         }
         else
         {
+            // Provider InMemory của test không có row lock; nhánh này không cung cấp
+            // bảo đảm tranh chấp như PostgreSQL và không thay thế nhánh production.
             var message = await _dbContext.RentalOutboxMessages
                 .Where(m => m.Status == "Pending" &&
                             (m.ScheduledAt == null || m.ScheduledAt <= utcNow) &&
@@ -98,6 +103,8 @@ public sealed class OutboxRepository : IOutboxRepository
 
         if (_dbContext.Database.IsRelational())
         {
+            // Outbox và thay đổi trạng thái phải commit/rollback cùng transaction của caller.
+            // Nếu tự commit riêng, có thể gửi event cho thay đổi nghiệp vụ đã bị rollback.
             if (_dbContext.Database.CurrentTransaction is null)
             {
                 return Error.Failure("OUTBOX_TRANSACTION_REQUIRED",
@@ -146,6 +153,9 @@ public sealed class OutboxRepository : IOutboxRepository
     {
         try
         {
+            // EF chưa hỗ trợ INSERT ... ON CONFLICT DO NOTHING qua LINQ.
+            // Giữ SQL ở đây để retry cùng ID không tạo event trùng và không làm hỏng
+            // transaction của caller. SaveChanges thay thế sẽ lưu cả entity khác đang tracked.
             int rows = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
                 INSERT INTO rental.rental_outbox_messages (
                     ""Id"",
@@ -225,16 +235,17 @@ public sealed class OutboxRepository : IOutboxRepository
     {
         if (_dbContext.Database.IsNpgsql())
         {
-            int rows = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
-                UPDATE rental.rental_outbox_messages
-                SET ""Status"" = 'Published',
-                    ""PublishedAt"" = {publishedAt},
-                    ""LockedBy"" = NULL,
-                    ""LockedUntilUtc"" = NULL
-                WHERE ""Id"" = {id}
-                  AND ""Status"" = 'Pending'
-                  AND ""LockedBy"" = {claimToken}
-                  AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" > NOW())", cancellationToken);
+            // Kiểm tra token, trạng thái và lease ngay trong UPDATE (compare-and-set).
+            // SELECT rồi SaveChanges sẽ có khoảng trống để worker khác giành lease.
+            // UtcNow nằm trong expression để Npgsql dùng đồng hồ DB, như NOW() trước đây.
+            int rows = await _dbContext.RentalOutboxMessages
+                .Where(m => m.Id == id && m.Status == "Pending" && m.LockedBy == claimToken &&
+                    (m.LockedUntilUtc == null || m.LockedUntilUtc > DateTimeOffset.UtcNow))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(m => m.Status, "Published")
+                    .SetProperty(m => m.PublishedAt, publishedAt)
+                    .SetProperty(m => m.LockedBy, (string?)null)
+                    .SetProperty(m => m.LockedUntilUtc, (DateTimeOffset?)null), cancellationToken);
 
             return rows == 1;
         }
@@ -266,55 +277,33 @@ public sealed class OutboxRepository : IOutboxRepository
     {
         if (_dbContext.Database.IsNpgsql())
         {
-            int rows;
-            if (targetStatus == "DeadLettered")
-            {
-                rows = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
-                    UPDATE rental.rental_outbox_messages
-                    SET ""RetryCount"" = ""RetryCount"" + 1,
-                        ""Status"" = 'DeadLettered',
-                        ""ErrorMessage"" = {errorMessage},
-                        ""LastAttemptedAt"" = {attemptedAt},
-                        ""ScheduledAt"" = NULL,
-                        ""LockedBy"" = NULL,
-                        ""LockedUntilUtc"" = NULL
-                    WHERE ""Id"" = {id}
-                      AND ""Status"" = 'Pending'
-                      AND ""LockedBy"" = {claimToken}
-                      AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" > NOW())", cancellationToken);
-            }
-            else if (targetStatus == "Pending")
-            {
-                rows = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
-                    UPDATE rental.rental_outbox_messages
-                    SET ""RetryCount"" = ""RetryCount"" + 1,
-                        ""Status"" = 'Pending',
-                        ""ErrorMessage"" = {errorMessage},
-                        ""LastAttemptedAt"" = {attemptedAt},
-                        ""ScheduledAt"" = {nextScheduledAt},
-                        ""LockedBy"" = NULL,
-                        ""LockedUntilUtc"" = NULL
-                    WHERE ""Id"" = {id}
-                      AND ""Status"" = 'Pending'
-                      AND ""LockedBy"" = {claimToken}
-                      AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" > NOW())", cancellationToken);
-            }
-            else
-            {
-                rows = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
-                    UPDATE rental.rental_outbox_messages
-                    SET ""RetryCount"" = ""RetryCount"" + 1,
-                        ""Status"" = CASE WHEN ""RetryCount"" + 1 >= 10 THEN 'DeadLettered' ELSE 'Pending' END,
-                        ""ErrorMessage"" = {errorMessage},
-                        ""LastAttemptedAt"" = {attemptedAt},
-                        ""ScheduledAt"" = CASE WHEN ""RetryCount"" + 1 >= 10 THEN NULL ELSE {nextScheduledAt} END,
-                        ""LockedBy"" = NULL,
-                        ""LockedUntilUtc"" = NULL
-                    WHERE ""Id"" = {id}
-                      AND ""Status"" = 'Pending'
-                      AND ""LockedBy"" = {claimToken}
-                      AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" > NOW())", cancellationToken);
-            }
+            // Worker có thể yêu cầu Pending để tiếp tục retry quá ngưỡng mặc định.
+            // Giữ contract cũ: chỉ Pending/DeadLettered là override; giá trị khác dùng ngưỡng 10.
+            // Tăng retry, ghi lỗi, lên lịch và nhả lease trong một UPDATE nguyên tử.
+            bool automaticStatus = targetStatus != "Pending" && targetStatus != "DeadLettered";
+            int rows = await _dbContext.RentalOutboxMessages
+                .Where(m => m.Id == id && m.Status == "Pending" && m.LockedBy == claimToken &&
+                    (m.LockedUntilUtc == null || m.LockedUntilUtc > DateTimeOffset.UtcNow))
+                .ExecuteUpdateAsync(setters =>
+                {
+                    setters.SetProperty(m => m.RetryCount, m => m.RetryCount + 1)
+                        .SetProperty(m => m.Status, m =>
+                            targetStatus == "DeadLettered" || (automaticStatus && m.RetryCount + 1 >= 10)
+                                ? "DeadLettered" : "Pending")
+                        .SetProperty(m => m.ErrorMessage, errorMessage)
+                        .SetProperty(m => m.LastAttemptedAt, attemptedAt)
+                        .SetProperty(m => m.LockedBy, (string?)null)
+                        .SetProperty(m => m.LockedUntilUtc, (DateTimeOffset?)null);
+
+                    // Tránh CASE chỉ có hai nhánh NULL: PostgreSQL sẽ suy ra kiểu text,
+                    // không phải timestamp. Gán NULL trực tiếp để EF lấy kiểu từ cột đích.
+                    if (nextScheduledAt is null)
+                        setters.SetProperty(m => m.ScheduledAt, (DateTimeOffset?)null);
+                    else
+                        setters.SetProperty(m => m.ScheduledAt, m =>
+                            targetStatus == "DeadLettered" || (automaticStatus && m.RetryCount + 1 >= 10)
+                                ? null : nextScheduledAt);
+                }, cancellationToken);
 
             return rows == 1;
         }

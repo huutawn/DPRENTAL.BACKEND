@@ -10,6 +10,11 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Dprental.RentalService.Application.Kafka.Producers;
 
+/// <remarks>
+/// Chuyển lệnh Inventory có kiểu dữ liệu cụ thể thành envelope rồi ghi Outbox qua KafkaOutboxWriter.
+/// MessageId ổn định theo loại lệnh/operation key; partition key theo order để gom các bản tin của đơn.
+/// Enqueue thành công chỉ xác nhận ý định gửi đã được ghi trong transaction, chưa xác nhận Inventory đã thực thi.
+/// </remarks>
 public sealed class InventoryCommandProducer : IInventoryCommandProducer
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

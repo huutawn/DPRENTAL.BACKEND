@@ -6,6 +6,11 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Kafka.Producers;
 
+/// <remarks>
+/// Lớp giao tiếp broker dùng chung: nhận topic/key/JSON từ publisher và trả delivery result.
+/// Bật producer idempotence và Acks.All; publisher vẫn phải kiểm tra Persisted trước khi đánh dấu Outbox.
+/// Không chứa quyết định nghiệp vụ, không thay deduplication bằng MessageId/operation key ở phía ứng dụng.
+/// </remarks>
 public sealed class KafkaProducerTransport : IKafkaProducerTransport
 {
     private readonly IProducer<string, string>? _producer;
@@ -83,7 +88,7 @@ public sealed class KafkaProducerTransport : IKafkaProducerTransport
             kafkaOptions.BootstrapServers, kafkaOptions.ClientId);
     }
 
-    // Constructor for testing with mock/fake producer
+    // Constructor phục vụ kiểm thử transport bằng producer giả lập.
     public KafkaProducerTransport(
         IProducer<string, string> producer,
         ILogger<KafkaProducerTransport> logger)

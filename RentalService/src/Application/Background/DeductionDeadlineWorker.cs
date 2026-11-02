@@ -7,6 +7,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Background;
 
+/// <remarks>
+/// Theo thứ tự mỗi vòng: xử lý supplier quá hạn đề xuất khấu trừ → xử lý renter quá hạn phản hồi
+/// → lập lịch quyết toán các item đủ điều kiện. Các service sở hữu quy tắc; worker chỉ kích hoạt theo lịch.
+/// </remarks>
 public sealed class DeductionDeadlineWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;

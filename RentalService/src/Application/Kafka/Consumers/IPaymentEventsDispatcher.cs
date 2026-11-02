@@ -5,9 +5,9 @@ namespace Dprental.RentalService.Application.Kafka.Consumers;
 public interface IPaymentEventsDispatcher
 {
     /// <summary>
-    /// Intakes a raw Kafka record, validates the envelope, performs canonical deduplication,
-    /// and durably persists it to the Inbox table or DLQ.
-    /// Returns Failure if persistence fails, so the Kafka offset is NOT committed.
+    /// Tiếp nhận JSON từ broker, kiểm tra envelope/proof và chống trùng bằng JSON chuẩn hóa.
+    /// Lưu Inbox hoặc DLQ bền vững; loại sự kiện không hỗ trợ trả Ignored.
+    /// Nếu persistence lỗi phải trả Failure để consumer không commit offset.
     /// </summary>
     Task<Result<KafkaIntakeDisposition>> ReceiveMessageAsync(
         string messageJson,
@@ -19,8 +19,8 @@ public interface IPaymentEventsDispatcher
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Processes an Inbox message by re-reading it under an order lock, executing
-    /// the domain workflow (InvoicePaid or RefundCompleted), and saving state atomically.
+    /// Đọc lại Inbox dưới khóa order, phân phối sự kiện Payment hoặc kết quả Inventory tới handler.
+    /// Lưu trạng thái nghiệp vụ, Inbox và Outbox phát sinh trong cùng transaction.
     /// </summary>
     Task<Result> ProcessInboxMessageAsync(
         Guid inboxMessageId,

@@ -12,6 +12,11 @@ using Microsoft.Extensions.Options;
 
 namespace Dprental.RentalService.Application.Kafka.Producers;
 
+/// <remarks>
+/// Chuyển kết quả nghiệp vụ thành event contract và ghi Outbox trong transaction của caller.
+/// Dùng MessageId tất định để replay không sinh sự kiện mới; orderVersion trong payload là phiên bản do caller cung cấp.
+/// OutboxPublisherWorker mới gửi broker; producer này không trực tiếp gọi Kafka.
+/// </remarks>
 public sealed class RentalEventProducer : IRentalEventProducer
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

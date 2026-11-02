@@ -7,6 +7,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Background;
 
+/// <remarks>
+/// Điểm vào tự động cho timeout thanh toán và timeout supplier xác nhận.
+/// Mỗi vòng tạo scope và gọi ExpiryWorkflowService; service kiểm tra lại điều kiện nghiệp vụ trước khi đổi trạng thái.
+/// </remarks>
 public sealed class ExpiryScannerWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
