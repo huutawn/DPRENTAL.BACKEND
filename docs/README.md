@@ -1,5 +1,11 @@
 # Tài liệu Kỹ thuật InventoryService
 
+Public listing trả `organizationId` từ claim tổ chức duy nhất đã xác thực khi tạo listing;
+listing cũ hoặc token không xác định được một tổ chức duy nhất trả `null`. Quyền quản lý
+vẫn dựa trên owner. `categoryIds` được đọc từ loại thiết bị Catalog; `null` nghĩa là
+không tra cứu được, còn mảng rỗng nghĩa là Catalog xác nhận chưa có danh mục. Danh mục
+được đọc theo từng loại thiết bị khác nhau trong trang và có giới hạn số request đồng thời.
+
 ## Ranh giới các lớp
 
 | Lớp | Trách nhiệm | Không được chứa |

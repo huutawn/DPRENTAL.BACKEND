@@ -57,6 +57,7 @@ public static class PublicEquipmentListingMapper
             thumbnailUrl,
             totalQuantity,
             availableQuantity,
-            warehouseArea);
+            warehouseArea,
+            listing.OrganizationId);
     }
 }

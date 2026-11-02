@@ -30,7 +30,7 @@ public sealed partial class PostgresIntegrationTests
 
         const string sourceSystem = "rental_service";
         string externalRef = $"REF_{Guid.NewGuid():N}";
-        var period = new RentalPeriod(new DateOnly(2026, 11, 20), new DateOnly(2026, 11, 25));
+        var period = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(20), BusinessDateTime.ToVietnamDate(now).AddDays(25));
 
         var executor = sp.GetRequiredService<IInventoryWriteTransaction>();
 
@@ -78,7 +78,7 @@ public sealed partial class PostgresIntegrationTests
         Guid assetId = Guid.NewGuid();
         DateTimeOffset now = DateTimeOffset.UtcNow;
         var seededAsset = await IntegrationTestHelper.InsertTestAssetAsync(setupContext, assetId: assetId, now: now);
-        var period = new RentalPeriod(new DateOnly(2026, 11, 20), new DateOnly(2026, 11, 25));
+        var period = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(20), BusinessDateTime.ToVietnamDate(now).AddDays(25));
         var alloc = AssetAllocation.CreateManual(Guid.NewGuid(), assetId, period, now).Value;
         setupContext.AssetAllocations.Add(alloc);
         await setupContext.SaveChangesAsync();
@@ -118,20 +118,20 @@ public sealed partial class PostgresIntegrationTests
         var asset = await IntegrationTestHelper.InsertTestAssetAsync(db, assetId: assetId, now: now);
 
         // 1. Expired hold
-        var period1 = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
+        var period1 = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(2), BusinessDateTime.ToVietnamDate(now).AddDays(6));
         var expiredHold = AssetAllocation.CreateHold(
             Guid.NewGuid(), assetId, period1, now.AddHours(-1), now.AddHours(-3), "rental", "EXP-01").Value;
 
         // 2. Active allocated
-        var period2 = new RentalPeriod(new DateOnly(2026, 11, 10), new DateOnly(2026, 11, 15));
+        var period2 = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(10), BusinessDateTime.ToVietnamDate(now).AddDays(15));
         var allocated = AssetAllocation.CreateManual(Guid.NewGuid(), assetId, period2, now, "ALLOC-01").Value;
 
         // 3. Released allocation
-        var period3 = new RentalPeriod(new DateOnly(2026, 11, 20), new DateOnly(2026, 11, 25));
+        var period3 = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(20), BusinessDateTime.ToVietnamDate(now).AddDays(25));
         var released = AssetAllocation.CreateManual(Guid.NewGuid(), assetId, period3, now, "REL-01").Value;
         released.Release("Xong", now.AddHours(1), "op");
 
-        var cancelledPeriod = new RentalPeriod(new DateOnly(2026, 12, 1), new DateOnly(2026, 12, 5));
+        var cancelledPeriod = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(30), BusinessDateTime.ToVietnamDate(now).AddDays(34));
         var cancelled = AssetAllocation.CreateManual(Guid.NewGuid(), assetId, cancelledPeriod, now, "CANCEL-01").Value;
         Assert.True(cancelled.Cancel("Cancelled", now.AddHours(1), "op").IsSuccess);
 
@@ -160,7 +160,7 @@ public sealed partial class PostgresIntegrationTests
     {
         var assetId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var period = new RentalPeriod(new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5));
+        var period = new RentalPeriod(BusinessDateTime.ToVietnamDate(now).AddDays(2), BusinessDateTime.ToVietnamDate(now).AddDays(6));
         var hold = AssetAllocation.CreateHold(
             Guid.NewGuid(), assetId, period, now.AddMinutes(-5), now.AddMinutes(-10), "rental", "EXT-EXP").Value;
 

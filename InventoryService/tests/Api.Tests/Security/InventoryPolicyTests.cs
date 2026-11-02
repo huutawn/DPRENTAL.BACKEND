@@ -12,6 +12,16 @@ public sealed class InventoryPolicyTests
     private readonly Guid _otherUserId = Guid.NewGuid();
     private readonly Guid _orgId = Guid.NewGuid();
 
+    [Fact]
+    public void OrganizationClaim_RequiresAnUnambiguousOrganization()
+    {
+        var identity = new ClaimsIdentity([new Claim("o", _orgId.ToString())], "Bearer");
+        var caller = new Dprental.InventoryService.Api.Security.InventoryCallerContext(new ClaimsPrincipal(identity));
+        Assert.Equal(_orgId, caller.OrganizationId);
+        identity.AddClaim(new Claim("o", Guid.NewGuid().ToString()));
+        Assert.Null(caller.OrganizationId);
+    }
+
     [Theory]
     [InlineData("manage", "POST")]
     [InlineData("calendar", "GET")]

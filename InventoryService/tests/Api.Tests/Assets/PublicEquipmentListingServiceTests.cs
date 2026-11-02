@@ -131,8 +131,9 @@ public sealed class PublicEquipmentListingServiceTests
 
     private sealed class FakeCatalogClient : ICatalogServiceClient
     {
+        public IReadOnlyList<Guid>? CategoryIds { get; set; }
         public Task<Result<CatalogEquipmentTypeResponse>> GetPublishedEquipmentTypeAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Result.Success(new CatalogEquipmentTypeResponse(id, "CAM", "Camera", null, 1, DateTime.UtcNow, null, DateTime.UtcNow)));
+            Task.FromResult(Result.Success(new CatalogEquipmentTypeResponse(id, "CAM", "Camera", null, 1, DateTime.UtcNow, null, DateTime.UtcNow, CategoryIds)));
 
         public Task<Result<CatalogBrandResponse>> GetBrandAsync(Guid id, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result.Success(new CatalogBrandResponse(id, "SONY", "Sony", true)));
@@ -217,9 +218,13 @@ public sealed class PublicEquipmentListingServiceTests
     {
         var service = CreateService();
         var id = Guid.NewGuid();
+        var organizationId = Guid.NewGuid();
+        var categoryIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
+        _catalogClient.CategoryIds = categoryIds;
         var listing = EquipmentListing.Create(
             id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            "Model Active", null, "Model Active", 1, "{\"spec\":\"val\"}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+            "Model Active", null, "Model Active", 1, "{\"spec\":\"val\"}", 100_000m, null, null, "VND", FixedNow, 2024,
+            organizationId: organizationId).Value;
         listing.UpdateStatus(EquipmentListingStatus.Active, true, FixedNow);
 
         var asset1 = InventoryAsset.Create(Guid.NewGuid(), id, "SN-PUB-1", FixedNow).Value;
@@ -231,6 +236,8 @@ public sealed class PublicEquipmentListingServiceTests
         Assert.True(result.IsSuccess);
         var response = result.Value;
         Assert.Equal(id, response.Id);
+        Assert.Equal(organizationId, response.OrganizationId);
+        Assert.Equal(categoryIds, response.CategoryIds);
         Assert.Equal("Model Active", response.Model);
         Assert.Equal(1, response.TotalQuantity);
         Assert.Equal(1, response.AvailableQuantity);

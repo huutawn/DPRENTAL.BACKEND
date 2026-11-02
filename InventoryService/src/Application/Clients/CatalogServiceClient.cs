@@ -109,6 +109,8 @@ public sealed partial class CatalogServiceClient : ICatalogServiceClient
         return null;
     }
 
+    private sealed record RemoteCategory(Guid Id);
+
     private sealed record RemoteEquipmentTypeResponse(
         Guid Id,
         string Code,
@@ -117,7 +119,8 @@ public sealed partial class CatalogServiceClient : ICatalogServiceClient
         JsonElement Status,
         DateTime CreatedAt,
         DateTime? UpdatedAt,
-        DateTime? PublishedAt
+        DateTime? PublishedAt,
+        IReadOnlyList<RemoteCategory>? Categories
     );
 
     private sealed record RemoteProblemDetails(
@@ -231,7 +234,8 @@ public sealed partial class CatalogServiceClient : ICatalogServiceClient
                     statusCode,
                     parsed.CreatedAt,
                     parsed.UpdatedAt,
-                    parsed.PublishedAt));
+                    parsed.PublishedAt,
+                    parsed.Categories?.Where(c => c.Id != Guid.Empty).Select(c => c.Id).Distinct().ToArray()));
             }
 
             return Error.Unavailable("CATALOG_SERVICE_ERROR", $"CatalogService trả về mã lỗi HTTP {(int)response.StatusCode}.");

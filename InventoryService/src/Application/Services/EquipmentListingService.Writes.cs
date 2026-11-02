@@ -184,7 +184,8 @@ public sealed partial class EquipmentListingService
             yearValidation.Value,
             validMediaIds,
             validThumb,
-            targetDeposit);
+            targetDeposit,
+            caller.OrganizationId);
 
         if (listingResult.IsFailure)
         {

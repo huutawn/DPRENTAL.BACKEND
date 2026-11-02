@@ -510,6 +510,32 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
                 _mediaOptions.PublicGatewayUrl))
             .ToList();
 
+        if (_catalogClient is not null && mappedItems.Count > 0)
+        {
+            var typeIds = mappedItems.Select(item => item.EquipmentTypeId).Distinct().ToArray();
+            using var concurrency = new SemaphoreSlim(8);
+            async Task<Result<DTOs.Catalog.CatalogEquipmentTypeResponse>> LookupAsync(Guid id)
+            {
+                await concurrency.WaitAsync(ct);
+                try
+                {
+                    return await _catalogClient.GetPublishedEquipmentTypeAsync(id, ct);
+                }
+                finally
+                {
+                    concurrency.Release();
+                }
+            }
+            var lookups = await Task.WhenAll(typeIds.Select(LookupAsync));
+            var categoriesByType = typeIds.Zip(lookups)
+                .Where(pair => pair.Second.IsSuccess)
+                .ToDictionary(pair => pair.First, pair => pair.Second.Value.CategoryIds);
+            mappedItems = mappedItems.Select(item => item with
+            {
+                CategoryIds = categoriesByType.GetValueOrDefault(item.EquipmentTypeId)
+            }).ToList();
+        }
+
         var paged = new PagedResponse<PublicEquipmentListingResponse>(
             mappedItems,
             request.Page,
