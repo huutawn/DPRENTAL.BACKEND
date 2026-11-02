@@ -31,7 +31,7 @@ public sealed class OrganizationIntegrationTests
     private static readonly Guid MemberRoleId = new("a1010000-0000-0000-0000-000000000002");
 
     [Fact]
-    public async Task SupplierContactOnlyAuthenticatedUsersSeeMinimalActiveSupplierData()
+    public async Task SupplierContactReturnsOnlyMinimalActiveSupplierData()
     {
         using WebApplicationFactory<Program> factory = CreateFactory();
         await SeedDatabaseAsync(factory);
@@ -58,8 +58,7 @@ public sealed class OrganizationIntegrationTests
         using HttpClient owner = CreateAuthenticatedClient(factory, ownerId, "customer");
         using HttpClient other = CreateAuthenticatedClient(factory, otherId, "customer");
         string route = $"/api/v1/auth/organizations/{activeId}/supplier-contact";
-        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(route)).StatusCode);
-        foreach (HttpClient client in new[] { owner, other })
+        foreach (HttpClient client in new[] { anonymous, owner, other })
         {
             using HttpResponseMessage response = await client.GetAsync(route);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -73,6 +72,8 @@ public sealed class OrganizationIntegrationTests
         {
             Assert.Equal(HttpStatusCode.NotFound,
                 (await other.GetAsync($"/api/v1/auth/organizations/{id}/supplier-contact")).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound,
+                (await anonymous.GetAsync($"/api/v1/auth/organizations/{id}/supplier-contact")).StatusCode);
         }
         Assert.Equal(HttpStatusCode.Forbidden,
             (await other.GetAsync($"/api/v1/auth/organizations/{activeId}")).StatusCode);
