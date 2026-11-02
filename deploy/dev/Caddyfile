@@ -22,7 +22,7 @@
 	encode zstd gzip
 
 	@signalrHubs {
-		path /hubs/payments /hubs/payments/* /hubs/analytics /hubs/analytics/*
+		path /api/v1/payment/hubs/payments /api/v1/payment/hubs/payments/* /hubs/analytics /hubs/analytics/*
 	}
 	handle @signalrHubs {
 		reverse_proxy gateway:8080 {
