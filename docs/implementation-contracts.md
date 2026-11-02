@@ -6,27 +6,29 @@ This document establishes the official technical specifications, file ownership,
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│  Phase 1 Roadmap:                                                      │
-│  [N01] Verify event paths, architecture, contracts & AGENTS.md (DONE)  │
+│  Phase 1 Roadmap (Execution Order):                                    │
+│  [N01] Contract & Verification Review (DONE)                           │
 │    │                                                                   │
 │    ▼                                                                   │
-│  [N02] PostgreSQL Schema, Entities & Persistence Layer                 │
+│  [N02] Foundation & Persistence Layer                                  │
+│    │                                                                   │
+│    ▼                                                                   │
+│  [N04] Policy, Recipient & Template Engine                             │
 │    │                                                                   │
 │    ├─────────────────────────────┬──────────────────────────┐          │
-│    ▼                             ▼                          ▼          │
-│  [N03] Kafka Ingestion Pipeline [N04] REST Inbox API  [N05] SignalR Hub│
+│    ▼                             ▼                          │          │
+│  [N03] Kafka Ingestion Pipeline [N05] Inbox REST API        │          │
 │    │                             │                          │          │
 │    └─────────────────────────────┼──────────────────────────┘          │
 │                                  ▼                                     │
-│  [N06] Email Delivery Engine & Lease Crash Recovery                     │
-│    │                                                                   │
-│    ▼                                                                   │
-│  [N07] Event Handlers & Stale Watermark Suppression (10 Events)        │
-│    │                                                                   │
-│    ▼                                                                   │
-│  [N08] End-to-End Integration Verification & Operational Readiness     │
+│  [N06] Email Delivery Engine  [N07] Security & Realtime Hub            │
+│    │                             │                                     │
+│    └─────────────────────────────┼─────────────────────────────────────┘
+│                                  ▼
+│  [N08] Full Testing Suite, CI & Operational Readiness                  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
+*Execution Order*: N01 → N02 → N04 → N03/N05 → N06/N07 → N08.
 
 ---
 
@@ -60,10 +62,17 @@ This document establishes the official technical specifications, file ownership,
 
 ---
 
-## 3. Detailed Specifications for Tasks N02–N08
+## 3. Detailed Specifications for Tasks N01–N08
 
-### 3.1. Task N02: Database Schema, Entities & Persistence Layer
+### 3.1. Task N01: Contract & Verification Review (Đối chiếu và sửa contract trước implementation)
+- **Objective**: Verify and align all 10 target events, payloads, schemas, fixtures, and contracts. Eliminate double numbering in roadmap.
+- **Completed Items**:
+  - 10 events verified against upstream `RentalService` source code.
+  - JSON schemas and fixtures created for valid, invalid identity, missing recipient, unsupported version, duplicate, same-version sibling, and out-of-order stale events.
+  - Contracts updated: Read-all requires server-side authoritative cutoff (`cutoffUtc` not accepted from client); Pagination uses deterministic `CreatedAt DESC, Id DESC` (not a cross-request transactional snapshot); Realtime SignalR strictly acts as cache invalidation requiring client refetch (no client badge direct increment).
+  - Stale action suppression invariant formalized via `notification.aggregate_watermarks`.
 
+### 3.2. Task N02: Foundation & Persistence (Cơ sở hạ tầng dữ liệu và lưu trữ)
 - **Objective**: Create the PostgreSQL database persistence layer for schema `notification`, including EF Core entities, DbContext, Fluent API mappings, indexes, migrations, and repository abstractions.
 - **File Ownership**:
   - `NotificationService.Domain/Entities/Notification.cs`
@@ -77,8 +86,8 @@ This document establishes the official technical specifications, file ownership,
   - `NotificationService.Domain/IRepositories/IPreferenceRepository.cs`
   - `NotificationService.Domain/IRepositories/IAggregateWatermarkRepository.cs`
   - `NotificationService.Domain/IRepositories/IUnitOfWork.cs`
-  - `NotificationService.Domain/Persistence/NotificationDbContext.cs`
-  - `NotificationService.Domain/Persistence/Configurations/*.cs`
+  - `NotificationService.Domain/Repositories/NotificationServiceDbContext.cs`
+  - `NotificationService.Domain/Repositories/Configurations/*.cs`
   - `NotificationService.Domain/Repositories/*.cs`
   - `NotificationService.Domain/Migrations/*.cs`
 - **Acceptance Criteria**:
@@ -89,18 +98,31 @@ This document establishes the official technical specifications, file ownership,
     - `UNIQUE (notification_id, channel)` on `delivery_jobs`.
     - `UNIQUE (user_id, category)` on `preferences`.
     - Primary key `(aggregate_id, recipient_user_id)` on `aggregate_watermarks`.
+  - Stores template identity/version, minimal standardized render data, event version, and target resource; does NOT store raw Kafka payloads.
   - Indexes created for unread queries and delivery job polling.
-- **Test Specifications**:
-  - Persistence Integration Tests (`NotificationService.Tests.Integration/Persistence/`):
-    - Verify EF Core migration runs cleanly against PostgreSQL testcontainer.
-    - Test unique constraint enforcement and duplicate rejection.
-    - Verify `.AsNoTracking()` queries and deterministic pagination sorting.
+  - Application owns validation & business rules; Entity holds state & mapping; Repository owns persistence, queries, locking, transactions.
+  - Ingestion transaction atomically commits inbox receipt, notifications, watermarks, and delivery jobs without holding network I/O.
+  - Startup configuration validation; readiness checks database & migrations. Kafka/SMTP degradation reported without failing liveness.
 
----
+### 3.3. Task N04: Policy, Recipient & Template (Chính sách, Người nhận & Bản mẫu nội dung)
+- **Objective**: Build notification channel policies, preference evaluation policies, stale action suppression policies, recipient resolution, and code-versioned vi-VN template rendering before connecting Kafka.
+- **File Ownership**:
+  - `NotificationService.Application/Policies/NotificationChannelPolicy.cs`
+  - `NotificationService.Application/Policies/PreferencePolicy.cs`
+  - `NotificationService.Application/Policies/StaleActionSuppressionPolicy.cs`
+  - `NotificationService.Application/Recipients/RecipientResolutionService.cs`
+  - `NotificationService.Application/Templates/NotificationTemplateRenderer.cs`
+  - `NotificationService.Application/Templates/NotificationTemplateCatalog.cs`
+- **Acceptance Criteria**:
+  - Built and tested independently before Kafka integration.
+  - Recipient resolved only from valid IDs in event contract; deduped by `(NotificationType, recipient_user_id)`.
+  - vi-VN template engine versioned in code, with placeholder allowlists, length limits, HTML encoding, and safe deep link allowlists.
+  - Missing `orderCode` handled with generic text and resource ID without external lookups.
+  - `LatePaymentRefundRequested`: strictly worded as refund *requested/processing*; NEVER asserts refund or settlement completed.
+  - Category preferences checked during job creation and rechecked prior to email dispatch. Re-enabling a preference does not retroactively create jobs.
 
-### 3.2. Task N03: Kafka Ingestion Pipeline, Envelope Validation & Quarantine
-
-- **Objective**: Implement Kafka consumer loop on `rental.events.v1`, envelope deserialization, allowlist filtering, transactional inbox deduplication, and DLQ quarantine.
+### 3.4. Task N03: Kafka Ingestion (Tiếp nhận sự kiện từ Kafka)
+- **Objective**: Implement Kafka consumer loop on `rental.events.v1`, envelope deserialization, allowlist filtering, transactional inbox deduplication, event handlers, and DLQ quarantine.
 - **File Ownership**:
   - `NotificationService.Application/Kafka/Consumers/KafkaConsumerHostedService.cs`
   - `NotificationService.Application/Kafka/Contracts/KafkaMessageEnvelope.cs`
@@ -108,22 +130,19 @@ This document establishes the official technical specifications, file ownership,
   - `NotificationService.Application/Kafka/Quarantine/IKafkaDeadLetterPublisher.cs`
   - `NotificationService.Application/Kafka/Quarantine/KafkaDeadLetterPublisher.cs`
   - `NotificationService.Application/Kafka/Handlers/IKafkaEventHandler.cs`
+  - `NotificationService.Application/Kafka/Handlers/*.cs` (All 10 handlers)
   - `NotificationService.Application/Kafka/Dispatch/KafkaEventDispatcher.cs`
 - **Acceptance Criteria**:
-  - Consumer joins group `notification-service-v1` with manual offset commit (`EnableAutoCommit = false`).
-  - Envelope validated against schema (version 1, non-empty UUID, valid producer).
-  - Malformed or invalid envelopes written to `rental.events.v1.notification.dlq` and recorded in `inbox_receipts` as `Quarantined`.
+  - Dedicated consumer group `notification-service-v1` with manual offset commit (`EnableAutoCommit = false`, `EnableAutoOffsetStore = false`). Offset advanced only after durable persistence or DLQ acknowledgement.
+  - Transport worker delegates entirely to Application ingestion service; handlers transform events into notification intents without sending emails or accessing DbContext directly.
   - Unknown event types from allowed producer on topic logged as informational and skipped with offset committed (no quarantine).
-  - Replayed messages with existing `(consumer_name, message_id)` skipped idempotently.
-- **Test Specifications**:
-  - Unit Tests: Validate envelope schema against fixtures (`invalid-identity`, `unsupported-version`, `unknown-allowed-topic-type`).
-  - Integration Tests: Test duplicate delivery handling and manual offset commit after DB transaction commit.
+  - Envelope/payload validation failures routed to DLQ `rental.events.v1.notification.dlq`.
+  - Messages lacking valid message ID use `topic:partition:offset` for quarantine identity (no fake business IDs).
+  - Transient retry with exponential backoff and jitter; prolonged dependency outage pauses partition consumption without dropping messages.
+  - DLQ and DB committed safely without falsely claiming cross-system distributed transactions.
 
----
-
-### 3.3. Task N04: In-App Inbox REST API & Preferences
-
-- **Objective**: Implement REST endpoints for notifications query, unread count, single read, read-all with cutoff, and category preferences.
+### 3.5. Task N05: Inbox REST API (Giao diện REST Hộp thư thông báo)
+- **Objective**: Implement 6 REST endpoints for notifications query, unread count, single read, read-all with server cutoff, and category preferences.
 - **File Ownership**:
   - `NotificationService.Api/Controllers/NotificationsController.cs`
   - `NotificationService.Api/Controllers/PreferencesController.cs`
@@ -134,110 +153,49 @@ This document establishes the official technical specifications, file ownership,
   - `NotificationService.Application/Services/NotificationReadService.cs`
   - `NotificationService.Application/Services/PreferenceService.cs`
   - `NotificationService.Application/DTOs/*.cs`
-  - `NotificationService.Application/Validation/QueryValidators.cs`
 - **Acceptance Criteria**:
-  - `GET /api/v1/notifications`: Paginated result with `created_at DESC, id DESC`.
-  - `GET /api/v1/notifications/unread-count`: Returns exact unread count.
-  - `PATCH /api/v1/notifications/{id}/read`: Idempotent single mark-read; returns 404 for non-owned or non-existent notification.
-  - `PATCH /api/v1/notifications/read-all`: Server-side cutoff applied; does not mark newer notifications read.
-  - `GET /api/v1/notifications/preferences`: Safe defaults returned when no record exists.
-  - `PUT /api/v1/notifications/preferences`: Validates categories and updates preferences.
-  - Service JWT (`u: "svc"`) rejected with 403 Forbidden.
-- **Test Specifications**:
-  - Unit Tests: Validate query validators, cutoff logic, and default preference resolution.
-  - Controller Tests: Verify Bearer JWT extraction, IDOR ownership isolation, and ProblemDetails mapping.
+  - All 6 endpoints implemented (`GET /api/v1/notifications`, `GET /api/v1/notifications/unread-count`, `PATCH /api/v1/notifications/{id}/read`, `PATCH /api/v1/notifications/read-all`, `GET /api/v1/notifications/preferences`, `PUT /api/v1/notifications/preferences`).
+  - Queries use `.AsNoTracking()`, `.Select()` projections, server-side count/filters, and `CancellationToken`.
+  - Mark-read is idempotent (preserves original `ReadAt`); returns 404 for non-existent or unowned notification.
+  - Read-all uses a single filtered batch database update with server-generated `cutoffUtc` (`TimeProvider.GetUtcNow()`); client cannot supply cutoff.
+  - Consistent DTO validation and ProblemDetails error mapping; user identity extracted solely from Bearer JWT (`sub`).
 
----
-
-### 3.4. Task N05: SignalR Realtime Hub for Inbox Invalidation
-
-- **Objective**: Implement the SignalR inbox hub `/api/v1/notifications/hubs/inbox` for realtime cache invalidation signals.
-- **File Ownership**:
-  - `NotificationService.Api/Hubs/NotificationHub.cs`
-  - `NotificationService.Application/IServices/INotificationRealtimeNotifier.cs`
-  - `NotificationService.Api/Services/SignalRNotificationRealtimeNotifier.cs`
-  - `NotificationService.Api/Security/SignalRAuthenticationExtensions.cs`
-- **Acceptance Criteria**:
-  - Hub endpoint `/api/v1/notifications/hubs/inbox` supports WebSocket and Long Polling.
-  - Bearer token accepted via header or HTTP-only cookie `accessToken`.
-  - Access tokens passed via query string `?access_token=` are strictly rejected.
-  - Upon connection, user connection joins private group `user:{sub}`. Client-side arbitrary group join is blocked.
-  - Service tokens (`u: "svc"`) rejected with 403 Forbidden.
-  - `NotificationInboxChanged` dispatched post-commit to group `user:{recipientUserId}`.
-- **Test Specifications**:
-  - Integration Tests: Connect using test WebSocket client with valid/invalid tokens; verify message receipt and group isolation.
-
----
-
-### 3.5. Task N06: Email Delivery Engine & Lease Crash Recovery
-
-- **Objective**: Implement the leased email worker using `FOR UPDATE SKIP LOCKED`, transactional SMTP sender, crash lease recovery, and `Uncertain` status handling.
+### 3.6. Task N06: Email Delivery (Tiến trình gửi Email có bảo vệ Lease)
+- **Objective**: Implement transactional SMTP email worker with PostgreSQL `FOR UPDATE SKIP LOCKED`, lease fencing, crash recovery, and `Uncertain` state handling.
 - **File Ownership**:
   - `NotificationService.Application/Email/IEmailSender.cs`
   - `NotificationService.Application/Email/SmtpEmailSender.cs`
-  - `NotificationService.Application/Email/Clients/IAuthContactClient.cs`
-  - `NotificationService.Application/Email/Clients/AuthContactClient.cs`
   - `NotificationService.Application/Email/Workers/EmailDeliveryWorker.cs`
   - `NotificationService.Application/Email/Workers/EmailLeaseReconciliationWorker.cs`
   - `NotificationService.Application/Email/Options/SmtpOptions.cs`
 - **Acceptance Criteria**:
-  - Worker claims jobs in batches using PostgreSQL `FOR UPDATE SKIP LOCKED` with 5-minute lease.
-  - DB transaction committed before opening SMTP connection.
-  - Contact resolution calls `IAuthContactClient`; job suppressed if recipient inactive or email unverified.
-  - Delivery outcomes accurately classified: `Succeeded`, `Failed`, `RetryScheduled`, `Uncertain`, `Suppressed`.
-  - When SMTP drops after `DATA` phase, job marked `Uncertain` with **BLIND RETRY STRICTLY FORBIDDEN**.
-  - `EmailLeaseReconciliationWorker` safely recovers expired leases from crashed workers.
-- **Test Specifications**:
-  - Unit Tests: Mock SMTP sender to simulate timeout after DATA command; assert job transitions to `Uncertain` and retry count is not incremented.
-  - Integration Tests: Verify concurrent workers claiming jobs via `FOR UPDATE SKIP LOCKED` without double-claiming.
+  - Single real SMTP adapter; dev/test uses real SMTP sink (MailHog/test sink).
+  - Claim jobs using lease and `FOR UPDATE SKIP LOCKED`; completion requires matching lease token.
+  - Persists `dispatch-start` before calling SMTP. If worker crashes or timeout occurs after `DATA` phase, transitions to `Uncertain` (blind retry strictly forbidden).
+  - Max 5 retries for verifiable pre-DATA errors; permanent failures marked `Failed`; inactive/unverified/preference/stale marked `Suppressed`.
+  - Detailed sanitized attempt audit; no DB transactions open during SMTP I/O.
 
----
-
-### 3.6. Task N07: Event Handlers & Stale Watermark Suppression (10 Events)
-
-- **Objective**: Implement concrete handlers for all 10 target events, recipient resolution, vi-VN template rendering, watermark tracking, and atomic DB transaction commit.
+### 3.7. Task N07: Security & Realtime (Bảo mật & Kênh thông báo tức thời)
+- **Objective**: Implement JWT/JWKS authentication, human vs service principal validation, Auth internal contact client, and SignalR realtime hub.
 - **File Ownership**:
-  - `NotificationService.Application/Kafka/Handlers/RentalOrderCreatedHandler.cs`
-  - `NotificationService.Application/Kafka/Handlers/RentalOrderPaidHandler.cs`
-  - `NotificationService.Application/Kafka/Handlers/RentalSupplierConfirmationRequestedHandler.cs`
-  - `NotificationService.Application/Kafka/Handlers/RentalOrderExpiredHandler.cs`
-  - `NotificationService.Application/Kafka/Handlers/RentalOrderCancelledHandler.cs`
-  - `NotificationService.Application/Kafka/Handlers/RentalItemHandoverCompletedHandler.cs`
-  - `NotificationService.Application/Kafka/Handlers/RentalHandoverOverdueHandler.cs`
-  - `NotificationService.Application/Kafka/Handlers/ReturnConfirmationOverdueHandler.cs`
-  - `NotificationService.Application/Kafka/Handlers/RentalOrderCompletedHandler.cs`
-  - `NotificationService.Application/Kafka/Handlers/LatePaymentRefundRequestedHandler.cs`
-  - `NotificationService.Application/Policies/StaleActionSuppressionPolicy.cs`
-  - `NotificationService.Application/Policies/NotificationChannelPolicy.cs`
-  - `NotificationService.Application/Templates/NotificationTemplateRenderer.cs`
+  - `NotificationService.Api/Security/*.cs`
+  - `NotificationService.Api/Hubs/NotificationHub.cs`
+  - `NotificationService.Application/IServices/INotificationRealtimeNotifier.cs`
+  - `NotificationService.Api/Services/SignalRNotificationRealtimeNotifier.cs`
+  - `NotificationService.Application/Clients/IAuthContactClient.cs`
+  - `NotificationService.Application/Clients/AuthContactClient.cs`
 - **Acceptance Criteria**:
-  - Recipient resolution extracts `RenterId` or `SupplierId` directly from verified payload. Empty GUID rejected to quarantine.
-  - For multi-recipient events (`RentalHandoverOverdue`, `ReturnConfirmationOverdue`), generates separate notifications for Renter and Supplier.
-  - Watermark tracking updates `last_order_version` and terminal states (`PAID`, `EXPIRED`, `CANCELLED`, `COMPLETED`).
-  - Stale action suppression: if `orderVersion < watermark` or order is in terminal state, suppresses payment/confirmation CTA buttons.
-  - Same-version sibling events sharing `orderVersion` processed independently if `messageId` differs.
-  - `LatePaymentRefundRequested`: Wording strictly asserts refund *requested/processing*; NEVER asserts refund succeeded.
-  - Single atomic PostgreSQL transaction commits inbox receipt, notification, delivery job, and watermark together.
-- **Test Specifications**:
-  - Handler Unit Tests: Exercise all 10 handlers against valid fixtures and assert expected DB records.
-  - Watermark Suppression Tests: Test `RentalOrderCreated` arriving after `RentalOrderPaid` (assert CTA suppressed and informational template rendered).
-  - Financial Wording Test: Verify `LatePaymentRefundRequested` template contains no false success claims.
+  - Bearer JWT validated via AuthService JWKS; requires human GUID `sub`; rejects service principal (`u: "svc"`), no admin bypass.
+  - SignalR hub `/api/v1/notifications/hubs/inbox` supports header/cookie auth, rejects query string tokens (`?access_token=`), enforces origin allowlist, and auto-disconnects on token expiration.
+  - Server manages user group `user:{sub}`; emits `NotificationInboxChanged` only after DB transaction commits. Client refetches badges/list upon receipt.
+  - `AuthContactClient` batches requests (max 100 users); emails sent only to active, email-verified accounts.
 
----
-
-### 3.7. Task N08: End-to-End Integration Verification & Operational Readiness
-
-- **Objective**: Execute comprehensive end-to-end integration tests, verify OpenTelemetry tracing, health check probes, load tolerance, and finalize deployment documentation.
-- **File Ownership**:
-  - `NotificationService.Tests.Integration/E2E/*.cs`
-  - `NotificationService.Api/Observability/*.cs`
-  - `docs/RUNBOOK.md`
-  - `docker-compose.yml`
+### 3.8. Task N08: Kiểm thử, CI và vận hành (Testing, CI & Operational Readiness)
+- **Objective**: Comprehensive unit, integration, and contract tests across all scenarios; CI pipeline configuration; metrics and operational runbooks.
 - **Acceptance Criteria**:
-  - End-to-end flow verified: publish Kafka event -> consume -> atomic DB persist -> realtime SignalR invalidation -> email worker delivery.
-  - Health checks `/health/live` and `/health/ready` verified.
-  - OpenTelemetry traces linked via Kafka `traceparent` headers to upstream RentalService checkout.
-  - Clean runbook for production deployment, SMTP failure escalation, and DLQ reprocessing.
-- **Test Specifications**:
-  - Full E2E Test Suite with Testcontainers (PostgreSQL, Kafka, Mailhog).
-  - Negative tests: poison pill quarantine, broker reconnect, SMTP timeout recovery.
+  - Unit tests for matrix, templates, suppression, siblings, financial wording.
+  - Integration tests for PostgreSQL migrations, unique constraints, concurrent ingestion, mark-read, lease fencing.
+  - Kafka tests for duplicates, commits, DLQ.
+  - SMTP tests for pre/post-DATA failures, lease recovery.
+  - SignalR tests for JWT, IDOR, group isolation, commit-bound dispatch.
+  - CI pipeline, non-root Docker build, metrics, and operational runbook.

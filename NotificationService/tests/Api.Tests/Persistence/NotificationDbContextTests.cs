@@ -1,0 +1,257 @@
+using Dprental.NotificationService.Domain.Entities;
+using Dprental.NotificationService.Domain.Repositories;
+using Microsoft.EntityFrameworkCore;
+using Xunit;
+
+namespace Dprental.NotificationService.Api.Tests.Persistence;
+
+public sealed class NotificationDbContextTests
+{
+    private static NotificationServiceDbContext CreateInMemoryDbContext()
+    {
+        var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+            .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+            .Options;
+
+        return new NotificationServiceDbContext(options);
+    }
+
+    [Fact]
+    public void ModelBuilder_ShouldConfigureFiveEntitiesInNotificationSchema()
+    {
+        using var context = CreateInMemoryDbContext();
+        var model = context.Model;
+
+        var notificationEntity = model.FindEntityType(typeof(Notification));
+        Assert.NotNull(notificationEntity);
+        Assert.Equal("notifications", notificationEntity.GetTableName());
+        Assert.Equal("notification", notificationEntity.GetSchema());
+
+        var inboxEntity = model.FindEntityType(typeof(NotificationInboxReceipt));
+        Assert.NotNull(inboxEntity);
+        Assert.Equal("inbox_receipts", inboxEntity.GetTableName());
+        Assert.Equal("notification", inboxEntity.GetSchema());
+
+        var deliveryEntity = model.FindEntityType(typeof(NotificationDeliveryJob));
+        Assert.NotNull(deliveryEntity);
+        Assert.Equal("delivery_jobs", deliveryEntity.GetTableName());
+        Assert.Equal("notification", deliveryEntity.GetSchema());
+
+        var preferenceEntity = model.FindEntityType(typeof(NotificationPreference));
+        Assert.NotNull(preferenceEntity);
+        Assert.Equal("preferences", preferenceEntity.GetTableName());
+        Assert.Equal("notification", preferenceEntity.GetSchema());
+
+        var watermarkEntity = model.FindEntityType(typeof(NotificationAggregateWatermark));
+        Assert.NotNull(watermarkEntity);
+        Assert.Equal("aggregate_watermarks", watermarkEntity.GetTableName());
+        Assert.Equal("notification", watermarkEntity.GetSchema());
+    }
+
+    [Fact]
+    public async Task NotificationRepository_ShouldAddAndQueryWithPagination()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new NotificationRepository(context);
+        var userId = Guid.NewGuid();
+
+        for (int i = 1; i <= 5; i++)
+        {
+            await repo.AddAsync(new Notification
+            {
+                Id = Guid.NewGuid(),
+                RecipientUserId = userId,
+                NotificationType = "ORDER_CREATED",
+                Category = "ORDER",
+                Severity = "INFO",
+                Title = $"Title {i}",
+                Body = $"Body {i}",
+                ResourceType = "RentalOrder",
+                ResourceId = Guid.NewGuid().ToString(),
+                SourceEventId = Guid.NewGuid(),
+                SourceProducer = "RentalService",
+                SourceEventType = "RentalOrderCreated",
+                TemplateCode = "ORDER_CREATED",
+                TemplateVersion = "1.0",
+                OccurredAt = DateTimeOffset.UtcNow.AddMinutes(-i),
+                CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-i)
+            });
+        }
+        await context.SaveChangesAsync();
+
+        var (items, total) = await repo.GetUserNotificationsPagedAsync(userId, category: null, unreadOnly: false, page: 1, pageSize: 3);
+        Assert.Equal(5, total);
+        Assert.Equal(3, items.Count);
+
+        var unreadCount = await repo.GetUnreadCountAsync(userId);
+        Assert.Equal(5, unreadCount);
+
+        var markReadResult = await repo.MarkAsReadAsync(items[0].Id, userId, DateTimeOffset.UtcNow);
+        Assert.True(markReadResult);
+
+        unreadCount = await repo.GetUnreadCountAsync(userId);
+        Assert.Equal(4, unreadCount);
+    }
+
+    [Fact]
+    public async Task PreferenceRepository_ShouldDefaultEmailToTrue_AndAllowUpsert()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new PreferenceRepository(context);
+        var userId = Guid.NewGuid();
+
+        var isEnabled = await repo.IsEmailEnabledAsync(userId, "ORDER");
+        Assert.True(isEnabled);
+
+        await repo.UpsertPreferencesAsync(userId, new[] { ("ORDER", false), ("PAYMENT", true) });
+        await context.SaveChangesAsync();
+
+        isEnabled = await repo.IsEmailEnabledAsync(userId, "ORDER");
+        Assert.False(isEnabled);
+
+        var paymentEnabled = await repo.IsEmailEnabledAsync(userId, "PAYMENT");
+        Assert.True(paymentEnabled);
+    }
+
+    [Fact]
+    public async Task AggregateWatermarkRepository_ShouldTrackMonotonicOrderVersion()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new AggregateWatermarkRepository(context);
+        var aggregateId = Guid.NewGuid();
+        var recipientId = Guid.NewGuid();
+
+        await repo.UpsertWatermarkAsync(new NotificationAggregateWatermark
+        {
+            AggregateId = aggregateId,
+            RecipientUserId = recipientId,
+            LastOrderVersion = 2,
+            LastMessageId = "msg-2",
+            IsTerminal = false
+        });
+        await context.SaveChangesAsync();
+
+        var watermark = await repo.GetWatermarkAsync(aggregateId, recipientId);
+        Assert.NotNull(watermark);
+        Assert.Equal(2, watermark.LastOrderVersion);
+
+        // Lower version should not regress watermark
+        await repo.UpsertWatermarkAsync(new NotificationAggregateWatermark
+        {
+            AggregateId = aggregateId,
+            RecipientUserId = recipientId,
+            LastOrderVersion = 1,
+            LastMessageId = "msg-1",
+            IsTerminal = false
+        });
+        await context.SaveChangesAsync();
+
+        watermark = await repo.GetWatermarkAsync(aggregateId, recipientId);
+        Assert.NotNull(watermark);
+        Assert.Equal(2, watermark.LastOrderVersion);
+
+        // Terminal state should set terminal
+        await repo.UpsertWatermarkAsync(new NotificationAggregateWatermark
+        {
+            AggregateId = aggregateId,
+            RecipientUserId = recipientId,
+            LastOrderVersion = 3,
+            LastMessageId = "msg-3",
+            IsTerminal = true,
+            TerminalState = "COMPLETED"
+        });
+        await context.SaveChangesAsync();
+
+        watermark = await repo.GetWatermarkAsync(aggregateId, recipientId);
+        Assert.NotNull(watermark);
+        Assert.Equal(3, watermark.LastOrderVersion);
+        Assert.True(watermark.IsTerminal);
+        Assert.Equal("COMPLETED", watermark.TerminalState);
+    }
+
+    [Fact]
+    public async Task InboxReceiptRepository_ShouldTrackIdempotency()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new InboxReceiptRepository(context);
+        var messageId = Guid.NewGuid();
+
+        var exists = await repo.ExistsAsync("notification-service-v1", messageId);
+        Assert.False(exists);
+
+        await repo.AddAsync(new NotificationInboxReceipt
+        {
+            Id = Guid.NewGuid(),
+            ConsumerName = "notification-service-v1",
+            MessageId = messageId,
+            Producer = "RentalService",
+            MessageType = "RentalOrderPaid",
+            Status = "Processed",
+            ProcessedAt = DateTimeOffset.UtcNow
+        });
+        await context.SaveChangesAsync();
+
+        exists = await repo.ExistsAsync("notification-service-v1", messageId);
+        Assert.True(exists);
+    }
+
+    [Fact]
+    public async Task DeliveryJobRepository_ShouldClaimAndRecoverExpiredLeases()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new DeliveryJobRepository(context);
+        var notificationId = Guid.NewGuid();
+
+        // Add notification first to satisfy foreign key
+        context.Notifications.Add(new Notification
+        {
+            Id = notificationId,
+            RecipientUserId = Guid.NewGuid(),
+            NotificationType = "ORDER_PAID",
+            Category = "ORDER",
+            Severity = "INFO",
+            Title = "Paid",
+            Body = "Order Paid",
+            ResourceType = "RentalOrder",
+            ResourceId = Guid.NewGuid().ToString(),
+            SourceEventId = Guid.NewGuid(),
+            SourceProducer = "RentalService",
+            SourceEventType = "RentalOrderPaid",
+            TemplateCode = "ORDER_PAID",
+            TemplateVersion = "1.0",
+            OccurredAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        var job = new NotificationDeliveryJob
+        {
+            Id = Guid.NewGuid(),
+            NotificationId = notificationId,
+            Channel = "EMAIL",
+            RecipientUserId = Guid.NewGuid(),
+            Status = "Pending",
+            NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await repo.AddAsync(job);
+        await context.SaveChangesAsync();
+
+        var claimed = await repo.ClaimPendingJobsAsync("worker-1", TimeSpan.FromMinutes(5), batchSize: 10);
+        Assert.Single(claimed);
+        Assert.Equal("Processing", claimed[0].Status);
+        Assert.NotNull(claimed[0].LeaseToken);
+
+        // Simulate expired lease
+        claimed[0].LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await context.SaveChangesAsync();
+
+        var recovered = await repo.RecoverExpiredLeasesAsync();
+        Assert.Equal(1, recovered);
+
+        var jobAfterRecovery = await context.DeliveryJobs.FindAsync(job.Id);
+        Assert.NotNull(jobAfterRecovery);
+        Assert.Equal("Pending", jobAfterRecovery.Status);
+        Assert.Null(jobAfterRecovery.LeaseToken);
+    }
+}

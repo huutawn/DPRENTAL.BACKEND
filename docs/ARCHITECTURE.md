@@ -296,8 +296,7 @@ All REST endpoints require a valid Human JWT Bearer token issued by `AuthService
 - Queries execute as `.AsNoTracking()` projections to `NotificationListItemDto`.
 
 ### 6.3. Server-Side Cutoff for Mark-All-Read
-`PATCH /api/v1/notifications/read-all` accepts an optional `cutoffUtc` ISO timestamp (defaulting to the server UTC clock at the moment the request is received).
-- Database query:
+`PATCH /api/v1/notifications/read-all` does not accept a client-provided cutoff timestamp. The server determines `cutoffUtc` via its authoritative UTC clock (`TimeProvider.GetUtcNow()`).
   ```sql
   UPDATE notification.notifications
   SET read_at = @ServerNow

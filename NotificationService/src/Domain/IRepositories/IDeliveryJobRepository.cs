@@ -1,0 +1,13 @@
+using Dprental.NotificationService.Domain.Entities;
+
+namespace Dprental.NotificationService.Domain.IRepositories;
+
+public interface IDeliveryJobRepository
+{
+    Task AddAsync(NotificationDeliveryJob job, CancellationToken cancellationToken = default);
+    Task AddRangeAsync(IEnumerable<NotificationDeliveryJob> jobs, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotificationDeliveryJob>> ClaimPendingJobsAsync(string workerId, TimeSpan leaseDuration, int batchSize, CancellationToken cancellationToken = default);
+    Task<int> RecoverExpiredLeasesAsync(CancellationToken cancellationToken = default);
+    Task<bool> UpdateJobStatusAsync(Guid jobId, string leaseToken, string newStatus, string? providerMessageId = null, string? errorCode = null, string? errorDetail = null, DateTimeOffset? nextAttemptAt = null, CancellationToken cancellationToken = default);
+    Task<bool> RecordDispatchStartAsync(Guid jobId, string leaseToken, DateTimeOffset dispatchStartedAt, CancellationToken cancellationToken = default);
+}

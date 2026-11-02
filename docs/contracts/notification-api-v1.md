@@ -51,11 +51,11 @@ Retrieves a paginated list of notifications for the authenticated user with stab
 | `status` | String | No | `"all"` | Filter status: `"all"` or `"unread"`. |
 | `category` | String | No | `null` | Filter by category: `"ORDER"`, `"PAYMENT"`, `"HANDOVER"`, `"RETURN"`. |
 
-- **Pagination Snapshot Semantics**:
+- **Pagination Semantics**:
   - Database query uses strict deterministic ordering: `ORDER BY created_at DESC, id DESC`.
+  - This is a deterministic database ordering, not a cross-request transactional snapshot. New notifications created between requests can cause items to shift pages.
   - Executed using `.AsNoTracking()` with `.Select()` projection.
   - Total item count and total pages are calculated in a single round-trip or parallel aggregate count.
-
 - **Response 200 OK**:
 ```json
 {
@@ -137,35 +137,28 @@ Marks an unread notification belonging to the authenticated user as read.
 
 ---
 
-### 3.4. `PATCH /api/v1/notifications/read-all` — Mark All As Read With Cutoff
+### 3.4. `PATCH /api/v1/notifications/read-all` — Mark All As Read With Server Cutoff
 
-Marks all unread notifications as read up to a specified server cutoff timestamp.
+Marks all unread notifications as read up to the server's authoritative cutoff timestamp.
 
 - **Method**: `PATCH`
 - **Path**: `/api/v1/notifications/read-all`
 - **Authentication**: Bearer Human JWT (`sub = <UserGuid>`)
-- **Request Body** (optional):
-```json
-{
-  "cutoffUtc": "2026-11-02T03:15:00Z"
-}
-```
-*Note: If `cutoffUtc` is omitted, the server uses its current UTC clock timestamp (`TimeProvider.GetUtcNow()`). If provided, it cannot be in the future.*
+- **Request Body**: None / Empty JSON object `{}`. The client cannot supply a cutoff timestamp. The server determines `cutoffUtc` via its authoritative UTC clock (`TimeProvider.GetUtcNow()`).
 
 - **Concurrency & Cutoff Semantics**:
   - Updates only notifications satisfying:
     `recipient_user_id = @UserId AND read_at IS NULL AND created_at <= @CutoffUtc`.
-  - Ensures notifications created while the user was viewing the screen or during network transit are NOT marked read accidentally.
+  - Notifications arriving after `@CutoffUtc` remain unread.
 
 - **Response 200 OK**:
 ```json
 {
   "markedCount": 3,
   "cutoffUtc": "2026-11-02T03:15:00Z",
-  "readAt": "2026-11-02T03:15:02Z"
+  "readAt": "2026-11-02T03:15:00Z"
 }
 ```
-
 ---
 
 ### 3.5. `GET /api/v1/notifications/preferences` — Get User Preferences
@@ -270,9 +263,9 @@ The server emits an invalidation event when a notification transaction commits:
 
 - **Client Consumption Semantics**:
   - `NotificationInboxChanged` is an **invalidation signal**, NOT a full data push.
-  - Upon receipt, client increments its unread badge count or triggers `GET /api/v1/notifications/unread-count`.
+  - Realtime only requires refetch; clients MUST NOT increment badge counts directly from the event.
+  - Upon receipt, client triggers `GET /api/v1/notifications/unread-count` to refresh unread badges.
   - If the user is currently viewing the notifications drop-down or inbox page, client invalidates its local cache and fetches the top page from `GET /api/v1/notifications`.
-
 ---
 
 ## 5. Internal Service APIs (`AuthService` Prerequisite)

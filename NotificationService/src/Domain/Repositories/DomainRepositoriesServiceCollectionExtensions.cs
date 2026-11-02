@@ -1,15 +1,16 @@
+using Dprental.NotificationService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Dprental.NotificationService.Domain.Repositories;
 
 /// <summary>
-/// Đăng ký PostgreSQL persistence cho service.
+/// Đăng ký PostgreSQL persistence và repositories cho service.
 /// </summary>
 public static class DomainRepositoriesServiceCollectionExtensions
 {
     /// <summary>
-    /// Đăng ký DbContext sau khi xác thực cấu hình kết nối.
+    /// Đăng ký DbContext và Repositories sau khi xác thực cấu hình kết nối.
     /// </summary>
     public static IServiceCollection AddNotificationServiceDomainRepositories(this IServiceCollection services, string? connectionString)
     {
@@ -19,6 +20,13 @@ public static class DomainRepositoriesServiceCollectionExtensions
         }
 
         services.AddDbContext<NotificationServiceDbContext>(options => options.UseNpgsql(connectionString));
+
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
+        services.AddScoped<INotificationRepository, NotificationRepository>();
+        services.AddScoped<IInboxReceiptRepository, InboxReceiptRepository>();
+        services.AddScoped<IDeliveryJobRepository, DeliveryJobRepository>();
+        services.AddScoped<IPreferenceRepository, PreferenceRepository>();
+        services.AddScoped<IAggregateWatermarkRepository, AggregateWatermarkRepository>();
 
         return services;
     }

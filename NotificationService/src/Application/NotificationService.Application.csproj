@@ -1,5 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CA1848;CA1711;CA1873</NoWarn>
+  </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Confluent.Kafka" />
     <ProjectReference Include="../Domain/NotificationService.Domain.csproj" />
   </ItemGroup>
 </Project>
