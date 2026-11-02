@@ -1,5 +1,4 @@
 using System.Net.Http.Json;
-using System.Text.Json.Serialization;
 using Dprental.NotificationService.Common;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -7,13 +6,13 @@ using Microsoft.Extensions.Logging;
 namespace Dprental.NotificationService.Application.Clients;
 
 public sealed record AuthContactDto(
-    [property: JsonPropertyName("userId")] Guid UserId,
-    [property: JsonPropertyName("email")] string Email,
-    [property: JsonPropertyName("isActive")] bool IsActive,
-    [property: JsonPropertyName("isEmailVerified")] bool IsEmailVerified);
+    Guid UserId,
+    string Email,
+    bool IsActive,
+    bool IsEmailVerified);
 
 public sealed record AuthContactBatchResponse(
-    [property: JsonPropertyName("contacts")] IReadOnlyList<AuthContactDto> Contacts);
+    IReadOnlyList<AuthContactDto> Contacts);
 
 public interface IAuthContactClient
 {

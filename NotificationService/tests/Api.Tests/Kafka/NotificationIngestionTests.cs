@@ -286,4 +286,40 @@ public sealed class NotificationIngestionTests
         Assert.True(await db.InboxReceipts.AnyAsync(r => r.MessageId == event1Id));
         Assert.True(await db.InboxReceipts.AnyAsync(r => r.MessageId == event2Id));
     }
+
+    [Fact]
+    public void KafkaMessageEnvelopeAndAuthContact_Contract_SerializesAndDeserializes()
+    {
+        var webOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        string json = """
+        {
+            "eventId": "evt-123",
+            "eventType": "OrderCreated",
+            "producer": "RentalService",
+            "version": 1,
+            "occurredAt": "2026-11-02T10:00:00Z",
+            "payload": { "id": 1 }
+        }
+        """;
+        var env = JsonSerializer.Deserialize<KafkaMessageEnvelope>(json, webOptions);
+        Assert.NotNull(env);
+        Assert.Equal("evt-123", env.EventId);
+        Assert.Equal("OrderCreated", env.EventType);
+        Assert.Equal("RentalService", env.Producer);
+        Assert.Equal(1, env.Version);
+
+        string contactJson = """
+        {
+            "contacts": [
+                { "userId": "00000000-0000-0000-0000-000000000001", "email": "test@example.com", "isActive": true, "isEmailVerified": true }
+            ]
+        }
+        """;
+        var contactBatch = JsonSerializer.Deserialize<Dprental.NotificationService.Application.Clients.AuthContactBatchResponse>(contactJson, webOptions);
+        Assert.NotNull(contactBatch);
+        Assert.Single(contactBatch.Contacts);
+        Assert.Equal("test@example.com", contactBatch.Contacts[0].Email);
+        Assert.True(contactBatch.Contacts[0].IsActive);
+        Assert.True(contactBatch.Contacts[0].IsEmailVerified);
+    }
 }
