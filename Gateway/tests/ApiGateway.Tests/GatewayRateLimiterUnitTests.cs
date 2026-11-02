@@ -1,7 +1,9 @@
 using System.Diagnostics.Metrics;
 using System.Net;
 using System.Security.Claims;
-using Dprental.Gateway.Security;
+using Dprental.Gateway.Models.Security;
+using Dprental.Gateway.Middlewares.Security;
+using Dprental.Gateway.Extensions.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Xunit;

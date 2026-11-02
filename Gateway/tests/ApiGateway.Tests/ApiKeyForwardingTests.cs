@@ -1,6 +1,9 @@
 using System.Net;
-using Dprental.Gateway.Authentication;
-using Dprental.Gateway.Security;
+using Dprental.Gateway.Models.Authentication;
+using Dprental.Gateway.Extensions.Authentication;
+using Dprental.Gateway.Models.Security;
+using Dprental.Gateway.Middlewares.Security;
+using Dprental.Gateway.Extensions.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;

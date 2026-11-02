@@ -1,3 +1,4 @@
+using Dprental.Gateway.Extensions.Proxy;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
@@ -7,8 +8,12 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Dprental.Gateway.Security;
-using Dprental.Gateway.Errors;
+using Dprental.Gateway.Models.Security;
+using Dprental.Gateway.Middlewares.Security;
+using Dprental.Gateway.Extensions.Security;
+using Dprental.Gateway.Models.Errors;
+using Dprental.Gateway.Middlewares.Errors;
+using Dprental.Gateway.Extensions.Errors;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -608,30 +613,28 @@ public sealed class GatewaySecurityIntegrationTests
         long? maxRequestBodySizeBytes = null,
         long? mediaUploadMaxRequestBodySizeBytes = null)
     {
+        var ocelotDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../Gateway/Ocelot/Development"));
+        var env = new TestHostEnvironment { ContentRootPath = Path.GetDirectoryName(Path.GetDirectoryName(ocelotDir))! };
+        var ocelotConfigBuilder = new ConfigurationBuilder();
+        OcelotServiceCollectionExtensions.AddGatewayOcelotConfiguration(
+            ocelotConfigBuilder, ocelotDir, env);
+        var ocelotConfig = ocelotConfigBuilder.Build();
+
         Dictionary<string, string?> overrides = new(StringComparer.Ordinal)
         {
             ["Gateway:Authentication:Jwt:Issuer"] = Issuer,
             ["Gateway:Authentication:Jwt:Audience"] = Audience,
             ["Gateway:Authentication:Jwt:JwksUri"] = new Uri(upstreamAddress, ".well-known/jwks.json").AbsoluteUri,
-            ["Routes:0:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:0:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:0:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Routes:1:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:1:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:1:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Routes:2:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:2:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:2:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Routes:3:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:3:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:3:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
 
-        for (int route = 4; route <= 5; route++)
+        foreach (var route in ocelotConfig.GetSection("Routes").GetChildren())
         {
-            overrides[$"Routes:{route}:DownstreamScheme"] = upstreamAddress.Scheme;
-            overrides[$"Routes:{route}:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
-            overrides[$"Routes:{route}:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            string existingScheme = route["DownstreamScheme"] ?? "http";
+            overrides[$"{route.Path}:DownstreamScheme"] = string.Equals(existingScheme, "ws", StringComparison.OrdinalIgnoreCase)
+                ? "ws"
+                : upstreamAddress.Scheme;
+            overrides[$"{route.Path}:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
+            overrides[$"{route.Path}:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         if (allowedOrigins is not null)
@@ -654,12 +657,13 @@ public sealed class GatewaySecurityIntegrationTests
 
         if (includeProtectedRoute)
         {
-            overrides["Routes:6:Key"] = "protected-service";
-            overrides["Routes:6:UpstreamPathTemplate"] = "/protected/{everything}";
-            overrides["Routes:6:DownstreamPathTemplate"] = "/protected/{everything}";
-            overrides["Routes:6:DownstreamScheme"] = upstreamAddress.Scheme;
-            overrides["Routes:6:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
-            overrides["Routes:6:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            overrides["Routes:19:Key"] = "protected-service";
+            overrides["Routes:19:UpstreamPathTemplate"] = "/protected/{everything}";
+            overrides["Routes:19:DownstreamPathTemplate"] = "/protected/{everything}";
+            overrides["Routes:19:DownstreamScheme"] = upstreamAddress.Scheme;
+            overrides["Routes:19:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
+            overrides["Routes:19:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            overrides["Routes:19:AuthenticationOptions:AuthenticationProviderKey"] = "Bearer";
         }
 
         return new WebApplicationFactory<Program>()
@@ -870,5 +874,15 @@ public sealed class GatewaySecurityIntegrationTests
         public string? Method { get; set; }
         public string? Path { get; set; }
         public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed class TestHostEnvironment : IWebHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Development";
+        public string ApplicationName { get; set; } = "Gateway.Api";
+        public string WebRootPath { get; set; } = "";
+        public Microsoft.Extensions.FileProviders.IFileProvider WebRootFileProvider { get; set; } = null!;
+        public string ContentRootPath { get; set; } = "";
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = null!;
     }
 }

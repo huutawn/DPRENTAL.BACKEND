@@ -1,3 +1,4 @@
+using Dprental.Gateway.Extensions.Proxy;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -95,24 +96,29 @@ public sealed class GatewayResilienceIntegrationTests
         Uri upstreamAddress,
         int? timeoutSeconds = null)
     {
+        var ocelotDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../Gateway/Ocelot/Development"));
+        var env = new TestHostEnvironment { ContentRootPath = Path.GetDirectoryName(Path.GetDirectoryName(ocelotDir))! };
+        var ocelotConfigBuilder = new ConfigurationBuilder();
+        OcelotServiceCollectionExtensions.AddGatewayOcelotConfiguration(
+            ocelotConfigBuilder, ocelotDir, env);
+        var ocelotConfig = ocelotConfigBuilder.Build();
+
         Dictionary<string, string?> overrides = new(StringComparer.Ordinal)
         {
             ["Gateway:Authentication:Jwt:Issuer"] = Issuer,
             ["Gateway:Authentication:Jwt:Audience"] = Audience,
             ["Gateway:Authentication:Jwt:JwksUri"] = new Uri(upstreamAddress, ".well-known/jwks.json").AbsoluteUri,
-            ["Routes:0:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:0:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:0:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Routes:1:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:1:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:1:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Routes:2:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:2:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:2:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Routes:3:DownstreamScheme"] = upstreamAddress.Scheme,
-            ["Routes:3:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host,
-            ["Routes:3:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
+
+        foreach (var route in ocelotConfig.GetSection("Routes").GetChildren())
+        {
+            string existingScheme = route["DownstreamScheme"] ?? "http";
+            overrides[$"{route.Path}:DownstreamScheme"] = string.Equals(existingScheme, "ws", StringComparison.OrdinalIgnoreCase)
+                ? "ws"
+                : upstreamAddress.Scheme;
+            overrides[$"{route.Path}:DownstreamHostAndPorts:0:Host"] = upstreamAddress.Host;
+            overrides[$"{route.Path}:DownstreamHostAndPorts:0:Port"] = upstreamAddress.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
 
         if (timeoutSeconds.HasValue)
         {
@@ -235,5 +241,15 @@ public sealed class GatewayResilienceIntegrationTests
             probe.Start();
             return ((IPEndPoint)probe.LocalEndpoint).Port;
         }
+    }
+
+    private sealed class TestHostEnvironment : IWebHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Development";
+        public string ApplicationName { get; set; } = "Gateway.Api";
+        public string WebRootPath { get; set; } = "";
+        public Microsoft.Extensions.FileProviders.IFileProvider WebRootFileProvider { get; set; } = null!;
+        public string ContentRootPath { get; set; } = "";
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = null!;
     }
 }

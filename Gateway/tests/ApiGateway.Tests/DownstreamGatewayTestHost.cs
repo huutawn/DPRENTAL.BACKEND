@@ -22,7 +22,13 @@ internal static class DownstreamGatewayTestHost
             builder.UseEnvironment("Development");
             builder.ConfigureAppConfiguration((_, configurationBuilder) =>
             {
-                var configuration = configurationBuilder.Build();
+                var ocelotDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../Gateway/Ocelot/Development"));
+                var env = new TestHostEnvironment { ContentRootPath = Path.GetDirectoryName(Path.GetDirectoryName(ocelotDir))! };
+                var ocelotConfigBuilder = new ConfigurationBuilder();
+                Dprental.Gateway.Extensions.Proxy.OcelotServiceCollectionExtensions.AddGatewayOcelotConfiguration(
+                    ocelotConfigBuilder, ocelotDir, env);
+                var ocelotConfig = ocelotConfigBuilder.Build();
+
                 Dictionary<string, string?> overrides = new()
                 {
                     ["Gateway:Authentication:Jwt:Issuer"] = "https://auth.example.test",
@@ -30,7 +36,7 @@ internal static class DownstreamGatewayTestHost
                     ["Gateway:Authentication:Jwt:InventoryAudience"] = "inventory-api",
                     ["Gateway:Authentication:Jwt:JwksUri"] = new Uri(upstreamAddress, "/.well-known/jwks.json").ToString()
                 };
-                foreach (var route in configuration.GetSection("Routes").GetChildren())
+                foreach (var route in ocelotConfig.GetSection("Routes").GetChildren())
                 {
                     string existingScheme = route["DownstreamScheme"] ?? "http";
                     overrides[$"{route.Path}:DownstreamScheme"] = string.Equals(existingScheme, "ws", StringComparison.OrdinalIgnoreCase)
@@ -228,4 +234,14 @@ internal static class DownstreamGatewayTestHost
         string Authorization,
         IReadOnlyDictionary<string, string> Headers,
         string Body);
+
+    private sealed class TestHostEnvironment : IWebHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Development";
+        public string ApplicationName { get; set; } = "Gateway.Api";
+        public string WebRootPath { get; set; } = "";
+        public Microsoft.Extensions.FileProviders.IFileProvider WebRootFileProvider { get; set; } = null!;
+        public string ContentRootPath { get; set; } = "";
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = null!;
+    }
 }
