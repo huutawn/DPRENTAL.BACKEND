@@ -201,6 +201,15 @@ public static class RentalAuthorizationPolicy
             Error.Forbidden(ErrorCodes.Forbidden, "Chỉ quản trị viên mới được xác nhận hoàn tiền."));
 
     /// <summary>
+    /// Chỉ Admin cá nhân đã đăng nhập được xem tài khoản nhận tiền của nhà cung cấp; từ chối token service.
+    /// </summary>
+    public static Result AuthorizeAdminSupplierBankAccountRead(IRentalCallerContext caller) =>
+        RequireAdmin(
+            caller,
+            "Service token không được xem tài khoản của nhà cung cấp.",
+            Error.Forbidden(ErrorCodes.Forbidden, "Chỉ quản trị viên mới được xem tài khoản của nhà cung cấp."));
+
+    /// <summary>
     /// Kiểm tra quyền đọc bằng chứng riêng tư của order/item.
     /// Caller phải là Admin, renter của order hoặc supplier của item; không cho token service truy cập.
     /// MediaId phải thuộc bằng chứng đã ghi của bàn giao, trả máy, khấu trừ hoặc tranh chấp.
