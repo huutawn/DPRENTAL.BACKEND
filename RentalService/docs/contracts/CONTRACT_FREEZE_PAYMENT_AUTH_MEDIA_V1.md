@@ -37,7 +37,7 @@ It establishes explicit capability boundaries, request/response models, event sc
 ### 2.2. Operations (`IPaymentRentalClient`)
 
 #### 1. `CreateInvoice`
-- **Proposed Route:** `POST /api/v1/invoices`
+- **Proposed Route:** `POST /api/v1/payment/invoices`
 - **Required Scope:** `payment.invoice.write`
 - **Idempotency:** Replay-safe by `OperationKey`. Same `OperationKey` + payload returns existing invoice with `IsReplay = true`. Conflicting payload returns `DUPLICATE_OPERATION_KEY`.
 - **Request:**
@@ -71,7 +71,7 @@ It establishes explicit capability boundaries, request/response models, event sc
 ```
 
 #### 2. `CancelInvoice`
-- **Proposed Route:** `POST /api/v1/invoices/{invoiceRef}/cancel`
+- **Proposed Route:** `POST /api/v1/payment/invoices/{invoiceRef}/cancel`
 - **Semantics:** Cancels an unpaid invoice if the rental order timed out or was cancelled prior to payment. If the invoice has already been collected, returns `INVOICE_ALREADY_PAID` (does not refund).
 - **Request:**
 ```json
@@ -93,7 +93,7 @@ It establishes explicit capability boundaries, request/response models, event sc
 ```
 
 #### 3. `RequestRefund`
-- **Proposed Route:** `POST /api/v1/refunds`
+- **Proposed Route:** `POST /api/v1/payment/refunds`
 - **Required Scope:** `payment.refund.write`
 - **Semantics:** Disburses refund back to original source for supplier rejections, supplier confirmation timeouts, or late-payment terminal orders.
 - **Request:**
@@ -126,7 +126,7 @@ It establishes explicit capability boundaries, request/response models, event sc
 ```
 
 #### 4. `SettleRental`
-- **Proposed Route:** `POST /api/v1/settlements`
+- **Proposed Route:** `POST /api/v1/payment/settlements`
 - **Required Scope:** `payment.settlement.write`
 - **Preconditions:** MUST ONLY be called after all physical units are returned and deduction proposal is finalized.
 - **Rule:** Refunded deposit amount MUST strictly equal `DepositAmount - FinalDeductionAmount`.

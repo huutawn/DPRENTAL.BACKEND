@@ -46,7 +46,7 @@ public sealed class HttpClientsAndTokenProviderIntegrationTests
                 Assert.Equal(expectedKey, req.Headers.GetValues("X-Api-Key").Single());
                 Assert.Null(req.Headers.Authorization);
                 Assert.Equal(HttpMethod.Post, req.Method);
-                Assert.Equal("http://payment-service:8080/api/v1/invoices/INV-001/cancel", req.RequestUri!.ToString());
+                Assert.Equal("http://payment-service:8080/api/v1/payment/invoices/INV-001/cancel", req.RequestUri!.ToString());
 
                 var resp = new CancelInvoiceResponse("INV-001", true, DateTimeOffset.UtcNow, false);
                 return new HttpResponseMessage(HttpStatusCode.OK)
