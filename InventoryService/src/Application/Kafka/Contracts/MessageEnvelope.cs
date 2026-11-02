@@ -144,35 +144,26 @@ public static class MessageEnvelope
 /// </summary>
 public sealed record MessageEnvelope<T>
 {
-    [JsonPropertyName("messageId")]
     public required Guid MessageId { get; init; }
 
-    [JsonPropertyName("messageType")]
     public required string MessageType { get; init; }
 
-    [JsonPropertyName("version")]
     public required int Version { get; init; }
 
-    [JsonPropertyName("correlationId")]
     public required string CorrelationId { get; init; }
 
-    [JsonPropertyName("causationId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? CausationId { get; init; }
-    [JsonPropertyName("aggregateId")]
+
     public required string AggregateId { get; init; }
 
-    [JsonPropertyName("organizationId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? OrganizationId { get; init; }
 
-    [JsonPropertyName("occurredAt")]
     public required DateTimeOffset OccurredAt { get; init; }
 
-    [JsonPropertyName("producer")]
     public required string Producer { get; init; }
 
-    [JsonPropertyName("payload")]
     public required T Payload { get; init; }
 
     /// <summary>

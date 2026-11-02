@@ -8,10 +8,10 @@ namespace Dprental.InventoryService.Application.DTOs.Allocations;
 /// </summary>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record CreateHoldRequest(
-    [property: JsonPropertyName("sourceSystem")] string SourceSystem,
-    [property: JsonPropertyName("externalReference")] string ExternalReference,
-    [property: JsonPropertyName("startDate")] DateOnly StartDate,
-    [property: JsonPropertyName("endDate")] DateOnly EndDate,
-    [property: JsonPropertyName("holdExpiresAt")] DateTimeOffset HoldExpiresAt,
-    [property: JsonPropertyName("notes")] string? Notes = null
+    string SourceSystem,
+    string ExternalReference,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    DateTimeOffset HoldExpiresAt,
+    string? Notes = null
 );

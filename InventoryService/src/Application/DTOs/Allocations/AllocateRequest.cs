@@ -8,5 +8,5 @@ namespace Dprental.InventoryService.Application.DTOs.Allocations;
 /// </summary>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record AllocateRequest(
-    [property: JsonPropertyName("operationKey")] string OperationKey
+    string OperationKey
 );

@@ -1,6 +1,5 @@
 using Dprental.InventoryService.Application.Caching;
 using Dprental.InventoryService.Application.DTOs.Availability;
-using System.Text.Json.Serialization;
 
 namespace Dprental.InventoryService.Application.DTOs.Availability;
 
@@ -9,7 +8,7 @@ namespace Dprental.InventoryService.Application.DTOs.Availability;
 /// Chỉ chứa assetId, acceptingBookings và ranges (gồm startDate, endDate).
 /// </summary>
 public sealed record AssetBusyRangesResponse(
-    [property: JsonPropertyName("assetId")] Guid AssetId,
-    [property: JsonPropertyName("acceptingBookings")] bool AcceptingBookings,
-    [property: JsonPropertyName("ranges")] IReadOnlyList<BusyRangeDto> Ranges
+    Guid AssetId,
+    bool AcceptingBookings,
+    IReadOnlyList<BusyRangeDto> Ranges
 );
