@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/api/auth-contact-batch-response-v1.json",
+  "title": "AuthContactBatchResponse",
+  "type": "object",
+  "required": ["contacts"],
+  "properties": {
+    "contacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["userId", "email", "isActive", "isEmailVerified"],
+        "properties": {
+          "userId": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "isActive": { "type": "boolean" },
+          "isEmailVerified": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

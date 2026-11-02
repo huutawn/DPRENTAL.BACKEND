@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/api/mark-all-read-request-v1.json",
+  "title": "MarkAllReadRequest",
+  "type": "object",
+  "properties": {
+    "cutoffUtc": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

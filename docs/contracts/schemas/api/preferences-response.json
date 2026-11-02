@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/api/preferences-response-v1.json",
+  "title": "PreferencesResponse",
+  "type": "object",
+  "required": ["preferences"],
+  "properties": {
+    "preferences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["category", "emailEnabled"],
+        "properties": {
+          "category": { "type": "string", "enum": ["ORDER", "PAYMENT", "HANDOVER", "RETURN"] },
+          "emailEnabled": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

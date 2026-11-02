@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/events/return-confirmation-overdue-v1.json",
+  "title": "ReturnConfirmationOverduePayload",
+  "type": "object",
+  "required": [
+    "rentalOrderId",
+    "rentalItemId",
+    "returnRequestId",
+    "supplierId",
+    "renterId",
+    "confirmationDeadlineAt",
+    "overdueAt",
+    "overdueAssignmentIds"
+  ],
+  "properties": {
+    "rentalOrderId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "rentalItemId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "returnRequestId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "supplierId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "renterId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "confirmationDeadlineAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "overdueAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "overdueAssignmentIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "orderVersion": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/events/rental-item-handover-completed-v1.json",
+  "title": "RentalItemHandoverCompletedPayload",
+  "type": "object",
+  "required": [
+    "rentalOrderId",
+    "rentalItemId",
+    "renterId",
+    "supplierId",
+    "equipmentListingId",
+    "quantity",
+    "handoverRecordId",
+    "actualHandoverAt",
+    "completedAt"
+  ],
+  "properties": {
+    "rentalOrderId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "rentalItemId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "renterId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "supplierId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "equipmentListingId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "quantity": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "handoverRecordId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "actualHandoverAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "orderVersion": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

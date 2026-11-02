@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/api/unread-count-response-v1.json",
+  "title": "UnreadCountResponse",
+  "type": "object",
+  "required": ["unreadCount"],
+  "properties": {
+    "unreadCount": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

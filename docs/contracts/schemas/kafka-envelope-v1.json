@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/kafka-envelope-v1.json",
+  "title": "KafkaMessageEnvelopeV1",
+  "type": "object",
+  "required": [
+    "messageId",
+    "messageType",
+    "version",
+    "producer",
+    "aggregateId",
+    "occurredAt",
+    "payload"
+  ],
+  "properties": {
+    "messageId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "messageType": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "producer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "aggregateId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlationId": {
+      "type": ["string", "null"]
+    },
+    "causationId": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

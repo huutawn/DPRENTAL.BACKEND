@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/events/rental-order-created-v1.json",
+  "title": "RentalOrderCreatedPayload",
+  "type": "object",
+  "required": [
+    "rentalOrderId",
+    "orderCode",
+    "renterId",
+    "totalRentalAmount",
+    "totalDepositAmount",
+    "totalPayableAmount",
+    "paymentDeadline",
+    "createdAt",
+    "items"
+  ],
+  "properties": {
+    "rentalOrderId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "orderCode": {
+      "type": "string",
+      "minLength": 1
+    },
+    "renterId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "currency": {
+      "type": "string"
+    },
+    "totalRentalAmount": {
+      "type": "number",
+      "minimum": 0
+    },
+    "totalDepositAmount": {
+      "type": "number",
+      "minimum": 0
+    },
+    "totalPayableAmount": {
+      "type": "number",
+      "minimum": 0
+    },
+    "paymentDeadline": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "rentalItemId",
+          "equipmentListingId",
+          "supplierId",
+          "quantity",
+          "expectedStartDate",
+          "expectedEndDate",
+          "rentalAmount",
+          "depositAmount"
+        ],
+        "properties": {
+          "rentalItemId": { "type": "string", "format": "uuid" },
+          "equipmentListingId": { "type": "string", "format": "uuid" },
+          "supplierId": { "type": "string", "format": "uuid" },
+          "quantity": { "type": "integer", "minimum": 1 },
+          "expectedStartDate": { "type": "string", "format": "date" },
+          "expectedEndDate": { "type": "string", "format": "date" },
+          "rentalAmount": { "type": "number", "minimum": 0 },
+          "depositAmount": { "type": "number", "minimum": 0 },
+          "equipmentTypeId": { "type": ["string", "null"], "format": "uuid" },
+          "equipmentTypeName": { "type": ["string", "null"] },
+          "brandId": { "type": ["string", "null"], "format": "uuid" },
+          "brandName": { "type": ["string", "null"] },
+          "model": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "orderVersion": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

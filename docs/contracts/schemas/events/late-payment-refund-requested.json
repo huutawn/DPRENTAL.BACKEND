@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/events/late-payment-refund-requested-v1.json",
+  "title": "LatePaymentRefundRequestedPayload",
+  "type": "object",
+  "required": [
+    "rentalOrderId",
+    "renterId",
+    "invoiceRef",
+    "paymentRef",
+    "totalRefundAmount",
+    "requestedAt"
+  ],
+  "properties": {
+    "rentalOrderId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "renterId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "invoiceRef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "paymentRef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "totalRefundAmount": {
+      "type": "number",
+      "minimum": 0
+    },
+    "requestedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "orderVersion": {
+      "type": ["integer", "null"],
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

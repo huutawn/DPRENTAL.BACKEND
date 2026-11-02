@@ -1,0 +1,19 @@
+{
+  "messageId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "messageType": "LatePaymentRefundRequested",
+  "version": 1,
+  "producer": "RentalService",
+  "aggregateId": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+  "occurredAt": "2026-11-02T04:30:00Z",
+  "correlationId": "order:a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+  "causationId": null,
+  "payload": {
+    "rentalOrderId": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+    "renterId": "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e",
+    "invoiceRef": "INV-20261102-0001",
+    "paymentRef": "PAY-20261102-0001",
+    "totalRefundAmount": 1500000.0,
+    "requestedAt": "2026-11-02T04:30:00Z",
+    "orderVersion": 3
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/events/rental-order-completed-v1.json",
+  "title": "RentalOrderCompletedPayload",
+  "type": "object",
+  "required": [
+    "rentalOrderId",
+    "renterId",
+    "completedAt"
+  ],
+  "properties": {
+    "rentalOrderId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "renterId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "orderVersion": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

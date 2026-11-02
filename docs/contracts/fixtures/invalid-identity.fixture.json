@@ -1,0 +1,19 @@
+{
+  "messageId": "not-a-valid-uuid-identity",
+  "messageType": "RentalOrderPaid",
+  "version": 1,
+  "producer": "RentalService",
+  "aggregateId": "invalid-aggregate-uuid",
+  "occurredAt": "2026-11-02T03:15:00Z",
+  "correlationId": null,
+  "causationId": null,
+  "payload": {
+    "rentalOrderId": "invalid-guid",
+    "renterId": "not-a-guid",
+    "invoiceRef": "INV-20261102-0001",
+    "paymentRef": "PAY-20261102-0001",
+    "paidAmount": 1500000.0,
+    "paidAt": "2026-11-02T03:15:00Z",
+    "orderVersion": 2
+  }
+}

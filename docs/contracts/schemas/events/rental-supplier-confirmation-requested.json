@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/events/rental-supplier-confirmation-requested-v1.json",
+  "title": "RentalSupplierConfirmationRequestedPayload",
+  "type": "object",
+  "required": [
+    "rentalOrderId",
+    "rentalItemId",
+    "supplierId",
+    "equipmentListingId",
+    "quantity",
+    "supplierConfirmationDeadline"
+  ],
+  "properties": {
+    "rentalOrderId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "rentalItemId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "supplierId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "equipmentListingId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "quantity": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "supplierConfirmationDeadline": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "orderVersion": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

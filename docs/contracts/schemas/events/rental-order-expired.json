@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/events/rental-order-expired-v1.json",
+  "title": "RentalOrderExpiredPayload",
+  "type": "object",
+  "required": [
+    "rentalOrderId",
+    "renterId",
+    "expiredAt",
+    "reason"
+  ],
+  "properties": {
+    "rentalOrderId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "renterId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "expiredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "orderVersion": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

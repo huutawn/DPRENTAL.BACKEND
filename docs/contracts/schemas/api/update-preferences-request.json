@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/api/update-preferences-request-v1.json",
+  "title": "UpdatePreferencesRequest",
+  "type": "object",
+  "required": ["preferences"],
+  "properties": {
+    "preferences": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["category", "emailEnabled"],
+        "properties": {
+          "category": { "type": "string", "enum": ["ORDER", "PAYMENT", "HANDOVER", "RETURN"] },
+          "emailEnabled": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

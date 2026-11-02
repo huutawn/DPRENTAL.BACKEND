@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dprental.vn/contracts/api/notification-list-response-v1.json",
+  "title": "NotificationListResponse",
+  "type": "object",
+  "required": [
+    "items",
+    "page",
+    "pageSize",
+    "totalCount",
+    "totalPages",
+    "hasPrevious",
+    "hasNext"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "notificationType",
+          "category",
+          "severity",
+          "title",
+          "body",
+          "resourceType",
+          "resourceId",
+          "isActionable",
+          "isRead",
+          "occurredAt",
+          "createdAt"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "notificationType": { "type": "string" },
+          "category": { "type": "string", "enum": ["ORDER", "PAYMENT", "HANDOVER", "RETURN", "SYSTEM"] },
+          "severity": { "type": "string", "enum": ["INFO", "ACTION_REQUIRED", "WARNING", "SUCCESS"] },
+          "title": { "type": "string" },
+          "body": { "type": "string" },
+          "resourceType": { "type": "string" },
+          "resourceId": { "type": "string" },
+          "deepLinkUrl": { "type": ["string", "null"] },
+          "isActionable": { "type": "boolean" },
+          "actionUrl": { "type": ["string", "null"] },
+          "isRead": { "type": "boolean" },
+          "readAt": { "type": ["string", "null"], "format": "date-time" },
+          "occurredAt": { "type": "string", "format": "date-time" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "page": { "type": "integer", "minimum": 1 },
+    "pageSize": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "totalCount": { "type": "integer", "minimum": 0 },
+    "totalPages": { "type": "integer", "minimum": 0 },
+    "hasPrevious": { "type": "boolean" },
+    "hasNext": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

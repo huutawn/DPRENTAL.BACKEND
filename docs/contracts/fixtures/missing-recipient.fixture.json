@@ -1,0 +1,19 @@
+{
+  "messageId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+  "messageType": "RentalOrderPaid",
+  "version": 1,
+  "producer": "RentalService",
+  "aggregateId": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+  "occurredAt": "2026-11-02T03:15:00Z",
+  "correlationId": "order:a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+  "causationId": null,
+  "payload": {
+    "rentalOrderId": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+    "renterId": "00000000-0000-0000-0000-000000000000",
+    "invoiceRef": "INV-20261102-0001",
+    "paymentRef": "PAY-20261102-0001",
+    "paidAmount": 1500000.0,
+    "paidAt": "2026-11-02T03:15:00Z",
+    "orderVersion": 2
+  }
+}

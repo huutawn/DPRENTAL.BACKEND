@@ -1,0 +1,19 @@
+{
+  "messageId": "77777777-7777-7777-7777-777777777777",
+  "messageType": "RentalHandoverOverdue",
+  "version": 1,
+  "producer": "RentalService",
+  "aggregateId": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+  "occurredAt": "2026-11-05T12:00:00Z",
+  "correlationId": "order:a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+  "causationId": null,
+  "payload": {
+    "rentalOrderId": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+    "rentalItemId": "c3d4e5f6-a7b8-9c0d-1e2f-3a4b5c6d7e8f",
+    "supplierId": "e5f6a7b8-c9d0-1e2f-3a4b-5c6d7e8f9a0b",
+    "renterId": "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e",
+    "expectedStartDate": "2026-11-05",
+    "overdueAt": "2026-11-05T12:00:00Z",
+    "orderVersion": 3
+  }
+}
