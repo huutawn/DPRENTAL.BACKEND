@@ -95,7 +95,10 @@ public sealed class EfFinancialReadRepository(PaymentServiceDbContext db) : IFin
                 x.Id, x.PayoutRef, x.SettlementId, x.Settlement!.SettlementRef, x.RentalItemId, x.SupplierId,
                 x.Amount, x.Currency, x.Status, x.DestinationRef, x.ExternalTransferReference,
                 x.CompletedBy, x.CreatedAt, x.CompletedAt,
-                x.DestinationId, x.Destination == null ? (int?)null : x.Destination.Version))
+                x.DestinationId, x.Destination == null ? (int?)null : x.Destination.Version,
+                db.Invoices.Where(i => i.Id == x.Settlement!.InvoiceId).Select(i => i.RentalOrderId).First(),
+                db.Invoices.Where(i => i.Id == x.Settlement!.InvoiceId).Select(i => i.OrderCode).First(),
+                x.Settlement!.RentalAmount, x.Settlement!.PlatformFeeAmount, x.Settlement!.FinalDeductionAmount))
             .ToListAsync(ct);
 
         return new ReadPage<AdminPayoutRow>(items, total);
