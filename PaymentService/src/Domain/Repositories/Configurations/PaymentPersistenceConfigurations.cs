@@ -280,3 +280,11 @@ public sealed class ManualRefundItemConfiguration : IEntityTypeConfiguration<Man
         builder.Property(x => x.DepositAmount).HasColumnType("numeric(18,0)");
     }
 }
+
+public sealed class SupplierPayoutConfiguration : IEntityTypeConfiguration<SupplierPayout>
+{
+    public void Configure(EntityTypeBuilder<SupplierPayout> builder)
+    {
+        builder.HasIndex(x => x.TransferCode).IsUnique().HasDatabaseName("UX_supplier_payouts_TransferCode");
+    }
+}

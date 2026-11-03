@@ -909,10 +909,19 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Property<Guid>("SupplierId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("TransferCode")
+                        .IsRequired()
+                        .HasMaxLength(14)
+                        .HasColumnType("character varying(14)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("SettlementId")
                         .IsUnique();
+
+                    b.HasIndex("TransferCode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_supplier_payouts_TransferCode");
 
                     b.ToTable("supplier_payouts");
                 });

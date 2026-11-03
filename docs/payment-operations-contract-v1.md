@@ -16,7 +16,8 @@ Status: **Đã triển khai subtask 1–7 của Supplier Payable, Manual Payout 
 
 | API | Quyền | Body và hiệu ứng |
 | --- | --- | --- |
-| `POST /api/v1/payment/admin/payouts/{payoutId}/complete` | Admin `adm`/`adp`, client audience | `OperationKey`, `ExternalTransferReference`, `AuditReason`. Server lấy `CompletedBy` từ `sub`, `CompletedAt` từ UTC clock. Chỉ hoàn tất payout đang `PENDING_PAYOUT`. |
+| `POST /api/v1/payment/admin/payouts/{payoutId}/complete` | Admin `adm`/`adp`, client audience | `OperationKey`, `ExternalTransferReference`, `AuditReason`. Server lấy `CompletedBy` từ `sub`, `CompletedAt` từ UTC clock. Chỉ hoàn tất payout đang `PENDING_PAYOUT`. Dùng khi webhook không tự hoàn tất được. |
+| Webhook SePay `transferType=out` | SePay `Apikey` | Nội dung chuyển khoản chứa đúng một `TransferCode` (`DPO` + 10 ký tự) của payout. Đúng tài khoản hệ thống, payout `PENDING_PAYOUT` và số tiền bằng `Amount` thì giao dịch ghi `MATCHED`/`PAYOUT_TRANSFER`, sau khi commit gọi cùng luồng `/complete` với `OperationKey` = `ExternalTransferReference` = `SEPAY:{id}`, actor `WEBHOOK:SEPAY`. SePay gửi lại webhook chỉ ra replay. Không khớp thì `REVIEW_REQUIRED` với `AMBIGUOUS_PAYMENT_CODE`, `ACCOUNT_MISMATCH`, `PAYOUT_NOT_FOUND`, `PAYOUT_NOT_PENDING` hoặc `AMOUNT_MISMATCH`. |
 | `POST /api/v1/payment/manual-refunds/{requirementId}/complete` | Admin `adm`/`adp`, client audience | `OperationKey`, `ExternalTransferReference`, `AuditReason`. Trạng thái hoàn cọc, audit và outbox được ghi trong cùng transaction. |
 | `POST /api/v1/payment/admin/payments/unmatched/{transactionId}/resolve` | Admin `adm`/`adp`, client audience | `InvoiceRef`, `OperationKey`, `ExternalReference`, `AuditReason`. Chỉ nhận giao dịch `UNMATCHED` tiền vào, đúng ngân hàng/tài khoản, số tiền, mã thanh toán và còn trong hạn theo cả thời điểm ngân hàng lẫn thời điểm xử lý. Ghi resolution bất biến, invoice `PAID` và `InvoicePaid` outbox trong cùng transaction. Giao dịch trễ/sai tiền tiếp tục ở review; replay cùng key/payload không phát event lặp. |
 
@@ -33,7 +34,7 @@ Status: **Đã triển khai subtask 1–7 của Supplier Payable, Manual Payout 
 | `GET /api/v1/payment/supplier/payouts` | Supplier từ JWT `sub` | Chỉ các payout có `SupplierId == sub`; không nhận supplier ID tùy ý từ query. |
 | `GET /api/v1/payment/admin/payments/review?kind=...` | Admin | Chọn một trong `AwaitingPayment`, `UnmatchedTransaction`, `LateTransaction`, `ReviewRequiredTransaction`, `SettlementPendingClose`; phân trang từng hàng đợi. `LateTransaction` là giao dịch `MANUAL_REFUND_REQUIRED` có reason `LATE_PAYMENT`. |
 | `GET /api/v1/payment/admin/manual-refunds` | Admin | Yêu cầu hoàn cọc pending. |
-| `GET /api/v1/payment/admin/payouts` | Admin | Payout pending. |
+| `GET /api/v1/payment/admin/payouts` | Admin | Payout pending, kèm `transferCode` để FE tạo QR VietQR (`des` = `transferCode`). |
 
 Các danh sách dùng `page` (từ 1), `pageSize` (1–100, mặc định 20), `from`, `to`; danh sách payout/refund còn nhận `status`. Review dùng `kind` thay cho `status`. Response gồm `items`, `page`, `pageSize`, `totalCount`. Sắp xếp ổn định theo `CreatedAt`, rồi ID. Cần lọc theo quyền **trong truy vấn DB**, không tải toàn bộ rồi lọc ở controller. Admin dùng claim hiện có `adm`/`adp`; supplier/renter dùng client audience và `sub`, đối chiếu ownership từ Payment DB. Không dùng service token để xem queue admin.
 

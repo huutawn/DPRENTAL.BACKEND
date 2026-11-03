@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Dprental.PaymentService.Common;
+using Dprental.PaymentService.Common.Utils;
 
 namespace Dprental.PaymentService.Domain.Entities;
 
@@ -24,6 +25,10 @@ public sealed class SupplierPayout
 
     [Required, MaxLength(3)]
     public string Currency { get; private set; } = default!;
+
+    // Nội dung chuyển khoản admin dùng khi trả payout (QR); webhook SePay tiền ra đọc mã này để tự xác nhận.
+    [Required, MaxLength(14)]
+    public string TransferCode { get; private set; } = default!;
 
     [Required, MaxLength(32)]
     public string Status { get; private set; } = default!;
@@ -59,6 +64,7 @@ public sealed class SupplierPayout
             SupplierId = supplierId,
             Amount = amount,
             Currency = "VND",
+            TransferCode = PaymentCodeGenerator.Generate(PaymentCodeGenerator.PayoutPrefix),
             Status = StatusPendingPayout,
             CreatedAt = now.ToUniversalTime()
         };

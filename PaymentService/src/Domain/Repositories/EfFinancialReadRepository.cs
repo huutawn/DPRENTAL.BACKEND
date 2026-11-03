@@ -93,7 +93,7 @@ public sealed class EfFinancialReadRepository(PaymentServiceDbContext db) : IFin
             .Skip(p.Skip).Take(p.PageSize)
             .Select(x => new AdminPayoutRow(
                 x.Id, x.PayoutRef, x.SettlementId, x.Settlement!.SettlementRef, x.RentalItemId, x.SupplierId,
-                x.Amount, x.Currency, x.Status, x.ExternalTransferReference,
+                x.Amount, x.Currency, x.Status, x.TransferCode, x.ExternalTransferReference,
                 x.CompletedBy, x.CreatedAt, x.CompletedAt,
                 db.Invoices.Where(i => i.Id == x.Settlement!.InvoiceId).Select(i => i.RentalOrderId).First(),
                 db.Invoices.Where(i => i.Id == x.Settlement!.InvoiceId).Select(i => i.OrderCode).First(),

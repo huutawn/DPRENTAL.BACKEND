@@ -50,7 +50,7 @@ public sealed record SupplierPayoutRow(
 
 public sealed record AdminPayoutRow(
     Guid PayoutId, string PayoutRef, Guid SettlementId, string SettlementRef, Guid RentalItemId, Guid SupplierId,
-    decimal Amount, string Currency, string Status, string? ExternalTransferReference,
+    decimal Amount, string Currency, string Status, string TransferCode, string? ExternalTransferReference,
     Guid? CompletedBy, DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt,
     Guid RentalOrderId, string OrderCode,
     decimal RentalAmount, decimal PlatformFeeAmount, decimal FinalDeductionAmount);
