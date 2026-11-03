@@ -216,6 +216,8 @@ public sealed class ManualRefundRequirementConfiguration : IEntityTypeConfigurat
         builder.HasIndex(x => x.ExternalTransferReference).IsUnique();
         builder.HasMany(x => x.Items).WithOne().HasForeignKey(x => x.RequirementId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => x.RequirementRef).IsUnique();
+        builder.Property(x => x.TransferCode).IsRequired().HasMaxLength(14);
+        builder.HasIndex(x => x.TransferCode).IsUnique().HasDatabaseName("UX_manual_refund_requirements_TransferCode");
     }
 }
 

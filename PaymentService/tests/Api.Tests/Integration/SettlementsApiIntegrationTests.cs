@@ -542,8 +542,68 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         await using var verify = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
         var recorded = await verify.PaymentTransactions.AsNoTracking().SingleAsync(t => t.ProviderTransactionId == "900003");
         Assert.Equal(PaymentTransactionStatus.ReviewRequired, recorded.Status);
-        Assert.Equal(PaymentTransactionReason.PayoutNotFound, recorded.ReasonCode);
+        Assert.Equal(PaymentTransactionReason.TransferTargetNotFound, recorded.ReasonCode);
         Assert.Null(recorded.InvoiceId);
+    }
+
+    [Fact]
+    public async Task SePay_outgoing_transfer_with_refund_code_completes_manual_refund_once()
+    {
+        await using var h = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
+        var invoice = await h.SeedAsync();
+        await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        {
+            var settlement = await h.Settlement(db).SettleAsync(FinancialWorkflowHarness.SettlementRequest(invoice), default);
+            Assert.True(settlement.IsSuccess, settlement.Error.Message);
+        }
+        await h.ConfirmAsync();
+        ManualRefundRequirement pending;
+        await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        {
+            pending = await db.ManualRefundRequirements.AsNoTracking().SingleAsync();
+        }
+        Assert.True(PaymentCodeGenerator.IsValid(pending.TransferCode, PaymentCodeGenerator.RefundPrefix));
+
+        var transfer = OutgoingTransfer(900004, pending.TransferCode, pending.Amount);
+        Assert.True((await ProcessWebhookAsync(transfer)).IsSuccess);
+        Assert.True((await ProcessWebhookAsync(transfer)).IsSuccess);          // SePay gửi lại cùng giao dịch
+
+        await using var verify = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
+        var refund = await verify.ManualRefundRequirements.AsNoTracking().SingleAsync();
+        Assert.Equal(ManualRefundStatus.Completed, refund.Status);
+        Assert.Equal("SEPAY:900004", refund.ExternalTransferReference);
+        Assert.Equal(ManualRefundService.SePayWebhookActorId, refund.CompletedBy);
+        Assert.Equal(SettlementState.Completed, (await verify.RentalItemSettlements.AsNoTracking().SingleAsync()).Status);
+        var recorded = await verify.PaymentTransactions.AsNoTracking().SingleAsync(t => t.ProviderTransactionId == "900004");
+        Assert.Equal(PaymentTransactionStatus.Matched, recorded.Status);
+        Assert.Equal(PaymentTransactionReason.RefundTransfer, recorded.ReasonCode);
+        Assert.Single(await verify.OperationReceipts.AsNoTracking().Where(r => r.OperationKey == "SEPAY:900004").ToListAsync());
+    }
+
+    [Fact]
+    public async Task SePay_outgoing_transfer_with_payout_and_refund_codes_is_ambiguous()
+    {
+        await using var h = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
+        var invoice = await h.SeedAsync();
+        await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        {
+            var settlement = await h.Settlement(db).SettleAsync(FinancialWorkflowHarness.SettlementRequest(invoice), default);
+            Assert.True(settlement.IsSuccess, settlement.Error.Message);
+        }
+        string payoutCode, refundCode;
+        await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        {
+            payoutCode = await db.SupplierPayouts.Select(x => x.TransferCode).SingleAsync();
+            refundCode = await db.ManualRefundRequirements.Select(x => x.TransferCode).SingleAsync();
+        }
+
+        Assert.True((await ProcessWebhookAsync(OutgoingTransfer(900005, $"{payoutCode} {refundCode}", 1_000))).IsSuccess);
+
+        await using var verify = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
+        var recorded = await verify.PaymentTransactions.AsNoTracking().SingleAsync(t => t.ProviderTransactionId == "900005");
+        Assert.Equal(PaymentTransactionReason.AmbiguousPaymentCode, recorded.ReasonCode);
+        Assert.Equal(SupplierPayout.StatusPendingPayout, (await verify.SupplierPayouts.AsNoTracking().SingleAsync()).Status);
+        Assert.Equal(ManualRefundStatus.PendingManualRefund, (await verify.ManualRefundRequirements.AsNoTracking().SingleAsync()).Status);
     }
 
     private static SePayWebhookPayload OutgoingTransfer(long id, string transferCode, decimal amount) =>

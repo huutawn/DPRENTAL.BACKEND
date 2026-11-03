@@ -22,6 +22,7 @@ public static class PaymentTransactionReason
     public const string LatePaymentAccepted = "LATE_PAYMENT_ACCEPTED";
     public const string OnTimePaymentInvoiceClosed = "ON_TIME_PAYMENT_INVOICE_CLOSED";
     public const string PayoutTransfer = "PAYOUT_TRANSFER";
-    public const string PayoutNotFound = "PAYOUT_NOT_FOUND";
-    public const string PayoutNotPending = "PAYOUT_NOT_PENDING";
+    public const string RefundTransfer = "REFUND_TRANSFER";
+    public const string TransferTargetNotFound = "TRANSFER_TARGET_NOT_FOUND";
+    public const string TransferTargetNotPending = "TRANSFER_TARGET_NOT_PENDING";
 }

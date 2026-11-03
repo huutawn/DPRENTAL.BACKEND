@@ -57,7 +57,7 @@ public sealed record AdminPayoutRow(
 
 public sealed record ManualRefundRow(
     Guid RequirementId, string RequirementRef, string? SettlementRef, Guid? RentalItemId, Guid RenterId,
-    decimal Amount, ManualRefundStatus Status, string? ExternalTransferReference,
+    decimal Amount, ManualRefundStatus Status, string TransferCode, string? ExternalTransferReference,
     Guid? CompletedBy, DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt);
 
 public sealed record ReviewRow(

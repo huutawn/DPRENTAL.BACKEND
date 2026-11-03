@@ -15,7 +15,11 @@ public sealed record CodeExtractionResult(CodeExtractionStatus Status, string? C
 public static class PaymentCodeExtractor
 {
     private static readonly Regex CodePattern = BuildPattern(PaymentCodeGenerator.Prefix);
-    private static readonly Regex PayoutCodePattern = BuildPattern(PaymentCodeGenerator.PayoutPrefix);
+    private static readonly (Regex Pattern, string Prefix)[] OutgoingPatterns =
+    [
+        (BuildPattern(PaymentCodeGenerator.PayoutPrefix), PaymentCodeGenerator.PayoutPrefix),
+        (BuildPattern(PaymentCodeGenerator.RefundPrefix), PaymentCodeGenerator.RefundPrefix)
+    ];
 
     private static Regex BuildPattern(string prefix) => new(
         @"(?<![\p{L}\p{N}_])" + Regex.Escape(prefix) +
@@ -23,11 +27,16 @@ public static class PaymentCodeExtractor
         RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(1));
 
-    // Tiền ra: field code của SePay chỉ nhận tiền tố DPR nên mã DPO chỉ đọc từ description/content.
-    public static CodeExtractionResult ExtractPayoutCode(string? contentField, string? descriptionField)
+    // Tiền ra: field code của SePay chỉ nhận tiền tố DPR nên mã DPO/DRF chỉ đọc từ description/content.
+    // Gặp hơn một mã (kể cả một DPO và một DRF) thì Ambiguous để admin xem tay.
+    public static CodeExtractionResult ExtractOutgoingCode(string? contentField, string? descriptionField)
     {
-        var codes = FindCodes(descriptionField, PayoutCodePattern, PaymentCodeGenerator.PayoutPrefix);
-        codes.UnionWith(FindCodes(contentField, PayoutCodePattern, PaymentCodeGenerator.PayoutPrefix));
+        var codes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (pattern, prefix) in OutgoingPatterns)
+        {
+            codes.UnionWith(FindCodes(descriptionField, pattern, prefix));
+            codes.UnionWith(FindCodes(contentField, pattern, prefix));
+        }
         return codes.Count switch
         {
             0 => new CodeExtractionResult(CodeExtractionStatus.Missing, null),

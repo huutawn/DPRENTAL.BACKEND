@@ -385,6 +385,11 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
+                    b.Property<string>("TransferCode")
+                        .IsRequired()
+                        .HasMaxLength(14)
+                        .HasColumnType("character varying(14)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ExternalTransferReference")
@@ -395,6 +400,10 @@ namespace Dprental.PaymentService.Domain.Migrations
 
                     b.HasIndex("SettlementId")
                         .IsUnique();
+
+                    b.HasIndex("TransferCode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_manual_refund_requirements_TransferCode");
 
                     b.ToTable("manual_refund_requirements", null, t =>
                         {

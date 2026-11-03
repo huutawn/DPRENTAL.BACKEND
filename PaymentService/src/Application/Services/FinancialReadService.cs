@@ -117,7 +117,7 @@ namespace Dprental.PaymentService.Application.Services
 
             return ToPage(page, q, x => new ManualRefundListItem(
                 x.RequirementId, x.RequirementRef, x.SettlementRef, x.RentalItemId, x.RenterId,
-                x.Amount, x.Status.ToString(), x.ExternalTransferReference,
+                x.Amount, x.Status.ToString(), x.TransferCode, x.ExternalTransferReference,
                 x.CompletedBy, x.CreatedAt, x.CompletedAt));
         }
 

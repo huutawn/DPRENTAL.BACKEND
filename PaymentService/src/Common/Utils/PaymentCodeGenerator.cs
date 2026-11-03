@@ -4,7 +4,7 @@ namespace Dprental.PaymentService.Common.Utils;
 
 /// <summary>
 /// Sinh mã chuyển khoản chuẩn SePay/VietQR theo mẫu: {tiền tố} {10 ký tự alphabet không chứa 0/1/I/O}.
-/// DPR cho tiền khách trả vào, DPO cho tiền admin trả payout cho supplier.
+/// DPR cho tiền khách trả vào; DPO (payout supplier) và DRF (hoàn tiền renter) cho tiền admin chuyển ra.
 /// </summary>
 public static class PaymentCodeGenerator
 {
@@ -12,6 +12,7 @@ public static class PaymentCodeGenerator
     public const int CodeLength = 10;
     public const string Prefix = "DPR ";
     public const string PayoutPrefix = "DPO ";
+    public const string RefundPrefix = "DRF ";
 
     public static string Generate(string prefix = Prefix)
     {

@@ -14,10 +14,27 @@ public sealed partial class ManualRefundService(
     IInvoiceRepository invoices, ISettlementLedger ledger, IUnitOfWork unitOfWork,
     IPaymentDataEncryptor encryptor, TimeProvider clock) : IManualRefundService
 {
-    public async Task<Result<CompleteManualRefundResponse>> CompleteAsync(
+    // Actor cố định khi SePay báo tiền ra khớp mã DRF; CompletedBy không được là Guid.Empty.
+    public static readonly Guid SePayWebhookActorId = new("5e9a0000-0000-0000-0000-000000000002");
+    private const string SePayWebhookActor = "WEBHOOK:SEPAY";
+
+    public Task<Result<CompleteManualRefundResponse>> CompleteAsync(
         Guid requirementId, CompleteManualRefundRequest request, Guid adminId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        return CompleteCoreAsync(requirementId, request, adminId, $"ADMIN:{adminId:D}", ct);
+    }
+
+    // paymentRef (SEPAY:{id}) vừa là OperationKey vừa là mã chuyển khoản: SePay gửi lại webhook chỉ ra replay.
+    public Task<Result<CompleteManualRefundResponse>> CompleteFromBankAsync(
+        Guid requirementId, string paymentRef, CancellationToken ct) =>
+        CompleteCoreAsync(requirementId,
+            new CompleteManualRefundRequest(paymentRef, paymentRef, "SePay báo chuyển khoản hoàn tiền khớp mã DRF và số tiền."),
+            SePayWebhookActorId, SePayWebhookActor, ct);
+
+    private async Task<Result<CompleteManualRefundResponse>> CompleteCoreAsync(
+        Guid requirementId, CompleteManualRefundRequest request, Guid adminId, string actorLabel, CancellationToken ct)
+    {
         if (requirementId == Guid.Empty || adminId == Guid.Empty || string.IsNullOrWhiteSpace(request.ExternalTransferReference) ||
             request.ExternalTransferReference.Trim().Length > 256 || string.IsNullOrWhiteSpace(request.OperationKey) || request.OperationKey.Trim().Length > 64)
             return Error.Validation("Payment.InvalidRefundConfirmation", "Valid requirement, transfer reference and OperationKey are required.");
@@ -34,7 +51,7 @@ public sealed partial class ManualRefundService(
         if (snapshot is null) return Error.NotFound("Payment.ManualRefundNotFound", "Refund requirement not found.");
         var verified = await integrityChecker.VerifyAsync(new TransactionVerificationRequest(snapshot.RequirementRef,
             VerificationPurposes.ManualRefundConfirmation, Guid.NewGuid().ToString("N"), ExpectedAmount: snapshot.Amount,
-            RequirementRef: snapshot.RequirementRef, CallerIdentity: $"ADMIN:{adminId:D}"), ct);
+            RequirementRef: snapshot.RequirementRef, CallerIdentity: actorLabel), ct);
         if (verified.IsFailure) return verified.Error;
         var evidence = VerifiedWriteContext.FromResponse(verified.Value, VerificationPurposes.ManualRefundConfirmation, clock.GetUtcNow());
         if (evidence.IsFailure) return evidence.Error;
@@ -85,22 +102,22 @@ public sealed partial class ManualRefundService(
         Guid operationId = Guid.NewGuid();
         var refundJournal = await JournalEntryFactory.CreateNextAsync(invoices, operationId,
             refund.RequirementRef, JournalStreamTypes.ManualRefund, JournalEventTypes.RefundConfirmed,
-            invoice, refund.Amount, "COMPLETED", $"ADMIN:{adminId:D}", now, claims, encryptor, message, ct);
+            invoice, refund.Amount, "COMPLETED", actorLabel, now, claims, encryptor, message, ct);
         var journals = new List<TransactionJournalEntry> { refundJournal };
         if (refundFinancial is not null)
             journals.Add(JournalEntryFactory.CreateLinkedFinancialEvent(refundJournal,
                 JournalEventTypes.RefundCompletedFinancialLinked, invoice, refund.Amount,
-                "COMPLETED", $"ADMIN:{adminId:D}", now, claims, encryptor, refundFinancial));
+                "COMPLETED", actorLabel, now, claims, encryptor, refundFinancial));
         if (settlement is not null)
         {
             var settlementJournal = await JournalEntryFactory.CreateNextAsync(invoices, operationId, settlement.SettlementRef,
                 JournalStreamTypes.RentalSettlement, JournalEventTypes.RentalSettled, invoice,
-                settlement.RentalAmount + settlement.DepositAmount, "COMPLETED", $"ADMIN:{adminId:D}", now, claims, encryptor, null, ct);
+                settlement.RentalAmount + settlement.DepositAmount, "COMPLETED", actorLabel, now, claims, encryptor, null, ct);
             journals.Add(settlementJournal);
             journals.Add(JournalEntryFactory.CreateLinkedFinancialEvent(settlementJournal,
                 JournalEventTypes.RentalItemFinancialSettledLinked, invoice,
                 settlement.RentalAmount + settlement.DepositAmount, "COMPLETED",
-                $"ADMIN:{adminId:D}", now, claims, encryptor, settlementFinancial!));
+                actorLabel, now, claims, encryptor, settlementFinancial!));
         }
         if (clock.GetUtcNow() >= evidence.Value.ExpiresAt) return Error.Conflict("Payment.ReceiptExpired", "Receipt expired before commit.");
         await invoices.SaveFinancialOperationAsync(receipt, journals, messages, ct);
@@ -138,5 +155,5 @@ public sealed partial class ManualRefundService(
     private static ManualRefundDetails ToDetails(ManualRefundRequirement x) => new(x.Id, x.RequirementRef, x.OperationKey,
         x.Kind.ToString(), x.Status.ToString(), x.InvoiceId, x.PaymentRef, x.Amount, x.Reason,
         x.Items.Select(i => new ManualRefundItemDto(i.RentalItemId, i.RentalAmount, i.DepositAmount)).ToArray(),
-        x.CreatedAt, x.CompletedAt, x.ExternalTransferReference);
+        x.CreatedAt, x.CompletedAt, x.ExternalTransferReference, x.TransferCode);
 }

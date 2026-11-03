@@ -117,7 +117,7 @@ public sealed class EfFinancialReadRepository(PaymentServiceDbContext db) : IFin
             .Skip(p.Skip).Take(p.PageSize)
             .Select(x => new ManualRefundRow(
                 x.Id, x.RequirementRef, x.Settlement == null ? null : x.Settlement.SettlementRef, x.RentalItemId, x.RenterId,
-                x.Amount, x.Status, x.ExternalTransferReference,
+                x.Amount, x.Status, x.TransferCode, x.ExternalTransferReference,
                 x.CompletedBy, x.CreatedAt, x.CompletedAt))
             .ToListAsync(ct);
 
