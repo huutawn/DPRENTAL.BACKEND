@@ -62,7 +62,7 @@ public sealed class RentalItemSettlementRecord
         record.CompletedAt = status == SettlementState.Completed ? now.ToUniversalTime() : null;
         if (s.SupplierPayable > 0)
             record.Payout = SupplierPayout.CreatePending(id, s.RentalItemId, s.SupplierId,
-                s.SupplierPayable, invoice.Currency, destinationRef: null, now);
+                s.SupplierPayable, invoice.Currency, now);
         return record;
     }
 

@@ -60,7 +60,6 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IManualRefundService, ManualRefundService>();
         services.AddScoped<IFinancialReadService, FinancialReadService>();
         services.AddScoped<ISupplierPayoutService, SupplierPayoutService>();
-        services.AddScoped<ISupplierPayoutDestinationService, SupplierPayoutDestinationService>();
         services.AddScoped<ITransactionResolutionService, TransactionResolutionService>();
         services.AddSingleton<IInvoicePaidKafkaProducer, InvoicePaidKafkaProducer>();
 

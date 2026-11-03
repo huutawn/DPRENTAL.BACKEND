@@ -31,22 +31,6 @@ public sealed class AdminPayoutsController : ControllerBase
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    /// <summary>Gắn mã phiên bản tài khoản nhận tiền; cần đối chiếu hồ sơ Payment trước khi dùng thật.</summary>
-    [HttpPost("{payoutId:guid}/destination")]
-    [ProducesResponseType(typeof(AttachPayoutDestinationResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> AttachDestination(
-        Guid payoutId, [FromBody] AttachPayoutDestinationRequest request, CancellationToken ct)
-    {
-        if (!TryGetAdminId(out var adminId)) return Forbid();
-        var result = await _service.AttachDestinationAsync(payoutId, adminId, request, ct);
-        return result.IsSuccess ? Ok(result.Value) : this.ToProblem(result.Error);
-    }
-
     /// <summary>Xác nhận admin đã chuyển khoản payout ngoài hệ thống.</summary>
     [HttpPost("{payoutId:guid}/complete")]
     [ProducesResponseType(typeof(CompleteSupplierPayoutResponse), StatusCodes.Status200OK)]
