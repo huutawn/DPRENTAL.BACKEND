@@ -1,0 +1,70 @@
+{
+  "plan_id": "review_service_phase2",
+  "title": "ReviewService Phase 2 - Foundation and Write Path",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Domain Entities, Enums, DbContext and Repositories",
+      "description": "Implement domain enums, entities, DbContext configuration and repository contracts with EF Core implementations:\n1. Enums in ReviewService/src/Common/Enums: ReviewDirection (renter_to_supplier_listing, supplier_to_renter), AuthorState (Active, Withdrawn), ModerationState (Visible, Hidden), ReviewAuditAction (Created, Updated, Withdrawn, Hidden, Restored).\n2. Entities in ReviewService/src/Domain/Entities:\n   - Review (id, orderId, itemId, direction, authorId, subjectId, equipmentListingId, rating, comment, authorState, moderationState, version, createdAt, updatedAt, withdrawnAt, adminHiddenAt, adminReason, canEditUntil). Invariants: rating 1..5, authorId != subjectId.\n   - ReviewAudit (id, reviewId, actorId, actorRole, action, reason, oldValues, newValues, createdAt).\n   - IdempotencyRecord (id, actorId, idempotencyKey, requestFingerprint, httpMethod, requestPath, responseStatusCode, responseHeaders, responseBody, createdAt, expiresAt).\n3. DbContext and Repositories in ReviewService/src/Domain/Repositories and IRepositories:\n   - ReviewServiceDbContext configured per docs/erd.md: tables reviews, review_audits, idempotency_records, check constraints, UNIQUE(item_id, direction), optimistic concurrency on version BIGINT with IsConcurrencyToken().\n   - IReviewRepository & ReviewRepository (GetByIdAsync, AddAsync, UpdateAsync, ExistsByItemAndDirectionAsync).\n   - IReviewAuditRepository & ReviewAuditRepository (AddAsync).\n   - IIdempotencyRepository & IdempotencyRepository (GetAsync, SaveAsync).\n   - DomainRepositoriesServiceCollectionExtensions registered in DI.",
+      "assigned_agent": "dev1",
+      "depends_on": [],
+      "test_command": "dotnet test ReviewService.sln",
+      "timeout_seconds": 600,
+      "acceptance_criteria": [
+        "Enums ReviewDirection, AuthorState, ModerationState, ReviewAuditAction exist in Common/Enums",
+        "Entities Review, ReviewAudit, IdempotencyRecord exist with required properties and invariants in Domain/Entities",
+        "ReviewServiceDbContext configures constraints, indexes, and concurrency token",
+        "Repositories implemented and registered in DomainRepositoriesServiceCollectionExtensions",
+        "dotnet build ReviewService.sln and dotnet test ReviewService.sln succeed"
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "Application DTOs, Idempotency Service, and Rental Snapshot Client",
+      "description": "Implement DTOs, idempotency service with SHA-256 fingerprinting, rune counting utility, and internal Rental snapshot client:\n1. DTOs in ReviewService/src/Application/DTOs/Reviews: CreateReviewRequest (orderId, itemId, rating, comment), UpdateReviewRequest (rating, comment), WithdrawReviewRequest (reason), ReviewDetailResponse (full fields per review-api-v1.md).\n2. DTOs in ReviewService/src/Application/DTOs/Rental: RentalItemReviewSnapshotDto (orderId, itemId, renterId, supplierId, equipmentListingId, status, completedAt, orderVersion).\n3. Unicode rune helper in ReviewService/src/Common/Utils/UnicodeRuneHelper.cs: counts runes using System.Text.Rune.\n4. Rental Client in ReviewService/src/Application/Clients:\n   - IRentalServiceClient and RentalServiceClient: calls GET /internal/orders/{orderId}/items/{itemId}/review-snapshot with X-Api-Key header and 5-second timeout.\n   - Maps HTTP 401/403 to Error.Failure('RENTAL_SERVICE_AUTHENTICATION_FAILED'), 404 to Error.NotFound('RENTAL_ITEM_NOT_FOUND'), timeout to Error.Failure('RENTAL_SERVICE_TIMEOUT').\n5. Idempotency Service in ReviewService/src/Application/Services:\n   - IIdempotencyService & IdempotencyService: computes SHA-256 fingerprint from (actorId + ':' + method + ':' + path + ':' + body + ':' + ifMatch), detects key replay and mismatch.\n6. Register application services in ReviewService/src/Application/DependencyInjection/ApplicationServiceCollectionExtensions.cs.",
+      "assigned_agent": "dev2",
+      "depends_on": ["T1"],
+      "test_command": "dotnet test ReviewService.sln",
+      "timeout_seconds": 600,
+      "acceptance_criteria": [
+        "DTOs conform strictly to docs/contracts/review-api-v1.md",
+        "RentalServiceClient implemented with X-Api-Key and error mapping",
+        "IdempotencyService computes SHA-256 fingerprint and handles replay vs 409 mismatch",
+        "UnicodeRuneHelper accurately counts UTF-8/UTF-16 runes",
+        "dotnet build ReviewService.sln and dotnet test ReviewService.sln succeed"
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "Review Application Workflows and Use Cases",
+      "description": "Implement core review use cases in ReviewService/src/Application/Services:\n1. IReviewService & ReviewService:\n   - CreateReviewAsync: verifies actorId is valid human UUID (not service token u='svc'). Calls Rental snapshot, verifies status == Completed, verifies now < completedAt + 30 days (exclusive UTC), verifies actorId == snapshot.RenterId (direction = renter_to_supplier_listing). Calculates canEditUntil = min(now + 7 days, completedAt + 30 days). In atomic transaction, commits Review, ReviewAudit (action Created), and IdempotencyRecord. Maps duplicate conflict to Error.Conflict('REVIEW_ALREADY_EXISTS').\n   - UpdateReviewAsync: checks idempotency. Checks If-Match against review.Version (missing: 428 Precondition Required, mismatch: 412 Precondition Failed). Verifies actorId == review.AuthorId. Verifies review.AuthorState == Active. Verifies now < review.CanEditUntil (else 422). Updates rating, comment, increments version, logs ReviewAudit (Updated), saves idempotency record.\n   - WithdrawReviewAsync: checks idempotency. Checks If-Match. Verifies actorId == review.AuthorId. Sets authorState = Withdrawn, withdrawnAt = now, increments version, logs ReviewAudit (Withdrawn), saves idempotency record. Does not remove (item_id, direction) constraint.\n   - GetReviewDetailAsync: verifies actor is Author, Subject, or Admin. If authenticated user is not participant/admin, returns Error.NotFound('REVIEW_NOT_FOUND') to prevent leaking existence. Returns ReviewDetailResponse.\n2. Update DI registration in ApplicationServiceCollectionExtensions.cs.",
+      "assigned_agent": "dev3",
+      "depends_on": ["T2"],
+      "test_command": "dotnet test ReviewService.sln",
+      "timeout_seconds": 600,
+      "acceptance_criteria": [
+        "CreateReviewAsync enforces participant, 30-day window, snapshot validation, and atomic audit/idempotency logging",
+        "UpdateReviewAsync enforces author ownership, 7-day edit window, and If-Match strong ETag",
+        "WithdrawReviewAsync transitions authorState to Withdrawn and increments version",
+        "GetReviewDetailAsync enforces privacy rules (404 for stranger, no 403)",
+        "dotnet build ReviewService.sln and dotnet test ReviewService.sln succeed"
+      ]
+    },
+    {
+      "id": "T4",
+      "title": "ReviewsController and Comprehensive Acceptance Test Suite",
+      "description": "Implement API controllers and complete acceptance test suite:\n1. ReviewsController in ReviewService/src/Api/Controllers:\n   - POST /api/v1/reviews: extracts actorId from JWT sub, reads Idempotency-Key header. Returns 201 Created with Location header and ETag: '\"{version}\"'.\n   - PUT /api/v1/reviews/{reviewId}: extracts actorId, reads Idempotency-Key and If-Match headers. Returns 200 OK with updated ETag.\n   - POST /api/v1/reviews/{reviewId}/withdraw: extracts actorId, reads Idempotency-Key and If-Match headers. Returns 200 OK with updated ETag.\n   - GET /api/v1/reviews/{reviewId}: extracts actorId. Returns 200 OK with ETag, or 401 if anonymous, or 404 if unauthorized.\n2. Program.cs wiring: register Application services, controllers, authentication/caller context, and problem details mappings.\n3. Comprehensive Acceptance Tests in ReviewService/tests/Api.Tests/ReviewLifecycleAndBoundaryTests.cs:\n   - Create review success (201, ETag '1', Location)\n   - Idempotency replay returns original response with identical ETag\n   - Idempotency key reuse with different body returns 409 Conflict\n   - Duplicate review on same item and direction returns 409 Conflict\n   - Creation window expired (> 30 days) returns 422 Unprocessable Entity\n   - Missing If-Match on mutation returns 428 Precondition Required\n   - Stale If-Match on mutation returns 412 Precondition Failed\n   - Edit review within 7 days succeeds, increments version to 2, ETag '2'\n   - Edit review after 7 days returns 422 Unprocessable Entity\n   - Withdraw review transitions to Withdrawn, subsequent edit returns 422\n   - Anonymous GET /api/v1/reviews/{id} returns 401 Unauthorized\n   - Non-participant GET /api/v1/reviews/{id} returns 404 Not Found\n   - Comment length: 1000 runes passes, 1001 runes returns 400 Bad Request\n   - Rating range: 0 or 6 returns 400 Bad Request\n   - Service token (u='svc') rejected with 403 Forbidden.",
+      "assigned_agent": "dev4",
+      "depends_on": ["T3"],
+      "test_command": "dotnet test ReviewService.sln",
+      "timeout_seconds": 600,
+      "acceptance_criteria": [
+        "ReviewsController exposes POST /reviews, PUT /reviews/{id}, POST .../withdraw, GET .../{id}",
+        "ETag and If-Match strong concurrency enforced on HTTP surface",
+        "Idempotency-Key and fingerprinting enforced on HTTP surface",
+        "All acceptance test scenarios pass with dotnet test ReviewService.sln",
+        "Existing 14 unit and boundary tests continue to pass"
+      ]
+    }
+  ]
+}

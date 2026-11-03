@@ -55,7 +55,8 @@ Theo phê duyệt của stakeholder `[stakeholder-approved]`:
      1. Chính Nhà cung cấp viết đánh giá đó (`Author`).
      2. Người thuê nhận đánh giá (`Subject`).
      3. Quản trị viên có role Admin (`Admin`).
-   - Mọi người dùng khác gọi API sẽ nhận `404 Not Found` (không để lộ sự tồn tại của review).
+   - Người dùng chưa đăng nhập gọi API nhận `401 Unauthorized`.
+   - Người dùng đã xác thực nhưng không thuộc 3 chủ thể trên sẽ nhận `404 Not Found` (tuyệt đối không trả `403 Forbidden` để không để lộ sự tồn tại của review).
 2. **Endpoint Chi tiết Riêng tư (`GET /api/v1/reviews/{reviewId}`):**
    - Được bổ sung để cho phép `Subject` và `Admin` (cũng như `Author`) đọc đầy đủ thông tin review riêng tư và lấy giá trị Strong ETag (`version`) phục vụ kiểm duyệt hoặc đối soát `[design-decision]`.
 3. **Tuyệt đối KHÔNG công khai Điểm số Người thuê (No Public Renter Score):**

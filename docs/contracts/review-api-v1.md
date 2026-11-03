@@ -18,6 +18,7 @@ Tài liệu này đặc tả toàn bộ các endpoints, cấu trúc DTO theo cơ
    - Người gọi **không truyền** `authorId`, `subjectId`, `targetId`, `listingId`, `supplierId` khi tạo review.
    - Hệ thống tự động xác định `actorId` từ claim `sub` trong JWT của người gọi.
    - `subjectId`, `targetId`, `listingId`, `supplierId` và chiều đánh giá (`direction`) được ánh xạ từ `RentalItemReviewSnapshot` của RentalService.
+   - **Phân biệt Human Token và Service Token:** Token hợp lệ phải mang UserId UUID trong claim `sub` và không có `u = "svc"`. Service token (`u = "svc"`) **tuyệt đối không được cấp quyền** viết/sửa/rút review; nếu gọi sẽ nhận `403 Forbidden` (`FORBIDDEN_SERVICE_TOKEN`).
 7. **Định dạng Concurrency Token (Strong ETag):**
    - Sử dụng **Strong ETag** biểu diễn số nguyên phiên bản, đặt trong dấu ngoặc kép: `"1"`, `"2"`.
    - Tuyệt đối không dùng Weak ETag (`W/"1"`).
@@ -35,7 +36,7 @@ Tài liệu này đặc tả toàn bộ các endpoints, cấu trúc DTO theo cơ
 | **1** | **Tạo đánh giá** | `/api/v1/reviews` | `POST` | Bearer JWT + `Idempotency-Key` | `201 Created` | `400`, `401`, `403`, `404`, `409`, `422`, `502`, `504` |
 | **2** | **Chỉnh sửa đánh giá** | `/api/v1/reviews/{reviewId}` | `PUT` | Bearer JWT (Chính tác giả) + `Idempotency-Key` + `If-Match` | `200 OK` | `400`, `401`, `403`, `404`, `409`, `412`, `422`, `428` |
 | **3** | **Rút đánh giá (Withdraw)** | `/api/v1/reviews/{reviewId}/withdraw` | `POST` | Bearer JWT (Chính tác giả) + `Idempotency-Key` + `If-Match` | `200 OK` | `400`, `401`, `403`, `404`, `409`, `412`, `428` |
-| **4** | **Chi tiết đánh giá (Private)** | `/api/v1/reviews/{reviewId}` | `GET` | Bearer JWT (Tác giả, Đối tượng nhận, hoặc Admin) | `200 OK` | `401`, `403`, `404` |
+| **4** | **Chi tiết đánh giá (Private)** | `/api/v1/reviews/{reviewId}` | `GET` | Bearer JWT (Tác giả, Đối tượng nhận, hoặc Admin) | `200 OK` | `401`, `404` |
 | **5** | **Đánh giá của tôi** | `/api/v1/reviews/my` | `GET` | Bearer JWT (Người dùng bất kỳ) | `200 OK` | `401`, `400` |
 | **6** | **Mục chờ đánh giá** | `/api/v1/reviews/pending` | `GET` | Bearer JWT (Người dùng bất kỳ) | `200 OK` | `401`, `400` |
 | **7** | **Xem review thiết bị** | `/api/v1/reviews/listings/{listingId}` | `GET` | Public (Không yêu cầu đăng nhập) | `200 OK` | `400`, `404` |
@@ -93,6 +94,7 @@ Tài liệu này đặc tả toàn bộ các endpoints, cấu trúc DTO theo cơ
 ### 3.2 `PUT /api/v1/reviews/{reviewId}` (Chỉnh sửa đánh giá)
 
 - **Đặc tính vòng đời:** Author được phép chỉnh sửa review trong thời hạn edit window (`now < canEditUntil`) miễn là chưa rút (`authorState == Active`). Nếu review đang bị Admin ẩn (`moderationState == Hidden`), tác giả vẫn được phép sửa, nhưng **thao tác sửa không tự động khôi phục moderationState** (nó vẫn giữ nguyên `Hidden`).
+- **Quyền sở hữu và phạm vi xác thực:** Thao tác sửa kiểm tra quyền sở hữu (`actorId == review.AuthorId`), edit window (`now < review.CanEditUntil`), và `If-Match` trực tiếp trên dữ liệu review đã lưu trong PostgreSQL. Không bắt buộc và không gọi lại RentalService snapshot khi không có thay đổi eligibility.
 - **Headers:**
   - `Authorization: Bearer <JWT>` (Bắt buộc).
   - `Idempotency-Key: <UUID>` (Bắt buộc).
@@ -133,6 +135,7 @@ Tài liệu này đặc tả toàn bộ các endpoints, cấu trúc DTO theo cơ
 ### 3.3 `POST /api/v1/reviews/{reviewId}/withdraw` (Rút đánh giá)
 
 - **Đặc tính:** Chuyển `authorState` sang `Withdrawn`. Tác giả có quyền rút cả review đang hiển thị (`Visible`) lẫn review đang bị ẩn (`Hidden`). Bảo toàn ràng buộc duy nhất `(itemId, direction)` trong cơ sở dữ liệu.
+- **Quyền sở hữu và phạm vi xác thực:** Thao tác rút kiểm tra quyền sở hữu (`actorId == review.AuthorId`) và `If-Match` trực tiếp trên dữ liệu review đã lưu trong PostgreSQL. Không bắt buộc và không gọi lại RentalService snapshot khi không có thay đổi eligibility.
 - **Headers:**
   - `Authorization: Bearer <JWT>` (Bắt buộc).
   - `Idempotency-Key: <UUID>` (Bắt buộc).
@@ -172,9 +175,10 @@ Tài liệu này đặc tả toàn bộ các endpoints, cấu trúc DTO theo cơ
 ### 3.4 `GET /api/v1/reviews/{reviewId}` (Xem chi tiết đánh giá riêng tư)
 
 - **Mục đích:** Cung cấp endpoint cho chính Tác giả (`Author`), Đối tượng nhận (`Subject`) và Quản trị viên (`Admin`) đọc đầy đủ thông tin review (kể cả review chiều `supplier_to_renter` hoặc review bị ẩn/rút), đồng thời **lấy giá trị `ETag` hiện tại** phục vụ các thao tác mutation tiếp theo.
-- **Phân quyền:**
-  - Nếu `actorId == authorId` hoặc `actorId == subjectId` hoặc `actor.IsAdmin == true`: Cho phép truy cập.
-  - Mọi người dùng khác hoặc người chưa đăng nhập: Trả về `404 Not Found` (bảo vệ quyền riêng tư).
+- **Phân quyền và Bảo vệ Quyền riêng tư:**
+  - Nếu request không có Bearer JWT (chưa xác thực / anonymous): Middleware xác thực trả về `401 Unauthorized`.
+  - Nếu đã xác thực: Cho phép truy cập nếu `actorId == authorId` hoặc `actorId == subjectId` hoặc `actor.IsAdmin == true`.
+  - Nếu người dùng đã xác thực nhưng không phải Author, Subject hoặc Admin: Trả về `404 Not Found` (tuyệt đối không trả `403 Forbidden` để không để lộ sự tồn tại của review).
 - **Response Headers:**
   - `ETag: "3"`
 - **Response Body (`200 OK` - `ReviewDetailResponse`):**
@@ -219,7 +223,7 @@ Dựa trên bảng chiếu (`review_projections`) đã hydrate đầy đủ và 
   - Chỉ nhận các review có: `direction = 'renter_to_supplier_listing'` **AND** `authorState = 'Active'` **AND** `moderationState = 'Visible'`.
   - Tuyệt đối không trả về review có `authorState = 'Withdrawn'` hoặc `moderationState = 'Hidden'`.
   - Tuyệt đối không trả về review chiều `supplier_to_renter`.
-- **Cấu trúc DTO Allowlist (`PublicReviewItemResponse`):** Chỉ lộ các trường an toàn, tên tác giả được làm mờ (Masked Name).
+- **Cấu trúc DTO Allowlist (`PublicReviewItemResponse`):** Chỉ lộ các trường an toàn, tên tác giả sử dụng nhãn trung tính ẩn danh cố định trong MVP (ví dụ: `"Khách hàng"`), không phát sinh tra cứu Auth lookup trên mỗi truy vấn danh sách:
   ```json
   {
     "items": [
@@ -229,7 +233,7 @@ Dựa trên bảng chiếu (`review_projections`) đã hydrate đầy đủ và 
         "comment": "Thiết bị máy quay Sony FX3 hoạt động rất tốt, phụ kiện đi kèm đầy đủ và sạch sẽ!",
         "createdAt": "2026-11-02T08:30:00.000Z",
         "updatedAt": null,
-        "authorMaskedName": "N** T**"
+        "authorMaskedName": "Khách hàng"
       }
     ],
     "page": 1,

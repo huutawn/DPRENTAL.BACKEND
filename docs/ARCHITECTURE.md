@@ -39,7 +39,7 @@ flowchart TD
 | **Đơn thuê, Mục thuê (`RentalOrder`, `RentalItem`)** | `RentalService` | Tiêu thụ snapshot qua HTTP client nội bộ; lưu cache chỉ đọc cho projection | `[confirmed-by-source: RentalService/src/Domain/Entities/]` |
 | **Quan hệ tham gia (`RenterId`, `SupplierId`, `EquipmentListingId`)** | `RentalService` | Xác thực quan hệ tham gia qua snapshot; cấm client tự khai báo | `[confirmed-by-source: RentalService/src/Domain/Entities/RentalItem.cs]` |
 | **Thời điểm hoàn tất nghiệp vụ (`completedAt`)** | `RentalService` | Tiếp nhận và dùng làm mốc tính deadline UTC; không tự tính toán hay suy diễn | `[confirmed-by-source: RentalService/src/Domain/Entities/RentalItem.Settlement.cs]` |
-| **Tài khoản người dùng & Role (`UserId`, `Admin`)** | `AuthService` | Nhận diện actor qua claims JWT (`sub`, `roles`); không cấp phát token | `[confirmed-by-source: RentalService/tests/Api.Tests/Contracts/AuthRentalContractAndPolicyTests.cs]` |
+| **Tài khoản người dùng & Role (`UserId`, `Admin`)** | `AuthService` | Nhận diện actor qua claims JWT (`sub`, `r` / alias `adm`, `u`); không cấp phát token | `[confirmed-by-source: AuthService/src/Common/Enums/JwtClaimCatalog.cs, RentalService/src/Application/Security/Jwt/RentalAuthClaims.cs]` |
 | **Nội dung đánh giá, Điểm số, Trạng thái Review** | `ReviewService` | Toàn quyền sở hữu (Authoritative owner), quản lý lifecycle hai trục và hiển thị | `[design-decision]` |
 | **Báo cáo vi phạm (Review Reports) & Kiểm duyệt** | `ReviewService` | Toàn quyền sở hữu; Admin thực hiện ẩn/khôi phục trên ReviewService | `[design-decision]` |
 | **Tổng hợp điểm (Rating Summary)** | `ReviewService` | Toàn quyền tính toán từ các review đủ điều kiện (`authorState = Active` & `moderationState = Visible`) | `[design-decision]` |
@@ -80,7 +80,8 @@ Giao tiếp nội bộ giữa `ReviewService` và `RentalService` được thi�
 
 1. **JWT Người dùng:**
    - Client gửi Bearer JWT qua header `Authorization: Bearer <token>`.
-   - JWT do `AuthService` phát hành, chứa claim `sub` (UserId) và các claim vai trò `role` / `roles` `[confirmed-by-source: RentalService/tests/Api.Tests/Contracts/AuthRentalContractAndPolicyTests.cs]`.
+   - JWT do `AuthService` phát hành, chứa claim định danh `sub` (UserId UUID), claim vai trò chuẩn `r` (với alias `adm`, `own`, `mem`, `cus`), và cờ định danh `u` (`TokenUse`) `[confirmed-by-source: AuthService/src/Common/Enums/JwtClaimCatalog.cs, RentalService/src/Application/Security/Jwt/RentalAuthClaims.cs]`.
+   - **Tách biệt Human Token và Service Token:** Service token mang claim `u = "svc"` và UUID trong `sub`. Service token **tuyệt đối không được phép đóng vai trò reviewer** để tạo, sửa hoặc rút review (`403 Forbidden` hoặc `401 Unauthorized`). Chỉ human user token (`u != "svc"`) có `sub` hợp lệ mới được thực hiện mutation đánh giá.
 2. **Xác định quyền sở hữu (Zero Trust Client Input):**
    - Client **không được phép** gửi `authorId`, `subjectId`, `targetId`, hoặc `supplierId` khi tạo/sửa review.
    - `ReviewService` lấy `actorId = JWT.sub`.

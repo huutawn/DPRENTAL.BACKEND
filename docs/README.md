@@ -53,7 +53,7 @@ Khi triển khai code thực tế tại DPR-274, bộ test suite bắt buộc ph
 ### 3.3 Nhóm 3: Snapshot, Phân quyền và Bảo mật Renter
 - **Kịch bản 3.1 (Participant mapping):** ReviewService lấy `RenterId` và `SupplierId` từ Snapshot; từ chối người gọi không phải là bên tham gia với mã `403 Forbidden` (`ACTOR_NOT_PARTICIPANT`).
 - **Kịch bản 3.2 (Zero trust client input):** Request body truyền `authorId` hoặc `subjectId` giả mạo $\rightarrow$ Bị bỏ qua hoặc từ chối; hệ thống luôn lấy từ JWT và Snapshot.
-- **Kịch bản 3.3 (Renter privacy):** Review chiều `supplier_to_renter` chỉ có thể truy vấn bởi chính Supplier tác giả, Renter đối tượng và Admin (`GET /api/v1/reviews/{reviewId}`). Người dùng thứ ba gọi API nhận `404 Not Found`.
+- **Kịch bản 3.3 (Renter privacy):** Review chiều `supplier_to_renter` chỉ có thể truy vấn bởi chính Supplier tác giả, Renter đối tượng và Admin (`GET /api/v1/reviews/{reviewId}`). Người dùng chưa đăng nhập nhận `401 Unauthorized`; người dùng đã xác thực nhưng không có quyền nhận `404 Not Found` (không trả `403`) để bảo vệ quyền riêng tư.
 - **Kịch bản 3.4 (No public renter summary):** Tuyệt đối không cung cấp điểm tổng hợp hoặc danh sách public của người thuê trên bất kỳ endpoint nào.
 
 ### 3.4 Nhóm 4: Bất đồng bộ Kafka, Hydration, Deduplication và Replay
@@ -127,7 +127,7 @@ Khi triển khai code thực tế tại DPR-274, bộ test suite bắt buộc ph
 | **RentalService** | Rental Core Team | Endpoint đối soát `GET /internal/orders/review-reconciliation` với phân trang keyset theo `itemId` | `[unimplemented-dependency]` | Integration test trả về danh sách item `Completed` trong cửa sổ 30 ngày kèm `nextCursor`. |
 | **RentalService** | Rental Core Team | Lưu trữ bền vững `completedAt` khi thanh toán quyết toán và phát cùng giá trị qua Outbox | `[confirmed-by-source: RentalItem.Settlement.cs]` | Event `RentalItemCompleted` mang `completedAt` trùng khớp với cơ sở dữ liệu. |
 | **API Gateway** | Gateway Team | Cấu hình Ocelot cho các route public của ReviewService; chặn triệt để `/internal/*` | `[confirmed-by-source: ServiceOnlyRouteBlockingMiddleware.cs]` | Test gọi `/internal/reviews/...` qua Gateway bị chặn `403 Forbidden` hoặc `404 Not Found`. |
-| **AuthService** | Auth Team | Duy trì phát hành JWT chứa claim `sub` (UserId) và `roles` (Admin) | `[confirmed-by-source: AuthRentalContractAndPolicyTests.cs]` | Token verification qua JWKS hoạt động ổn định. |
+| **AuthService** | Auth Team | Duy trì phát hành JWT chứa claim `sub` (UserId), `r` (roles với alias `adm`), `u` (TokenUse) | `[confirmed-by-source: JwtClaimCatalog.cs, RentalAuthClaims.cs]` | Token verification qua JWKS hoạt động ổn định. |
 | **ReviewService**| Review Team | Triển khai use cases, DTOs, ERD, Inbox deduplication, HTTP client, và tests | Chuẩn bị triển khai tại **DPR-274** | Toàn bộ 6 nhóm Acceptance Test Specifications chạy pass. |
 
 ---
