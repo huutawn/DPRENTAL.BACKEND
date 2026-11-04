@@ -60,9 +60,20 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
             segments[0].Equals("hubs", StringComparison.OrdinalIgnoreCase) &&
             segments[1].Equals("analytics", StringComparison.OrdinalIgnoreCase);
 
-        if (isPaymentHub || isRentalOrderHub || isAnalyticsHub)
+        bool isNotificationHub = segments.Length >= 5 &&
+            segments[0].Equals("api", StringComparison.OrdinalIgnoreCase) &&
+            segments[1].Equals("v1", StringComparison.OrdinalIgnoreCase) &&
+            segments[2].Equals("notifications", StringComparison.OrdinalIgnoreCase) &&
+            segments[3].Equals("hubs", StringComparison.OrdinalIgnoreCase) &&
+            segments[4].Equals("inbox", StringComparison.OrdinalIgnoreCase);
+
+        if (isPaymentHub || isRentalOrderHub || isAnalyticsHub || isNotificationHub)
         {
-            string hubName = isRentalOrderHub ? "Rental Order Hub" : isAnalyticsHub ? "Analytics Hub" : "Payment Hub";
+            string hubName = isRentalOrderHub ? "Rental Order Hub"
+                : isAnalyticsHub ? "Analytics Hub"
+                : isNotificationHub ? "Notification Hub"
+                : "Payment Hub";
+
 
             if (context.User?.Identity?.IsAuthenticated != true)
             {
@@ -300,6 +311,16 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
             segments[0].Equals("internal", StringComparison.OrdinalIgnoreCase) &&
             segments[1].Equals("v1", StringComparison.OrdinalIgnoreCase) &&
             segments[2].Equals("integrity", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Chặn toàn bộ các route nội bộ của NotificationService: /api/v1/notifications/internal/*
+        if (segments.Length >= 4 &&
+            segments[0].Equals("api", StringComparison.OrdinalIgnoreCase) &&
+            segments[1].Equals("v1", StringComparison.OrdinalIgnoreCase) &&
+            segments[2].Equals("notifications", StringComparison.OrdinalIgnoreCase) &&
+            segments[3].Equals("internal", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

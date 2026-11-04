@@ -1,0 +1,57 @@
+{
+  "Routes": [
+    {
+      "Key": "notification-service",
+      "UpstreamPathTemplate": "/api/v1/notifications/{everything}",
+      "DownstreamPathTemplate": "/api/v1/notifications/{everything}",
+      "Priority": 1,
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "notification-service",
+          "Port": 5005
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "notification-hub",
+      "UpstreamPathTemplate": "/api/v1/notifications/hubs/inbox/{everything}",
+      "DownstreamPathTemplate": "/api/v1/notifications/hubs/inbox/{everything}",
+      "Priority": 10,
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "notification-service",
+          "Port": 5005
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "notification-service-internal",
+      "UpstreamPathTemplate": "/api/v1/notifications/internal/{everything}",
+      "DownstreamPathTemplate": "/api/v1/notifications/internal/{everything}",
+      "Priority": 100,
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "notification-service",
+          "Port": 5005
+        }
+      ],
+      "AuthenticationOptions": {
+        "AuthenticationProviderKeys": [
+          "Bearer"
+        ],
+        "RouteClaimsRequirement": {
+          "scope": "internal:blocked"
+        }
+      }
+    }
+  ]
+}
