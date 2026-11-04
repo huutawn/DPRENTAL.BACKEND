@@ -67,8 +67,8 @@ public sealed class NotificationRepository : INotificationRepository
         if (_dbContext.Database.IsNpgsql())
         {
             var updated = await _dbContext.Notifications
-                .Where(n => n.Id == id && n.RecipientUserId == userId)
-                .ExecuteUpdateAsync(s => s.SetProperty(n => n.ReadAt, n => n.ReadAt ?? readAt), cancellationToken);
+                .Where(n => n.Id == id && n.RecipientUserId == userId && n.ReadAt == null)
+                .ExecuteUpdateAsync(s => s.SetProperty(n => n.ReadAt, readAt), cancellationToken);
 
             return updated > 0;
         }
@@ -77,12 +77,12 @@ public sealed class NotificationRepository : INotificationRepository
             var entity = await _dbContext.Notifications
                 .FirstOrDefaultAsync(n => n.Id == id && n.RecipientUserId == userId, cancellationToken);
 
-            if (entity == null)
+            if (entity == null || entity.ReadAt != null)
             {
                 return false;
             }
 
-            entity.ReadAt ??= readAt;
+            entity.ReadAt = readAt;
             await _dbContext.SaveChangesAsync(cancellationToken);
             return true;
         }
@@ -125,5 +125,74 @@ public sealed class NotificationRepository : INotificationRepository
     {
         ArgumentNullException.ThrowIfNull(notifications);
         await _dbContext.Notifications.AddRangeAsync(notifications, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Notification>> SuppressPendingActionsForResourceAsync(string resourceType, string resourceId, CancellationToken cancellationToken = default)
+    {
+        var actionableNotifications = await _dbContext.Notifications
+            .Where(n => n.ResourceType == resourceType && n.ResourceId == resourceId && n.IsActionable)
+            .ToListAsync(cancellationToken);
+
+        foreach (var notification in actionableNotifications)
+        {
+            notification.IsActionable = false;
+            notification.ActionUrl = null;
+        }
+
+        return actionableNotifications;
+    }
+
+    public async Task<IReadOnlyList<Notification>> SuppressPendingActionsForOrderAsync(Guid orderId, CancellationToken cancellationToken = default)
+    {
+        var orderIdStr = orderId.ToString();
+        var actionableNotifications = await _dbContext.Notifications
+            .Where(n => (n.OrderId == orderId || (n.ResourceType == "RentalOrder" && n.ResourceId == orderIdStr)) && n.IsActionable)
+            .ToListAsync(cancellationToken);
+
+        foreach (var notification in actionableNotifications)
+        {
+            notification.IsActionable = false;
+            notification.ActionUrl = null;
+        }
+
+        return actionableNotifications;
+    }
+
+    public async Task<IReadOnlyList<Notification>> GetByRentalItemIdAsync(Guid rentalItemId, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Notifications
+            .Where(n => n.RentalItemId == rentalItemId)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Notification>> DismissReturnOverdueActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default)
+    {
+        var actionableNotifications = await _dbContext.Notifications
+            .Where(n => n.RentalItemId == rentalItemId && n.NotificationType == "RETURN_CONFIRMATION_OVERDUE_SUPPLIER" && n.IsActionable)
+            .ToListAsync(cancellationToken);
+
+        foreach (var notification in actionableNotifications)
+        {
+            notification.IsActionable = false;
+            notification.ActionUrl = null;
+        }
+
+        return actionableNotifications;
+    }
+
+    public async Task<IReadOnlyList<Notification>> SuppressPendingActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default)
+    {
+        var itemIdStr = rentalItemId.ToString();
+        var actionableNotifications = await _dbContext.Notifications
+            .Where(n => (n.RentalItemId == rentalItemId || (n.ResourceType == "RentalItem" && n.ResourceId == itemIdStr)) && n.IsActionable)
+            .ToListAsync(cancellationToken);
+
+        foreach (var notification in actionableNotifications)
+        {
+            notification.IsActionable = false;
+            notification.ActionUrl = null;
+        }
+
+        return actionableNotifications;
     }
 }

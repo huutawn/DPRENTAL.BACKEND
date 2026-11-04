@@ -110,17 +110,134 @@ If SMTP provider experiences an outage:
 
 ---
 
-## 5. Database Rollback & Migration Preflight
-Before applying migrations:
-1. Verify database connectivity:
+## 5. Database Migration, Preflight & Safe Rollback
+
+### 5.1. Preflight Checklist
+1. Stop intake consumer and delivery workers (`KafkaConsumerHostedService`, `EmailDeliveryWorker`).
+2. Create full backup of the `notification` schema:
    ```bash
-   pg_isready -h localhost -p 5432 -U postgres -d dprental_notification
+   pg_dump -h localhost -p 20992 -U notificationservice -n notification -Fc -f notification_backup_$(date +%s).dump notificationservice
    ```
-2. Apply pending migrations:
+3. Check migration status via `GET /health/ready` or EF tools:
    ```bash
-   dotnet ef database update --project NotificationService/src/Domain --startup-project NotificationService/src/Api
+   dotnet ef migrations has-pending-model-changes --project NotificationService/src/Domain --startup-project NotificationService/src/Api
    ```
-3. Rollback (if necessary to rollback to initial clean state):
-   ```bash
-   dotnet ef database update 0 --project NotificationService/src/Domain --startup-project NotificationService/src/Api
-   ```
+
+### 5.2. Apply Upgrade Migration Chain
+```bash
+dotnet ef database update --project NotificationService/src/Domain --startup-project NotificationService/src/Api
+```
+- Applies `20261104042342_AddNotificationSchemaUpgrades`, `20261104075246_AddLinkageAndCorrectPaidMilestones`, and `20261104084104_CorrectNotificationLinkageBackfill`.
+- Preserves all existing `notifications`, `inbox_receipts`, and `delivery_jobs`.
+- Renames columns to snake_case matching PostgreSQL conventions (`status`, `read_at`, `lease_token`, etc.).
+- Adds `rental_item_id` on notifications (`ix_notifications_rental_item`) and `parent_item_id` on aggregate watermarks (`ix_aggregate_watermarks_parent_item`).
+- Corrects historical `PAID` watermarks: resets `terminal_state = NULL`, `is_terminal = false`, and sets `is_paid = true`.
+- Preserves actual terminal states (`CANCELLED`, `COMPLETED`, `EXPIRED`, `REJECTED`).
+- Backfills `is_paid = true` for orders with recorded `ORDER_PAID` / `RENTAL_ORDER_PAID` notifications.
+- Backfills `rental_item_id` safely via `CASE WHEN pg_input_is_valid(...)` from `render_data_json ->> 'rentalItemId'` (ignoring empty GUIDs) and `parent_item_id` on ReturnRequest watermarks.
+
+### 5.3. Safe Rollback Procedure
+If rollback is necessary:
+```bash
+# Rollback to previous schema upgrade
+dotnet ef database update 20261104042342_AddNotificationSchemaUpgrades --project NotificationService/src/Domain --startup-project NotificationService/src/Api
+```
+Do NOT run `database update 0` as that would drop all tables and destroy audit history.
+
+### 5.4. Preflight Audit Queries
+Run before or after upgrade to detect conflicting linkages or malformed JSON payloads:
+```sql
+-- 1. Identify ReturnRequests with conflicting rental_item_id across notifications:
+WITH parsed AS (
+    SELECT
+        n.resource_id AS return_request_id,
+        n.rental_item_id
+    FROM notification.notifications n
+    WHERE n.resource_type = 'ReturnRequest' AND n.rental_item_id IS NOT NULL
+    UNION ALL
+    SELECT
+        (n.render_data_json::jsonb ->> 'returnRequestId') AS return_request_id,
+        n.rental_item_id
+    FROM notification.notifications n
+    WHERE n.render_data_json IS NOT NULL
+      AND pg_input_is_valid(n.render_data_json, 'jsonb')
+      AND (n.render_data_json::jsonb ? 'returnRequestId')
+      AND n.rental_item_id IS NOT NULL
+)
+SELECT return_request_id, COUNT(DISTINCT rental_item_id) AS distinct_item_count, array_agg(DISTINCT rental_item_id) AS conflicting_item_ids
+FROM parsed
+GROUP BY return_request_id
+HAVING COUNT(DISTINCT rental_item_id) > 1;
+
+-- 2. Identify notifications with unresolvable rental_item_id or malformed JSON:
+SELECT id, notification_type, resource_type, resource_id, created_at
+FROM notification.notifications
+WHERE rental_item_id IS NULL
+  AND (
+      resource_type = 'RentalItem'
+      OR (render_data_json IS NOT NULL AND render_data_json LIKE '%rentalItemId%')
+  );
+```
+---
+
+## 6. Job Reconciliation Runbook (Stale Suppression Recovery)
+
+Due to previous blanket suppression on terminal states, informational result notifications (`ORDER_PAID`, `ORDER_COMPLETED`, `REFUND_COMPLETED`, `PAYOUT_COMPLETED`) may have had their email delivery jobs suppressed with `errorCode = 'STALE_ACTION_SUPPRESSED'`.
+
+### 6.1. Candidate Audit (Dry-Run Projection)
+Inject `IJobReconciliationService` or run via operational CLI/endpoint:
+```csharp
+var candidateReport = await reconciliationService.GetCandidatesAsync(limit: 100);
+logger.LogInformation("Dry-run audit: Found {Count} candidate suppressed jobs to requeue: {@JobIds}",
+    candidateReport.TotalCandidates, candidateReport.CandidateJobIds);
+```
+- Evaluates both legacy error codes: `STALE_ACTION_SUPPRESSED` and `STALE_EVENT_TERMINATED`.
+- Verifies exact counts and job IDs before taking any mutation action (capped at 100 per request).
+- Strictly excludes jobs with `DispatchStartedAt != null`, `SentAt != null`, `ProviderMessageId != null`, active leases (`LeaseExpiresAt > now`), or exhausted retry budgets (`AttemptCount >= MaxAttempts`).
+
+### 6.2. Controlled Requeue Execution
+When approved during a maintenance window with a mandatory operator/run ID:
+```csharp
+var execReport = await reconciliationService.RequeueJobsAsync(
+    candidateReport.CandidateJobIds,
+    operatorId: "operator-maint-20261104-01");
+
+logger.LogInformation("Reconciliation executed: Operator '{Op}' requeued {Reconciled}/{Requested} jobs. Reconciled={ReconciledIds}, Skipped={SkippedIds}",
+    execReport.OperatorId, execReport.ReconciledCount, execReport.RequestedCount, execReport.ReconciledJobIds, execReport.SkippedJobIds);
+```
+- Atomic conditional update via `DeliveryJobRepository`: if a background worker or another reconciler changed the job state in the interim, the update affects 0 rows and worker leases are preserved.
+- Resets eligible jobs to `status = 'Pending'`, `lease_token = NULL`, `lease_expires_at = NULL`.
+- Records non-PII audit trail in `last_error_detail` (`"Requeued by op:{operatorId} at {timestamp}; prev_code:{prevCode}"`).
+- Completely idempotent: running a second time finds 0 candidates.
+---
+
+## 7. Realtime & Redis Backplane Configuration
+
+### 7.1. Mandatory Redis Connection
+- Redis connection string (`ConnectionStrings:Redis` or `Redis:ConnectionString`) is mandatory for all non-test environments.
+- Startup validation fails fast with `InvalidOperationException` if Redis configuration is absent or invalid.
+- Local in-memory SignalR without a backplane is strictly prohibited in multi-replica deployments.
+
+### 7.2. Channel Prefixing & Isolation
+- Channel prefix is automatically configured based on environment: `dprental:notification:{environment}`.
+- Replicas belonging to the same deployment cluster must connect to the same Redis instance/cluster and share the same channel prefix.
+
+### 7.3. Redis Resilience
+- Configured with `AbortOnConnectFail = false` and 5 reconnection retries.
+- Temporary Redis drops log warnings and increment metrics, but do NOT crash the host process or abort database transactions.
+
+---
+
+## 8. Authentication & JWKS Configuration
+
+### 8.1. Mandatory Parameters
+- `Jwt:Issuer`: Expected token issuer (e.g., `https://auth.dprental.vn`).
+- `Jwt:Audience`: Expected token audience (e.g., `dprental-platform`).
+- `Jwt:JwksUri`: Absolute HTTP/HTTPS URI to AuthService JWKS endpoint (e.g., `http://auth-service:8080/.well-known/jwks.json`).
+
+### 8.2. Key Caching & Rotation Rules
+- **Periodic Refresh**: Automatically refreshes keys every 15 minutes.
+- **Stale Cache Fallback**: Allows cached keys up to 60 minutes if the JWKS endpoint is unreachable.
+- **Fail-Closed**: Rejects all tokens after 60 minutes if the endpoint remains down.
+- **Unknown Key ID Throttling**: Requests with unknown `kid` trigger a forced refresh, throttled to at most once per 30 seconds to prevent DDoS.
+- **Human vs. Service JWT Policy**: Service tokens (`u: "svc"`) or tokens lacking a valid User GUID `sub` are rejected with `403 Forbidden` on user inbox REST endpoints and SignalR Hub negotiate. Query string `access_token` is strictly rejected with `401 Unauthorized`.

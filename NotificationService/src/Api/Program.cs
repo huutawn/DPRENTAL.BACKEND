@@ -1,13 +1,16 @@
 using System.IO;
+using Dprental.NotificationService.Api.HealthChecks;
 using Dprental.NotificationService.Api.Exceptions;
 using Dprental.NotificationService.Api.Hubs;
 using Dprental.NotificationService.Api.Security;
 using Dprental.NotificationService.Api.Services;
+using Dprental.NotificationService.Api.Validation;
 using Dprental.NotificationService.Application.Clients;
 using Dprental.NotificationService.Application.DependencyInjection;
 using Dprental.NotificationService.Application.Email;
 using Dprental.NotificationService.Application.Email.Options;
 using Dprental.NotificationService.Application.Email.Workers;
+using Dprental.NotificationService.Application.Email.Services;
 using Dprental.NotificationService.Application.IServices;
 using Dprental.NotificationService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -15,6 +18,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
+StartupConfigurationValidator.Validate(builder.Configuration);
 builder.Services.AddNotificationSecurityAndAuthentication(builder.Configuration);
 builder.Services.AddNotificationServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddNotificationServiceApplication();
@@ -22,23 +26,53 @@ builder.Services.AddNotificationServiceApplication();
 // Cấu hình SMTP & Email Delivery
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
 builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+builder.Services.AddScoped<IEmailDeliveryService, EmailDeliveryService>();
 builder.Services.AddHostedService<EmailDeliveryWorker>();
 builder.Services.AddHostedService<EmailLeaseReconciliationWorker>();
 
 // Cấu hình AuthService HttpClient
 builder.Services.AddHttpClient<IAuthContactClient, AuthContactClient>(client =>
 {
-    var authBaseUrl = builder.Configuration["Services:AuthService:BaseUrl"] ?? "http://auth-service:8080";
-    client.BaseAddress = new Uri(authBaseUrl);
+    var authBaseUrl = builder.Configuration["Services:AuthService:BaseUrl"] ?? builder.Configuration["AuthService:BaseUrl"];
+    client.BaseAddress = new Uri(authBaseUrl!);
+    client.Timeout = TimeSpan.FromSeconds(10);
 });
 
-// Cấu hình SignalR Realtime Notifier
-builder.Services.AddSignalR();
-builder.Services.AddSingleton<INotificationRealtimeNotifier, SignalRNotificationRealtimeNotifier>();
+// Cấu hình SignalR Realtime Notifier & Redis Backplane
+var signalRBuilder = builder.Services.AddSignalR();
+var redisConnectionString = builder.Configuration.GetConnectionString("Redis")
+    ?? builder.Configuration["Redis:ConnectionString"];
 
+if (string.IsNullOrWhiteSpace(redisConnectionString))
+{
+    if (builder.Environment.IsProduction())
+    {
+        throw new InvalidOperationException("Redis backplane connection string is mandatory in production profile.");
+    }
+}
+else
+{
+    var environmentName = builder.Environment.EnvironmentName.ToLowerInvariant();
+    var channelPrefix = $"dprental:notification:{environmentName}";
+    signalRBuilder.AddStackExchangeRedis(redisConnectionString, options =>
+    {
+        options.Configuration.ChannelPrefix = StackExchange.Redis.RedisChannel.Literal(channelPrefix);
+        options.Configuration.AbortOnConnectFail = false;
+        options.Configuration.ConnectRetry = 5;
+        options.Configuration.ConnectTimeout = 5000;
+        options.Configuration.AsyncTimeout = 5000;
+        options.Configuration.SyncTimeout = 5000;
+    });
+}
+
+builder.Services.AddSingleton<INotificationRealtimeNotifier, SignalRNotificationRealtimeNotifier>();
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<NotificationServiceDbContext>(
         "postgres",
+        failureStatus: HealthStatus.Unhealthy,
+        tags: ["ready"])
+    .AddCheck<DatabaseMigrationHealthCheck>(
+        "migrations",
         failureStatus: HealthStatus.Unhealthy,
         tags: ["ready"]);
 

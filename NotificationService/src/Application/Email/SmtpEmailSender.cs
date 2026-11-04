@@ -24,6 +24,7 @@ public sealed record EmailSendResult(
 public interface IEmailSender
 {
     Task<EmailSendResult> SendEmailAsync(
+        Guid deliveryJobId,
         string recipientEmail,
         string subject,
         string bodyHtml,
@@ -42,11 +43,13 @@ public sealed class SmtpEmailSender : IEmailSender
     }
 
     public async Task<EmailSendResult> SendEmailAsync(
+        Guid deliveryJobId,
         string recipientEmail,
         string subject,
         string bodyHtml,
         CancellationToken cancellationToken = default)
     {
+        var sendStarted = false;
         try
         {
             using var client = new SmtpClient(_options.Host, _options.Port)
@@ -69,9 +72,12 @@ public sealed class SmtpEmailSender : IEmailSender
             };
             message.To.Add(recipientEmail);
 
+            var messageId = $"<notif_{deliveryJobId:N}@dprental.vn>";
+            message.Headers.Set("Message-ID", messageId);
+
+            sendStarted = true;
             await client.SendMailAsync(message, cancellationToken);
 
-            var messageId = $"smtp_{Guid.NewGuid():N}";
             return new EmailSendResult(
                 Outcome: EmailSendOutcome.Success,
                 ProviderMessageId: messageId,
@@ -81,16 +87,33 @@ public sealed class SmtpEmailSender : IEmailSender
         catch (SmtpFailedRecipientException ex)
         {
             _logger.LogWarning(ex, "SMTP từ chối địa chỉ người nhận {Email}: {StatusCode}", recipientEmail, ex.StatusCode);
+            var is5xx = (int)ex.StatusCode >= 500 && (int)ex.StatusCode < 600;
+            var is4xx = (int)ex.StatusCode >= 400 && (int)ex.StatusCode < 500;
+            if (is5xx)
+            {
+                return new EmailSendResult(
+                    Outcome: EmailSendOutcome.PermanentRejection,
+                    ProviderMessageId: null,
+                    ErrorCode: "RECIPIENT_REJECTED",
+                    ErrorDetail: $"SMTP StatusCode: {ex.StatusCode}");
+            }
+            if (is4xx)
+            {
+                return new EmailSendResult(
+                    Outcome: EmailSendOutcome.PreDataError,
+                    ProviderMessageId: null,
+                    ErrorCode: "TRANSIENT_SMTP_4XX",
+                    ErrorDetail: $"SMTP StatusCode: {ex.StatusCode}");
+            }
             return new EmailSendResult(
-                Outcome: EmailSendOutcome.PermanentRejection,
+                Outcome: sendStarted ? EmailSendOutcome.PostDataError : EmailSendOutcome.PreDataError,
                 ProviderMessageId: null,
-                ErrorCode: "RECIPIENT_REJECTED",
-                ErrorDetail: $"SMTP StatusCode: {ex.StatusCode}");
+                ErrorCode: sendStarted ? "AMBIGUOUS_SMTP_ERROR" : "TRANSIENT_SMTP_ERROR",
+                ErrorDetail: ex.Message);
         }
-        catch (SmtpException ex) when (ex.InnerException is SocketException or TimeoutException)
+        catch (SmtpException ex) when (ex.InnerException is SocketException or TimeoutException or IOException)
         {
             _logger.LogWarning(ex, "Lỗi kết nối Socket hoặc Timeout khi gửi email tới {Email}", recipientEmail);
-            // Lỗi socket hoặc timeout có thể xảy ra sau DATA
             return new EmailSendResult(
                 Outcome: EmailSendOutcome.PostDataError,
                 ProviderMessageId: null,
@@ -101,19 +124,45 @@ public sealed class SmtpEmailSender : IEmailSender
         {
             _logger.LogWarning(ex, "Lỗi SMTP khi gửi email tới {Email}: {StatusCode}", recipientEmail, ex.StatusCode);
             var is5xx = (int)ex.StatusCode >= 500 && (int)ex.StatusCode < 600;
+            var is4xx = (int)ex.StatusCode >= 400 && (int)ex.StatusCode < 500;
+            if (is5xx)
+            {
+                return new EmailSendResult(
+                    Outcome: EmailSendOutcome.PermanentRejection,
+                    ProviderMessageId: null,
+                    ErrorCode: "PERMANENT_SMTP_FAILURE",
+                    ErrorDetail: ex.Message);
+            }
+            if (is4xx)
+            {
+                return new EmailSendResult(
+                    Outcome: EmailSendOutcome.PreDataError,
+                    ProviderMessageId: null,
+                    ErrorCode: "TRANSIENT_SMTP_4XX",
+                    ErrorDetail: ex.Message);
+            }
             return new EmailSendResult(
-                Outcome: is5xx ? EmailSendOutcome.PermanentRejection : EmailSendOutcome.PreDataError,
+                Outcome: sendStarted ? EmailSendOutcome.PostDataError : EmailSendOutcome.PreDataError,
                 ProviderMessageId: null,
-                ErrorCode: is5xx ? "PERMANENT_SMTP_FAILURE" : "TRANSIENT_SMTP_ERROR",
+                ErrorCode: sendStarted ? "AMBIGUOUS_SMTP_ERROR" : "TRANSIENT_SMTP_ERROR",
+                ErrorDetail: ex.Message);
+        }
+        catch (Exception ex) when (ex is SocketException or TimeoutException or IOException or OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Timeout hoặc ngắt kết nối khi gửi email tới {Email}", recipientEmail);
+            return new EmailSendResult(
+                Outcome: sendStarted ? EmailSendOutcome.PostDataError : EmailSendOutcome.PreDataError,
+                ProviderMessageId: null,
+                ErrorCode: sendStarted ? "SMTP_TIMEOUT_OR_DROPPED" : "TRANSIENT_CONNECTION_ERROR",
                 ErrorDetail: ex.Message);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Lỗi không xác định khi gửi email tới {Email}", recipientEmail);
             return new EmailSendResult(
-                Outcome: EmailSendOutcome.PreDataError,
+                Outcome: sendStarted ? EmailSendOutcome.PostDataError : EmailSendOutcome.PreDataError,
                 ProviderMessageId: null,
-                ErrorCode: "UNKNOWN_SEND_ERROR",
+                ErrorCode: sendStarted ? "AMBIGUOUS_SEND_ERROR" : "UNKNOWN_SEND_ERROR",
                 ErrorDetail: ex.Message);
         }
     }
