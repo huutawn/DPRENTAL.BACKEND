@@ -38,12 +38,60 @@ public sealed class SecurityAndRealtimeTests
             new Claim("u", "svc") // Service principal token!
         };
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+        var result = principal.TryGetHumanUserId();
+        Assert.True(result.IsFailure);
+        Assert.Equal("SERVICE_TOKEN_FORBIDDEN", result.Error.Code);
+        Assert.Equal(Dprental.NotificationService.Common.ErrorType.Forbidden, result.Error.Type);
+    }
+
+    [Fact]
+    public void UserContext_ServiceToken_WithoutSub_ShouldBeStrictlyRejectedWith403Forbidden()
+    {
+        var claims = new[]
+        {
+            new Claim("u", "svc")
+        };
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
 
         var result = principal.TryGetHumanUserId();
         Assert.True(result.IsFailure);
         Assert.Equal("SERVICE_TOKEN_FORBIDDEN", result.Error.Code);
+        Assert.Equal(Dprental.NotificationService.Common.ErrorType.Forbidden, result.Error.Type);
     }
 
+    [Fact]
+    public void UserContext_HumanToken_MissingSub_ShouldBeRejectedWith401Unauthorized()
+    {
+        var claims = new[]
+        {
+            new Claim("u", "usr")
+        };
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+
+        var result = principal.TryGetHumanUserId();
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_TOKEN_SUB", result.Error.Code);
+        Assert.Equal(Dprental.NotificationService.Common.ErrorType.Unauthorized, result.Error.Type);
+    }
+
+    [Theory]
+    [InlineData("not-a-valid-guid")]
+    [InlineData("12345")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public void UserContext_HumanToken_NonGuidSub_ShouldBeRejectedWith401Unauthorized(string invalidSub)
+    {
+        var claims = new[]
+        {
+            new Claim("sub", invalidSub),
+            new Claim("u", "usr")
+        };
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+
+        var result = principal.TryGetHumanUserId();
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_TOKEN_SUB", result.Error.Code);
+        Assert.Equal(Dprental.NotificationService.Common.ErrorType.Unauthorized, result.Error.Type);
+    }
     [Fact]
     public void UserContext_Unauthenticated_ShouldBeRejected()
     {
@@ -107,5 +155,105 @@ public sealed class SecurityAndRealtimeTests
             "NotificationInboxChanged",
             It.IsAny<object?[]>(),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task NotificationHub_HumanUserToken_ConnectsAndJoinsUserGroup()
+    {
+        var userId = Guid.NewGuid();
+        var claims = new[]
+        {
+            new Claim("sub", userId.ToString()),
+            new Claim("u", "usr")
+        };
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+
+        var hub = new NotificationHub(NullLogger<NotificationHub>.Instance);
+        var mockContext = new Mock<HubCallerContext>();
+        var mockGroups = new Mock<IGroupManager>();
+
+        mockContext.Setup(c => c.ConnectionId).Returns("conn-123");
+        mockContext.Setup(c => c.User).Returns(principal);
+        hub.Context = mockContext.Object;
+        hub.Groups = mockGroups.Object;
+
+        await hub.OnConnectedAsync();
+
+        mockGroups.Verify(g => g.AddToGroupAsync("conn-123", $"user:{userId}", default), Times.Once);
+        mockContext.Verify(c => c.Abort(), Times.Never);
+    }
+
+    [Fact]
+    public async Task NotificationHub_ServiceToken_StrictlyRejectedWith403Forbidden()
+    {
+        var claims = new[]
+        {
+            new Claim("sub", Guid.NewGuid().ToString()),
+            new Claim("u", "svc")
+        };
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+
+        var hub = new NotificationHub(NullLogger<NotificationHub>.Instance);
+        var mockContext = new Mock<HubCallerContext>();
+        var mockGroups = new Mock<IGroupManager>();
+
+        mockContext.Setup(c => c.ConnectionId).Returns("conn-service");
+        mockContext.Setup(c => c.User).Returns(principal);
+        hub.Context = mockContext.Object;
+        hub.Groups = mockGroups.Object;
+
+        var ex = await Assert.ThrowsAsync<HubException>(() => hub.OnConnectedAsync());
+        Assert.Contains("403 Forbidden", ex.Message);
+        mockContext.Verify(c => c.Abort(), Times.Once);
+        mockGroups.Verify(g => g.AddToGroupAsync(It.IsAny<string>(), It.IsAny<string>(), default), Times.Never);
+    }
+
+    [Fact]
+    public async Task NotificationHub_MissingSub_RejectedWith401Unauthorized()
+    {
+        var claims = new[]
+        {
+            new Claim("u", "usr")
+        };
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+
+        var hub = new NotificationHub(NullLogger<NotificationHub>.Instance);
+        var mockContext = new Mock<HubCallerContext>();
+        var mockGroups = new Mock<IGroupManager>();
+
+        mockContext.Setup(c => c.ConnectionId).Returns("conn-nosub");
+        mockContext.Setup(c => c.User).Returns(principal);
+        hub.Context = mockContext.Object;
+        hub.Groups = mockGroups.Object;
+
+        var ex = await Assert.ThrowsAsync<HubException>(() => hub.OnConnectedAsync());
+        Assert.Contains("401 Unauthorized", ex.Message);
+        mockContext.Verify(c => c.Abort(), Times.Once);
+        mockGroups.Verify(g => g.AddToGroupAsync(It.IsAny<string>(), It.IsAny<string>(), default), Times.Never);
+    }
+
+    [Fact]
+    public async Task NotificationHub_NonGuidSub_RejectedWith401Unauthorized()
+    {
+        var claims = new[]
+        {
+            new Claim("sub", "not-a-valid-guid"),
+            new Claim("u", "usr")
+        };
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+
+        var hub = new NotificationHub(NullLogger<NotificationHub>.Instance);
+        var mockContext = new Mock<HubCallerContext>();
+        var mockGroups = new Mock<IGroupManager>();
+
+        mockContext.Setup(c => c.ConnectionId).Returns("conn-badsub");
+        mockContext.Setup(c => c.User).Returns(principal);
+        hub.Context = mockContext.Object;
+        hub.Groups = mockGroups.Object;
+
+        var ex = await Assert.ThrowsAsync<HubException>(() => hub.OnConnectedAsync());
+        Assert.Contains("401 Unauthorized", ex.Message);
+        mockContext.Verify(c => c.Abort(), Times.Once);
+        mockGroups.Verify(g => g.AddToGroupAsync(It.IsAny<string>(), It.IsAny<string>(), default), Times.Never);
     }
 }

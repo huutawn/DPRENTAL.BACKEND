@@ -30,6 +30,7 @@ builder.Services.AddHttpClient<IAuthContactClient, AuthContactClient>(client =>
 {
     var authBaseUrl = builder.Configuration["Services:AuthService:BaseUrl"] ?? "http://auth-service:8080";
     client.BaseAddress = new Uri(authBaseUrl);
+    client.Timeout = TimeSpan.FromSeconds(10);
 });
 
 // Cấu hình SignalR Realtime Notifier

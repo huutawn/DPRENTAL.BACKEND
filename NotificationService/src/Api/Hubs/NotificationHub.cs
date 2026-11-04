@@ -23,8 +23,29 @@ public sealed class NotificationHub : Hub
         if (userResult.IsFailure)
         {
             _logger.LogWarning("Từ chối kết nối SignalR: {Code} - {Message}", userResult.Error.Code, userResult.Error.Message);
+            try
+            {
+                var httpContext = Context.GetHttpContext();
+                if (httpContext != null)
+                {
+                    httpContext.Response.StatusCode = userResult.Error.Type == ErrorType.Forbidden
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status401Unauthorized;
+                }
+            }
+            catch
+            {
+                // Fallback nếu HttpContext không khả dụng
+            }
+
             Context.Abort();
-            return;
+
+            if (userResult.Error.Type == ErrorType.Forbidden)
+            {
+                throw new HubException("403 Forbidden: Service principal (u: svc) is not allowed to access SignalR hub.");
+            }
+
+            throw new HubException($"401 Unauthorized: {userResult.Error.Message}");
         }
 
         var userId = userResult.Value;
