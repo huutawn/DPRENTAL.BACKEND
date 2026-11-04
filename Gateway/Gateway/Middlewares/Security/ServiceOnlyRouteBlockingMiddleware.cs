@@ -42,13 +42,6 @@ public sealed class ServiceOnlyRouteBlockingMiddleware
         string path = context.Request.Path.Value ?? string.Empty;
         string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
-        // This endpoint is intended only for direct Inventory-to-Auth calls.
-        if (path.StartsWith("/api/v1/auth/internal/", StringComparison.OrdinalIgnoreCase))
-        {
-            context.Response.StatusCode = StatusCodes.Status404NotFound;
-            return;
-        }
-
         bool isPaymentHub = segments.Length >= 5 &&
             segments[0].Equals("api", StringComparison.OrdinalIgnoreCase) &&
             segments[1].Equals("v1", StringComparison.OrdinalIgnoreCase) &&
