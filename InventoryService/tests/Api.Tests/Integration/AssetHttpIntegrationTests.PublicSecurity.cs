@@ -52,14 +52,15 @@ public sealed partial class AssetHttpIntegrationTests
         using var client = app.CreateClient();
 
         var owner = Guid.NewGuid();
+        string uniqueModel = $"Toyota-{Guid.NewGuid():N}";
         var asset = await SeedAssetAsync(
             owner,
-            model: "Toyota 8FD25",
+            model: uniqueModel,
             serial: "SECRET-SN-12345",
             specValues: "{\"capacityKg\": 2500, \"fuelType\": \"diesel\", \"ownerUserId\": \"leak-attempt\"}");
 
         // 1. List
-        var resList = await client.GetAsync("api/v1/inventory/public/equipment-listings");
+        var resList = await client.GetAsync($"api/v1/inventory/public/equipment-listings?q={Uri.EscapeDataString(uniqueModel)}");
         Assert.Equal(HttpStatusCode.OK, resList.StatusCode);
         var listJson = await resList.Content.ReadAsStringAsync();
         using var docList = JsonDocument.Parse(listJson);

@@ -58,6 +58,18 @@ public static class ClientsServiceCollectionExtensions
             AllowAutoRedirect = false
         });
 
+        services.AddHttpClient<IOrganizationMembershipClient, OrganizationMembershipClient>((_, client) =>
+        {
+            string baseUrl = configuration["AuthService:BaseUrl"] ?? "http://auth-service:8080";
+            client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
+            client.Timeout = TimeSpan.FromSeconds(10);
+            string internalKey = configuration["InternalAuthentication:ApiKey"] ?? configuration["INTERNAL_API_KEY"] ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(internalKey))
+            {
+                client.DefaultRequestHeaders.Add("X-Api-Key", internalKey);
+            }
+        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+
         return services;
     }
 }

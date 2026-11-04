@@ -21,6 +21,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<AssetSearchQueryValidator>();
         services.AddScoped<AssetSearchFilterResolver>();
         services.AddScoped<IEquipmentListingService, EquipmentListingService>();
+        services.AddScoped<ListingOrganizationConfirmationService>();
         services.AddScoped<IWarehouseService, WarehouseService>();
         services.AddScoped<IInventoryAssetService, InventoryAssetService>();
         services.AddScoped<IPublicEquipmentListingService, PublicEquipmentListingService>();

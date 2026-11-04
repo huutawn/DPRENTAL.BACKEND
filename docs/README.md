@@ -10,6 +10,15 @@ vẫn dựa trên owner. `categoryIds` được đọc từ loại thiết bị 
 không tra cứu được, còn mảng rỗng nghĩa là Catalog xác nhận chưa có danh mục. Danh mục
 được đọc theo từng loại thiết bị khác nhau trong trang và có giới hạn số request đồng thời.
 
+Đối với listing cũ chưa có tổ chức, chủ listing đăng nhập và xác nhận qua
+`PUT /api/v1/inventory/equipment-listings/{id}/organization` với body `{"organizationId":"..."}`.
+Inventory dùng phiên đăng nhập để gọi `GET /api/v1/auth/users/organizations`, chỉ chấp nhận
+vai trò Owner của tổ chức Supplier đang Active. Lặp lại cùng ID là an toàn; không tự thay
+ID tổ chức đã gắn. Cấu hình `AuthService__BaseUrl` trỏ tới Auth nội bộ và cấu hình
+`InternalAuthentication__ApiKey` (hoặc `INTERNAL_API_KEY`) khớp key nội bộ của Auth; nếu Auth lỗi,
+thao tác xác nhận không lưu thay đổi. Sau khi xác nhận, FE lấy `organizationId` từ
+listing để gọi Auth `supplier-contact` cho khách chưa đăng nhập.
+
 ## Ranh giới các lớp
 
 | Lớp | Trách nhiệm | Không được chứa |

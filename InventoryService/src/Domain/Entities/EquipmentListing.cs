@@ -94,6 +94,13 @@ public sealed class EquipmentListing
     public ICollection<InventoryAsset> Assets { get; private set; } = new List<InventoryAsset>();
     public Warehouse? Warehouse { get; private set; }
 
+    /// <summary>Ghi nhận tổ chức đã được use case xác minh cho listing.</summary>
+    public void AssignOrganization(Guid organizationId, DateTimeOffset now)
+    {
+        OrganizationId = organizationId;
+        UpdatedAt = now.ToUniversalTime();
+    }
+
     private EquipmentListing()
     {
     }
