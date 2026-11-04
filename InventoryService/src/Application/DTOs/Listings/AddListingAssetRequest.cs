@@ -7,5 +7,5 @@ namespace Dprental.InventoryService.Application.DTOs.Listings;
 /// </summary>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record AddListingAssetRequest(
-    [property: JsonPropertyName("serialNumber")] string SerialNumber
+    string SerialNumber
 );

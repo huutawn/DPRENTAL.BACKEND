@@ -1,4 +1,3 @@
-using System.Text.Json.Serialization;
 
 namespace Dprental.InventoryService.Application.Kafka.Contracts.Behavior;
 
@@ -8,12 +7,9 @@ namespace Dprental.InventoryService.Application.Kafka.Contracts.Behavior;
 /// </summary>
 public sealed record ListingViewedPayload
 {
-    [JsonPropertyName("userId")]
     public Guid? UserId { get; init; }
 
-    [JsonPropertyName("equipmentListingId")]
     public required Guid EquipmentListingId { get; init; }
 
-    [JsonPropertyName("equipmentTypeId")]
     public required Guid EquipmentTypeId { get; init; }
 }

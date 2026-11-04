@@ -7,10 +7,10 @@ namespace Dprental.InventoryService.Application.DTOs.Warehouse;
 /// </summary>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record UpdateWarehouseRequest(
-    [property: JsonPropertyName("addressDetail")] string AddressDetail,
-    [property: JsonPropertyName("provinceCode")] string ProvinceCode,
-    [property: JsonPropertyName("wardCode")] string WardCode,
-    [property: JsonPropertyName("latitude"), JsonRequired] double? Latitude,
-    [property: JsonPropertyName("longitude"), JsonRequired] double? Longitude,
-    [property: JsonPropertyName("expectedVersion")] uint? ExpectedVersion = null
+    string AddressDetail,
+    string ProvinceCode,
+    string WardCode,
+    [property: JsonRequired] double? Latitude,
+    [property: JsonRequired] double? Longitude,
+    uint? ExpectedVersion = null
 );

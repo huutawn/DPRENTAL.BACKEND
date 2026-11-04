@@ -10,10 +10,10 @@ namespace Dprental.InventoryService.Application.DTOs.Assets;
 /// </summary>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record RentalRateDto(
-    [property: JsonPropertyName("dailyRate"), JsonConverter(typeof(StrictIntegerRateJsonConverter))] decimal? DailyRate,
-    [property: JsonPropertyName("weeklyRate"), JsonConverter(typeof(StrictIntegerRateJsonConverter))] decimal? WeeklyRate = null,
-    [property: JsonPropertyName("monthlyRate"), JsonConverter(typeof(StrictIntegerRateJsonConverter))] decimal? MonthlyRate = null,
-    [property: JsonPropertyName("currency")] string? Currency = null
+    [property: JsonConverter(typeof(StrictIntegerRateJsonConverter))] decimal? DailyRate,
+    [property: JsonConverter(typeof(StrictIntegerRateJsonConverter))] decimal? WeeklyRate = null,
+    [property: JsonConverter(typeof(StrictIntegerRateJsonConverter))] decimal? MonthlyRate = null,
+    string? Currency = null
 )
 {
     /// <summary>

@@ -11,17 +11,17 @@ namespace Dprental.InventoryService.Application.DTOs.Listings;
 /// </summary>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record CreateEquipmentListingRequest(
-    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
-    [property: JsonPropertyName("brandId")] Guid BrandId,
-    [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("model")] string Model,
-    [property: JsonPropertyName("serialNumber")] string SerialNumber,
-    [property: JsonPropertyName("specValues")] JsonElement SpecValues,
-    [property: JsonPropertyName("rentalRate")] RentalRateDto RentalRate,
-    [property: JsonPropertyName("manufactureYear")] int? ManufactureYear = null,
-    [property: JsonPropertyName("description")] string? Description = null,
-    [property: JsonPropertyName("schemaVersion")] int SchemaVersion = 1,
-    [property: JsonPropertyName("mediaIds")] IReadOnlyList<Guid>? MediaIds = null,
-    [property: JsonPropertyName("thumbnailMediaId")] Guid? ThumbnailMediaId = null,
-    [property: JsonPropertyName("depositAmount"), JsonConverter(typeof(StrictIntegerDepositJsonConverter))] decimal? DepositAmount = null
+    Guid EquipmentTypeId,
+    Guid BrandId,
+    string Name,
+    string Model,
+    string SerialNumber,
+    JsonElement SpecValues,
+    RentalRateDto RentalRate,
+    int? ManufactureYear = null,
+    string? Description = null,
+    int SchemaVersion = 1,
+    IReadOnlyList<Guid>? MediaIds = null,
+    Guid? ThumbnailMediaId = null,
+    [property: JsonConverter(typeof(StrictIntegerDepositJsonConverter))] decimal? DepositAmount = null
 );

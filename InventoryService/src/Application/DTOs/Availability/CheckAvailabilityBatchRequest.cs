@@ -9,7 +9,7 @@ namespace Dprental.InventoryService.Application.DTOs.Availability;
 /// </summary>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record CheckAvailabilityBatchRequest(
-    [property: JsonPropertyName("assetIds")] IReadOnlyList<Guid>? AssetIds,
-    [property: JsonPropertyName("startDate")] DateOnly? StartDate,
-    [property: JsonPropertyName("endDate")] DateOnly? EndDate
+    IReadOnlyList<Guid>? AssetIds,
+    DateOnly? StartDate,
+    DateOnly? EndDate
 );
