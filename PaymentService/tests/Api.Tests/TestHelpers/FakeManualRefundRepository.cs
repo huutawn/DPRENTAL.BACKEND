@@ -26,6 +26,11 @@ public sealed class FakeManualRefundRepository : IManualRefundRepository
     public Task<IReadOnlyList<ManualRefundRequirement>> ListAsync(ManualRefundStatus status, Guid? after, int limit, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<ManualRefundRequirement>>(_refunds.FindAll(r => r.Status == status));
 
+    public Task<OutgoingTransferTarget?> FindByTransferCodeAsync(string transferCode, CancellationToken ct = default) =>
+        Task.FromResult(_refunds.Find(r => r.TransferCode == transferCode) is { } r
+            ? new OutgoingTransferTarget(r.Id, r.Amount, r.Status == ManualRefundStatus.PendingManualRefund)
+            : null);
+
     public Task<bool> TransferReferenceExistsAsync(string reference, Guid exceptId, CancellationToken ct = default) =>
         Task.FromResult(false);
 

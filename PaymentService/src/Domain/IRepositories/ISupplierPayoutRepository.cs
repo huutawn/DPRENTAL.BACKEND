@@ -15,6 +15,7 @@ public sealed record SupplierPayoutPublication(
 
 public interface ISupplierPayoutRepository
 {
+    Task<OutgoingTransferTarget?> FindByTransferCodeAsync(string transferCode, CancellationToken ct);
     Task<Result<SupplierPayoutWriteResult>> CompleteAsync(CompleteSupplierPayoutCommand command,
         Func<Dprental.PaymentService.Domain.Entities.SupplierPayout, DateTimeOffset, CancellationToken,
             Task<SupplierPayoutPublication>> createPublication, CancellationToken ct);

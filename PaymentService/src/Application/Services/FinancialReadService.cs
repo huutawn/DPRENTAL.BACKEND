@@ -101,7 +101,7 @@ namespace Dprental.PaymentService.Application.Services
 
             return ToPage(page, q, x => new AdminPayoutListItem(
                 x.PayoutId, x.PayoutRef, x.SettlementId, x.SettlementRef, x.RentalItemId, x.SupplierId,
-                x.Amount, x.Currency, x.Status, x.ExternalTransferReference,
+                x.Amount, x.Currency, x.Status, x.TransferCode, x.ExternalTransferReference,
                 x.CompletedBy, x.CreatedAt, x.CompletedAt,
                 x.RentalOrderId, x.OrderCode, x.RentalAmount, x.PlatformFeeAmount, x.FinalDeductionAmount));
         }
@@ -117,7 +117,7 @@ namespace Dprental.PaymentService.Application.Services
 
             return ToPage(page, q, x => new ManualRefundListItem(
                 x.RequirementId, x.RequirementRef, x.SettlementRef, x.RentalItemId, x.RenterId,
-                x.Amount, x.Status.ToString(), x.ExternalTransferReference,
+                x.Amount, x.Status.ToString(), x.TransferCode, x.ExternalTransferReference,
                 x.CompletedBy, x.CreatedAt, x.CompletedAt));
         }
 

@@ -1,3 +1,5 @@
+using Dprental.PaymentService.Common.Utils;
+
 namespace Dprental.PaymentService.Domain.Entities;
 
 public enum ManualRefundStatus { PendingManualRefund = 1, Completed = 2 }
@@ -7,6 +9,8 @@ public sealed class ManualRefundRequirement
 {
     public Guid Id { get; private set; }
     public string RequirementRef { get; private set; } = string.Empty;
+    // Nội dung chuyển khoản admin dùng khi hoàn tiền (QR); webhook SePay tiền ra đọc mã này để tự xác nhận.
+    public string TransferCode { get; private set; } = string.Empty;
     public Guid? SettlementId { get; private set; }
     public Guid InvoiceId { get; private set; }
     public Guid? RentalItemId { get; private set; }
@@ -38,6 +42,7 @@ public sealed class ManualRefundRequirement
         {
             Id = id,
             RequirementRef = $"MRF-{id:N}",
+            TransferCode = PaymentCodeGenerator.Generate(PaymentCodeGenerator.RefundPrefix),
             InvoiceId = invoiceId,
             RenterId = renterId,
             PaymentRef = paymentRef,

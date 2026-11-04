@@ -23,6 +23,12 @@ public sealed class EfSupplierPayoutRepository : ISupplierPayoutRepository
         _clock = clock;
     }
 
+    public Task<OutgoingTransferTarget?> FindByTransferCodeAsync(string transferCode, CancellationToken ct) =>
+        _db.SupplierPayouts.AsNoTracking()
+            .Where(x => x.TransferCode == transferCode)
+            .Select(x => new OutgoingTransferTarget(x.Id, x.Amount, x.Status == SupplierPayout.StatusPendingPayout))
+            .SingleOrDefaultAsync(ct);
+
     public Task<Result<SupplierPayoutWriteResult>> CompleteAsync(
         CompleteSupplierPayoutCommand command,
         Func<SupplierPayout, DateTimeOffset, CancellationToken, Task<SupplierPayoutPublication>> createPublication,

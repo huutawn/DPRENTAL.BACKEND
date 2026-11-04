@@ -8,6 +8,7 @@ public interface IManualRefundRepository
     Task<ManualRefundRequirement?> FindWithRowLockAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<ManualRefundRequirement>> GetForInvoiceAsync(Guid invoiceId, CancellationToken ct = default);
     Task<IReadOnlyList<ManualRefundRequirement>> ListAsync(ManualRefundStatus status, Guid? after, int limit, CancellationToken ct = default);
+    Task<OutgoingTransferTarget?> FindByTransferCodeAsync(string transferCode, CancellationToken ct = default);
     Task<bool> TransferReferenceExistsAsync(string reference, Guid exceptId, CancellationToken ct = default);
     Task AddAsync(ManualRefundRequirement refund, CancellationToken ct = default);
 }

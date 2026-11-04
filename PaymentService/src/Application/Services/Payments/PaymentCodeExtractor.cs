@@ -14,11 +14,36 @@ public sealed record CodeExtractionResult(CodeExtractionStatus Status, string? C
 
 public static class PaymentCodeExtractor
 {
-    private static readonly Regex CodePattern = new(
-        @"(?<![\p{L}\p{N}_])" + Regex.Escape(PaymentCodeGenerator.Prefix) +
+    private static readonly Regex CodePattern = BuildPattern(PaymentCodeGenerator.Prefix);
+    private static readonly (Regex Pattern, string Prefix)[] OutgoingPatterns =
+    [
+        (BuildPattern(PaymentCodeGenerator.PayoutPrefix), PaymentCodeGenerator.PayoutPrefix),
+        (BuildPattern(PaymentCodeGenerator.RefundPrefix), PaymentCodeGenerator.RefundPrefix)
+    ];
+
+    private static Regex BuildPattern(string prefix) => new(
+        @"(?<![\p{L}\p{N}_])" + Regex.Escape(prefix) +
         @"[A-Z0-9]{" + PaymentCodeGenerator.CodeLength + @"}(?![\p{L}\p{N}_])",
         RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(1));
+
+    // Tiền ra: field code của SePay chỉ nhận tiền tố DPR nên mã DPO/DRF chỉ đọc từ description/content.
+    // Gặp hơn một mã (kể cả một DPO và một DRF) thì Ambiguous để admin xem tay.
+    public static CodeExtractionResult ExtractOutgoingCode(string? contentField, string? descriptionField)
+    {
+        var codes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (pattern, prefix) in OutgoingPatterns)
+        {
+            codes.UnionWith(FindCodes(descriptionField, pattern, prefix));
+            codes.UnionWith(FindCodes(contentField, pattern, prefix));
+        }
+        return codes.Count switch
+        {
+            0 => new CodeExtractionResult(CodeExtractionStatus.Missing, null),
+            1 => new CodeExtractionResult(CodeExtractionStatus.SingleMatch, codes.Single()),
+            _ => new CodeExtractionResult(CodeExtractionStatus.Ambiguous, null)
+        };
+    }
 
     public static CodeExtractionResult Extract(string? codeField, string? contentField, string? descriptionField)
     {
@@ -39,7 +64,7 @@ public static class PaymentCodeExtractor
             }
         }
 
-        var descriptionCodes = FindCodes(descriptionField);
+        var descriptionCodes = FindCodes(descriptionField, CodePattern, PaymentCodeGenerator.Prefix);
         if (descriptionCodes.Count > 1)
         {
             return new CodeExtractionResult(CodeExtractionStatus.Ambiguous, null);
@@ -50,7 +75,7 @@ public static class PaymentCodeExtractor
             return new CodeExtractionResult(CodeExtractionStatus.SingleMatch, descriptionCodes.Single());
         }
 
-        var contentCodes = FindCodes(contentField);
+        var contentCodes = FindCodes(contentField, CodePattern, PaymentCodeGenerator.Prefix);
 
         // If multiple distinct codes found in content -> Ambiguous
         if (contentCodes.Count > 1)
@@ -97,14 +122,14 @@ public static class PaymentCodeExtractor
         return new CodeExtractionResult(CodeExtractionStatus.Missing, null);
     }
 
-    private static HashSet<string> FindCodes(string? text)
+    private static HashSet<string> FindCodes(string? text, Regex pattern, string prefix)
     {
         var codes = new HashSet<string>(StringComparer.Ordinal);
         if (!string.IsNullOrEmpty(text))
         {
-            foreach (Match match in CodePattern.Matches(text))
+            foreach (Match match in pattern.Matches(text))
             {
-                if (PaymentCodeGenerator.IsValid(match.Value))
+                if (PaymentCodeGenerator.IsValid(match.Value, prefix))
                 {
                     codes.Add(match.Value);
                 }
