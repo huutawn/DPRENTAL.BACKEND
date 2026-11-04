@@ -40,6 +40,30 @@ public static class StartupConfigurationValidator
             throw new InvalidOperationException("Thiếu cấu hình InternalAuthentication:ApiKey.");
         }
 
+        var jwtIssuer = configuration["Jwt:Issuer"];
+        if (string.IsNullOrWhiteSpace(jwtIssuer))
+        {
+            throw new InvalidOperationException("Thiếu cấu hình Jwt:Issuer.");
+        }
+
+        var jwtAudience = configuration["Jwt:Audience"];
+        if (string.IsNullOrWhiteSpace(jwtAudience))
+        {
+            throw new InvalidOperationException("Thiếu cấu hình Jwt:Audience.");
+        }
+
+        var jwtJwksUri = configuration["Jwt:JwksUri"];
+        if (string.IsNullOrWhiteSpace(jwtJwksUri))
+        {
+            throw new InvalidOperationException("Thiếu cấu hình Jwt:JwksUri.");
+        }
+
+        if (!Uri.TryCreate(jwtJwksUri, UriKind.Absolute, out var parsedJwksUri) ||
+            (parsedJwksUri.Scheme != Uri.UriSchemeHttp && parsedJwksUri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new InvalidOperationException("Cấu hình Jwt:JwksUri phải là URI HTTP hoặc HTTPS tuyệt đối.");
+        }
+
         var redis = configuration.GetConnectionString("Redis") ?? configuration["Redis:ConnectionString"];
         if (!string.IsNullOrWhiteSpace(redis))
         {
