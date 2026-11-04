@@ -254,4 +254,64 @@ public sealed class NotificationDbContextTests
         Assert.Equal("Pending", jobAfterRecovery.Status);
         Assert.Null(jobAfterRecovery.LeaseToken);
     }
+
+    [Fact]
+    public async Task DeliveryJobRepository_RecoverExpiredLeases_WhenDispatchStartedNotNull_ShouldTransitionToUncertain()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new DeliveryJobRepository(context);
+
+        var notificationId = Guid.NewGuid();
+        context.Notifications.Add(new Notification
+        {
+            Id = notificationId,
+            RecipientUserId = Guid.NewGuid(),
+            NotificationType = "ORDER_PAID",
+            Category = "ORDER",
+            Severity = "INFO",
+            Title = "Title",
+            Body = "Body",
+            ResourceType = "RentalOrder",
+            ResourceId = Guid.NewGuid().ToString(),
+            SourceEventId = Guid.NewGuid(),
+            SourceProducer = "RentalService",
+            SourceEventType = "RentalOrderPaid",
+            TemplateCode = "ORDER_PAID",
+            TemplateVersion = "1.0",
+            OccurredAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        var job = new NotificationDeliveryJob
+        {
+            Id = Guid.NewGuid(),
+            NotificationId = notificationId,
+            Channel = "EMAIL",
+            RecipientUserId = Guid.NewGuid(),
+            Status = "Pending",
+            NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await repo.AddAsync(job);
+        await context.SaveChangesAsync();
+
+        var claimed = await repo.ClaimPendingJobsAsync("worker-1", TimeSpan.FromMinutes(5), batchSize: 10);
+        Assert.Single(claimed);
+        Assert.Equal("Processing", claimed[0].Status);
+
+        // Simulate dispatch started, then worker crashed and lease expired
+        claimed[0].DispatchStartedAt = DateTimeOffset.UtcNow.AddMinutes(-2);
+        claimed[0].LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await context.SaveChangesAsync();
+
+        var recovered = await repo.RecoverExpiredLeasesAsync();
+        Assert.Equal(1, recovered);
+
+        var jobAfterRecovery = await context.DeliveryJobs.FindAsync(job.Id);
+        Assert.NotNull(jobAfterRecovery);
+        Assert.Equal("Uncertain", jobAfterRecovery.Status);
+        Assert.Null(jobAfterRecovery.LeaseToken);
+        Assert.Null(jobAfterRecovery.LeaseExpiresAt);
+    }
 }

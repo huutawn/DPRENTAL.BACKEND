@@ -28,6 +28,14 @@ public interface IEmailSender
         string subject,
         string bodyHtml,
         CancellationToken cancellationToken = default);
+
+    Task<EmailSendResult> SendEmailAsync(
+        string recipientEmail,
+        string subject,
+        string bodyHtml,
+        Guid deliveryJobId,
+        CancellationToken cancellationToken = default)
+        => SendEmailAsync(recipientEmail, subject, bodyHtml, cancellationToken);
 }
 
 public sealed class SmtpEmailSender : IEmailSender
@@ -41,12 +49,23 @@ public sealed class SmtpEmailSender : IEmailSender
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<EmailSendResult> SendEmailAsync(
+    public Task<EmailSendResult> SendEmailAsync(
         string recipientEmail,
         string subject,
         string bodyHtml,
         CancellationToken cancellationToken = default)
     {
+        return SendEmailAsync(recipientEmail, subject, bodyHtml, Guid.Empty, cancellationToken);
+    }
+
+    public async Task<EmailSendResult> SendEmailAsync(
+        string recipientEmail,
+        string subject,
+        string bodyHtml,
+        Guid deliveryJobId,
+        CancellationToken cancellationToken = default)
+    {
+        var sendStarted = false;
         try
         {
             using var client = new SmtpClient(_options.Host, _options.Port)
@@ -69,9 +88,14 @@ public sealed class SmtpEmailSender : IEmailSender
             };
             message.To.Add(recipientEmail);
 
+            var messageId = deliveryJobId != Guid.Empty
+                ? $"<notif_{deliveryJobId:N}@dprental.vn>"
+                : $"<notif_{Guid.NewGuid():N}@dprental.vn>";
+            message.Headers.Set("Message-ID", messageId);
+
+            sendStarted = true;
             await client.SendMailAsync(message, cancellationToken);
 
-            var messageId = $"smtp_{Guid.NewGuid():N}";
             return new EmailSendResult(
                 Outcome: EmailSendOutcome.Success,
                 ProviderMessageId: messageId,
@@ -87,7 +111,7 @@ public sealed class SmtpEmailSender : IEmailSender
                 ErrorCode: "RECIPIENT_REJECTED",
                 ErrorDetail: $"SMTP StatusCode: {ex.StatusCode}");
         }
-        catch (SmtpException ex) when (ex.InnerException is SocketException or TimeoutException)
+        catch (SmtpException ex) when (ex.InnerException is SocketException or TimeoutException or IOException)
         {
             _logger.LogWarning(ex, "Lỗi kết nối Socket hoặc Timeout khi gửi email tới {Email}", recipientEmail);
             // Lỗi socket hoặc timeout có thể xảy ra sau DATA
@@ -102,18 +126,18 @@ public sealed class SmtpEmailSender : IEmailSender
             _logger.LogWarning(ex, "Lỗi SMTP khi gửi email tới {Email}: {StatusCode}", recipientEmail, ex.StatusCode);
             var is5xx = (int)ex.StatusCode >= 500 && (int)ex.StatusCode < 600;
             return new EmailSendResult(
-                Outcome: is5xx ? EmailSendOutcome.PermanentRejection : EmailSendOutcome.PreDataError,
+                Outcome: is5xx ? EmailSendOutcome.PermanentRejection : (sendStarted ? EmailSendOutcome.PostDataError : EmailSendOutcome.PreDataError),
                 ProviderMessageId: null,
-                ErrorCode: is5xx ? "PERMANENT_SMTP_FAILURE" : "TRANSIENT_SMTP_ERROR",
+                ErrorCode: is5xx ? "PERMANENT_SMTP_FAILURE" : (sendStarted ? "AMBIGUOUS_SMTP_ERROR" : "TRANSIENT_SMTP_ERROR"),
                 ErrorDetail: ex.Message);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Lỗi không xác định khi gửi email tới {Email}", recipientEmail);
             return new EmailSendResult(
-                Outcome: EmailSendOutcome.PreDataError,
+                Outcome: sendStarted ? EmailSendOutcome.PostDataError : EmailSendOutcome.PreDataError,
                 ProviderMessageId: null,
-                ErrorCode: "UNKNOWN_SEND_ERROR",
+                ErrorCode: sendStarted ? "AMBIGUOUS_SEND_ERROR" : "UNKNOWN_SEND_ERROR",
                 ErrorDetail: ex.Message);
         }
     }

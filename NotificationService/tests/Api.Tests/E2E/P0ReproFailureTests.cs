@@ -182,8 +182,9 @@ public sealed class P0ReproFailureTests
 
         var updatedJob = await db.DeliveryJobs.FindAsync(job.Id);
         Assert.NotNull(updatedJob);
-        // Demonstrating P0: Job becomes Suppressed instead of RetryScheduled/Pending in current code
-        Assert.Equal("Suppressed", updatedJob.Status);
-        Assert.Equal("INACTIVE_OR_UNVERIFIED_EMAIL", updatedJob.LastErrorCode);
+        // Verified P0 fix: Job becomes RetryScheduled instead of Suppressed during Auth outage
+        Assert.Equal("RetryScheduled", updatedJob.Status);
+        Assert.Equal(1, updatedJob.AttemptCount);
+        Assert.True(updatedJob.NextAttemptAt > now);
     }
 }
