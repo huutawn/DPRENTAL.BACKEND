@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Dprental.ReviewService.Application.Kafka.Events;
 using Dprental.ReviewService.Application.DTOs.Reviews;
 using Dprental.ReviewService.Common;
 using Dprental.ReviewService.Common.Enums;
@@ -158,10 +159,10 @@ public sealed class ReviewModerationService : IReviewModerationService
 
         var outbox = new OutboxMessage(
             Guid.NewGuid(),
-            "review.events.v1",
+            ReviewEventFactory.PublicEventsTopic,
             "ReviewHidden",
-            review.Id.ToString("D"),
-            JsonSerializer.Serialize(new { reviewId = review.Id, version = review.Version }),
+            review.ListingId.ToString("D"),
+            JsonSerializer.Serialize(ReviewEventFactory.CreateContributionEvent(review), JsonOptions),
             now);
 
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
@@ -228,10 +229,10 @@ public sealed class ReviewModerationService : IReviewModerationService
 
         var outbox = new OutboxMessage(
             Guid.NewGuid(),
-            "review.events.v1",
+            ReviewEventFactory.PublicEventsTopic,
             "ReviewRestored",
-            review.Id.ToString("D"),
-            JsonSerializer.Serialize(new { reviewId = review.Id, version = review.Version }),
+            review.ListingId.ToString("D"),
+            JsonSerializer.Serialize(ReviewEventFactory.CreateContributionEvent(review), JsonOptions),
             now);
 
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
@@ -346,10 +347,10 @@ public sealed class ReviewModerationService : IReviewModerationService
 
                     var outbox = new OutboxMessage(
                         Guid.NewGuid(),
-                        "review.events.v1",
+                        ReviewEventFactory.PublicEventsTopic,
                         "ReviewHidden",
-                        review.Id.ToString("D"),
-                        JsonSerializer.Serialize(new { reviewId = review.Id, version = review.Version }),
+                        review.ListingId.ToString("D"),
+                        JsonSerializer.Serialize(ReviewEventFactory.CreateContributionEvent(review), JsonOptions),
                         now);
 
                     await _auditRepository.AddAsync(audit, cancellationToken);

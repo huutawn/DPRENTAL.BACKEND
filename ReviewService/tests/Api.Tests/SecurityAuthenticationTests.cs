@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Claims;
+using Dprental.ReviewService.Application.Security;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Dprental.ReviewService.Application.DTOs.Rental;
@@ -149,10 +151,12 @@ public sealed class SecurityAuthenticationTests : IClassFixture<ReviewTestFixtur
     public async Task Authorize_ForgedAdmClaimWithoutAdminRole_Returns403Forbidden()
     {
         var attackerId = Guid.NewGuid();
-        // Generate validly signed token, but with role != Admin and fake adm claim
-        var key = new Microsoft.IdentityModel.Tokens.RsaSecurityKey(System.Security.Cryptography.RSA.Create(2048));
-        // Using fixture key so signature is valid, but claims contain forged "adm": true and role "Customer"
-        var token = _fixture.GenerateJwt(attackerId, userType: "cus", role: "Customer");
+        // Token has valid signature, but has forged "adm": true and role "Customer"
+        var token = _fixture.GenerateJwt(
+            attackerId,
+            userType: "cus",
+            role: "Customer",
+            extraClaims: new[] { new Claim("adm", "true") });
 
         using var req = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/admin/reviews/{Guid.NewGuid()}/hide");
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -162,5 +166,105 @@ public sealed class SecurityAuthenticationTests : IClassFixture<ReviewTestFixtur
 
         using var res = await _client.SendAsync(req);
         Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Authorize_TokenWithRoleClaimAdm_SuccessfullyAccessesAdminEndpoint()
+    {
+        var adminId = Guid.NewGuid();
+        // AuthService standard role claim r = "adm"
+        var adminToken = _fixture.GenerateJwt(adminId, userType: "cus", role: "adm");
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/admin/reviews/reports");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+
+        using var res = await _client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Authorize_ServiceTokenOnAdminEndpoint_Returns403Forbidden_EvenIfRoleIsAdm()
+    {
+        var serviceId = Guid.NewGuid();
+        // Service token (u = "svc") with r = "adm" must still be rejected
+        var serviceToken = _fixture.GenerateJwt(serviceId, userType: "svc", role: "adm");
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/admin/reviews/reports");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
+
+        using var res = await _client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Authorize_FakeAdmBooleanAlone_WithoutRole_Returns403Forbidden()
+    {
+        var attackerId = Guid.NewGuid();
+        // Token has "adm": "true" but no role claim
+        var token = _fixture.GenerateJwt(
+            attackerId,
+            userType: "cus",
+            role: null,
+            extraClaims: new[] { new Claim("adm", "true") });
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/admin/reviews/reports");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var res = await _client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("adm", true)]
+    [InlineData("Admin", true)]
+    [InlineData("customer", false)]
+    [InlineData("supplier", false)]
+    public void ReviewSecurityRules_IsAdmin_EvaluatesRoleCorrectly(string role, bool expectedAdmin)
+    {
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim("sub", Guid.NewGuid().ToString()),
+            new Claim("u", "cus"),
+            new Claim("r", role)
+        }, "Bearer");
+        var principal = new ClaimsPrincipal(identity);
+
+        Assert.Equal(expectedAdmin, ReviewSecurityRules.IsAdmin(principal));
+    }
+
+    [Fact]
+    public void ReviewSecurityRules_IsAdmin_RejectsServiceToken_EvenWithAdmRole()
+    {
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim("sub", Guid.NewGuid().ToString()),
+            new Claim("u", "svc"),
+            new Claim("r", "adm")
+        }, "Bearer");
+        var principal = new ClaimsPrincipal(identity);
+
+        Assert.False(ReviewSecurityRules.IsAdmin(principal));
+    }
+
+    [Fact]
+    public void ReviewSecurityRules_IsAdmin_RejectsForgedBooleanClaim_WithoutRole()
+    {
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim("sub", Guid.NewGuid().ToString()),
+            new Claim("u", "cus"),
+            new Claim("adm", "true")
+        }, "Bearer");
+        var principal = new ClaimsPrincipal(identity);
+
+        Assert.False(ReviewSecurityRules.IsAdmin(principal));
+    }
+
+    [Fact]
+    public void ReviewSecurityRules_IsAdmin_ReturnsFalse_WhenPrincipalUnauthenticatedOrNull()
+    {
+        Assert.False(ReviewSecurityRules.IsAdmin(null));
+        Assert.False(ReviewSecurityRules.IsAdmin(new ClaimsPrincipal()));
+        Assert.False(ReviewSecurityRules.IsAdmin(new ClaimsPrincipal(new ClaimsIdentity())));
     }
 }

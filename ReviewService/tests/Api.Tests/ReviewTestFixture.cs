@@ -18,6 +18,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
+using Dprental.ReviewService.Application.Kafka.Producers;
 
 namespace Dprental.ReviewService.Api.Tests;
 
@@ -44,6 +45,7 @@ public sealed class ReviewTestFixture : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+        builder.UseSetting("Kafka:BootstrapServers", "localhost:9092");
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<DbContextOptions<ReviewServiceDbContext>>();
@@ -59,6 +61,8 @@ public sealed class ReviewTestFixture : WebApplicationFactory<Program>
             services.AddSingleton<IMediaServiceClient>(MediaClient);
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(TimeProvider);
+            services.RemoveAll<IKafkaProducer>();
+            services.AddSingleton<IKafkaProducer, NullKafkaProducer>();
             services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
             {
                 options.ConfigurationManager = new TestJwksConfigurationManager(_rsa, TestKeyId);
@@ -87,7 +91,8 @@ public sealed class ReviewTestFixture : WebApplicationFactory<Program>
         string? audience = Audience,
         bool expired = false,
         RSA? customKey = null,
-        string? keyId = TestKeyId)
+        string? keyId = TestKeyId,
+        IEnumerable<Claim>? extraClaims = null)
     {
         var key = new RsaSecurityKey(customKey ?? _rsa) { KeyId = keyId };
         var claims = new List<Claim> { new("sub", userId.ToString()) };
@@ -96,6 +101,10 @@ public sealed class ReviewTestFixture : WebApplicationFactory<Program>
         {
             claims.Add(new Claim("r", role));
             claims.Add(new Claim(ClaimTypes.Role, role));
+        }
+        if (extraClaims != null)
+        {
+            claims.AddRange(extraClaims);
         }
 
         var token = new JwtSecurityToken(

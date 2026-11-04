@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Dprental.ReviewService.Application.Kafka.Events;
 using Dprental.ReviewService.Application.Clients;
 using Dprental.ReviewService.Application.DTOs.Reviews;
 using Dprental.ReviewService.Common;
@@ -260,20 +261,10 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
         // 11. Chuẩn bị Outbox events
         var publicOutbox = new OutboxMessage(
             Guid.NewGuid(),
-            "review.events.v1",
+            ReviewEventFactory.PublicEventsTopic,
             "ReviewCreated",
-            review.Id.ToString("D"),
-            JsonSerializer.Serialize(new
-            {
-                reviewId = review.Id,
-                reviewVersion = review.Version,
-                listingId = review.EquipmentListingId,
-                supplierId = review.Direction == ReviewDirection.renter_to_supplier_listing ? review.SubjectId : review.AuthorId,
-                rating = review.Rating,
-                publicEligible = review.Direction == ReviewDirection.renter_to_supplier_listing &&
-                                 review.AuthorState == AuthorState.Active &&
-                                 review.ModerationState == ModerationState.Visible
-            }, JsonOptions),
+            review.ListingId.ToString("D"),
+            JsonSerializer.Serialize(ReviewEventFactory.CreateContributionEvent(review), JsonOptions),
             now);
 
         var privateOutbox = new OutboxMessage(
@@ -302,7 +293,13 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
             await _reviewAuditRepository.AddAsync(audit, cancellationToken);
             await _outboxRepository.AddAsync(publicOutbox, cancellationToken);
             await _outboxRepository.AddAsync(privateOutbox, cancellationToken);
-            await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
+            var idempResult = await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
+            if (idempResult.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(idempResult.Error);
+            }
             await _unitOfWork.CommitAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
         }
@@ -473,20 +470,10 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
 
         var updateOutbox = new OutboxMessage(
             Guid.NewGuid(),
-            "review.events.v1",
+            ReviewEventFactory.PublicEventsTopic,
             "ReviewUpdated",
-            review.Id.ToString("D"),
-            JsonSerializer.Serialize(new
-            {
-                reviewId = review.Id,
-                reviewVersion = review.Version,
-                listingId = review.EquipmentListingId,
-                supplierId = review.Direction == ReviewDirection.renter_to_supplier_listing ? review.SubjectId : review.AuthorId,
-                rating = review.Rating,
-                publicEligible = review.Direction == ReviewDirection.renter_to_supplier_listing &&
-                                 review.AuthorState == AuthorState.Active &&
-                                 review.ModerationState == ModerationState.Visible
-            }, JsonOptions),
+            review.ListingId.ToString("D"),
+            JsonSerializer.Serialize(ReviewEventFactory.CreateContributionEvent(review), JsonOptions),
             now);
 
         // 11. Lưu nguyên tử qua IUnitOfWork
@@ -496,7 +483,13 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
             await _reviewRepository.UpdateAsync(review, cancellationToken);
             await _reviewAuditRepository.AddAsync(audit, cancellationToken);
             await _outboxRepository.AddAsync(updateOutbox, cancellationToken);
-            await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
+            var idempResult = await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
+            if (idempResult.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(idempResult.Error);
+            }
             await _unitOfWork.CommitAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
         }
@@ -638,18 +631,10 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
 
         var withdrawOutbox = new OutboxMessage(
             Guid.NewGuid(),
-            "review.events.v1",
+            ReviewEventFactory.PublicEventsTopic,
             "ReviewWithdrawn",
-            review.Id.ToString("D"),
-            JsonSerializer.Serialize(new
-            {
-                reviewId = review.Id,
-                reviewVersion = review.Version,
-                listingId = review.EquipmentListingId,
-                supplierId = review.Direction == ReviewDirection.renter_to_supplier_listing ? review.SubjectId : review.AuthorId,
-                rating = review.Rating,
-                publicEligible = false
-            }, JsonOptions),
+            review.ListingId.ToString("D"),
+            JsonSerializer.Serialize(ReviewEventFactory.CreateContributionEvent(review), JsonOptions),
             now);
 
         // 10. Lưu nguyên tử qua IUnitOfWork
@@ -659,7 +644,13 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
             await _reviewRepository.UpdateAsync(review, cancellationToken);
             await _reviewAuditRepository.AddAsync(audit, cancellationToken);
             await _outboxRepository.AddAsync(withdrawOutbox, cancellationToken);
-            await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
+            var idempResult = await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
+            if (idempResult.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(idempResult.Error);
+            }
             await _unitOfWork.CommitAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
         }

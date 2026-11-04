@@ -145,6 +145,9 @@ public sealed class ReviewServiceDbContext : DbContext, IUnitOfWork
                 .HasColumnName("equipment_listing_id")
                 .IsRequired();
 
+            entity.Ignore(r => r.ListingId);
+            entity.Ignore(r => r.SupplierId);
+
             entity.Property(r => r.Rating)
                 .HasColumnName("rating")
                 .IsRequired();
@@ -444,6 +447,7 @@ public sealed class ReviewServiceDbContext : DbContext, IUnitOfWork
             entity.Property(o => o.Payload).HasColumnName("payload").IsRequired();
             entity.Property(o => o.CreatedAt).HasColumnName("created_at").IsRequired();
             entity.Property(o => o.ProcessedAt).HasColumnName("processed_at");
+            entity.Property(o => o.ClaimToken).HasColumnName("claim_token");
             entity.Property(o => o.Attempts).HasColumnName("attempts").HasDefaultValue(0).IsRequired();
             entity.Property(o => o.NextAttemptAt).HasColumnName("next_attempt_at");
             entity.Property(o => o.LeaseExpiresAt).HasColumnName("lease_expires_at");

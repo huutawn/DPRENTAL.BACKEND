@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Dprental.ReviewService.Application.Security;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
@@ -87,23 +88,7 @@ public static class JwtAuthenticationExtensions
             options.AddPolicy(AdminOnlyPolicy, policy =>
             {
                 policy.RequireAuthenticatedUser();
-                policy.RequireAssertion(context =>
-                {
-                    var u = context.User.FindFirst("u")?.Value;
-                    if (string.Equals(u, "svc", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return false;
-                    }
-
-                    // Only accept standard Auth role claim 'r' == "Admin" or ClaimTypes.Role == "Admin"
-                    // Strictly reject 'adm=true' or forged claims
-                    bool hasAdminRole = context.User.IsInRole("Admin")
-                        || context.User.Claims.Any(c =>
-                            (c.Type == "r" || c.Type == ClaimTypes.Role) &&
-                            string.Equals(c.Value, "Admin", StringComparison.Ordinal));
-
-                    return hasAdminRole;
-                });
+                policy.RequireAssertion(context => ReviewSecurityRules.IsAdmin(context.User));
             });
         });
 
