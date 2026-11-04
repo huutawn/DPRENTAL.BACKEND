@@ -75,13 +75,13 @@ public sealed class MediaServiceClient : IMediaServiceClient
 
     public async Task<Result<MediaAccessDto>> CreatePrivateReadAccessAsync(Guid mediaId, CancellationToken cancellationToken = default)
     {
-        string relativePath = $"api/v1/media/{mediaId}/access";
+        string relativePath = $"api/v1/media/{mediaId}/access?purpose=review";
         var requestUri = BuildUri(relativePath);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, requestUri);
         AddHeaders(request);
 
-        var body = new { action = "read", download = false };
+        var body = new { action = "read", download = false, purpose = "review" };
         request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
         try

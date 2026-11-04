@@ -63,10 +63,24 @@ public sealed class ReviewMediaService : IReviewMediaService
                 Error.Forbidden("FORBIDDEN", "Chỉ tác giả mới có quyền đính kèm media vào đánh giá."));
         }
 
+        if (review.AuthorState != AuthorState.Active)
+        {
+            return Result.Failure<ReviewMediaResponse>(
+                Error.Unprocessable("REVIEW_ALREADY_WITHDRAWN", "Không thể đính kèm media vào đánh giá đã được rút lại."));
+        }
+
         if (!ParseIfMatch(ifMatch, review.Version, out var ifMatchError))
         {
             return Result.Failure<ReviewMediaResponse>(ifMatchError!);
         }
+
+        if (!string.IsNullOrWhiteSpace(mediaType) &&
+            !mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            return Result.Failure<ReviewMediaResponse>(
+                Error.Validation("INVALID_MEDIA_TYPE", "Chỉ chấp nhận đính kèm tệp hình ảnh vào đánh giá."));
+        }
+
         if (_mediaClient != null)
         {
             var verifyResult = await _mediaClient.VerifyMediaAsync(mediaId, cancellationToken);
@@ -87,7 +101,7 @@ public sealed class ReviewMediaService : IReviewMediaService
                     Error.Unprocessable("MEDIA_NOT_READY", "Tệp media chưa ở trạng thái sẵn sàng để đính kèm."));
             }
 
-            if (verifyResult.Value.ContentType != null &&
+            if (string.IsNullOrWhiteSpace(verifyResult.Value.ContentType) ||
                 !verifyResult.Value.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             {
                 return Result.Failure<ReviewMediaResponse>(
@@ -221,19 +235,32 @@ public sealed class ReviewMediaService : IReviewMediaService
             return Result.Failure<MediaAccessDto>(
                 Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
         }
+        // Kiểm tra quyền riêng tư của review:
+        // Nếu review bị Hidden hoặc Withdrawn, chỉ Tác giả (Author) hoặc Quản trị viên (Admin) mới có quyền truy cập media URL.
+        bool isAuthor = actor.ActorId == review.AuthorId;
+        bool isAuthorOrAdmin = isAuthor || actor.IsAdmin;
+        bool isHiddenOrWithdrawn = review.ModerationState == ModerationState.Hidden ||
+                                   review.AuthorState == AuthorState.Withdrawn;
 
-        // Kiểm tra quyền riêng tư của review
-        bool isPublic = review.Direction == ReviewDirection.renter_to_supplier_listing &&
-                        review.AuthorState == AuthorState.Active &&
-                        review.ModerationState == ModerationState.Visible;
-        bool isParticipant = actor.ActorId == review.AuthorId || actor.ActorId == review.SubjectId;
-
-        if (!isPublic && !isParticipant && !actor.IsAdmin)
+        if (isHiddenOrWithdrawn)
         {
-            return Result.Failure<MediaAccessDto>(
-                Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
+            if (!isAuthorOrAdmin)
+            {
+                return Result.Failure<MediaAccessDto>(
+                    Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
+            }
         }
+        else
+        {
+            bool isPublic = review.Direction == ReviewDirection.renter_to_supplier_listing;
+            bool isParticipant = isAuthor || actor.ActorId == review.SubjectId;
 
+            if (!isPublic && !isParticipant && !actor.IsAdmin)
+            {
+                return Result.Failure<MediaAccessDto>(
+                    Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
+            }
+        }
         var media = await _mediaRepository.GetByReviewAndMediaIdAsync(reviewId, mediaId, cancellationToken);
         if (media == null)
         {

@@ -458,6 +458,155 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
         Assert.Equal(HttpStatusCode.Forbidden, attachRes.StatusCode);
     }
 
+    [Fact]
+    public async Task Phase7_GetMediaAccess_WhenReviewHidden_OnlyAuthorOrAdminCanAccess()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review to hide"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        var mediaId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(mediaId, renterId, "Ready", "image/jpeg");
+
+        using var attachReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(mediaId, "image/jpeg"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        var attachRes = await _client.SendAsync(attachReq);
+        Assert.Equal(HttpStatusCode.Created, attachRes.StatusCode);
+
+        // Admin hides the review
+        var adminId = Guid.NewGuid();
+        using var hideReq = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/{detail.ReviewId}/hide",
+            new AdminModerationRequest("Vi phạm tiêu chuẩn"), GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"), ifMatch: "\"2\"");
+        var hideRes = await _client.SendAsync(hideReq);
+        Assert.Equal(HttpStatusCode.OK, hideRes.StatusCode);
+
+        // 1. Author can access media URL
+        using var authorAccessReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(renterId));
+        var authorAccessRes = await _client.SendAsync(authorAccessReq);
+        Assert.Equal(HttpStatusCode.OK, authorAccessRes.StatusCode);
+
+        // 2. Admin can access media URL
+        using var adminAccessReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(adminId, role: "Admin"));
+        var adminAccessRes = await _client.SendAsync(adminAccessReq);
+        Assert.Equal(HttpStatusCode.OK, adminAccessRes.StatusCode);
+
+        // 3. Third-party user cannot access media URL -> 404 NotFound
+        var thirdPartyId = Guid.NewGuid();
+        using var thirdPartyReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(thirdPartyId));
+        var thirdPartyRes = await _client.SendAsync(thirdPartyReq);
+        Assert.Equal(HttpStatusCode.NotFound, thirdPartyRes.StatusCode);
+
+        // 4. Subject cannot access media URL when Hidden -> 404 NotFound
+        using var subjectReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(supplierId));
+        var subjectRes = await _client.SendAsync(subjectReq);
+        Assert.Equal(HttpStatusCode.NotFound, subjectRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task Phase7_GetMediaAccess_WhenReviewWithdrawn_OnlyAuthorOrAdminCanAccess()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review to withdraw"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        var mediaId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(mediaId, renterId, "Ready", "image/jpeg");
+
+        using var attachReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(mediaId, "image/jpeg"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        var attachRes = await _client.SendAsync(attachReq);
+        Assert.Equal(HttpStatusCode.Created, attachRes.StatusCode);
+
+        // Author withdraws the review
+        using var withdrawReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/withdraw",
+            new WithdrawReviewRequest("Chủ động rút lại"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"2\"");
+        var withdrawRes = await _client.SendAsync(withdrawReq);
+        Assert.Equal(HttpStatusCode.OK, withdrawRes.StatusCode);
+
+        // 1. Author can access media URL
+        using var authorAccessReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(renterId));
+        var authorAccessRes = await _client.SendAsync(authorAccessReq);
+        Assert.Equal(HttpStatusCode.OK, authorAccessRes.StatusCode);
+
+        // 2. Admin can access media URL
+        var adminId = Guid.NewGuid();
+        using var adminAccessReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(adminId, role: "Admin"));
+        var adminAccessRes = await _client.SendAsync(adminAccessReq);
+        Assert.Equal(HttpStatusCode.OK, adminAccessRes.StatusCode);
+
+        // 3. Third-party user cannot access media URL -> 404 NotFound
+        var thirdPartyId = Guid.NewGuid();
+        using var thirdPartyReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(thirdPartyId));
+        var thirdPartyRes = await _client.SendAsync(thirdPartyReq);
+        Assert.Equal(HttpStatusCode.NotFound, thirdPartyRes.StatusCode);
+
+        // 4. Subject cannot access media URL when Withdrawn -> 404 NotFound
+        using var subjectReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(supplierId));
+        var subjectRes = await _client.SendAsync(subjectReq);
+        Assert.Equal(HttpStatusCode.NotFound, subjectRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task Phase7_AttachMedia_WhenNotReadyOrNotImage_ReturnsExpectedErrors()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review test media valid"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // 1. Media not Ready -> 422 UnprocessableEntity
+        var notReadyMediaId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(notReadyMediaId, renterId, "PendingUpload", "image/jpeg");
+
+        using var notReadyReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(notReadyMediaId, "image/jpeg"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        var notReadyRes = await _client.SendAsync(notReadyReq);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, notReadyRes.StatusCode);
+
+        // 2. Media not an image -> 400 BadRequest
+        var pdfMediaId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(pdfMediaId, renterId, "Ready", "application/pdf");
+
+        using var pdfReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(pdfMediaId, "application/pdf"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        var pdfRes = await _client.SendAsync(pdfReq);
+        Assert.Equal(HttpStatusCode.BadRequest, pdfRes.StatusCode);
+    }
+
     #endregion
 
     private static HttpRequestMessage CreateRequest(
