@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Confluent.Kafka" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Domain/ReviewService.Domain.csproj" />

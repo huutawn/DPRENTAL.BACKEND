@@ -80,4 +80,20 @@ public interface IReviewRepository
         string targetType,
         Guid targetId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách đánh giá nhận được của một người dùng (active và visible).
+    /// </summary>
+    Task<(IReadOnlyList<Review> Items, int TotalCount)> GetReceivedReviewsAsync(
+        Guid subjectId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tính tổng hợp điểm uy tín người thuê (supplier_to_renter) bằng server-side GROUP BY.
+    /// </summary>
+    Task<(int TotalCount, double? AverageRating, Dictionary<int, int> Distribution)> GetRenterReputationAsync(
+        Guid renterId,
+        CancellationToken cancellationToken = default);
 }

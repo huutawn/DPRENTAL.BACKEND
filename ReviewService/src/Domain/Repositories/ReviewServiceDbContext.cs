@@ -1,17 +1,49 @@
 using Dprental.ReviewService.Common.Enums;
 using Dprental.ReviewService.Domain.Entities;
+using Dprental.ReviewService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-
 namespace Dprental.ReviewService.Domain.Repositories;
 
 /// <summary>
 /// DbContext quản lý dữ liệu ReviewService trên PostgreSQL.
 /// </summary>
-public sealed class ReviewServiceDbContext : DbContext
+public sealed class ReviewServiceDbContext : DbContext, IUnitOfWork
 {
+    public bool HasActiveTransaction => Database.CurrentTransaction != null;
+
     public ReviewServiceDbContext(DbContextOptions<ReviewServiceDbContext> options) : base(options)
     {
+    }
+
+    public Task<int> CommitAsync(CancellationToken cancellationToken = default) => SaveChangesAsync(cancellationToken);
+
+    public void DiscardChanges() => ChangeTracker.Clear();
+
+    public async Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+    {
+        if (Database.IsRelational())
+        {
+            var tx = await Database.BeginTransactionAsync(cancellationToken);
+            return new RelationalUnitOfWorkTransaction(tx);
+        }
+
+        return new NoOpUnitOfWorkTransaction();
+    }
+
+    private sealed class RelationalUnitOfWorkTransaction(IDbContextTransaction tx) : IUnitOfWorkTransaction
+    {
+        public Task CommitAsync(CancellationToken cancellationToken = default) => tx.CommitAsync(cancellationToken);
+        public Task RollbackAsync(CancellationToken cancellationToken = default) => tx.RollbackAsync(cancellationToken);
+        public ValueTask DisposeAsync() => tx.DisposeAsync();
+    }
+
+    private sealed class NoOpUnitOfWorkTransaction : IUnitOfWorkTransaction
+    {
+        public Task CommitAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RollbackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     /// <summary>Bảng lưu trữ đánh giá người dùng.</summary>
@@ -112,6 +144,9 @@ public sealed class ReviewServiceDbContext : DbContext
             entity.Property(r => r.EquipmentListingId)
                 .HasColumnName("equipment_listing_id")
                 .IsRequired();
+
+            entity.Ignore(r => r.ListingId);
+            entity.Ignore(r => r.SupplierId);
 
             entity.Property(r => r.Rating)
                 .HasColumnName("rating")
@@ -333,6 +368,13 @@ public sealed class ReviewServiceDbContext : DbContext
             entity.Property(r => r.CreatedAt).HasColumnName("created_at").IsRequired();
             entity.Property(r => r.ResolvedAt).HasColumnName("resolved_at");
             entity.Property(r => r.ResolvedBy).HasColumnName("resolved_by");
+            entity.Property(r => r.Version).HasColumnName("version").HasDefaultValue(1L).IsConcurrencyToken().IsRequired();
+
+            entity.HasOne<Review>()
+                .WithMany()
+                .HasForeignKey(r => r.ReviewId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("fk_reports_review");
 
             entity.HasIndex(r => new { r.ReviewId, r.ReporterId }).IsUnique().HasDatabaseName("uq_reports_review_reporter");
             entity.HasIndex(r => r.Status).HasDatabaseName("idx_reports_status");
@@ -385,6 +427,7 @@ public sealed class ReviewServiceDbContext : DbContext
             entity.HasKey(c => c.SweepId);
             entity.Property(c => c.SweepId).HasColumnName("sweep_id").HasMaxLength(64);
             entity.Property(c => c.WindowStart).HasColumnName("window_start").IsRequired();
+            entity.Property(c => c.Cursor).HasColumnName("cursor");
             entity.Property(c => c.LastItemId).HasColumnName("last_item_id");
             entity.Property(c => c.IsCompleted).HasColumnName("is_completed").IsRequired();
             entity.Property(c => c.StartedAt).HasColumnName("started_at").IsRequired();
@@ -405,8 +448,16 @@ public sealed class ReviewServiceDbContext : DbContext
             entity.Property(o => o.Payload).HasColumnName("payload").IsRequired();
             entity.Property(o => o.CreatedAt).HasColumnName("created_at").IsRequired();
             entity.Property(o => o.ProcessedAt).HasColumnName("processed_at");
+            entity.Property(o => o.ClaimToken).HasColumnName("claim_token");
+            entity.Property(o => o.Attempts).HasColumnName("attempts").HasDefaultValue(0).IsRequired();
+            entity.Property(o => o.NextAttemptAt).HasColumnName("next_attempt_at");
+            entity.Property(o => o.LeaseExpiresAt).HasColumnName("lease_expires_at");
+            entity.Property(o => o.ClaimOwner).HasColumnName("claim_owner").HasMaxLength(128);
+            entity.Property(o => o.LastErrorCode).HasColumnName("last_error_code").HasMaxLength(64);
+            entity.Property(o => o.DeliveryState).HasColumnName("delivery_state").HasMaxLength(32).HasDefaultValue("Pending").IsRequired();
 
             entity.HasIndex(o => o.ProcessedAt).HasDatabaseName("idx_outbox_processed");
+            entity.HasIndex(o => new { o.DeliveryState, o.NextAttemptAt, o.LeaseExpiresAt }).HasDatabaseName("idx_outbox_claim");
         });
     }
 
@@ -421,6 +472,12 @@ public sealed class ReviewServiceDbContext : DbContext
             entity.Property(m => m.MediaId).HasColumnName("media_id").IsRequired();
             entity.Property(m => m.MediaType).HasColumnName("media_type").HasMaxLength(32).IsRequired();
             entity.Property(m => m.CreatedAt).HasColumnName("created_at").IsRequired();
+
+            entity.HasOne<Review>()
+                .WithMany()
+                .HasForeignKey(m => m.ReviewId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_review_media_review");
 
             entity.HasIndex(m => new { m.ReviewId, m.MediaId }).IsUnique().HasDatabaseName("uq_review_media_pair");
         });

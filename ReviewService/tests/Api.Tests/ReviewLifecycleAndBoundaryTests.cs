@@ -394,7 +394,7 @@ public sealed class ReviewLifecycleAndBoundaryTests : IClassFixture<ReviewTestFi
     }
 
     [Fact]
-    public async Task ReviewsController_AlternateRoutePrefixWithoutApiV1_ExposesAllEndpoints()
+    public async Task ReviewsController_LegacyRouteWithoutApiV1_Returns404NotFound()
     {
         var renterId = Guid.NewGuid();
         var supplierId = Guid.NewGuid();
@@ -402,31 +402,17 @@ public sealed class ReviewLifecycleAndBoundaryTests : IClassFixture<ReviewTestFi
         var itemId = Guid.NewGuid();
         _fixture.RentalClient.SetSnapshot(CreateCompletedSnapshot(orderId, itemId, renterId, supplierId, _fixture.CurrentTime.AddDays(-1)));
 
-        var createBody = new CreateReviewRequest(orderId, itemId, 5, "Alternate route test");
-        using var createReq = CreateRequest(HttpMethod.Post, "/reviews", createBody, GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
-        using var createRes = await _client.SendAsync(createReq);
-        Assert.Equal(HttpStatusCode.Created, createRes.StatusCode);
-        Assert.NotNull(createRes.Headers.ETag);
+        var createBody = new CreateReviewRequest(orderId, itemId, 5, "Legacy route test");
+        using var legacyReq = CreateRequest(HttpMethod.Post, "/reviews", createBody, GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        using var legacyRes = await _client.SendAsync(legacyReq);
 
-        var createContent = await createRes.Content.ReadAsStringAsync();
-        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(createContent, JsonOptions);
-        Assert.NotNull(detail);
+        // Legacy alias /reviews must be 404 NotFound after central api/v1 prefix enforcement
+        Assert.Equal(HttpStatusCode.NotFound, legacyRes.StatusCode);
 
-        using var getReq = CreateRequest(HttpMethod.Get, $"/reviews/{detail.ReviewId}", token: GenerateJwt(renterId));
-        using var getRes = await _client.SendAsync(getReq);
-        Assert.Equal(HttpStatusCode.OK, getRes.StatusCode);
-
-        var updateBody = new UpdateReviewRequest(4, "Alternate route update");
-        using var putReq = CreateRequest(HttpMethod.Put, $"/reviews/{detail.ReviewId}", updateBody, GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
-        using var putRes = await _client.SendAsync(putReq);
-        Assert.Equal(HttpStatusCode.OK, putRes.StatusCode);
-        Assert.Equal("\"2\"", putRes.Headers.ETag?.Tag);
-
-        var withdrawBody = new WithdrawReviewRequest("Alternate route withdraw");
-        using var withdrawReq = CreateRequest(HttpMethod.Post, $"/reviews/{detail.ReviewId}/withdraw", withdrawBody, GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"2\"");
-        using var withdrawRes = await _client.SendAsync(withdrawReq);
-        Assert.Equal(HttpStatusCode.OK, withdrawRes.StatusCode);
-        Assert.Equal("\"3\"", withdrawRes.Headers.ETag?.Tag);
+        // Authoritative route /api/v1/reviews works cleanly
+        using var authReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews", createBody, GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        using var authRes = await _client.SendAsync(authReq);
+        Assert.Equal(HttpStatusCode.Created, authRes.StatusCode);
     }
 
     private async Task<ReviewDetailResponse> CreateActiveReviewAsync()
@@ -482,15 +468,9 @@ public sealed class ReviewLifecycleAndBoundaryTests : IClassFixture<ReviewTestFi
         return request;
     }
 
-    private static string GenerateJwt(Guid userId, string? userType = "cus", string? role = null)
+    private string GenerateJwt(Guid userId, string? userType = "cus", string? role = null)
     {
-        var payload = new Dictionary<string, object> { ["sub"] = userId.ToString() };
-        if (!string.IsNullOrEmpty(userType)) payload["u"] = userType;
-        if (!string.IsNullOrEmpty(role)) payload["r"] = role;
-
-        string json = JsonSerializer.Serialize(payload);
-        string base64Payload = Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        return $"eyJhbGciOiJub25lIn0.{base64Payload}.testsignature";
+        return _fixture.GenerateJwt(userId, userType, role);
     }
 
     private static RentalItemReviewSnapshotDto CreateCompletedSnapshot(

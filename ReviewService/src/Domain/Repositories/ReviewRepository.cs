@@ -223,4 +223,71 @@ public sealed class ReviewRepository : IReviewRepository
 
         return (totalCount, averageRating, distribution);
     }
+
+    public async Task<(IReadOnlyList<Review> Items, int TotalCount)> GetReceivedReviewsAsync(
+        Guid subjectId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        if (page < 1) page = 1;
+        if (pageSize < 1) pageSize = 20;
+        if (pageSize > 50) pageSize = 50;
+
+        var query = _dbContext.Reviews
+            .AsNoTracking()
+            .Where(r => r.SubjectId == subjectId && r.AuthorState == AuthorState.Active && r.ModerationState == ModerationState.Visible)
+            .OrderByDescending(r => r.CreatedAt)
+            .ThenByDescending(r => r.Id);
+
+        int totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
+
+    public async Task<(int TotalCount, double? AverageRating, Dictionary<int, int> Distribution)> GetRenterReputationAsync(
+        Guid renterId,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _dbContext.Reviews
+            .AsNoTracking()
+            .Where(r => r.SubjectId == renterId &&
+                        r.Direction == ReviewDirection.supplier_to_renter &&
+                        r.AuthorState == AuthorState.Active &&
+                        r.ModerationState == ModerationState.Visible);
+
+        var distribution = new Dictionary<int, int>
+        {
+            [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0
+        };
+
+        var ratingGroups = await query
+            .GroupBy(r => r.Rating)
+            .Select(g => new { Rating = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+
+        var totalCount = 0;
+        long totalSum = 0;
+
+        foreach (var group in ratingGroups)
+        {
+            if (distribution.ContainsKey(group.Rating))
+            {
+                distribution[group.Rating] = group.Count;
+            }
+
+            totalCount += group.Count;
+            totalSum += (long)group.Rating * group.Count;
+        }
+
+        double? averageRating = totalCount == 0
+            ? null
+            : Math.Round((double)totalSum / totalCount, 1, MidpointRounding.AwayFromZero);
+
+        return (totalCount, averageRating, distribution);
+    }
 }

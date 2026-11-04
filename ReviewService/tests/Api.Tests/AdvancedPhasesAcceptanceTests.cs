@@ -331,6 +331,281 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
 
         Assert.Equal(HttpStatusCode.NoContent, detachRes.StatusCode);
     }
+    [Fact]
+    public async Task Phase6_ReportPrivateReview_ByThirdParty_Returns404NotFound_NoExistenceLeak()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        // Supplier đánh giá renter (supplier_to_renter -> private)
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Đánh giá nội bộ"), GenerateJwt(supplierId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // Người thứ ba cố gắng báo cáo review riêng tư này -> 404 Not Found (không làm rò rỉ sự tồn tại)
+        var thirdPartyId = Guid.NewGuid();
+        var reportBody = new CreateReviewReportRequest("Spam");
+        using var repReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/reports", reportBody, GenerateJwt(thirdPartyId), Guid.NewGuid().ToString("N"));
+        using var repRes = await _client.SendAsync(repReq);
+
+        Assert.Equal(HttpStatusCode.NotFound, repRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task Phase6_ResolveReport_AlreadyResolved_Returns409Conflict()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review công khai"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // Báo cáo
+        var reporterId = Guid.NewGuid();
+        using var repReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/reports",
+            new CreateReviewReportRequest("Quảng cáo sai"), GenerateJwt(reporterId), Guid.NewGuid().ToString("N"));
+        var repRes = await _client.SendAsync(repReq);
+        var report = JsonSerializer.Deserialize<ReviewReportResponse>(await repRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // Admin resolve lần 1 -> 200 OK
+        var adminId = Guid.NewGuid();
+        using var resolveReq1 = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/reports/{report.Id}/resolve",
+            new ResolveReviewReportRequest("ReviewedDismissed"), GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"));
+        var resolveRes1 = await _client.SendAsync(resolveReq1);
+        Assert.Equal(HttpStatusCode.OK, resolveRes1.StatusCode);
+
+        // Admin resolve lần 2 -> 409 Conflict (đã giải quyết)
+        using var resolveReq2 = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/reports/{report.Id}/resolve",
+            new ResolveReviewReportRequest("ReviewedHidden"), GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"));
+        var resolveRes2 = await _client.SendAsync(resolveReq2);
+        Assert.Equal(HttpStatusCode.Conflict, resolveRes2.StatusCode);
+    }
+
+    [Fact]
+    public async Task Phase7_GetMediaAccess_PublicReview_SucceedsWithShortLivedUrl()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review có ảnh"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // Đính kèm ảnh
+        var mediaId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(mediaId, renterId, "Ready", "image/jpeg");
+
+        using var attachReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(mediaId, "image/jpeg"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        var attachRes = await _client.SendAsync(attachReq);
+        Assert.Equal(HttpStatusCode.Created, attachRes.StatusCode);
+
+        // Lấy private access URL
+        using var accessReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(renterId));
+        var accessRes = await _client.SendAsync(accessReq);
+        Assert.Equal(HttpStatusCode.OK, accessRes.StatusCode);
+
+        var accessContent = await accessRes.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(accessContent);
+        Assert.True(doc.RootElement.TryGetProperty("url", out var urlProp));
+        Assert.Contains("test-sig", urlProp.GetString());
+    }
+
+    [Fact]
+    public async Task Phase7_AttachMedia_OwnershipMismatch_Returns403Forbidden()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review tác giả A"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // Media do user khác tải lên
+        var mediaId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(mediaId, otherUserId, "Ready", "image/jpeg");
+
+        using var attachReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(mediaId, "image/jpeg"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        var attachRes = await _client.SendAsync(attachReq);
+        Assert.Equal(HttpStatusCode.Forbidden, attachRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task Phase7_GetMediaAccess_WhenReviewHidden_OnlyAuthorOrAdminCanAccess()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review to hide"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        var mediaId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(mediaId, renterId, "Ready", "image/jpeg");
+
+        using var attachReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(mediaId, "image/jpeg"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        var attachRes = await _client.SendAsync(attachReq);
+        Assert.Equal(HttpStatusCode.Created, attachRes.StatusCode);
+
+        // Admin hides the review
+        var adminId = Guid.NewGuid();
+        using var hideReq = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/{detail.ReviewId}/hide",
+            new AdminModerationRequest("Vi phạm tiêu chuẩn"), GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"), ifMatch: "\"2\"");
+        var hideRes = await _client.SendAsync(hideReq);
+        Assert.Equal(HttpStatusCode.OK, hideRes.StatusCode);
+
+        // 1. Author can access media URL
+        using var authorAccessReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(renterId));
+        var authorAccessRes = await _client.SendAsync(authorAccessReq);
+        Assert.Equal(HttpStatusCode.OK, authorAccessRes.StatusCode);
+
+        // 2. Admin can access media URL
+        using var adminAccessReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(adminId, role: "Admin"));
+        var adminAccessRes = await _client.SendAsync(adminAccessReq);
+        Assert.Equal(HttpStatusCode.OK, adminAccessRes.StatusCode);
+
+        // 3. Third-party user cannot access media URL -> 404 NotFound
+        var thirdPartyId = Guid.NewGuid();
+        using var thirdPartyReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(thirdPartyId));
+        var thirdPartyRes = await _client.SendAsync(thirdPartyReq);
+        Assert.Equal(HttpStatusCode.NotFound, thirdPartyRes.StatusCode);
+
+        // 4. Subject cannot access media URL when Hidden -> 404 NotFound
+        using var subjectReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(supplierId));
+        var subjectRes = await _client.SendAsync(subjectReq);
+        Assert.Equal(HttpStatusCode.NotFound, subjectRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task Phase7_GetMediaAccess_WhenReviewWithdrawn_OnlyAuthorOrAdminCanAccess()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review to withdraw"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        var mediaId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(mediaId, renterId, "Ready", "image/jpeg");
+
+        using var attachReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(mediaId, "image/jpeg"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        var attachRes = await _client.SendAsync(attachReq);
+        Assert.Equal(HttpStatusCode.Created, attachRes.StatusCode);
+
+        // Author withdraws the review
+        using var withdrawReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/withdraw",
+            new WithdrawReviewRequest("Chủ động rút lại"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"2\"");
+        var withdrawRes = await _client.SendAsync(withdrawReq);
+        Assert.Equal(HttpStatusCode.OK, withdrawRes.StatusCode);
+
+        // 1. Author can access media URL
+        using var authorAccessReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(renterId));
+        var authorAccessRes = await _client.SendAsync(authorAccessReq);
+        Assert.Equal(HttpStatusCode.OK, authorAccessRes.StatusCode);
+
+        // 2. Admin can access media URL
+        var adminId = Guid.NewGuid();
+        using var adminAccessReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(adminId, role: "Admin"));
+        var adminAccessRes = await _client.SendAsync(adminAccessReq);
+        Assert.Equal(HttpStatusCode.OK, adminAccessRes.StatusCode);
+
+        // 3. Third-party user cannot access media URL -> 404 NotFound
+        var thirdPartyId = Guid.NewGuid();
+        using var thirdPartyReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(thirdPartyId));
+        var thirdPartyRes = await _client.SendAsync(thirdPartyReq);
+        Assert.Equal(HttpStatusCode.NotFound, thirdPartyRes.StatusCode);
+
+        // 4. Subject cannot access media URL when Withdrawn -> 404 NotFound
+        using var subjectReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(supplierId));
+        var subjectRes = await _client.SendAsync(subjectReq);
+        Assert.Equal(HttpStatusCode.NotFound, subjectRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task Phase7_AttachMedia_WhenNotReadyOrNotImage_ReturnsExpectedErrors()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review test media valid"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // 1. Media not Ready -> 422 UnprocessableEntity
+        var notReadyMediaId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(notReadyMediaId, renterId, "PendingUpload", "image/jpeg");
+
+        using var notReadyReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(notReadyMediaId, "image/jpeg"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        var notReadyRes = await _client.SendAsync(notReadyReq);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, notReadyRes.StatusCode);
+
+        // 2. Media not an image -> 400 BadRequest
+        var pdfMediaId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(pdfMediaId, renterId, "Ready", "application/pdf");
+
+        using var pdfReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(pdfMediaId, "application/pdf"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        var pdfRes = await _client.SendAsync(pdfReq);
+        Assert.Equal(HttpStatusCode.BadRequest, pdfRes.StatusCode);
+    }
 
     #endregion
 
@@ -366,14 +641,8 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
         return request;
     }
 
-    private static string GenerateJwt(Guid userId, string? userType = "cus", string? role = null)
+    private string GenerateJwt(Guid userId, string? userType = "cus", string? role = null)
     {
-        var payload = new Dictionary<string, object> { ["sub"] = userId.ToString() };
-        if (!string.IsNullOrEmpty(userType)) payload["u"] = userType;
-        if (!string.IsNullOrEmpty(role)) payload["r"] = role;
-
-        string json = JsonSerializer.Serialize(payload);
-        string base64Payload = Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        return $"eyJhbGciOiJub25lIn0.{base64Payload}.testsignature";
+        return _fixture.GenerateJwt(userId, userType, role);
     }
 }

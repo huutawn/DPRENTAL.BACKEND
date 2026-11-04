@@ -155,4 +155,51 @@ public sealed class RentalServiceClient : IRentalServiceClient
                 Error.Failure("RENTAL_SERVICE_UNAVAILABLE", $"Không thể kết nối đến RentalService: {ex.Message}"));
         }
     }
+
+    public async Task<Result<ReconciliationBatchDto>> GetReconciliationBatchAsync(
+        string? cursor = null,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        string relativePath = $"internal/reconciliation/rental-items?limit={limit}";
+        if (!string.IsNullOrWhiteSpace(cursor))
+        {
+            relativePath += $"&cursor={Uri.EscapeDataString(cursor)}";
+        }
+
+        Uri requestUri = _httpClient.BaseAddress != null
+            ? new Uri(relativePath, UriKind.Relative)
+            : new Uri($"{_options.BaseUrl.TrimEnd('/')}/{relativePath}");
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        if (!string.IsNullOrWhiteSpace(_options.ApiKey) &&
+            !_httpClient.DefaultRequestHeaders.Contains("X-Api-Key") &&
+            !request.Headers.Contains("X-Api-Key"))
+        {
+            request.Headers.TryAddWithoutValidation("X-Api-Key", _options.ApiKey);
+        }
+
+        try
+        {
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return Result.Failure<ReconciliationBatchDto>(
+                    Error.Failure("RENTAL_SERVICE_ERROR", $"RentalService trả về mã lỗi HTTP {(int)response.StatusCode}."));
+            }
+
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+            var batch = JsonSerializer.Deserialize<ReconciliationBatchDto>(content, JsonOptions);
+            return batch != null
+                ? Result.Success(batch)
+                : Result.Failure<ReconciliationBatchDto>(Error.Failure("RENTAL_SERVICE_INVALID_RESPONSE", "Dữ liệu đối soát không đúng định dạng."));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
+        {
+            _logger?.LogError(ex, "Lỗi khi gọi đối soát RentalService với cursor {Cursor}", cursor);
+            return Result.Failure<ReconciliationBatchDto>(
+                Error.Failure("RENTAL_SERVICE_UNAVAILABLE", "Dịch vụ RentalService đối soát tạm thời không khả dụng."));
+        }
+    }
 }

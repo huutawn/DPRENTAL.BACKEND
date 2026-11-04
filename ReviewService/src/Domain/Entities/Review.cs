@@ -101,6 +101,12 @@ public sealed class Review
     /// <summary>Mã thiết bị được thuê từ CatalogService/RentalService.</summary>
     public Guid EquipmentListingId { get; set; }
 
+    /// <summary>Mã thiết bị / bài đăng được thuê (alias chuẩn hóa cho EquipmentListingId).</summary>
+    public Guid ListingId => EquipmentListingId;
+
+    /// <summary>Mã nhà cung cấp đối với review (SubjectId cho renter_to_supplier_listing, AuthorId cho supplier_to_renter).</summary>
+    public Guid SupplierId => Direction == ReviewDirection.renter_to_supplier_listing ? SubjectId : AuthorId;
+
     /// <summary>Điểm đánh giá từ 1 đến 5 sao.</summary>
     public int Rating
     {

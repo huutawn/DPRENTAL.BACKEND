@@ -1,4 +1,5 @@
 using Dprental.ReviewService.Common.Enums;
+using Dprental.ReviewService.Common;
 using Dprental.ReviewService.Domain.Entities;
 using Dprental.ReviewService.Domain.IRepositories;
 using Dprental.ReviewService.Domain.Repositories;
@@ -219,23 +220,13 @@ public sealed class RepositoriesTests
         Assert.NotNull(fetched1);
         Assert.Equal(201, fetched1.ResponseStatusCode);
 
-        // Get by key and actorId
-        var fetched2 = await repository.GetAsync(key, actorId);
-        Assert.NotNull(fetched2);
-        Assert.Equal(201, fetched2.ResponseStatusCode);
-
-        // Get by key
-        var fetched3 = await repository.GetAsync(key);
-        Assert.NotNull(fetched3);
-        Assert.Equal(201, fetched3.ResponseStatusCode);
-
         // Non-existent key returns null
         Assert.Null(await repository.GetAsync(actorId, "non-existent"));
-        Assert.Null(await repository.GetAsync("non-existent"));
+        Assert.Null(await repository.GetAsync(Guid.NewGuid(), key));
     }
 
     [Fact]
-    public async Task IdempotencyRepository_SaveAsync_UpdatesExistingRecord()
+    public async Task IdempotencyRepository_SaveAsync_ReceiptIsImmutable_DoesNotOverwrite()
     {
         using var context = CreateDbContext();
         var repository = new IdempotencyRepository(context);
@@ -259,14 +250,193 @@ public sealed class RepositoriesTests
 
         await repository.SaveAsync(record);
 
+        // Attempt to overwrite
         record.ResponseBody = "{\"updated\":true}";
         record.ResponseStatusCode = 201;
         await repository.SaveAsync(record);
 
+        // Must remain initial (immutable)
         var fetched = await repository.GetAsync(actorId, key);
         Assert.NotNull(fetched);
+        Assert.Equal(200, fetched.ResponseStatusCode);
+        Assert.Equal("{\"initial\":true}", fetched.ResponseBody);
+    }
+
+    [Fact]
+    public async Task IdempotencyRepository_SaveAsync_DifferentFingerprint_ReturnsConflict409()
+    {
+        using var context = CreateDbContext();
+        var repository = new IdempotencyRepository(context);
+
+        var actorId = Guid.NewGuid();
+        var key = "conflict-key-789";
+        var now = DateTimeOffset.UtcNow;
+
+        var record1 = new IdempotencyRecord(
+            id: Guid.NewGuid(),
+            actorId: actorId,
+            idempotencyKey: key,
+            requestFingerprint: "fingerprint-alpha",
+            httpMethod: "POST",
+            requestPath: "/api/v1/reviews",
+            responseStatusCode: 201,
+            responseHeaders: null,
+            responseBody: "{\"created\":1}",
+            createdAt: now,
+            expiresAt: now.AddDays(30));
+
+        var result1 = await repository.SaveAsync(record1);
+        Assert.True(result1.IsSuccess);
+
+        // Attempt with different fingerprint for the same actor and key
+        var record2 = new IdempotencyRecord(
+            id: Guid.NewGuid(),
+            actorId: actorId,
+            idempotencyKey: key,
+            requestFingerprint: "fingerprint-beta",
+            httpMethod: "POST",
+            requestPath: "/api/v1/reviews",
+            responseStatusCode: 201,
+            responseHeaders: null,
+            responseBody: "{\"created\":2}",
+            createdAt: now,
+            expiresAt: now.AddDays(30));
+
+        var result2 = await repository.SaveAsync(record2);
+        Assert.True(result2.IsFailure);
+        Assert.Equal(ErrorType.Conflict, result2.Error.Type);
+        Assert.Equal("IDEMPOTENCY_KEY_REUSE_MISMATCH", result2.Error.Code);
+    }
+
+    [Fact]
+    public async Task IdempotencyRepository_SaveAsync_ExpiredReceipt_AtomicallyReplaced()
+    {
+        using var context = CreateDbContext();
+        var repository = new IdempotencyRepository(context);
+
+        var actorId = Guid.NewGuid();
+        var key = "expired-key-101";
+        var now = DateTimeOffset.UtcNow;
+
+        // Initial expired record
+        var expiredRecord = new IdempotencyRecord(
+            id: Guid.NewGuid(),
+            actorId: actorId,
+            idempotencyKey: key,
+            requestFingerprint: "fingerprint-old",
+            httpMethod: "POST",
+            requestPath: "/api/v1/reviews",
+            responseStatusCode: 200,
+            responseHeaders: null,
+            responseBody: "{\"old\":true}",
+            createdAt: now.AddDays(-31),
+            expiresAt: now.AddDays(-1));
+
+        await repository.SaveAsync(expiredRecord);
+
+        // New record replaces the expired record
+        var newRecord = new IdempotencyRecord(
+            id: Guid.NewGuid(),
+            actorId: actorId,
+            idempotencyKey: key,
+            requestFingerprint: "fingerprint-new",
+            httpMethod: "POST",
+            requestPath: "/api/v1/reviews",
+            responseStatusCode: 201,
+            responseHeaders: null,
+            responseBody: "{\"new\":true}",
+            createdAt: now,
+            expiresAt: now.AddDays(30));
+
+        var result = await repository.SaveAsync(newRecord);
+        Assert.True(result.IsSuccess);
+
+        var fetched = await repository.GetAsync(actorId, key);
+        Assert.NotNull(fetched);
+        Assert.Equal("fingerprint-new", fetched.RequestFingerprint);
         Assert.Equal(201, fetched.ResponseStatusCode);
-        Assert.Equal("{\"updated\":true}", fetched.ResponseBody);
+        Assert.Equal("{\"new\":true}", fetched.ResponseBody);
+    }
+
+    [Fact]
+    public async Task OutboxRepository_ClaimBatchAsync_AssignsClaimTokenOwnerAndExpiry()
+    {
+        using var context = CreateDbContext();
+        var repository = new OutboxRepository(context);
+        var now = DateTimeOffset.UtcNow;
+
+        var msg = new OutboxMessage(Guid.NewGuid(), "topic-1", "EventType", "key-1", "{}", now);
+        await repository.AddAsync(msg);
+
+        var claimed = await repository.ClaimBatchAsync("worker-test", TimeSpan.FromMinutes(2), 10, now);
+        Assert.Single(claimed);
+        var claimedMsg = claimed[0];
+        Assert.Equal("worker-test", claimedMsg.ClaimOwner);
+        Assert.NotNull(claimedMsg.ClaimToken);
+        Assert.NotNull(claimedMsg.LeaseExpiresAt);
+        Assert.True(claimedMsg.LeaseExpiresAt > now);
+    }
+
+    [Fact]
+    public async Task OutboxRepository_MarkProcessedAsync_OnlyUpdatesIfClaimTokenMatches()
+    {
+        using var context = CreateDbContext();
+        var repository = new OutboxRepository(context);
+        var now = DateTimeOffset.UtcNow;
+
+        var msg = new OutboxMessage(Guid.NewGuid(), "topic-2", "EventType", "key-2", "{}", now);
+        await repository.AddAsync(msg);
+
+        var claimed = await repository.ClaimBatchAsync("worker-1", TimeSpan.FromMinutes(2), 10, now);
+        var token = claimed[0].ClaimToken!.Value;
+
+        // Attempt mark processed with wrong token
+        bool wrongTokenUpdated = await repository.MarkProcessedAsync(msg.Id, Guid.NewGuid(), "worker-1", now);
+        Assert.False(wrongTokenUpdated);
+        var unupdated = await context.OutboxMessages.FindAsync(msg.Id);
+        Assert.NotNull(unupdated);
+        Assert.Equal("Pending", unupdated.DeliveryState);
+        Assert.Null(unupdated.ProcessedAt);
+
+        // Mark processed with correct token
+        bool correctTokenUpdated = await repository.MarkProcessedAsync(msg.Id, token, "worker-1", now);
+        Assert.True(correctTokenUpdated);
+        var updated = await context.OutboxMessages.FindAsync(msg.Id);
+        Assert.NotNull(updated);
+        Assert.Equal("Published", updated.DeliveryState);
+        Assert.NotNull(updated.ProcessedAt);
+        Assert.Null(updated.ClaimToken);
+    }
+
+    [Fact]
+    public async Task OutboxRepository_FailAttemptAsync_OnlyUpdatesIfClaimTokenMatches()
+    {
+        using var context = CreateDbContext();
+        var repository = new OutboxRepository(context);
+        var now = DateTimeOffset.UtcNow;
+
+        var msg = new OutboxMessage(Guid.NewGuid(), "topic-3", "EventType", "key-3", "{}", now);
+        await repository.AddAsync(msg);
+
+        var claimed = await repository.ClaimBatchAsync("worker-1", TimeSpan.FromMinutes(2), 10, now);
+        var token = claimed[0].ClaimToken!.Value;
+
+        // Attempt fail with wrong token
+        bool wrongTokenFailed = await repository.FailAttemptAsync(msg.Id, Guid.NewGuid(), "worker-1", "WRONG_TOKEN_ERR", now.AddMinutes(5), false, now);
+        Assert.False(wrongTokenFailed);
+        var unupdated = await context.OutboxMessages.FindAsync(msg.Id);
+        Assert.NotNull(unupdated);
+        Assert.Equal(0, unupdated.Attempts);
+        Assert.Null(unupdated.LastErrorCode);
+
+        // Fail with correct token
+        bool correctTokenFailed = await repository.FailAttemptAsync(msg.Id, token, "worker-1", "REAL_ERR", now.AddMinutes(5), false, now);
+        Assert.True(correctTokenFailed);
+        var updated = await context.OutboxMessages.FindAsync(msg.Id);
+        Assert.NotNull(updated);
+        Assert.Equal(1, updated.Attempts);
+        Assert.Equal("REAL_ERR", updated.LastErrorCode);
+        Assert.Null(updated.ClaimToken);
     }
 
     [Fact]

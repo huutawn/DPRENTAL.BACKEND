@@ -1,4 +1,5 @@
 using Dprental.ReviewService.Api.Filters;
+using Dprental.ReviewService.Api.Security;
 using Dprental.ReviewService.Application.DTOs.Reviews;
 using Dprental.ReviewService.Application.Security;
 using Dprental.ReviewService.Application.Services;
@@ -12,18 +13,18 @@ namespace Dprental.ReviewService.Api.Controllers;
 /// Controller quản trị kiểm duyệt và xử lý vi phạm đánh giá (Admin API).
 /// </summary>
 [ApiController]
-[Route("api/v1/admin/reviews")]
+[Authorize(Policy = JwtAuthenticationExtensions.AdminOnlyPolicy)]
 [Route("admin/reviews")]
 public sealed class AdminReviewsController : ControllerBase
 {
-    private readonly IReviewService _reviewService;
+    private readonly IReviewModerationService _moderationService;
     private readonly IReviewCallerContext _callerContext;
 
     public AdminReviewsController(
-        IReviewService reviewService,
+        IReviewModerationService moderationService,
         IReviewCallerContext callerContext)
     {
-        _reviewService = reviewService ?? throw new ArgumentNullException(nameof(reviewService));
+        _moderationService = moderationService ?? throw new ArgumentNullException(nameof(moderationService));
         _callerContext = callerContext ?? throw new ArgumentNullException(nameof(callerContext));
     }
 
@@ -60,7 +61,7 @@ public sealed class AdminReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.HideReviewAsync(
+        var result = await _moderationService.HideReviewAsync(
             reviewId,
             _callerContext.ActorId.Value,
             request?.Reason,
@@ -110,7 +111,7 @@ public sealed class AdminReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.RestoreReviewAsync(
+        var result = await _moderationService.RestoreReviewAsync(
             reviewId,
             _callerContext.ActorId.Value,
             request?.Reason,
@@ -158,7 +159,7 @@ public sealed class AdminReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.GetReportsAsync(page, pageSize, cancellationToken);
+        var result = await _moderationService.GetReportsAsync(page, pageSize, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : this.ToProblem(result.Error);
     }
 
@@ -193,7 +194,7 @@ public sealed class AdminReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.ResolveReportAsync(
+        var result = await _moderationService.ResolveReportAsync(
             reportId,
             _callerContext.ActorId.Value,
             request.Resolution,

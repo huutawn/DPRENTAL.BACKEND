@@ -1,4 +1,6 @@
 using Dprental.ReviewService.Api.Filters;
+using Dprental.ReviewService.Api.Security;
+using Microsoft.AspNetCore.Authorization;
 using Dprental.ReviewService.Application.DTOs.Reviews;
 using Dprental.ReviewService.Application.Security;
 using Dprental.ReviewService.Application.Services;
@@ -12,18 +14,27 @@ namespace Dprental.ReviewService.Api.Controllers;
 /// Controller xử lý vòng đời đánh giá và truy vấn chi tiết đánh giá riêng tư (Public and Author API).
 /// </summary>
 [ApiController]
-[Route("api/v1/reviews")]
+[Authorize(Policy = JwtAuthenticationExtensions.HumanOnlyPolicy)]
 [Route("reviews")]
 public sealed class ReviewsController : ControllerBase
 {
-    private readonly IReviewService _reviewService;
+    private readonly IReviewAuthoringService _authoringService;
+    private readonly IReviewQueryService _queryService;
+    private readonly IReviewModerationService _moderationService;
+    private readonly IReviewMediaService _mediaService;
     private readonly IReviewCallerContext _callerContext;
 
     public ReviewsController(
-        IReviewService reviewService,
+        IReviewAuthoringService authoringService,
+        IReviewQueryService queryService,
+        IReviewModerationService moderationService,
+        IReviewMediaService mediaService,
         IReviewCallerContext callerContext)
     {
-        _reviewService = reviewService ?? throw new ArgumentNullException(nameof(reviewService));
+        _authoringService = authoringService ?? throw new ArgumentNullException(nameof(authoringService));
+        _queryService = queryService ?? throw new ArgumentNullException(nameof(queryService));
+        _moderationService = moderationService ?? throw new ArgumentNullException(nameof(moderationService));
+        _mediaService = mediaService ?? throw new ArgumentNullException(nameof(mediaService));
         _callerContext = callerContext ?? throw new ArgumentNullException(nameof(callerContext));
     }
 
@@ -50,11 +61,10 @@ public sealed class ReviewsController : ControllerBase
             return this.ToProblem(Error.Unauthorized("UNAUTHORIZED", "Mã người dùng không hợp lệ."));
         }
 
-        var result = await _reviewService.CreateReviewAsync(
-            _callerContext.ActorId.Value,
+        var result = await _authoringService.CreateReviewAsync(
+            _callerContext.ToActorContext(),
             request,
             idempotencyKey ?? string.Empty,
-            _callerContext.UserType,
             cancellationToken);
 
         if (result.IsFailure)
@@ -100,13 +110,12 @@ public sealed class ReviewsController : ControllerBase
                 "Yêu cầu chỉnh sửa hoặc thay đổi trạng thái đánh giá bắt buộc phải có header 'If-Match' chứa ETag phiên bản hiện tại."));
         }
 
-        var result = await _reviewService.UpdateReviewAsync(
-            _callerContext.ActorId.Value,
+        var result = await _authoringService.UpdateReviewAsync(
+            _callerContext.ToActorContext(),
             reviewId,
             request,
             idempotencyKey ?? string.Empty,
             ifMatch,
-            _callerContext.UserType,
             cancellationToken);
 
         if (result.IsFailure)
@@ -152,13 +161,12 @@ public sealed class ReviewsController : ControllerBase
                 "Yêu cầu chỉnh sửa hoặc thay đổi trạng thái đánh giá bắt buộc phải có header 'If-Match' chứa ETag phiên bản hiện tại."));
         }
 
-        var result = await _reviewService.WithdrawReviewAsync(
-            _callerContext.ActorId.Value,
+        var result = await _authoringService.WithdrawReviewAsync(
+            _callerContext.ToActorContext(),
             reviewId,
             request,
             idempotencyKey ?? string.Empty,
             ifMatch,
-            _callerContext.UserType,
             cancellationToken);
 
         if (result.IsFailure)
@@ -191,10 +199,9 @@ public sealed class ReviewsController : ControllerBase
             return this.ToProblem(Error.Unauthorized("UNAUTHORIZED", "Mã người dùng không hợp lệ."));
         }
 
-        var result = await _reviewService.GetReviewDetailAsync(
+        var result = await _queryService.GetReviewDetailAsync(
             reviewId,
-            _callerContext.ActorId.Value,
-            _callerContext.IsAdmin,
+            _callerContext.ToActorContext(),
             cancellationToken);
 
         if (result.IsFailure)
@@ -226,7 +233,7 @@ public sealed class ReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.GetMyReviewsAsync(
+        var result = await _queryService.GetMyReviewsAsync(
             _callerContext.ActorId.Value, page, pageSize, cancellationToken);
 
         return result.IsSuccess
@@ -237,6 +244,7 @@ public sealed class ReviewsController : ControllerBase
     /// <summary>
     /// Đọc danh sách đánh giá công khai của một thiết bị (GET /api/v1/reviews/listings/{listingId}).
     /// </summary>
+    [AllowAnonymous]
     [HttpGet("listings/{listingId:guid}")]
     public async Task<IActionResult> GetListingReviews(
         [FromRoute] Guid listingId,
@@ -244,7 +252,7 @@ public sealed class ReviewsController : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-        var result = await _reviewService.GetListingReviewsAsync(
+        var result = await _queryService.GetListingReviewsAsync(
             listingId, page, pageSize, cancellationToken);
 
         return result.IsSuccess
@@ -255,6 +263,7 @@ public sealed class ReviewsController : ControllerBase
     /// <summary>
     /// Đọc danh sách đánh giá công khai của nhà cung cấp (GET /api/v1/reviews/suppliers/{supplierId}).
     /// </summary>
+    [AllowAnonymous]
     [HttpGet("suppliers/{supplierId:guid}")]
     public async Task<IActionResult> GetSupplierReviews(
         [FromRoute] Guid supplierId,
@@ -262,7 +271,7 @@ public sealed class ReviewsController : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-        var result = await _reviewService.GetSupplierReviewsAsync(
+        var result = await _queryService.GetSupplierReviewsAsync(
             supplierId, page, pageSize, cancellationToken);
 
         return result.IsSuccess
@@ -273,6 +282,7 @@ public sealed class ReviewsController : ControllerBase
     /// <summary>
     /// Xem tổng hợp điểm đánh giá cho listing hoặc supplier (GET /api/v1/reviews/summary).
     /// </summary>
+    [AllowAnonymous]
     [HttpGet("summary")]
     public async Task<IActionResult> GetSummary(
         [FromQuery] string? targetType,
@@ -290,7 +300,7 @@ public sealed class ReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.GetSummaryAsync(
+        var result = await _queryService.GetSummaryAsync(
             targetType, targetId.Value, cancellationToken);
 
         return result.IsSuccess
@@ -318,7 +328,7 @@ public sealed class ReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.GetPendingReviewsAsync(
+        var result = await _queryService.GetPendingReviewsAsync(
             _callerContext.ActorId.Value, page, pageSize, cancellationToken);
 
         return result.IsSuccess
@@ -346,7 +356,7 @@ public sealed class ReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.GetReceivedReviewsAsync(
+        var result = await _queryService.GetReceivedReviewsAsync(
             _callerContext.ActorId.Value, page, pageSize, cancellationToken);
 
         return result.IsSuccess
@@ -371,7 +381,7 @@ public sealed class ReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.GetRenterReputationAsync(
+        var result = await _queryService.GetRenterReputationAsync(
             _callerContext.ActorId.Value, cancellationToken);
 
         return result.IsSuccess
@@ -400,7 +410,7 @@ public sealed class ReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.CreateReportAsync(
+        var result = await _moderationService.CreateReportAsync(
             reviewId,
             _callerContext.ActorId.Value,
             request?.Reason ?? string.Empty,
@@ -433,7 +443,7 @@ public sealed class ReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.AttachMediaAsync(
+        var result = await _mediaService.AttachMediaAsync(
             reviewId,
             _callerContext.ActorId.Value,
             request.MediaId,
@@ -467,7 +477,7 @@ public sealed class ReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.DetachMediaAsync(
+        var result = await _mediaService.DetachMediaAsync(
             reviewId,
             _callerContext.ActorId.Value,
             mediaId,
@@ -476,6 +486,26 @@ public sealed class ReviewsController : ControllerBase
 
         return result.IsSuccess
             ? NoContent()
+            : this.ToProblem(result.Error);
+    }
+
+    /// <summary>
+    /// Lấy URL đọc riêng tư ngắn hạn cho tệp media đính kèm (GET /api/v1/reviews/{reviewId}/media/{mediaId}/access).
+    /// </summary>
+    [HttpGet("{reviewId:guid}/media/{mediaId:guid}/access")]
+    public async Task<IActionResult> GetMediaAccess(
+        [FromRoute] Guid reviewId,
+        [FromRoute] Guid mediaId,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _mediaService.GetMediaPrivateAccessAsync(
+            reviewId,
+            mediaId,
+            _callerContext.ToActorContext(),
+            cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
             : this.ToProblem(result.Error);
     }
 }

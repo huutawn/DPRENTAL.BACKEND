@@ -16,13 +16,16 @@ public sealed class IdempotencyService : IIdempotencyService
     private static readonly TimeSpan DefaultRetentionPeriod = TimeSpan.FromDays(30);
 
     private readonly IIdempotencyRepository _idempotencyRepository;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<IdempotencyService>? _logger;
 
     public IdempotencyService(
         IIdempotencyRepository idempotencyRepository,
+        TimeProvider? timeProvider = null,
         ILogger<IdempotencyService>? logger = null)
     {
         _idempotencyRepository = idempotencyRepository ?? throw new ArgumentNullException(nameof(idempotencyRepository));
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
     }
 
@@ -71,6 +74,14 @@ public sealed class IdempotencyService : IIdempotencyService
             return Result.Success<IdempotencyRecord?>(null);
         }
 
+        var now = _timeProvider.GetUtcNow();
+        if (now >= existingRecord.ExpiresAt)
+        {
+            _logger?.LogInformation(
+                "Khóa Idempotency-Key {Key} của actor {ActorId} đã hết hạn TTL ({ExpiresAt}). Không coi là replay hợp lệ.",
+                idempotencyKey, actorId, existingRecord.ExpiresAt);
+            return Result.Success<IdempotencyRecord?>(null);
+        }
         if (string.Equals(existingRecord.RequestFingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
         {
             _logger?.LogInformation(
@@ -117,7 +128,7 @@ public sealed class IdempotencyService : IIdempotencyService
         DateTimeOffset? createdAt = null,
         TimeSpan? retentionPeriod = null)
     {
-        DateTimeOffset now = createdAt ?? DateTimeOffset.UtcNow;
+        DateTimeOffset now = createdAt ?? _timeProvider.GetUtcNow();
         TimeSpan retention = retentionPeriod ?? DefaultRetentionPeriod;
 
         return new IdempotencyRecord(
