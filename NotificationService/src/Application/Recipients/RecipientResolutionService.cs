@@ -234,7 +234,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     "SETTLEMENT", "INFO", false, $"/renter/orders/{orderId}", null));
                 results.Add(new ResolvedRecipient(
                     supplierId.Value, "Supplier", "DEDUCTION_DISPUTE_RESOLVED_SUPPLIER",
-                    "SETTLEMENT", "INFO", false, $"/supplier/sub-orders/{orderId}", null));
+                    "SETTLEMENT", "INFO", false, "/supplier/sub-orders", null));
                 break;
 
             case "LatePaymentRefundRequested":

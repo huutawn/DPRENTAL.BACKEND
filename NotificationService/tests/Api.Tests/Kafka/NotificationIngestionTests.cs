@@ -115,7 +115,8 @@ public sealed class NotificationIngestionTests
         Assert.Contains(notifications, n => n.RecipientUserId == renterId &&
             n.NotificationType == "DEDUCTION_DISPUTE_RESOLVED_RENTER");
         Assert.Contains(notifications, n => n.RecipientUserId == supplierId &&
-            n.NotificationType == "DEDUCTION_DISPUTE_RESOLVED_SUPPLIER");
+            n.NotificationType == "DEDUCTION_DISPUTE_RESOLVED_SUPPLIER" &&
+            n.DeepLinkUrl == "/supplier/sub-orders");
     }
 
     [Fact]
