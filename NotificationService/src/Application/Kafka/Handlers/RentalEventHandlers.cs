@@ -8,10 +8,14 @@ internal static class JsonElementExtensions
 {
     public static Guid? GetGuidOrDefault(this JsonElement root, string propertyName)
     {
-        if (root.TryGetProperty(propertyName, out var prop) &&
-            Guid.TryParse(prop.GetString(), out var guid))
+        if (root.TryGetProperty(propertyName, out var prop))
         {
-            return guid;
+            if (prop.ValueKind == JsonValueKind.String &&
+                Guid.TryParse(prop.GetString(), out var guid) &&
+                guid != Guid.Empty)
+            {
+                return guid;
+            }
         }
         return null;
     }
@@ -31,7 +35,14 @@ internal static class JsonElementExtensions
 
     public static string? GetStringOrDefault(this JsonElement root, string propertyName)
     {
-        return root.TryGetProperty(propertyName, out var prop) ? prop.GetString() : null;
+        if (root.TryGetProperty(propertyName, out var prop))
+        {
+            if (prop.ValueKind == JsonValueKind.String)
+            {
+                return prop.GetString();
+            }
+        }
+        return null;
     }
 
     public static string? GetStringFromAny(this JsonElement root, params string[] propertyNames)
@@ -39,6 +50,37 @@ internal static class JsonElementExtensions
         foreach (var name in propertyNames)
         {
             var val = root.GetStringOrDefault(name);
+            if (!string.IsNullOrWhiteSpace(val))
+            {
+                return val;
+            }
+        }
+        return null;
+    }
+
+    public static string? GetUtcTimestampOrDefault(this JsonElement root, string propertyName)
+    {
+        if (root.TryGetProperty(propertyName, out var prop))
+        {
+            if (prop.ValueKind == JsonValueKind.String)
+            {
+                var str = prop.GetString();
+                if (!string.IsNullOrWhiteSpace(str) &&
+                    DateTimeOffset.TryParse(str, out var dto) &&
+                    dto.Offset == TimeSpan.Zero)
+                {
+                    return str;
+                }
+            }
+        }
+        return null;
+    }
+
+    public static string? GetUtcTimestampFromAny(this JsonElement root, params string[] propertyNames)
+    {
+        foreach (var name in propertyNames)
+        {
+            var val = root.GetUtcTimestampOrDefault(name);
             if (!string.IsNullOrWhiteSpace(val))
             {
                 return val;
@@ -100,6 +142,130 @@ internal static class JsonElementExtensions
         }
         return defaultValue;
     }
+
+    public static Result ValidateGuidPropertyIfPresent(this JsonElement root, string propertyName)
+    {
+        if (root.TryGetProperty(propertyName, out var prop))
+        {
+            if (prop.ValueKind == JsonValueKind.Null)
+            {
+                return Result.Success();
+            }
+
+            if (prop.ValueKind != JsonValueKind.String)
+            {
+                return Result.Failure(Error.Validation("INVALID_GUID_KIND", $"Trường '{propertyName}' phải là kiểu chuỗi (String)."));
+            }
+
+            var str = prop.GetString();
+            if (string.IsNullOrWhiteSpace(str) || !Guid.TryParse(str, out var guid) || guid == Guid.Empty)
+            {
+                return Result.Failure(Error.Validation("INVALID_GUID_VALUE", $"Trường '{propertyName}' phải là GUID hợp lệ và khác Guid.Empty."));
+            }
+        }
+        return Result.Success();
+    }
+
+    public static Result ValidateUtcTimestampPropertyIfPresent(this JsonElement root, string propertyName)
+    {
+        if (root.TryGetProperty(propertyName, out var prop))
+        {
+            if (prop.ValueKind == JsonValueKind.Null)
+            {
+                return Result.Success();
+            }
+
+            if (prop.ValueKind != JsonValueKind.String)
+            {
+                return Result.Failure(Error.Validation("INVALID_TIMESTAMP_KIND", $"Trường '{propertyName}' phải là kiểu chuỗi (String)."));
+            }
+
+            var str = prop.GetString();
+            if (string.IsNullOrWhiteSpace(str) || !DateTimeOffset.TryParse(str, out var dto) || dto.Offset != TimeSpan.Zero)
+            {
+                return Result.Failure(Error.Validation("INVALID_UTC_TIMESTAMP", $"Trường '{propertyName}' phải là thời gian UTC hợp lệ."));
+            }
+        }
+        return Result.Success();
+    }
+
+    public static Result ValidateNumberPropertyIfPresent(this JsonElement root, string propertyName)
+    {
+        if (root.TryGetProperty(propertyName, out var prop))
+        {
+            if (prop.ValueKind == JsonValueKind.Null)
+            {
+                return Result.Success();
+            }
+
+            if (prop.ValueKind != JsonValueKind.Number)
+            {
+                return Result.Failure(Error.Validation("INVALID_NUMBER_KIND", $"Trường '{propertyName}' phải là kiểu số (Number)."));
+            }
+        }
+        return Result.Success();
+    }
+
+    public static Result ValidateStringPropertyIfPresent(this JsonElement root, string propertyName)
+    {
+        if (root.TryGetProperty(propertyName, out var prop))
+        {
+            if (prop.ValueKind == JsonValueKind.Null)
+            {
+                return Result.Success();
+            }
+
+            if (prop.ValueKind != JsonValueKind.String)
+            {
+                return Result.Failure(Error.Validation("INVALID_STRING_KIND", $"Trường '{propertyName}' phải là kiểu chuỗi (String)."));
+            }
+        }
+        return Result.Success();
+    }
+    public static Result ValidateFields(this JsonElement root,
+        string[]? guidFields = null,
+        string[]? numberFields = null,
+        string[]? utcTimestampFields = null,
+        string[]? stringFields = null)
+    {
+        if (guidFields != null)
+        {
+            foreach (var field in guidFields)
+            {
+                var res = root.ValidateGuidPropertyIfPresent(field);
+                if (res.IsFailure) return res;
+            }
+        }
+
+        if (numberFields != null)
+        {
+            foreach (var field in numberFields)
+            {
+                var res = root.ValidateNumberPropertyIfPresent(field);
+                if (res.IsFailure) return res;
+            }
+        }
+
+        if (utcTimestampFields != null)
+        {
+            foreach (var field in utcTimestampFields)
+            {
+                var res = root.ValidateUtcTimestampPropertyIfPresent(field);
+                if (res.IsFailure) return res;
+            }
+        }
+
+        if (stringFields != null)
+        {
+            foreach (var field in stringFields)
+            {
+                var res = root.ValidateStringPropertyIfPresent(field);
+                if (res.IsFailure) return res;
+            }
+        }
+
+        return Result.Success();
+    }
 }
 
 public sealed class RentalOrderCreatedHandler : IKafkaEventHandler
@@ -109,6 +275,16 @@ public sealed class RentalOrderCreatedHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "renterId", "userId"],
+            numberFields: ["orderVersion", "version", "totalPayableAmount", "amount"],
+            utcTimestampFields: ["paymentDeadline"],
+            stringFields: ["orderCode"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -149,6 +325,16 @@ public sealed class RentalOrderPaidHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "renterId", "userId"],
+            numberFields: ["orderVersion", "version", "paidAmount", "amount"],
+            utcTimestampFields: ["paidAt"],
+            stringFields: ["orderCode", "invoiceRef", "paymentRef"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -169,7 +355,6 @@ public sealed class RentalOrderPaidHandler : IKafkaEventHandler
             ["invoiceRef"] = invoiceRef
         };
 
-        // PAID là mốc xác nhận thanh toán thành công, KHÔNG PHẢI trạng thái kết thúc toàn bộ vòng đời đơn hàng
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
             AggregateId: orderId.Value,
@@ -190,6 +375,16 @@ public sealed class RentalSupplierConfirmationRequestedHandler : IKafkaEventHand
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "supplierId", "rentalItemId", "itemId"],
+            numberFields: ["orderVersion", "version"],
+            utcTimestampFields: ["supplierConfirmationDeadline"],
+            stringFields: ["orderCode"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -230,6 +425,16 @@ public sealed class RentalOrderExpiredHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "renterId", "userId"],
+            numberFields: ["orderVersion", "version"],
+            utcTimestampFields: ["expiredAt"],
+            stringFields: ["orderCode", "reason"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -268,6 +473,16 @@ public sealed class RentalOrderCancelledHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "renterId", "userId"],
+            numberFields: ["orderVersion", "version"],
+            utcTimestampFields: ["cancelledAt"],
+            stringFields: ["orderCode", "reason"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -306,6 +521,16 @@ public sealed class RentalItemHandoverCompletedHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "renterId", "userId", "supplierId", "rentalItemId", "itemId"],
+            numberFields: ["orderVersion", "version"],
+            utcTimestampFields: ["actualHandoverAt", "completedAt"],
+            stringFields: ["orderCode"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -347,6 +572,16 @@ public sealed class RentalHandoverOverdueHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "supplierId", "renterId", "userId", "rentalItemId", "itemId"],
+            numberFields: ["orderVersion", "version"],
+            utcTimestampFields: ["overdueAt"],
+            stringFields: ["orderCode", "expectedStartDate"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -388,6 +623,16 @@ public sealed class ReturnConfirmationOverdueHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "supplierId", "renterId", "userId", "returnRequestId", "rentalItemId", "itemId"],
+            numberFields: ["orderVersion", "version"],
+            utcTimestampFields: ["confirmationDeadlineAt"],
+            stringFields: ["orderCode"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -431,6 +676,16 @@ public sealed class RentalOrderCompletedHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "renterId", "userId"],
+            numberFields: ["orderVersion", "version"],
+            utcTimestampFields: ["completedAt"],
+            stringFields: ["orderCode"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -469,6 +724,16 @@ public sealed class LatePaymentRefundRequestedHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "renterId", "userId"],
+            numberFields: ["orderVersion", "version", "totalRefundAmount", "amount"],
+            utcTimestampFields: ["requestedAt"],
+            stringFields: ["orderCode", "refundReason"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -507,6 +772,16 @@ public sealed class RentalItemConfirmedHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "renterId", "userId", "customerId", "supplierId", "rentalItemId", "itemId"],
+            numberFields: ["orderVersion", "version"],
+            utcTimestampFields: ["decisionAt"],
+            stringFields: ["orderCode", "inventoryConfirmationRef"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId") ?? (Guid.TryParse(envelope.AggregateId, out var g0) && g0 != Guid.Empty ? g0 : null);
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -554,6 +829,16 @@ public sealed class RentalItemRejectedHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "renterId", "userId", "customerId", "supplierId", "rentalItemId", "itemId"],
+            numberFields: ["orderVersion", "version"],
+            utcTimestampFields: ["decisionAt"],
+            stringFields: ["orderCode", "reason", "optionalNote", "note"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId") ?? (Guid.TryParse(envelope.AggregateId, out var g1) && g1 != Guid.Empty ? g1 : null);
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -603,6 +888,16 @@ public sealed class RefundCompletedFinancialHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "refundId", "rentalItemId", "itemId", "renterId", "userId"],
+            numberFields: ["orderVersion", "version", "amount", "refundAmount"],
+            utcTimestampFields: ["completedAt"],
+            stringFields: ["refundRef", "refundKind", "currency", "orderCode"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId") ?? (Guid.TryParse(envelope.AggregateId, out var g2) && g2 != Guid.Empty ? g2 : null);
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
@@ -656,6 +951,16 @@ public sealed class SupplierPayoutCompletedHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["settlementId", "rentalOrderId", "orderId", "payoutId", "rentalItemId", "itemId", "supplierId"],
+            numberFields: ["orderVersion", "version", "amount", "payoutAmount"],
+            utcTimestampFields: ["completedAt"],
+            stringFields: ["payoutRef", "currency"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
         var settlementId = payload.GetGuidFromAny("settlementId", "rentalOrderId", "orderId") ?? (Guid.TryParse(envelope.AggregateId, out var g3) && g3 != Guid.Empty ? g3 : null);
         if (!settlementId.HasValue || settlementId.Value == Guid.Empty)
         {

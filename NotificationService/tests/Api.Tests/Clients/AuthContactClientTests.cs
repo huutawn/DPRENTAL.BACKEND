@@ -56,6 +56,14 @@ public sealed class AuthContactClientTests
             base.Dispose(disposing);
         }
     }
+    private static IConfiguration CreateTestConfig(string apiKey = "test-internal-api-key") =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["InternalAuthentication:ApiKey"] = apiKey
+            })
+            .Build();
+
 
     [Fact]
     public async Task AuthContactClient_SendsXApiKeyHeader_WithConfiguredValue()
@@ -93,31 +101,14 @@ public sealed class AuthContactClientTests
     }
 
     [Fact]
-    public async Task AuthContactClient_SendsXApiKeyHeader_WithDefaultFallbackValue()
+    public void AuthContactClient_MissingApiKey_ThrowsInvalidOperationException()
     {
-        HttpRequestMessage? interceptedRequest = null;
-        var handler = new MockHttpMessageHandler((req, _) =>
-        {
-            interceptedRequest = req;
-            var response = new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = JsonContent.Create(new AuthContactBatchResponse(Array.Empty<AuthContactDto>()))
-            };
-            return Task.FromResult(response);
-        });
-
+        var handler = new MockHttpMessageHandler((req, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)));
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
         var emptyConfig = new ConfigurationBuilder().Build();
 
-        var client = new AuthContactClient(httpClient, emptyConfig, NullLogger<AuthContactClient>.Instance);
-
-        var result = await client.GetUserContactsBatchAsync(new[] { Guid.NewGuid() });
-
-        Assert.True(result.IsSuccess);
-        Assert.NotNull(interceptedRequest);
-        Assert.True(interceptedRequest.Headers.Contains("X-Api-Key"));
-        Assert.Equal("dev-internal-api-key-dprental-2026", interceptedRequest.Headers.GetValues("X-Api-Key").Single());
-        Assert.False(interceptedRequest.Headers.Contains("X-Internal-Api-Key"));
+        Assert.Throws<InvalidOperationException>(() =>
+            new AuthContactClient(httpClient, emptyConfig, NullLogger<AuthContactClient>.Instance));
     }
 
     [Fact]
@@ -125,7 +116,7 @@ public sealed class AuthContactClientTests
     {
         var handler = new MockHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)));
         var httpClient = new HttpClient(handler);
-        var config = new ConfigurationBuilder().Build();
+        var config = CreateTestConfig();
 
         _ = new AuthContactClient(httpClient, config, NullLogger<AuthContactClient>.Instance);
 
@@ -144,7 +135,7 @@ public sealed class AuthContactClientTests
         });
 
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
-        var client = new AuthContactClient(httpClient, new ConfigurationBuilder().Build(), NullLogger<AuthContactClient>.Instance);
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
 
         var resultEmpty = await client.GetUserContactsBatchAsync(Array.Empty<Guid>());
         var resultNull = await client.GetUserContactsBatchAsync(null!);
@@ -177,7 +168,7 @@ public sealed class AuthContactClientTests
         });
 
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
-        var client = new AuthContactClient(httpClient, new ConfigurationBuilder().Build(), NullLogger<AuthContactClient>.Instance);
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
 
         var result = await client.GetUserContactsBatchAsync(new[] { userId1, userId2 });
 
@@ -202,7 +193,7 @@ public sealed class AuthContactClientTests
         });
 
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
-        var client = new AuthContactClient(httpClient, new ConfigurationBuilder().Build(), NullLogger<AuthContactClient>.Instance);
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
 
         var result = await client.GetUserContactsBatchAsync(new[] { Guid.NewGuid() });
 
@@ -221,7 +212,7 @@ public sealed class AuthContactClientTests
             Task.FromResult(new HttpResponseMessage(statusCode)));
 
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
-        var client = new AuthContactClient(httpClient, new ConfigurationBuilder().Build(), NullLogger<AuthContactClient>.Instance);
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
 
         var result = await client.GetUserContactsBatchAsync(new[] { Guid.NewGuid() });
 
@@ -241,7 +232,7 @@ public sealed class AuthContactClientTests
             Task.FromResult(new HttpResponseMessage(statusCode)));
 
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
-        var client = new AuthContactClient(httpClient, new ConfigurationBuilder().Build(), NullLogger<AuthContactClient>.Instance);
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
 
         var result = await client.GetUserContactsBatchAsync(new[] { Guid.NewGuid() });
 
@@ -257,7 +248,7 @@ public sealed class AuthContactClientTests
             throw new HttpRequestException("DNS resolution failed or connection refused"));
 
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
-        var client = new AuthContactClient(httpClient, new ConfigurationBuilder().Build(), NullLogger<AuthContactClient>.Instance);
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
 
         var result = await client.GetUserContactsBatchAsync(new[] { Guid.NewGuid() });
 
@@ -272,7 +263,7 @@ public sealed class AuthContactClientTests
             throw new TimeoutException("The HTTP request timed out."));
 
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
-        var client = new AuthContactClient(httpClient, new ConfigurationBuilder().Build(), NullLogger<AuthContactClient>.Instance);
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
 
         var result = await client.GetUserContactsBatchAsync(new[] { Guid.NewGuid() });
 
@@ -295,7 +286,7 @@ public sealed class AuthContactClientTests
         });
 
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
-        var client = new AuthContactClient(httpClient, new ConfigurationBuilder().Build(), NullLogger<AuthContactClient>.Instance);
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
 
         var result = await client.GetUserContactsBatchAsync(new[] { Guid.NewGuid() });
 

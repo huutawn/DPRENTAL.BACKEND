@@ -10,8 +10,8 @@ using Dprental.NotificationService.Application.Templates;
 using Dprental.NotificationService.Domain.Entities;
 using Dprental.NotificationService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-
 namespace Dprental.NotificationService.Application.Kafka.Services;
 
 public enum IngestionOutcome
@@ -35,7 +35,8 @@ public interface INotificationIngestionService
 
 public sealed class NotificationIngestionService : INotificationIngestionService
 {
-    private const string ConsumerGroupName = "notification-service-v1";
+    private readonly string _consumerGroupName;
+    private readonly IKafkaContractRegistry _contractRegistry;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly IEnumerable<IKafkaEventHandler> _handlers;
     private readonly IRecipientResolutionService _recipientResolver;
@@ -62,7 +63,9 @@ public sealed class NotificationIngestionService : INotificationIngestionService
         IUnitOfWork unitOfWork,
         IKafkaDeadLetterPublisher dlqPublisher,
         INotificationRealtimeNotifier realtimeNotifier,
-        ILogger<NotificationIngestionService> logger)
+        ILogger<NotificationIngestionService> logger,
+        IConfiguration? configuration = null,
+        IKafkaContractRegistry? contractRegistry = null)
     {
         _handlers = handlers ?? throw new ArgumentNullException(nameof(handlers));
         _recipientResolver = recipientResolver ?? throw new ArgumentNullException(nameof(recipientResolver));
@@ -76,6 +79,8 @@ public sealed class NotificationIngestionService : INotificationIngestionService
         _dlqPublisher = dlqPublisher ?? throw new ArgumentNullException(nameof(dlqPublisher));
         _realtimeNotifier = realtimeNotifier ?? throw new ArgumentNullException(nameof(realtimeNotifier));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _consumerGroupName = configuration?["Kafka:GroupId"] ?? "notification-service-v1";
+        _contractRegistry = contractRegistry ?? new KafkaContractRegistry(handlers);
     }
 
     public async Task<IngestionOutcome> IngestMessageAsync(
@@ -116,21 +121,38 @@ public sealed class NotificationIngestionService : INotificationIngestionService
 
         var messageId = envelope!.MessageId;
 
-        // 3. Check Unknown Event Type from allowed Producer
-        var handler = _handlers.FirstOrDefault(h => string.Equals(h.EventType, envelope.MessageType, StringComparison.OrdinalIgnoreCase));
-        if (handler == null)
+        // 3. Contract Registry Validation & Handler Resolution
+        var resolution = _contractRegistry.Resolve(topic, envelope!);
+        if (resolution.Status == ContractResolutionStatus.Quarantined)
+        {
+            var qId = envelope!.MessageId.ToString();
+            _logger.LogWarning("Contract vi phạm quy tắc ({Code}): {Message}. Đẩy vào DLQ: {QuarantineId}",
+                resolution.ErrorCode, resolution.ErrorMessage, qId);
+            await _dlqPublisher.PublishToDeadLetterQueueAsync(
+                rawMessage,
+                qId,
+                resolution.ErrorMessage ?? "Lỗi xác thực hợp đồng Kafka.",
+                resolution.ErrorCode ?? "CONTRACT_VIOLATION",
+                cancellationToken);
+            return IngestionOutcome.Quarantined;
+        }
+
+        if (resolution.Status == ContractResolutionStatus.Ignored)
         {
             _logger.LogInformation(
-                "Bỏ qua sự kiện không thuộc danh sách quan tâm: MessageType={MessageType}, MessageId={MessageId}, Producer={Producer}",
-                envelope.MessageType,
+                "Bỏ qua sự kiện không thuộc danh sách quan tâm: Topic={Topic}, MessageType={MessageType}, MessageId={MessageId}, Producer={Producer}",
+                topic,
+                envelope!.MessageType,
                 envelope.MessageId,
                 envelope.Producer);
 
             return IngestionOutcome.Ignored;
         }
 
+        var handler = resolution.Handler!;
+
         // 4. Idempotency Pre-Check
-        var exists = await _inboxRepo.ExistsAsync(ConsumerGroupName, messageId, cancellationToken);
+        var exists = await _inboxRepo.ExistsAsync(_consumerGroupName, messageId, cancellationToken);
         if (exists)
         {
             _logger.LogInformation("Bỏ qua tin nhắn trùng lặp (idempotent pre-check): MessageId={MessageId}", messageId);
@@ -175,7 +197,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
             await using var transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             // Double check idempotency inside transaction
-            var alreadyProcessed = await _inboxRepo.ExistsAsync(ConsumerGroupName, messageId, cancellationToken);
+            var alreadyProcessed = await _inboxRepo.ExistsAsync(_consumerGroupName, messageId, cancellationToken);
             if (alreadyProcessed)
             {
                 _logger.LogInformation("Bỏ qua tin nhắn trùng lặp (inside transaction): MessageId={MessageId}", messageId);
@@ -281,7 +303,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
             await _inboxRepo.AddAsync(new NotificationInboxReceipt
             {
                 Id = Guid.NewGuid(),
-                ConsumerName = ConsumerGroupName,
+                ConsumerName = _consumerGroupName,
                 MessageId = messageId,
                 Producer = envelope.Producer,
                 MessageType = envelope.MessageType,
@@ -337,7 +359,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
         {
             _logger.LogWarning(ex, "Lỗi vi phạm constraint database (có thể là duplicate concurrent): MessageId={MessageId}", messageId);
             // Verify if inbox receipt already exists
-            var isDuplicate = await _inboxRepo.ExistsAsync(ConsumerGroupName, messageId, cancellationToken);
+            var isDuplicate = await _inboxRepo.ExistsAsync(_consumerGroupName, messageId, cancellationToken);
             if (isDuplicate)
             {
                 return IngestionOutcome.Duplicate;

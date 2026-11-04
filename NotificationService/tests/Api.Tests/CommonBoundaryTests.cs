@@ -57,6 +57,10 @@ public sealed class CommonBoundaryTests
                 builder.UseSetting("environment", "Production");
                 builder.UseSetting("ConnectionStrings:Postgres",
                     "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("Kafka:BootstrapServers", "localhost:9092");
+                builder.UseSetting("Kafka:Topics", "rental.events.v1,payment.analytics.v1");
+                builder.UseSetting("Services:AuthService:BaseUrl", "http://auth-service:8080");
+                builder.UseSetting("InternalAuthentication:ApiKey", "test-internal-api-key");
                 builder.ConfigureTestServices(services => services.AddControllers()
                     .AddApplicationPart(typeof(BoundaryTestController).Assembly));
             });

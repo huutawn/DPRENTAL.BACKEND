@@ -13,16 +13,54 @@ public sealed class KafkaConsumerHostedService : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly IConfiguration _configuration;
     private readonly ILogger<KafkaConsumerHostedService> _logger;
+    private readonly IHostApplicationLifetime? _hostApplicationLifetime;
+    private readonly Func<ConsumerConfig, IConsumer<string, string>> _consumerFactory;
 
     public KafkaConsumerHostedService(
         IServiceProvider serviceProvider,
         IConfiguration configuration,
-        ILogger<KafkaConsumerHostedService> logger)
+        ILogger<KafkaConsumerHostedService> logger,
+        IHostApplicationLifetime? hostApplicationLifetime = null,
+        Func<ConsumerConfig, IConsumer<string, string>>? consumerFactory = null)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _hostApplicationLifetime = hostApplicationLifetime;
+        _consumerFactory = consumerFactory ?? (config => new ConsumerBuilder<string, string>(config).Build());
     }
+
+    public static IReadOnlyList<string> ResolveConfiguredTopics(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var topicsSection = configuration.GetSection("Kafka:Topics");
+        var topicList = topicsSection.GetChildren()
+            .Select(c => c.Value)
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v!.Trim())
+            .ToList();
+
+        if (topicList.Count > 0)
+        {
+            return topicList!;
+        }
+
+        var topicsValue = configuration["Kafka:Topics"];
+        if (!string.IsNullOrWhiteSpace(topicsValue))
+        {
+            var parsed = topicsValue.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToList();
+            if (parsed.Count > 0)
+            {
+                return parsed;
+            }
+        }
+
+        return new[] { "rental.events.v1", "payment.analytics.v1" };
+    }
+    public Task ExecuteConsumerAsync(CancellationToken stoppingToken) => ExecuteAsync(stoppingToken);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -33,7 +71,7 @@ public sealed class KafkaConsumerHostedService : BackgroundService
             return;
         }
 
-        var topic = _configuration["Kafka:EventsTopic"] ?? "rental.events.v1";
+        var topics = ResolveConfiguredTopics(_configuration);
         var groupId = _configuration["Kafka:GroupId"] ?? "notification-service-v1";
 
         var config = new ConsumerConfig
@@ -46,9 +84,10 @@ public sealed class KafkaConsumerHostedService : BackgroundService
             EnablePartitionEof = false
         };
 
-        using var consumer = new ConsumerBuilder<string, string>(config).Build();
-        consumer.Subscribe(topic);
-        _logger.LogInformation("Kafka consumer đã kết nối tới {Servers}, lắng nghe topic '{Topic}', group '{GroupId}'.", bootstrapServers, topic, groupId);
+        using var consumer = _consumerFactory(config);
+        consumer.Subscribe(topics);
+        _logger.LogInformation("Kafka consumer đã kết nối tới {Servers}, lắng nghe topics [{Topics}], group '{GroupId}'.",
+            bootstrapServers, string.Join(", ", topics), groupId);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -93,19 +132,20 @@ public sealed class KafkaConsumerHostedService : BackgroundService
 
                         if (attempt < MaxTransientRetries)
                         {
-                            await Task.Delay(TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt - 1)), stoppingToken);
+                            var delayMs = (int)(500 * Math.Pow(2, attempt - 1));
+                            await Task.Delay(TimeSpan.FromMilliseconds(delayMs), stoppingToken);
                         }
                     }
                 }
 
                 if (!success && !stoppingToken.IsCancellationRequested)
                 {
-                    // Lỗi kéo dài: KHÔNG commit offset, seek lại offset hiện tại để không bỏ sót bản tin sau đó
-                    _logger.LogError("Message tại [Topic={Topic}, Partition={Partition}, Offset={Offset}] thất bại sau {Max} lần thử. Giữ nguyên offset và seek lại.",
+                    // Lỗi hạ tầng sau 3 lần thử: Dừng consumer và host, KHÔNG commit offset
+                    _logger.LogCritical("Lỗi hạ tầng xử lý Kafka message tại [Topic={Topic}, Partition={Partition}, Offset={Offset}] sau {Max} lần thử. Dừng consumer và host không commit offset.",
                         consumeResult.Topic, consumeResult.Partition.Value, consumeResult.Offset.Value, MaxTransientRetries);
 
-                    consumer.Seek(new TopicPartitionOffset(consumeResult.TopicPartition, consumeResult.Offset));
-                    await Task.Delay(3000, stoppingToken);
+                    _hostApplicationLifetime?.StopApplication();
+                    break;
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -115,17 +155,6 @@ public sealed class KafkaConsumerHostedService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Lỗi xảy ra trong vòng lặp tiêu thụ Kafka message.");
-                if (consumeResult != null)
-                {
-                    try
-                    {
-                        consumer.Seek(new TopicPartitionOffset(consumeResult.TopicPartition, consumeResult.Offset));
-                    }
-                    catch
-                    {
-                        // Ignore seek error during outer loop failure
-                    }
-                }
                 await Task.Delay(2000, stoppingToken);
             }
         }
