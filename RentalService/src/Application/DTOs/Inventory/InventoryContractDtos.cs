@@ -18,7 +18,7 @@ public sealed record ListingWarehouseDto(
 public sealed record ListingRentalSnapshotDto(
     Guid Id,
     Guid OwnerUserId,
-    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
+    Guid EquipmentTypeId,
     string Name,
     Guid? ThumbnailMediaId,
     decimal DailyRate,

@@ -140,28 +140,28 @@ public sealed record ReturnConfirmationOverduePayload(
     long OrderVersion = 1);
 
 public sealed record CartItemAddedPayload(
-    [property: JsonPropertyName("userId")] Guid UserId,
-    [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,
-    [property: JsonPropertyName("equipmentTypeId")] Guid EquipmentTypeId,
-    [property: JsonPropertyName("cartId")] Guid CartId,
-    [property: JsonPropertyName("cartItemId")] Guid CartItemId);
+    Guid UserId,
+    Guid EquipmentListingId,
+    Guid EquipmentTypeId,
+    Guid CartId,
+    Guid CartItemId);
 
 public sealed record RentalItemPaidPayload(
-    [property: JsonPropertyName("userId")] Guid UserId,
-    [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,
-    [property: JsonPropertyName("equipmentTypeId")] Guid? EquipmentTypeId,
-    [property: JsonPropertyName("rentalOrderId")] Guid RentalOrderId,
-    [property: JsonPropertyName("rentalItemId")] Guid RentalItemId,
-    [property: JsonPropertyName("orderVersion")] long OrderVersion = 1);
+    Guid UserId,
+    Guid EquipmentListingId,
+    Guid? EquipmentTypeId,
+    Guid RentalOrderId,
+    Guid RentalItemId,
+    long OrderVersion = 1);
 
 public sealed record RentalItemCompletedPayload(
-    [property: JsonPropertyName("userId")] Guid UserId,
-    [property: JsonPropertyName("equipmentListingId")] Guid EquipmentListingId,
-    [property: JsonPropertyName("equipmentTypeId")] Guid? EquipmentTypeId,
-    [property: JsonPropertyName("rentalOrderId")] Guid RentalOrderId,
-    [property: JsonPropertyName("rentalItemId")] Guid RentalItemId,
-    [property: JsonPropertyName("orderVersion")] long OrderVersion,
-    [property: JsonPropertyName("completedAt"), JsonConverter(typeof(UtcIsoDateTimeOffsetConverter))] DateTimeOffset CompletedAt);
+    Guid UserId,
+    Guid EquipmentListingId,
+    Guid? EquipmentTypeId,
+    Guid RentalOrderId,
+    Guid RentalItemId,
+    long OrderVersion,
+    [property: JsonConverter(typeof(UtcIsoDateTimeOffsetConverter))] DateTimeOffset CompletedAt);
 
 public sealed record RentalItemHandoverCompletedPayload(
     Guid RentalOrderId, Guid RentalItemId, Guid RenterId, Guid SupplierId,

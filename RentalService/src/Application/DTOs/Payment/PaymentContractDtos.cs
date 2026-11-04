@@ -6,6 +6,9 @@ using Dprental.RentalService.Application.Clients;
 
 namespace Dprental.RentalService.Application.DTOs.Payment;
 
+/// <summary>Tài khoản nhận tiền gửi kèm để Payment ghép QR chuyển khoản cho Admin; null thì Payment vẫn tạo khoản, chỉ không có QR.</summary>
+public sealed record TransferRecipientDto(string BankCode, string AccountNumber, string AccountHolderName);
+
 // 1. Create Invoice
 public sealed record CreateInvoiceItemRequest(
     [Required] Guid RentalItemId,
@@ -221,7 +224,8 @@ public sealed record RequestRefundRequest(
     [Required] IReadOnlyList<RefundItemRequest> Items,
     [Required][MaxLength(500)] string Reason,
     [Required][MaxLength(64)] string OperationKey,
-    [Required] string RefundKind)
+    [Required] string RefundKind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TransferRecipientDto? RefundAccount = null)
 {
     [JsonIgnore]
     public decimal TotalRefundAmount => Items?.Sum(i => i.TotalRefundAmount) ?? 0m;
@@ -303,7 +307,9 @@ public sealed record SettleRentalRequest(
     [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RefundedDepositAmount,
     [Required][StringLength(3, MinimumLength = 3)] string Currency,
     [Required][MaxLength(256)] string DecisionRef,
-    [Required][MaxLength(64)] string OperationKey)
+    [Required][MaxLength(64)] string OperationKey,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TransferRecipientDto? SupplierAccount = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TransferRecipientDto? RenterRefundAccount = null)
 {
     public Result Validate()
     {

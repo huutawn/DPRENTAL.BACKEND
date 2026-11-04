@@ -382,4 +382,63 @@ public sealed class ContractJsonSchemaValidationTests
         JsonElement firstItem = root.GetProperty("items")[0];
         Assert.False(firstItem.TryGetProperty("totalAmount", out _));
     }
+
+    [Fact]
+    public void SimplifiedDtos_ContractSerializationAndDeserialization_MatchesExpectations()
+    {
+        // 1. ListingRentalSnapshotDto retains depositAmount mapping and serializes equipmentTypeId
+        string snapshotJson = """
+        {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "ownerUserId": "22222222-2222-2222-2222-222222222222",
+            "equipmentTypeId": "33333333-3333-3333-3333-333333333333",
+            "name": "Excavator",
+            "dailyRate": 1000000,
+            "currency": "VND",
+            "status": "Available",
+            "depositAmount": 5000000
+        }
+        """;
+        var snapshot = JsonSerializer.Deserialize<Dprental.RentalService.Application.DTOs.Inventory.ListingRentalSnapshotDto>(snapshotJson, JsonOptions);
+        Assert.NotNull(snapshot);
+        Assert.Equal(Guid.Parse("33333333-3333-3333-3333-333333333333"), snapshot.EquipmentTypeId);
+        Assert.Equal(5000000m, snapshot.DepositPerUnit);
+
+        string reserializedSnapshot = JsonSerializer.Serialize(snapshot, JsonOptions);
+        Assert.Contains("\"equipmentTypeId\":", reserializedSnapshot);
+        Assert.Contains("\"depositAmount\":5000000", reserializedSnapshot);
+
+        // 2. RenterCalendarResponse serializes with camelCase
+        var day = new Dprental.RentalService.Application.DTOs.Calendar.RenterCalendarDayResponse(new DateOnly(2026, 11, 2), 3);
+        var entry = new Dprental.RentalService.Application.DTOs.Calendar.RenterCalendarEntryResponse(
+            Guid.NewGuid(), "ORD-123", Guid.NewGuid(), Guid.NewGuid(), "Listing Title", 2,
+            new DateOnly(2026, 11, 2), new DateOnly(2026, 11, 5), "Active");
+        var calendar = new Dprental.RentalService.Application.DTOs.Calendar.RenterCalendarResponse(
+            "2026-11", [day], [entry], 1, 20, 1, 1);
+
+        string calendarJson = JsonSerializer.Serialize(calendar, JsonOptions);
+        using var calDoc = JsonDocument.Parse(calendarJson);
+        Assert.True(calDoc.RootElement.TryGetProperty("month", out _));
+        Assert.True(calDoc.RootElement.TryGetProperty("days", out var daysProp));
+        Assert.True(daysProp[0].TryGetProperty("rentedQuantity", out _));
+        Assert.True(calDoc.RootElement.TryGetProperty("entries", out var entriesProp));
+        Assert.True(entriesProp[0].TryGetProperty("listingTitleSnapshot", out _));
+
+        // 3. KafkaMessageEnvelope with RentalItemCompletedPayload
+        var completedPayload = new Dprental.RentalService.Application.Kafka.Events.RentalItemCompletedPayload(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 2,
+            new DateTimeOffset(2026, 11, 2, 10, 0, 0, TimeSpan.Zero));
+        var envelope = new Dprental.RentalService.Application.Kafka.Contracts.KafkaMessageEnvelope<Dprental.RentalService.Application.Kafka.Events.RentalItemCompletedPayload>(
+            Guid.NewGuid(), "RentalItemCompleted", 1, "RentalService", "order-123",
+            new DateTimeOffset(2026, 11, 2, 10, 0, 0, TimeSpan.Zero),
+            "corr-1", Guid.NewGuid(), completedPayload);
+
+        string envelopeJson = JsonSerializer.Serialize(envelope, JsonOptions);
+        using var envDoc = JsonDocument.Parse(envelopeJson);
+        Assert.True(envDoc.RootElement.TryGetProperty("messageId", out _));
+        Assert.True(envDoc.RootElement.TryGetProperty("messageType", out _));
+        Assert.True(envDoc.RootElement.TryGetProperty("occurredAt", out _));
+        Assert.False(envDoc.RootElement.TryGetProperty("organizationId", out _)); // omitted when null
+        Assert.True(envDoc.RootElement.GetProperty("payload").TryGetProperty("completedAt", out _));
+    }
 }

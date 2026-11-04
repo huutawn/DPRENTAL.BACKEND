@@ -12,13 +12,13 @@ namespace Dprental.RentalService.Application.Kafka.Contracts;
 /// Version là phiên bản envelope, khác orderVersion của dữ liệu nghiệp vụ trong payload.
 /// </remarks>
 public sealed record KafkaMessageEnvelope<TPayload>(
-    [property: JsonPropertyName("messageId")] Guid MessageId,
-    [property: JsonPropertyName("messageType")] string MessageType,
-    [property: JsonPropertyName("version")] int Version,
-    [property: JsonPropertyName("producer")] string Producer,
-    [property: JsonPropertyName("aggregateId")] string AggregateId,
-    [property: JsonPropertyName("occurredAt"), JsonConverter(typeof(UtcIsoDateTimeOffsetConverter))] DateTimeOffset OccurredAt,
-    [property: JsonPropertyName("correlationId")] string? CorrelationId,
-    [property: JsonPropertyName("causationId")] Guid? CausationId,
-    [property: JsonPropertyName("payload")] TPayload Payload,
-    [property: JsonPropertyName("organizationId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? OrganizationId = null);
+    Guid MessageId,
+    string MessageType,
+    int Version,
+    string Producer,
+    string AggregateId,
+    [property: JsonConverter(typeof(UtcIsoDateTimeOffsetConverter))] DateTimeOffset OccurredAt,
+    string? CorrelationId,
+    Guid? CausationId,
+    TPayload Payload,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? OrganizationId = null);
