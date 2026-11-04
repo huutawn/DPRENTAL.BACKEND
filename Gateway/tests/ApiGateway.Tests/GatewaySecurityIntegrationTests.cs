@@ -481,6 +481,54 @@ public sealed class GatewaySecurityIntegrationTests
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("/api/v1/notifications/internal/test", "GET")]
+    [InlineData("/api/v1/notifications/internal/dispatch", "POST")]
+    public async Task InternalNotificationRouteIsBlockedAtGatewayReturns403Forbidden(string path, string method)
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(new HttpMethod(method), path);
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task NotificationHubServiceTokenReturns403()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        string serviceToken = DownstreamGatewayTestHost.CreateServiceToken(signingKey, "key-1", Issuer, Audience, "service-account");
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Post, "/api/v1/notifications/hubs/inbox/negotiate");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task NotificationHubWebSocketServiceTokenReturns403()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        string serviceToken = DownstreamGatewayTestHost.CreateServiceToken(signingKey, "key-1", Issuer, Audience, "service-account");
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/notifications/hubs/inbox");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
     [Fact]
     public async Task NonInternalRouteStripsClientApiKeyAndInjectsGatewayKey()
     {

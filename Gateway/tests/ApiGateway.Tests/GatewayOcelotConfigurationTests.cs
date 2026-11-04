@@ -47,6 +47,10 @@ public sealed class GatewayOcelotConfigurationTests
         "media-service-public-content",
         "media-service",
         "media-service-openapi",
+        "notification-service",
+        "notification-hub-negotiate",
+        "notification-hub-ws",
+        "notification-service-internal",
         "payment-hub-negotiate",
         "payment-hub-ws",
         "payment-service-openapi",
@@ -127,7 +131,7 @@ public sealed class GatewayOcelotConfigurationTests
             // Both must define valid non-empty paths
             Assert.False(string.IsNullOrWhiteSpace(devRoute["UpstreamPathTemplate"]));
             // Realtime SignalR hubs retain "ws" scheme across both environments
-            if (devRoute["Key"] is "rental-order-hub-ws" or "analytics-hub-ws" or "payment-hub-ws")
+            if (devRoute["Key"] is "rental-order-hub-ws" or "analytics-hub-ws" or "payment-hub-ws" or "notification-hub-ws")
             {
                 Assert.Equal("ws", devRoute["DownstreamScheme"]);
                 Assert.Equal("ws", prodRoute["DownstreamScheme"]);

@@ -1,0 +1,79 @@
+{
+  "Routes": [
+    {
+      "Key": "notification-service",
+      "UpstreamPathTemplate": "/api/v1/notifications/{everything}",
+      "DownstreamPathTemplate": "/api/v1/notifications/{everything}",
+      "Priority": 1,
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "notification-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "notification-hub-negotiate",
+      "UpstreamPathTemplate": "/api/v1/notifications/hubs/inbox/negotiate",
+      "DownstreamPathTemplate": "/api/v1/notifications/hubs/inbox/negotiate",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "Priority": 10,
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "notification-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "notification-hub-ws",
+      "UpstreamPathTemplate": "/api/v1/notifications/hubs/inbox",
+      "DownstreamPathTemplate": "/api/v1/notifications/hubs/inbox",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "Priority": 10,
+      "DownstreamScheme": "ws",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "notification-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "notification-service-internal",
+      "UpstreamPathTemplate": "/api/v1/notifications/internal/{everything}",
+      "DownstreamPathTemplate": "/api/v1/notifications/internal/{everything}",
+      "Priority": 100,
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "notification-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AuthenticationProviderKeys": [
+          "Bearer"
+        ],
+        "RouteClaimsRequirement": {
+          "scope": "internal:blocked"
+        }
+      }
+    }
+  ]
+}
