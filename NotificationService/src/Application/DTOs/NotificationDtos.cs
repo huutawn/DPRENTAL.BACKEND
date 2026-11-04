@@ -42,3 +42,17 @@ public sealed record PreferencesResponseDto(
 
 public sealed record UpdatePreferencesRequestDto(
     IReadOnlyList<PreferenceDto> Preferences);
+
+public static class NotificationChangeTypes
+{
+    public const string Created = "CREATED";
+    public const string Read = "READ";
+    public const string ReadAll = "READ_ALL";
+    public const string Updated = "UPDATED";
+}
+
+public sealed record NotificationInboxChangedEvent(
+    string ChangeType,
+    Guid? NotificationId,
+    string? Category,
+    DateTimeOffset OccurredAt);

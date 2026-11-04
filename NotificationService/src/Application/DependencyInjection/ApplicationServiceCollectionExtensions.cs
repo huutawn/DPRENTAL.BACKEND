@@ -16,7 +16,6 @@ public static class ApplicationServiceCollectionExtensions
     public static IServiceCollection AddNotificationServiceApplication(this IServiceCollection services)
     {
         services.AddSingleton(TimeProvider.System);
-        services.TryAddSingleton<INotificationRealtimeNotifier, NoOpNotificationRealtimeNotifier>();
 
         services.AddSingleton<IRecipientResolutionService, RecipientResolutionService>();
         services.AddSingleton<INotificationTemplateRenderer, NotificationTemplateRenderer>();
@@ -36,6 +35,11 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<IKafkaEventHandler, RentalItemRejectedHandler>();
         services.AddSingleton<IKafkaEventHandler, RefundCompletedFinancialHandler>();
         services.AddSingleton<IKafkaEventHandler, SupplierPayoutCompletedHandler>();
+        services.AddSingleton<IKafkaEventHandler, RentalOrderRejectedHandler>();
+        services.AddSingleton<IKafkaEventHandler, RentalItemExpiredHandler>();
+        services.AddSingleton<IKafkaEventHandler, RentalItemCancelledHandler>();
+        services.AddSingleton<IKafkaEventHandler, RentalItemReturnedHandler>();
+        services.AddSingleton<IKafkaEventHandler, RentalItemCompletedHandler>();
         // Kafka Ingestion & DLQ
         services.AddSingleton<IKafkaDeadLetterPublisher, KafkaDeadLetterPublisher>();
         services.AddScoped<INotificationIngestionService, NotificationIngestionService>();

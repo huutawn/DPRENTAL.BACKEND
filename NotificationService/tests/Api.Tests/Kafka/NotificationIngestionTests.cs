@@ -58,7 +58,12 @@ public sealed class NotificationIngestionTests
             new RentalItemConfirmedHandler(),
             new RentalItemRejectedHandler(),
             new RefundCompletedFinancialHandler(),
-            new SupplierPayoutCompletedHandler()
+            new SupplierPayoutCompletedHandler(),
+            new RentalOrderRejectedHandler(),
+            new RentalItemExpiredHandler(),
+            new RentalItemCancelledHandler(),
+            new RentalItemReturnedHandler(),
+            new RentalItemCompletedHandler()
         };
 
         var dlqMock = new Mock<IKafkaDeadLetterPublisher>();
@@ -617,5 +622,150 @@ public sealed class NotificationIngestionTests
         Assert.Equal("Pending", deliveryJob.Status);
         Assert.Equal("EMAIL", deliveryJob.Channel);
         Assert.Equal(supplierId, deliveryJob.RecipientUserId);
+    }
+
+    [Fact]
+    public async Task Ingestion_ValidRentalOrderRejected_ShouldSucceed()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var messageId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+
+        var raw = ProducerFixtures.RentalOrderRejected(messageId, orderId, renterId, reason: "Đơn bị từ chối do quá tải");
+
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 20);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var notification = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == messageId);
+        Assert.NotNull(notification);
+        Assert.Equal(renterId, notification.RecipientUserId);
+        Assert.Equal("ORDER_REJECTED", notification.NotificationType);
+        Assert.Equal("ORDER", notification.Category);
+        Assert.Equal("WARNING", notification.Severity);
+        Assert.Contains(System.Net.WebUtility.HtmlEncode("Đơn bị từ chối do quá tải"), notification.Body);
+
+        // Terminal watermark check
+        var watermark = await db.AggregateWatermarks.FirstOrDefaultAsync(w => w.AggregateId == orderId && w.RecipientUserId == renterId);
+        Assert.NotNull(watermark);
+        Assert.True(watermark.IsTerminal);
+        Assert.Equal("REJECTED", watermark.TerminalState);
+    }
+
+    [Fact]
+    public async Task Ingestion_ValidRentalItemExpired_ShouldSucceedItemScope()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var messageId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+
+        var raw = ProducerFixtures.RentalItemExpired(messageId, orderId, itemId, renterId);
+
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 21);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var notification = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == messageId);
+        Assert.NotNull(notification);
+        Assert.Equal(renterId, notification.RecipientUserId);
+        Assert.Equal("ORDER_EXPIRED", notification.NotificationType);
+        Assert.Equal("ORDER", notification.Category);
+        Assert.Equal("WARNING", notification.Severity);
+
+        // Non-terminal watermark since item scope
+        var watermark = await db.AggregateWatermarks.FirstOrDefaultAsync(w => w.AggregateId == orderId && w.RecipientUserId == renterId);
+        Assert.NotNull(watermark);
+        Assert.False(watermark.IsTerminal);
+    }
+
+    [Fact]
+    public async Task Ingestion_ValidRentalItemCancelled_ShouldSucceedItemScope()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var messageId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+
+        var raw = ProducerFixtures.RentalItemCancelled(messageId, orderId, itemId, renterId);
+
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 22);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var notification = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == messageId);
+        Assert.NotNull(notification);
+        Assert.Equal(renterId, notification.RecipientUserId);
+        Assert.Equal("ORDER_CANCELLED", notification.NotificationType);
+        Assert.Equal("ORDER", notification.Category);
+        Assert.Equal("WARNING", notification.Severity);
+
+        // Non-terminal watermark since item scope
+        var watermark = await db.AggregateWatermarks.FirstOrDefaultAsync(w => w.AggregateId == orderId && w.RecipientUserId == renterId);
+        Assert.NotNull(watermark);
+        Assert.False(watermark.IsTerminal);
+    }
+
+    [Fact]
+    public async Task Ingestion_ValidRentalItemReturned_ShouldNotifyBothRenterAndSupplier()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var messageId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        var raw = ProducerFixtures.RentalItemReturned(messageId, orderId, itemId, renterId, supplierId);
+
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 23);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var notifications = await db.Notifications.Where(n => n.SourceEventId == messageId).ToListAsync();
+        Assert.Equal(2, notifications.Count);
+
+        var renterNotif = notifications.First(n => n.RecipientUserId == renterId);
+        Assert.Equal("RETURN_CONFIRMED", renterNotif.NotificationType);
+        Assert.Equal("RETURN", renterNotif.Category);
+        Assert.Equal("INFO", renterNotif.Severity);
+
+        var supplierNotif = notifications.First(n => n.RecipientUserId == supplierId);
+        Assert.Equal("RETURN_CONFIRMED", supplierNotif.NotificationType);
+        Assert.Equal("RETURN", supplierNotif.Category);
+        Assert.Equal("INFO", supplierNotif.Severity);
+    }
+
+    [Fact]
+    public async Task Ingestion_ValidRentalItemCompleted_ShouldNotifyBothRenterAndSupplier()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var messageId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        var raw = ProducerFixtures.RentalItemCompleted(messageId, orderId, itemId, renterId, supplierId);
+
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 24);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var notifications = await db.Notifications.Where(n => n.SourceEventId == messageId).ToListAsync();
+        Assert.Equal(2, notifications.Count);
+
+        var renterNotif = notifications.First(n => n.RecipientUserId == renterId);
+        Assert.Equal("RENTAL_COMPLETED", renterNotif.NotificationType);
+        Assert.Equal("ORDER", renterNotif.Category);
+        Assert.Equal("SUCCESS", renterNotif.Severity);
+
+        var supplierNotif = notifications.First(n => n.RecipientUserId == supplierId);
+        Assert.Equal("RENTAL_COMPLETED", supplierNotif.NotificationType);
+        Assert.Equal("ORDER", supplierNotif.Category);
+        Assert.Equal("SUCCESS", supplierNotif.Severity);
     }
 }

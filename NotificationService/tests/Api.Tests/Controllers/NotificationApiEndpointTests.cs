@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Moq;
 using Dprental.NotificationService.Api.Controllers;
 using Dprental.NotificationService.Application.DTOs;
 using Dprental.NotificationService.Application.IServices;
@@ -47,7 +48,7 @@ public sealed class NotificationApiEndpointTests
         using var db = CreateInMemoryDbContext();
         var notifRepo = new NotificationRepository(db);
         var queryService = new NotificationQueryService(notifRepo);
-        var readService = new NotificationReadService(notifRepo);
+        var readService = new NotificationReadService(notifRepo, Mock.Of<INotificationRealtimeNotifier>());
 
         var controller = new NotificationsController(queryService, readService)
         {
@@ -71,7 +72,7 @@ public sealed class NotificationApiEndpointTests
         using var db = CreateInMemoryDbContext();
         var notifRepo = new NotificationRepository(db);
         var queryService = new NotificationQueryService(notifRepo);
-        var readService = new NotificationReadService(notifRepo);
+        var readService = new NotificationReadService(notifRepo, Mock.Of<INotificationRealtimeNotifier>());
 
         var controller = new NotificationsController(queryService, readService)
         {
@@ -95,7 +96,7 @@ public sealed class NotificationApiEndpointTests
         using var db = CreateInMemoryDbContext();
         var notifRepo = new NotificationRepository(db);
         var queryService = new NotificationQueryService(notifRepo);
-        var readService = new NotificationReadService(notifRepo);
+        var readService = new NotificationReadService(notifRepo, Mock.Of<INotificationRealtimeNotifier>());
 
         var controller = new NotificationsController(queryService, readService)
         {
@@ -123,7 +124,7 @@ public sealed class NotificationApiEndpointTests
         using var db = CreateInMemoryDbContext();
         var notifRepo = new NotificationRepository(db);
         var queryService = new NotificationQueryService(notifRepo);
-        var readService = new NotificationReadService(notifRepo);
+        var readService = new NotificationReadService(notifRepo, Mock.Of<INotificationRealtimeNotifier>());
 
         var userId = Guid.NewGuid();
         for (int i = 1; i <= 3; i++)
@@ -177,7 +178,7 @@ public sealed class NotificationApiEndpointTests
         using var db = CreateInMemoryDbContext();
         var notifRepo = new NotificationRepository(db);
         var queryService = new NotificationQueryService(notifRepo);
-        var readService = new NotificationReadService(notifRepo);
+        var readService = new NotificationReadService(notifRepo, Mock.Of<INotificationRealtimeNotifier>());
 
         var ownerId = Guid.NewGuid();
         var attackerId = Guid.NewGuid();
@@ -230,7 +231,7 @@ public sealed class NotificationApiEndpointTests
         var fixedTime = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
         var fakeTimeProvider = new FakeTimeProvider(fixedTime);
 
-        var readService = new NotificationReadService(notifRepo, fakeTimeProvider);
+        var readService = new NotificationReadService(notifRepo, Mock.Of<INotificationRealtimeNotifier>(), fakeTimeProvider);
         var userId = Guid.NewGuid();
 
         // Older notification before cutoff

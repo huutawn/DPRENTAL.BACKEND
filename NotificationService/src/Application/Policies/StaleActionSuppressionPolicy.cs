@@ -15,7 +15,8 @@ public static class StaleActionSuppressionPolicy
         "PAID",
         "EXPIRED",
         "CANCELLED",
-        "COMPLETED"
+        "COMPLETED",
+        "REJECTED"
     };
 
     /// <summary>

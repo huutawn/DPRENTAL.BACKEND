@@ -194,7 +194,7 @@ public sealed class E2EScenariosHarnessTests
         Assert.Equal(2, markAllResult.Value.MarkedCount);
         ctx.RealtimeMock.Verify(r => r.NotifyInboxChangedAsync(
             renterId,
-            Guid.Empty,
+            (Guid?)null,
             "READ_ALL",
             "ALL",
             markAllResult.Value.ReadAt,
