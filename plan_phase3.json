@@ -1,0 +1,51 @@
+{
+  "plan_id": "review_service_phase3",
+  "title": "ReviewService Phase 3 - Public Queries, Summary and Core MVP Release",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Domain and Repository Query Extensions for Public and Summary Queries",
+      "description": "Extend IReviewRepository and ReviewRepository in ReviewService/src/Domain to support public listing reviews, public supplier reviews, my reviews, and rating summary calculations:\n1. GetPublicListingReviewsAsync(Guid listingId, int page, int pageSize, CancellationToken ct):\n   - Filter: direction == renter_to_supplier_listing && authorState == Active && moderationState == Visible && equipmentListingId == listingId.\n   - Order: CreatedAt DESC, Id DESC.\n   - Pagination: Skip((page - 1) * pageSize).Take(pageSize). Returns (IReadOnlyList<Review> Items, int TotalCount).\n2. GetPublicSupplierReviewsAsync(Guid supplierId, int page, int pageSize, CancellationToken ct):\n   - Filter: direction == renter_to_supplier_listing && authorState == Active && moderationState == Visible && subjectId == supplierId.\n   - Order: CreatedAt DESC, Id DESC.\n   - Pagination: Skip((page - 1) * pageSize).Take(pageSize). Returns (IReadOnlyList<Review> Items, int TotalCount).\n3. GetMyReviewsAsync(Guid authorId, int page, int pageSize, CancellationToken ct):\n   - Filter: authorId == authorId (includes Active and Withdrawn reviews).\n   - Order: CreatedAt DESC, Id DESC.\n   - Pagination: Skip((page - 1) * pageSize).Take(pageSize). Returns (IReadOnlyList<Review> Items, int TotalCount).\n4. GetRatingSummaryAsync(string targetType, Guid targetId, CancellationToken ct):\n   - TargetType 'listing': equipmentListingId == targetId. TargetType 'supplier': subjectId == targetId.\n   - Filter: direction == renter_to_supplier_listing && authorState == Active && moderationState == Visible.\n   - Returns (int TotalCount, double? AverageRating, Dictionary<int, int> Distribution).\n   - When TotalCount == 0, AverageRating is null and all distribution keys 1..5 have count 0.\n   - AverageRating rounded AwayFromZero to 1 decimal place.\n5. Unit tests in ReviewService/tests/Api.Tests/RepositoriesTests.cs covering query filters and summary calculations.",
+      "assigned_agent": "dev1",
+      "depends_on": [],
+      "test_command": "dotnet test ReviewService.sln",
+      "timeout_seconds": 600,
+      "acceptance_criteria": [
+        "IReviewRepository and ReviewRepository implement public listing, supplier, my reviews, and rating summary queries",
+        "Public query filter strictly enforces direction=renter_to_supplier_listing, authorState=Active, moderationState=Visible",
+        "Summary calculation returns null average when count is 0 and full 1..5 distribution",
+        "Repository unit tests pass with dotnet test ReviewService.sln"
+      ]
+    },
+    {
+      "id": "T2",
+      "title": "Application Layer Query DTOs, Mapping and ReviewService Query Methods",
+      "description": "Implement DTOs and query workflows in ReviewService/src/Application:\n1. DTOs in ReviewService/src/Application/DTOs/Reviews:\n   - PublicReviewItemResponse (Guid ReviewId, int Rating, string? Comment, DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt, string AuthorMaskedName = \"Khách hàng\")\n   - ReviewSummaryResponse (string TargetType, Guid TargetId, double? AverageRating, int ReviewCount, IReadOnlyDictionary<string, int> RatingDistribution)\n   - PagedResult<T> in ReviewService/src/Application/DTOs/Common or Reviews (IReadOnlyList<T> Items, int Page, int PageSize, int TotalCount, int TotalPages)\n2. IReviewService and ReviewService in ReviewService/src/Application/Services:\n   - GetListingReviewsAsync(Guid listingId, int page, int pageSize, CancellationToken ct)\n   - GetSupplierReviewsAsync(Guid supplierId, int page, int pageSize, CancellationToken ct)\n   - GetMyReviewsAsync(Guid actorId, int page, int pageSize, CancellationToken ct)\n   - GetSummaryAsync(string targetType, Guid targetId, CancellationToken ct): validates targetType is 'listing' or 'supplier' (case-insensitive), returns Error.Validation if invalid. If target has no reviews, returns count 0, average null, distribution 1..5 as 0s (never returns 404).\n3. Unit tests in ReviewService/tests/Api.Tests/ApplicationDtoTests.cs verifying serialization matches fixtures public-listing-reviews-response.json, review-summary-response.json, review-summary-empty-response.json.",
+      "assigned_agent": "dev2",
+      "depends_on": ["T1"],
+      "test_command": "dotnet test ReviewService.sln",
+      "timeout_seconds": 600,
+      "acceptance_criteria": [
+        "PublicReviewItemResponse, ReviewSummaryResponse, PagedResult DTOs conform strictly to docs/contracts/review-api-v1.md",
+        "AuthorMaskedName defaults to neutral label 'Khách hàng'",
+        "IReviewService and ReviewService implement all 4 query use cases",
+        "DTO serialization tests pass with dotnet test ReviewService.sln"
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "ReviewsController Endpoints and Acceptance Tests for Public Queries and Summary",
+      "description": "Expose public and personal query endpoints in ReviewsController and implement comprehensive acceptance test suite:\n1. Endpoints in ReviewService/src/Api/Controllers/ReviewsController.cs:\n   - GET /api/v1/reviews/my: [Authorize], reads actorId from JWT sub, accepts page (default 1), pageSize (default 20, max 50). Returns 200 OK with PagedResult<ReviewDetailResponse>.\n   - GET /api/v1/reviews/listings/{listingId}: [AllowAnonymous], accepts page, pageSize. Returns 200 OK with PagedResult<PublicReviewItemResponse>.\n   - GET /api/v1/reviews/suppliers/{supplierId}: [AllowAnonymous], accepts page, pageSize. Returns 200 OK with PagedResult<PublicReviewItemResponse>.\n   - GET /api/v1/reviews/summary?targetType=listing|supplier&targetId={UUID}: [AllowAnonymous], validates query params. Returns 200 OK with ReviewSummaryResponse.\n2. Acceptance Tests in ReviewService/tests/Api.Tests/PublicReviewsAndSummaryTests.cs covering:\n   - GET /reviews/listings/{id} returns only Active+Visible reviews, hides Withdrawn, hides Hidden, hides supplier_to_renter, masks author as 'Khách hàng'\n   - GET /reviews/suppliers/{id} returns supplier reviews correctly\n   - Target with 0 reviews returns empty list with 200 OK (not 404)\n   - GET /reviews/summary returns exact average rating, review count, and full 1..5 distribution\n   - GET /reviews/summary on empty target returns 200 OK with count 0, averageRating null, all distribution keys 0\n   - GET /reviews/summary with invalid targetType returns 400 Bad Request\n   - GET /reviews/my without JWT returns 401 Unauthorized\n   - GET /reviews/my with JWT returns user's reviews including Withdrawn\n   - Pagination parameters (page, pageSize) are validated and respected\n3. Confirm all existing 85 tests continue to pass.",
+      "assigned_agent": "dev3",
+      "depends_on": ["T2"],
+      "test_command": "dotnet test ReviewService.sln",
+      "timeout_seconds": 600,
+      "acceptance_criteria": [
+        "ReviewsController exposes /my, /listings/{id}, /suppliers/{id}, /summary endpoints",
+        "Public endpoints are accessible anonymously while /my requires authentication",
+        "All acceptance tests in PublicReviewsAndSummaryTests pass cleanly",
+        "Full test suite passes with dotnet test ReviewService.sln"
+      ]
+    }
+  ]
+}
