@@ -24,6 +24,12 @@ public sealed class ManualRefundRepository(PaymentServiceDbContext db) : IManual
             .Where(x => x.Status == status && (!after.HasValue || x.Id.CompareTo(after.Value) > 0))
             .OrderBy(x => x.Id).Take(limit).ToListAsync(ct);
 
+    public Task<OutgoingTransferTarget?> FindByTransferCodeAsync(string transferCode, CancellationToken ct = default) =>
+        db.ManualRefundRequirements.AsNoTracking()
+            .Where(x => x.TransferCode == transferCode)
+            .Select(x => new OutgoingTransferTarget(x.Id, x.Amount, x.Status == ManualRefundStatus.PendingManualRefund))
+            .SingleOrDefaultAsync(ct);
+
     public Task<bool> TransferReferenceExistsAsync(string reference, Guid exceptId, CancellationToken ct = default) =>
         db.ManualRefundRequirements.AsNoTracking().AnyAsync(x => x.Id != exceptId && x.ExternalTransferReference == reference, ct);
 

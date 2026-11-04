@@ -12,4 +12,7 @@ public interface IManualRefundService
     Task<Result<CompleteManualRefundResponse>> CompleteAsync(
         Guid requirementId, CompleteManualRefundRequest request, Guid adminId,
         CancellationToken ct);
+
+    Task<Result<CompleteManualRefundResponse>> CompleteFromBankAsync(
+        Guid requirementId, string paymentRef, CancellationToken ct);
 }

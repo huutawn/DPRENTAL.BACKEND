@@ -5,7 +5,6 @@ namespace Dprental.PaymentService.Domain.Entities;
 
 public static class FinancialOperationTypes
 {
-    public const string AttachPayoutDestination = "AttachPayoutDestination";
     public const string CompleteSupplierPayout = "CompleteSupplierPayout";
 }
 
@@ -27,6 +26,7 @@ public sealed class FinancialOperationAudit
     // Ảnh chụp trạng thái payout tại thời điểm thao tác.
     [Required, Column(TypeName = "numeric(18,0)")] public decimal Amount { get; private set; }
     [Required, MaxLength(3)] public string Currency { get; private set; } = default!;
+    // Giữ cột Destination* cho bản ghi cũ; payout hiện không còn tài khoản đích nên bản ghi mới để null.
     [MaxLength(256)] public string? DestinationRef { get; private set; }
     [MaxLength(256)] public string? ExternalTransferReference { get; private set; }
 
@@ -40,8 +40,7 @@ public sealed class FinancialOperationAudit
 
     internal static FinancialOperationAudit Create(
         string operationKey, string operationType, string fingerprint,
-        SupplierPayout payout, Guid actorId, string reason, DateTimeOffset now,
-        string? previousDestinationRef = null) => new()
+        SupplierPayout payout, Guid actorId, string reason, DateTimeOffset now) => new()
         {
             Id = Guid.NewGuid(),
             OperationKey = operationKey,
@@ -53,11 +52,8 @@ public sealed class FinancialOperationAudit
             ActorId = actorId,
             Amount = payout.Amount,
             Currency = payout.Currency,
-            DestinationRef = payout.DestinationRef,
             ExternalTransferReference = payout.ExternalTransferReference,
             Reason = reason,
-            DestinationId = payout.DestinationId,                 // phiên bản destination tại thời điểm thao tác
-            PreviousDestinationRef = previousDestinationRef,
             OccurredAt = now.ToUniversalTime()
         };
 }

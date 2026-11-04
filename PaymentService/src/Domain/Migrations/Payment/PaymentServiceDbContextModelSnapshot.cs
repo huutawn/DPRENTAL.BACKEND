@@ -385,6 +385,11 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
+                    b.Property<string>("TransferCode")
+                        .IsRequired()
+                        .HasMaxLength(14)
+                        .HasColumnType("character varying(14)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ExternalTransferReference")
@@ -395,6 +400,10 @@ namespace Dprental.PaymentService.Domain.Migrations
 
                     b.HasIndex("SettlementId")
                         .IsUnique();
+
+                    b.HasIndex("TransferCode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_manual_refund_requirements_TransferCode");
 
                     b.ToTable("manual_refund_requirements", null, t =>
                         {
@@ -886,13 +895,6 @@ namespace Dprental.PaymentService.Domain.Migrations
                         .HasMaxLength(3)
                         .HasColumnType("character varying(3)");
 
-                    b.Property<Guid?>("DestinationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("DestinationRef")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
                     b.Property<string>("ExternalTransferReference")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
@@ -916,85 +918,21 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Property<Guid>("SupplierId")
                         .HasColumnType("uuid");
 
-                    b.HasKey("Id");
+                    b.Property<string>("TransferCode")
+                        .IsRequired()
+                        .HasMaxLength(14)
+                        .HasColumnType("character varying(14)");
 
-                    b.HasIndex("DestinationId");
+                    b.HasKey("Id");
 
                     b.HasIndex("SettlementId")
                         .IsUnique();
 
+                    b.HasIndex("TransferCode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_supplier_payouts_TransferCode");
+
                     b.ToTable("supplier_payouts");
-                });
-
-            modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.SupplierPayoutDestination", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("AccountFingerprint")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("AccountHolderName")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("AccountNumberLast4")
-                        .IsRequired()
-                        .HasMaxLength(4)
-                        .HasColumnType("character varying(4)");
-
-                    b.Property<string>("AuditReason")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("BankCode")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("DestinationRef")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("OperationKey")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("PayloadFingerprint")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<Guid>("SupplierId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("VerificationRef")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<DateTimeOffset>("VerifiedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("VerifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("supplier_payout_destinations");
                 });
 
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.TransactionJournalEntry", b =>
@@ -1211,17 +1149,11 @@ namespace Dprental.PaymentService.Domain.Migrations
 
             modelBuilder.Entity("Dprental.PaymentService.Domain.Entities.SupplierPayout", b =>
                 {
-                    b.HasOne("Dprental.PaymentService.Domain.Entities.SupplierPayoutDestination", "Destination")
-                        .WithMany()
-                        .HasForeignKey("DestinationId");
-
                     b.HasOne("Dprental.PaymentService.Domain.Entities.RentalItemSettlementRecord", "Settlement")
                         .WithOne("Payout")
                         .HasForeignKey("Dprental.PaymentService.Domain.Entities.SupplierPayout", "SettlementId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("Destination");
 
                     b.Navigation("Settlement");
                 });

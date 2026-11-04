@@ -23,32 +23,11 @@ public sealed class EfSupplierPayoutRepository : ISupplierPayoutRepository
         _clock = clock;
     }
 
-    public Task<Result<SupplierPayoutWriteResult>> AttachDestinationAsync(
-        AttachPayoutDestinationCommand command, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(command);
-        const string type = FinancialOperationTypes.AttachPayoutDestination;
-        var fingerprint = Fingerprint(type, command.PayoutId, command.AdminId,
-            $"{command.DestinationRef}:{command.Version}", command.AuditReason);
-        SupplierPayoutDestination? selected = null;
-
-        return ExecuteAsync(
-            command.PayoutId, command.OperationKey, type, fingerprint,
-            validate: async (p, token) =>
-            {
-                selected = await FindDestinationAsync(command.DestinationRef, command.Version, token);
-                if (selected is null)
-                    return Error.NotFound("Payment.PayoutDestinationNotFound", "Không tìm thấy tài khoản nhận tiền đã xác minh.");
-                if (selected.SupplierId != p.SupplierId)
-                    return Error.Conflict("Payment.PayoutDestinationSupplierMismatch", "Tài khoản nhận tiền không thuộc supplier của payout.");
-                return p.ValidateCanAttachDestination(selected.Id);
-            },
-            mutate: (p, _) => p.AttachDestination(selected!),
-            buildAudit: (p, now, previousRef) => FinancialOperationAudit.Create(
-                command.OperationKey, type, fingerprint, p, command.AdminId, command.AuditReason, now, previousRef),
-            createPublication: null,
-            ct);
-    }
+    public Task<OutgoingTransferTarget?> FindByTransferCodeAsync(string transferCode, CancellationToken ct) =>
+        _db.SupplierPayouts.AsNoTracking()
+            .Where(x => x.TransferCode == transferCode)
+            .Select(x => new OutgoingTransferTarget(x.Id, x.Amount, x.Status == SupplierPayout.StatusPendingPayout))
+            .SingleOrDefaultAsync(ct);
 
     public Task<Result<SupplierPayoutWriteResult>> CompleteAsync(
         CompleteSupplierPayoutCommand command,
@@ -66,11 +45,6 @@ public sealed class EfSupplierPayoutRepository : ISupplierPayoutRepository
             {
                 if (p.ValidateCanComplete() is { } blocked) return blocked;
 
-                var destination = await _db.SupplierPayoutDestinations.AsNoTracking()
-                    .SingleOrDefaultAsync(x => x.Id == p.DestinationId, token);
-                if (destination is null || destination.SupplierId != p.SupplierId)
-                    return Error.Conflict("Payment.PayoutDestinationInvalid", "Payout destination không còn hợp lệ.");
-
                 var usedElsewhere = await _db.SupplierPayouts.AsNoTracking()
                     .AnyAsync(x => x.ExternalTransferReference == command.ExternalTransferReference && x.Id != p.Id, token);
                 if (usedElsewhere)
@@ -80,7 +54,7 @@ public sealed class EfSupplierPayoutRepository : ISupplierPayoutRepository
                 return null;
             },
             mutate: (p, now) => p.Complete(command.ExternalTransferReference, command.AdminId, now),
-            buildAudit: (p, now, previousRef) => FinancialOperationAudit.Create(
+            buildAudit: (p, now) => FinancialOperationAudit.Create(
                 command.OperationKey, type, fingerprint, p, command.AdminId, command.AuditReason, now),
             createPublication: createPublication,
             ct);
@@ -90,7 +64,7 @@ public sealed class EfSupplierPayoutRepository : ISupplierPayoutRepository
         Guid payoutId, string operationKey, string operationType, string fingerprint,
         Func<SupplierPayout, CancellationToken, Task<Error?>> validate,
         Action<SupplierPayout, DateTimeOffset> mutate,
-        Func<SupplierPayout, DateTimeOffset, string?, FinancialOperationAudit> buildAudit,
+        Func<SupplierPayout, DateTimeOffset, FinancialOperationAudit> buildAudit,
         Func<SupplierPayout, DateTimeOffset, CancellationToken, Task<SupplierPayoutPublication>>? createPublication,
         CancellationToken ct)
     {
@@ -110,9 +84,8 @@ public sealed class EfSupplierPayoutRepository : ISupplierPayoutRepository
                 return rejected;                       // thoát khỏi using => rollback, nhả khóa
 
             var now = _clock.GetUtcNow();
-            var previousRef = payout.DestinationRef;
             mutate(payout, now);
-            _db.FinancialOperationAudits.Add(buildAudit(payout, now, previousRef));
+            _db.FinancialOperationAudits.Add(buildAudit(payout, now));
             if (createPublication is not null)
             {
                 var publication = await createPublication(payout, now, ct);
@@ -141,10 +114,6 @@ public sealed class EfSupplierPayoutRepository : ISupplierPayoutRepository
             .ToListAsync(ct);
         return rows.SingleOrDefault();
     }
-
-    private Task<SupplierPayoutDestination?> FindDestinationAsync(string reference, int version, CancellationToken ct) =>
-        _db.SupplierPayoutDestinations.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.DestinationRef == reference && x.Version == version, ct);
 
     private Task<FinancialOperationAudit?> FindAuditAsync(string operationKey, CancellationToken ct) =>
         _db.FinancialOperationAudits.AsNoTracking()
@@ -186,7 +155,7 @@ public sealed class EfSupplierPayoutRepository : ISupplierPayoutRepository
     }
 
     private static SupplierPayoutWriteResult Map(SupplierPayout p, bool isReplay) =>
-        new(p.Id, p.PayoutRef, p.Status, p.DestinationRef, p.ExternalTransferReference,
+        new(p.Id, p.PayoutRef, p.Status, p.ExternalTransferReference,
             p.CompletedAt, p.CompletedBy, isReplay);
 
     // JSON array để các trường văn bản tự do không thể "dịch ranh giới" giữa hai trường.

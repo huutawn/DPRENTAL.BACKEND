@@ -12,7 +12,6 @@ public sealed class SupplierPayoutService : ISupplierPayoutService
 {
     private const int MaxOperationKey = 64;
     private const int MaxTransferReference = 256;
-    private const int MaxDestinationRef = 256;
     private const int MaxReason = 500;
 
     private readonly ISupplierPayoutRepository _repository;
@@ -27,19 +26,37 @@ public sealed class SupplierPayoutService : ISupplierPayoutService
         _encryptor = encryptor;
     }
 
-    public async Task<Result<CompleteSupplierPayoutResponse>> CompleteAsync(
+    // Actor cố định khi SePay báo tiền ra khớp mã DPO; CompletedBy/ActorId của audit không được là Guid.Empty.
+    public static readonly Guid SePayWebhookActorId = new("5e9a0000-0000-0000-0000-000000000001");
+    private const string SePayWebhookActor = "WEBHOOK:SEPAY";
+    private const string SePayAuditReason = "SePay báo chuyển khoản payout khớp mã DPO và số tiền.";
+
+    public Task<Result<CompleteSupplierPayoutResponse>> CompleteAsync(
         Guid payoutId, Guid adminId, CompleteSupplierPayoutRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        return CompleteCoreAsync(payoutId, adminId, JournalConfirmationSources.Admin, $"ADMIN:{adminId:D}",
+            request.OperationKey, request.ExternalTransferReference, request.AuditReason, ct);
+    }
 
-        if (Validate(payoutId, adminId, request.OperationKey,
-                request.ExternalTransferReference, "ExternalTransferReference", MaxTransferReference,
-                request.AuditReason) is { } invalid)
+    // paymentRef (SEPAY:{id}) vừa là OperationKey vừa là mã chuyển khoản: SePay gửi lại webhook chỉ ra replay.
+    public Task<Result<CompleteSupplierPayoutResponse>> CompleteFromBankAsync(
+        Guid payoutId, string paymentRef, CancellationToken ct) =>
+        CompleteCoreAsync(payoutId, SePayWebhookActorId, JournalConfirmationSources.Webhook, SePayWebhookActor,
+            paymentRef, paymentRef, SePayAuditReason, ct);
+
+    private async Task<Result<CompleteSupplierPayoutResponse>> CompleteCoreAsync(
+        Guid payoutId, Guid actorId, string confirmationSource, string actorLabel,
+        string operationKey, string externalTransferReference, string auditReason, CancellationToken ct)
+    {
+        if (Validate(payoutId, actorId, operationKey,
+                externalTransferReference, "ExternalTransferReference", MaxTransferReference,
+                auditReason) is { } invalid)
             return invalid;
 
         var result = await _repository.CompleteAsync(new CompleteSupplierPayoutCommand(
-            payoutId, adminId, request.OperationKey.Trim(),
-            request.ExternalTransferReference.Trim(), request.AuditReason.Trim()),
+            payoutId, actorId, operationKey.Trim(),
+            externalTransferReference.Trim(), auditReason.Trim()),
             async (payout, now, token) =>
             {
                 var message = PaymentOutboxFactory.CreateSupplierPayoutCompleted(payout);
@@ -50,8 +67,8 @@ public sealed class SupplierPayoutService : ISupplierPayoutService
                 var journal = JournalEntryFactory.CreateEntry(operationId, payout.PayoutRef,
                     JournalStreamTypes.SupplierPayout, (previous?.Version ?? 0) + 1,
                     eventId, JournalEventTypes.SupplierPayoutCompleted, payout.Amount,
-                    payout.Currency, payout.Status, JournalConfirmationSources.Admin,
-                    $"ADMIN:{adminId:D}", now,
+                    payout.Currency, payout.Status, confirmationSource,
+                    actorLabel, now,
                     previous?.EntryHash ?? CanonicalJournalHasher.GenesisHash, _encryptor,
                     relatedEntities: new Dictionary<string, string?>
                     {
@@ -69,31 +86,8 @@ public sealed class SupplierPayoutService : ISupplierPayoutService
 
         var w = result.Value;
         return Result.Success(new CompleteSupplierPayoutResponse(
-            w.PayoutId, w.PayoutRef, w.Status, request.OperationKey.Trim(), w.ExternalTransferReference!,
+            w.PayoutId, w.PayoutRef, w.Status, operationKey.Trim(), w.ExternalTransferReference!,
             w.CompletedAt!.Value, w.CompletedBy!.Value, w.IsReplay));
-    }
-
-    public async Task<Result<AttachPayoutDestinationResponse>> AttachDestinationAsync(
-        Guid payoutId, Guid adminId, AttachPayoutDestinationRequest request, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        if (Validate(payoutId, adminId, request.OperationKey,
-                request.DestinationRef, "DestinationRef", MaxDestinationRef,
-                request.AuditReason) is { } invalid)
-            return invalid;
-        if (request.Version < 1)
-            return Error.Validation("Payment.PayoutDestinationVersionInvalid", "Version phải từ 1 trở lên.");
-
-        var result = await _repository.AttachDestinationAsync(new AttachPayoutDestinationCommand(
-            payoutId, adminId, request.OperationKey.Trim(),
-            request.DestinationRef.Trim(), request.AuditReason.Trim(), request.Version), ct);
-
-        if (!result.IsSuccess) return result.Error;
-
-        var w = result.Value;
-        return Result.Success(new AttachPayoutDestinationResponse(
-            w.PayoutId, w.PayoutRef, w.Status, w.DestinationRef!, w.IsReplay));
     }
 
     private static Error? Validate(

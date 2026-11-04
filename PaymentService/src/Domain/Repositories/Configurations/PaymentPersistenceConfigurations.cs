@@ -216,6 +216,8 @@ public sealed class ManualRefundRequirementConfiguration : IEntityTypeConfigurat
         builder.HasIndex(x => x.ExternalTransferReference).IsUnique();
         builder.HasMany(x => x.Items).WithOne().HasForeignKey(x => x.RequirementId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => x.RequirementRef).IsUnique();
+        builder.Property(x => x.TransferCode).IsRequired().HasMaxLength(14);
+        builder.HasIndex(x => x.TransferCode).IsUnique().HasDatabaseName("UX_manual_refund_requirements_TransferCode");
     }
 }
 
@@ -278,5 +280,13 @@ public sealed class ManualRefundItemConfiguration : IEntityTypeConfiguration<Man
         builder.HasKey(x => new { x.RequirementId, x.RentalItemId });
         builder.Property(x => x.RentalAmount).HasColumnType("numeric(18,0)");
         builder.Property(x => x.DepositAmount).HasColumnType("numeric(18,0)");
+    }
+}
+
+public sealed class SupplierPayoutConfiguration : IEntityTypeConfiguration<SupplierPayout>
+{
+    public void Configure(EntityTypeBuilder<SupplierPayout> builder)
+    {
+        builder.HasIndex(x => x.TransferCode).IsUnique().HasDatabaseName("UX_supplier_payouts_TransferCode");
     }
 }

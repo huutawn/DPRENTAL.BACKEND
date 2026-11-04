@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -8,10 +9,14 @@ using System.Text.Json;
 using Dprental.PaymentService.Api.Tests.TestHelpers;
 using Dprental.PaymentService.Application.DTOs.Operations;
 using Dprental.PaymentService.Application.DTOs.Payout;
+using Dprental.PaymentService.Application.DTOs.SePay;
 using Dprental.PaymentService.Application.DTOs.Settlement;
 using Dprental.PaymentService.Application.DTOs.Verification;
 using Dprental.PaymentService.Application.IServices;
 using Dprental.PaymentService.Application.Options;
+using Dprental.PaymentService.Application.Services;
+using Dprental.PaymentService.Common;
+using Dprental.PaymentService.Common.Utils;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -65,7 +70,6 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
             builder.UseSetting("PaymentEncryption:ActiveKeyId", "dpr-enc-2026-v1");
             builder.UseSetting("Payment:Merchant:Bank", "MBBank");
             builder.UseSetting("Payment:Merchant:Account", "0383799632");
-            builder.UseSetting("PayoutDestination:FingerprintKey", "integration-test-payout-fingerprint-key-32-bytes");
             builder.UseSetting("Authentication:Jwt:Issuer", Issuer);
             builder.UseSetting("Authentication:Jwt:ServiceAudience", Audience);
             builder.UseSetting("Authentication:Jwt:ClientAudience", "dprental-clients");
@@ -489,16 +493,139 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Verified_destination_is_versioned_and_required_for_payout_completion()
+    public async Task SePay_outgoing_transfer_with_payout_code_completes_payout_once()
     {
         await using var harness = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
         var invoice = await harness.SeedAsync();
-        var supplierId = invoice.Items[0].SupplierId;
-        var otherSupplierId = Guid.NewGuid();
+        await using (var settlementDb = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        {
+            var settled = await harness.Settlement(settlementDb).SettleAsync(
+                FinancialWorkflowHarness.SettlementRequest(invoice, invoice.Items[0].DepositAmount, "settle-payout-webhook"),
+                CancellationToken.None);
+            Assert.True(settled.IsSuccess, settled.Error.Message);
+        }
+        SupplierPayout pending;
+        await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        {
+            pending = await db.SupplierPayouts.AsNoTracking().SingleAsync();
+        }
+        Assert.True(PaymentCodeGenerator.IsValid(pending.TransferCode, PaymentCodeGenerator.PayoutPrefix));
+
+        var wrongAmount = OutgoingTransfer(900001, pending.TransferCode, pending.Amount + 1);
+        var transfer = OutgoingTransfer(900002, pending.TransferCode, pending.Amount);
+        Assert.True((await ProcessWebhookAsync(wrongAmount)).IsSuccess);
+        Assert.True((await ProcessWebhookAsync(transfer)).IsSuccess);
+        Assert.True((await ProcessWebhookAsync(transfer)).IsSuccess);          // SePay gửi lại cùng giao dịch
+
+        await using var verify = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
+        var payout = await verify.SupplierPayouts.AsNoTracking().SingleAsync();
+        Assert.Equal(SupplierPayout.StatusCompleted, payout.Status);
+        Assert.Equal("SEPAY:900002", payout.ExternalTransferReference);
+        Assert.Equal(SupplierPayoutService.SePayWebhookActorId, payout.CompletedBy);
+        Assert.Equal(1, await verify.FinancialOperationAudits.CountAsync());
+        var outgoing = await verify.PaymentTransactions.AsNoTracking()
+            .Where(t => t.TransferType == "out").OrderBy(t => t.ProviderTransactionId).ToListAsync();
+        Assert.Equal(2, outgoing.Count);
+        Assert.Equal(PaymentTransactionStatus.ReviewRequired, outgoing[0].Status);
+        Assert.Equal(PaymentTransactionReason.AmountMismatch, outgoing[0].ReasonCode);
+        Assert.Equal(PaymentTransactionStatus.Matched, outgoing[1].Status);
+        Assert.Equal(PaymentTransactionReason.PayoutTransfer, outgoing[1].ReasonCode);
+        Assert.Equal(1, await verify.OutboxMessages.CountAsync(x => x.MessageType == OutboxTopics.SupplierPayoutCompletedMessageType));
+    }
+
+    [Fact]
+    public async Task SePay_outgoing_transfer_with_unknown_payout_code_needs_review()
+    {
+        var transfer = OutgoingTransfer(900003, PaymentCodeGenerator.Generate(PaymentCodeGenerator.PayoutPrefix), 900_000);
+        Assert.True((await ProcessWebhookAsync(transfer)).IsSuccess);
+
+        await using var verify = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
+        var recorded = await verify.PaymentTransactions.AsNoTracking().SingleAsync(t => t.ProviderTransactionId == "900003");
+        Assert.Equal(PaymentTransactionStatus.ReviewRequired, recorded.Status);
+        Assert.Equal(PaymentTransactionReason.TransferTargetNotFound, recorded.ReasonCode);
+        Assert.Null(recorded.InvoiceId);
+    }
+
+    [Fact]
+    public async Task SePay_outgoing_transfer_with_refund_code_completes_manual_refund_once()
+    {
+        await using var h = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
+        var invoice = await h.SeedAsync();
+        await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        {
+            var settlement = await h.Settlement(db).SettleAsync(FinancialWorkflowHarness.SettlementRequest(invoice), default);
+            Assert.True(settlement.IsSuccess, settlement.Error.Message);
+        }
+        await h.ConfirmAsync();
+        ManualRefundRequirement pending;
+        await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        {
+            pending = await db.ManualRefundRequirements.AsNoTracking().SingleAsync();
+        }
+        Assert.True(PaymentCodeGenerator.IsValid(pending.TransferCode, PaymentCodeGenerator.RefundPrefix));
+
+        var transfer = OutgoingTransfer(900004, pending.TransferCode, pending.Amount);
+        Assert.True((await ProcessWebhookAsync(transfer)).IsSuccess);
+        Assert.True((await ProcessWebhookAsync(transfer)).IsSuccess);          // SePay gửi lại cùng giao dịch
+
+        await using var verify = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
+        var refund = await verify.ManualRefundRequirements.AsNoTracking().SingleAsync();
+        Assert.Equal(ManualRefundStatus.Completed, refund.Status);
+        Assert.Equal("SEPAY:900004", refund.ExternalTransferReference);
+        Assert.Equal(ManualRefundService.SePayWebhookActorId, refund.CompletedBy);
+        Assert.Equal(SettlementState.Completed, (await verify.RentalItemSettlements.AsNoTracking().SingleAsync()).Status);
+        var recorded = await verify.PaymentTransactions.AsNoTracking().SingleAsync(t => t.ProviderTransactionId == "900004");
+        Assert.Equal(PaymentTransactionStatus.Matched, recorded.Status);
+        Assert.Equal(PaymentTransactionReason.RefundTransfer, recorded.ReasonCode);
+        Assert.Single(await verify.OperationReceipts.AsNoTracking().Where(r => r.OperationKey == "SEPAY:900004").ToListAsync());
+    }
+
+    [Fact]
+    public async Task SePay_outgoing_transfer_with_payout_and_refund_codes_is_ambiguous()
+    {
+        await using var h = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
+        var invoice = await h.SeedAsync();
+        await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        {
+            var settlement = await h.Settlement(db).SettleAsync(FinancialWorkflowHarness.SettlementRequest(invoice), default);
+            Assert.True(settlement.IsSuccess, settlement.Error.Message);
+        }
+        string payoutCode, refundCode;
+        await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        {
+            payoutCode = await db.SupplierPayouts.Select(x => x.TransferCode).SingleAsync();
+            refundCode = await db.ManualRefundRequirements.Select(x => x.TransferCode).SingleAsync();
+        }
+
+        Assert.True((await ProcessWebhookAsync(OutgoingTransfer(900005, $"{payoutCode} {refundCode}", 1_000))).IsSuccess);
+
+        await using var verify = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
+        var recorded = await verify.PaymentTransactions.AsNoTracking().SingleAsync(t => t.ProviderTransactionId == "900005");
+        Assert.Equal(PaymentTransactionReason.AmbiguousPaymentCode, recorded.ReasonCode);
+        Assert.Equal(SupplierPayout.StatusPendingPayout, (await verify.SupplierPayouts.AsNoTracking().SingleAsync()).Status);
+        Assert.Equal(ManualRefundStatus.PendingManualRefund, (await verify.ManualRefundRequirements.AsNoTracking().SingleAsync()).Status);
+    }
+
+    private static SePayWebhookPayload OutgoingTransfer(long id, string transferCode, decimal amount) =>
+        new(id, "MBBank",
+            DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+            "0383799632", null, null, $"CK {transferCode} tra tien thue may xuc", "out", null, amount, null, $"BANK-OUT-{id}");
+
+    private async Task<Result> ProcessWebhookAsync(SePayWebhookPayload payload)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IInvoicePaymentProcessor>().ProcessAsync(payload);
+    }
+
+    [Fact]
+    public async Task Admin_completes_payout_without_destination()
+    {
+        await using var harness = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
+        var invoice = await harness.SeedAsync();
         var item = invoice.Items[0];
         await using var settlementDb = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
         var settled = await harness.Settlement(settlementDb).SettleAsync(
-            FinancialWorkflowHarness.SettlementRequest(invoice, item.DepositAmount, "settle-destination-api"), CancellationToken.None);
+            FinancialWorkflowHarness.SettlementRequest(invoice, item.DepositAmount, "settle-payout-api"), CancellationToken.None);
         Assert.True(settled.IsSuccess, settled.Error.Message);
         Guid payoutId;
         await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
@@ -509,60 +636,19 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
         using var admin = _factory.CreateClient();
         admin.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("adm"));
         var completeUrl = $"/api/v1/payment/admin/payouts/{payoutId}/complete";
-        var completion = new CompleteSupplierPayoutRequest("dest-complete-key", "BANK-DEST-001", "Đã đối chiếu chuyển khoản.");
-        Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync(completeUrl, completion)).StatusCode);
-
-        var registerUrl = $"/api/v1/payment/admin/suppliers/{supplierId}/payout-destinations";
-        var registration = new RegisterPayoutDestinationRequest("dest-register-1", null,
-            "VCB", "SUPPLIER NAME", "1234567890", "VERIFY-001", "Đã đối chiếu hồ sơ ngân hàng.");
-        var created = await admin.PostAsJsonAsync(registerUrl, registration);
-        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
-        var destination = await created.Content.ReadFromJsonAsync<PayoutDestinationResponse>();
-        Assert.NotNull(destination);
-        Assert.Equal("****7890", destination.AccountNumberMasked);
-        Assert.Equal(1, destination.Version);
-        var replay = await admin.PostAsJsonAsync(registerUrl, registration);
-        Assert.True((await replay.Content.ReadFromJsonAsync<PayoutDestinationResponse>())!.IsReplay);
-
-        var attachUrl = $"/api/v1/payment/admin/payouts/{payoutId}/destination";
-        Assert.Equal(HttpStatusCode.NotFound,
-            (await admin.PostAsJsonAsync(attachUrl, new AttachPayoutDestinationRequest(
-                "attach-unknown", "arbitrary-ref", "Không có hồ sơ.", 1))).StatusCode);
-        var otherUrl = $"/api/v1/payment/admin/suppliers/{otherSupplierId}/payout-destinations";
-        var otherCreated = await admin.PostAsJsonAsync(otherUrl, registration with { OperationKey = "dest-register-other", AccountNumber = "9999999999" });
-        Assert.Equal(HttpStatusCode.OK, otherCreated.StatusCode);
-        var other = await otherCreated.Content.ReadFromJsonAsync<PayoutDestinationResponse>();
-        Assert.Equal(HttpStatusCode.Conflict,
-            (await admin.PostAsJsonAsync(attachUrl, new AttachPayoutDestinationRequest(
-                "attach-other", other!.DestinationRef, "Sai supplier.", 1))).StatusCode);
-
-        var attach = new AttachPayoutDestinationRequest("attach-own", destination.DestinationRef,
-            "Đã đối chiếu supplier.", destination.Version);
-        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(attachUrl, attach)).StatusCode);
-        using (var queue = await admin.GetFromJsonAsync<JsonDocument>("/api/v1/payment/admin/payouts"))
-        {
-            var row = queue!.RootElement.GetProperty("items")[0];
-            Assert.Equal(destination.Id, row.GetProperty("destinationId").GetGuid());
-            Assert.Equal(1, row.GetProperty("destinationVersion").GetInt32());
-        }
-        var newVersion = await admin.PostAsJsonAsync(registerUrl, registration with
-        {
-            OperationKey = "dest-register-2",
-            DestinationRef = destination.DestinationRef,
-            AccountNumber = "1234567891",
-            VerificationRef = "VERIFY-002"
-        });
-        Assert.Equal(HttpStatusCode.OK, newVersion.StatusCode);
-        Assert.Equal(2, (await newVersion.Content.ReadFromJsonAsync<PayoutDestinationResponse>())!.Version);
+        var completion = new CompleteSupplierPayoutRequest("payout-complete-key", "BANK-PAYOUT-001", "Đã đối chiếu chuyển khoản.");
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(completeUrl, completion)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync(completeUrl, completion)).StatusCode);
+        var replay = await admin.PostAsJsonAsync(completeUrl, completion);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        Assert.True((await replay.Content.ReadFromJsonAsync<CompleteSupplierPayoutResponse>())!.IsReplay);
 
         await using var verify = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString));
         var payout = await verify.SupplierPayouts.SingleAsync();
-        Assert.Equal(destination.Id, payout.DestinationId);
         Assert.Equal(SupplierPayout.StatusCompleted, payout.Status);
-        Assert.Equal(2, await verify.FinancialOperationAudits.CountAsync());
-        Assert.Equal(3, await verify.SupplierPayoutDestinations.CountAsync());
+        Assert.Equal("BANK-PAYOUT-001", payout.ExternalTransferReference);
+        var audit = await verify.FinancialOperationAudits.SingleAsync();
+        Assert.Null(audit.DestinationRef);
+        Assert.Null(audit.DestinationId);
         var payoutEvent = await verify.OutboxMessages.SingleAsync(x => x.MessageType == OutboxTopics.SupplierPayoutCompletedMessageType);
         Assert.Equal(OutboxTopics.PaymentAnalyticsV1, payoutEvent.Topic);
         using (var json = JsonDocument.Parse(payoutEvent.Payload))
