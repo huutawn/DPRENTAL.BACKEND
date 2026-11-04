@@ -29,6 +29,7 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
     private readonly IIdempotencyRepository _idempotencyRepository;
     private readonly IIdempotencyService _idempotencyService;
     private readonly IRentalServiceClient _rentalServiceClient;
+    private readonly IOutboxRepository _outboxRepository;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ReviewAuthoringService>? _logger;
 
@@ -39,6 +40,7 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
         IIdempotencyRepository idempotencyRepository,
         IIdempotencyService idempotencyService,
         IRentalServiceClient rentalServiceClient,
+        IOutboxRepository outboxRepository,
         TimeProvider? timeProvider = null,
         ILogger<ReviewAuthoringService>? logger = null)
     {
@@ -48,6 +50,7 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
         _idempotencyRepository = idempotencyRepository ?? throw new ArgumentNullException(nameof(idempotencyRepository));
         _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
         _rentalServiceClient = rentalServiceClient ?? throw new ArgumentNullException(nameof(rentalServiceClient));
+        _outboxRepository = outboxRepository ?? throw new ArgumentNullException(nameof(outboxRepository));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
     }
@@ -254,12 +257,51 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
             responseBody: responseBody,
             createdAt: now);
 
-        // 11. Cam kết giao dịch nguyên tử qua IUnitOfWork
+        // 11. Chuẩn bị Outbox events
+        var publicOutbox = new OutboxMessage(
+            Guid.NewGuid(),
+            "review.events.v1",
+            "ReviewCreated",
+            review.Id.ToString("D"),
+            JsonSerializer.Serialize(new
+            {
+                reviewId = review.Id,
+                reviewVersion = review.Version,
+                listingId = review.EquipmentListingId,
+                supplierId = review.Direction == ReviewDirection.renter_to_supplier_listing ? review.SubjectId : review.AuthorId,
+                rating = review.Rating,
+                publicEligible = review.Direction == ReviewDirection.renter_to_supplier_listing &&
+                                 review.AuthorState == AuthorState.Active &&
+                                 review.ModerationState == ModerationState.Visible
+            }, JsonOptions),
+            now);
+
+        var privateOutbox = new OutboxMessage(
+            Guid.NewGuid(),
+            "review.private.events.v1",
+            "ReviewCreated",
+            review.Id.ToString("D"),
+            JsonSerializer.Serialize(new
+            {
+                reviewId = review.Id,
+                reviewVersion = review.Version,
+                direction = review.Direction.ToString(),
+                authorId = review.AuthorId,
+                recipientId = review.SubjectId,
+                orderId = review.OrderId,
+                itemId = review.ItemId,
+                eventType = "ReviewCreated"
+            }, JsonOptions),
+            now);
+
+        // 12. Cam kết giao dịch nguyên tử qua IUnitOfWork
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
             await _reviewRepository.AddAsync(review, cancellationToken);
             await _reviewAuditRepository.AddAsync(audit, cancellationToken);
+            await _outboxRepository.AddAsync(publicOutbox, cancellationToken);
+            await _outboxRepository.AddAsync(privateOutbox, cancellationToken);
             await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
             await _unitOfWork.CommitAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
@@ -429,12 +471,31 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
             responseBody: responseBody,
             createdAt: now);
 
+        var updateOutbox = new OutboxMessage(
+            Guid.NewGuid(),
+            "review.events.v1",
+            "ReviewUpdated",
+            review.Id.ToString("D"),
+            JsonSerializer.Serialize(new
+            {
+                reviewId = review.Id,
+                reviewVersion = review.Version,
+                listingId = review.EquipmentListingId,
+                supplierId = review.Direction == ReviewDirection.renter_to_supplier_listing ? review.SubjectId : review.AuthorId,
+                rating = review.Rating,
+                publicEligible = review.Direction == ReviewDirection.renter_to_supplier_listing &&
+                                 review.AuthorState == AuthorState.Active &&
+                                 review.ModerationState == ModerationState.Visible
+            }, JsonOptions),
+            now);
+
         // 11. Lưu nguyên tử qua IUnitOfWork
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
             await _reviewRepository.UpdateAsync(review, cancellationToken);
             await _reviewAuditRepository.AddAsync(audit, cancellationToken);
+            await _outboxRepository.AddAsync(updateOutbox, cancellationToken);
             await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
             await _unitOfWork.CommitAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
@@ -575,12 +636,29 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
             responseBody: responseBody,
             createdAt: now);
 
+        var withdrawOutbox = new OutboxMessage(
+            Guid.NewGuid(),
+            "review.events.v1",
+            "ReviewWithdrawn",
+            review.Id.ToString("D"),
+            JsonSerializer.Serialize(new
+            {
+                reviewId = review.Id,
+                reviewVersion = review.Version,
+                listingId = review.EquipmentListingId,
+                supplierId = review.Direction == ReviewDirection.renter_to_supplier_listing ? review.SubjectId : review.AuthorId,
+                rating = review.Rating,
+                publicEligible = false
+            }, JsonOptions),
+            now);
+
         // 10. Lưu nguyên tử qua IUnitOfWork
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
             await _reviewRepository.UpdateAsync(review, cancellationToken);
             await _reviewAuditRepository.AddAsync(audit, cancellationToken);
+            await _outboxRepository.AddAsync(withdrawOutbox, cancellationToken);
             await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
             await _unitOfWork.CommitAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);

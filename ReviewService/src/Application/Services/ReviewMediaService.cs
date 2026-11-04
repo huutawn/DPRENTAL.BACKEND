@@ -18,6 +18,7 @@ public sealed class ReviewMediaService : IReviewMediaService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IReviewRepository _reviewRepository;
     private readonly IReviewMediaRepository _mediaRepository;
+    private readonly IOutboxRepository? _outboxRepository;
     private readonly IMediaServiceClient? _mediaClient;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ReviewMediaService>? _logger;
@@ -26,6 +27,7 @@ public sealed class ReviewMediaService : IReviewMediaService
         IUnitOfWork unitOfWork,
         IReviewRepository reviewRepository,
         IReviewMediaRepository mediaRepository,
+        IOutboxRepository? outboxRepository = null,
         IMediaServiceClient? mediaClient = null,
         TimeProvider? timeProvider = null,
         ILogger<ReviewMediaService>? logger = null)
@@ -33,6 +35,7 @@ public sealed class ReviewMediaService : IReviewMediaService
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _reviewRepository = reviewRepository ?? throw new ArgumentNullException(nameof(reviewRepository));
         _mediaRepository = mediaRepository ?? throw new ArgumentNullException(nameof(mediaRepository));
+        _outboxRepository = outboxRepository;
         _mediaClient = mediaClient;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
@@ -115,6 +118,19 @@ public sealed class ReviewMediaService : IReviewMediaService
         {
             await _mediaRepository.AddAsync(media, cancellationToken);
             await _reviewRepository.UpdateAsync(review, cancellationToken);
+
+            if (_outboxRepository != null)
+            {
+                var outbox = new OutboxMessage(
+                    Guid.NewGuid(),
+                    "review.events.v1",
+                    "ReviewMediaAttached",
+                    review.Id.ToString("D"),
+                    System.Text.Json.JsonSerializer.Serialize(new { reviewId = review.Id, mediaId = media.MediaId, version = review.Version }),
+                    now);
+                await _outboxRepository.AddAsync(outbox, cancellationToken);
+            }
+
             await _unitOfWork.CommitAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
         }
@@ -163,6 +179,19 @@ public sealed class ReviewMediaService : IReviewMediaService
             {
                 _mediaRepository.Remove(media);
                 await _reviewRepository.UpdateAsync(review, cancellationToken);
+
+                if (_outboxRepository != null)
+                {
+                    var outbox = new OutboxMessage(
+                        Guid.NewGuid(),
+                        "review.events.v1",
+                        "ReviewMediaDetached",
+                        review.Id.ToString("D"),
+                        System.Text.Json.JsonSerializer.Serialize(new { reviewId = review.Id, mediaId = media.MediaId, version = review.Version }),
+                        _timeProvider.GetUtcNow());
+                    await _outboxRepository.AddAsync(outbox, cancellationToken);
+                }
+
                 await _unitOfWork.CommitAsync(cancellationToken);
                 await tx.CommitAsync(cancellationToken);
             }

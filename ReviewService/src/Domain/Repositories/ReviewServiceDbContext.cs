@@ -444,8 +444,15 @@ public sealed class ReviewServiceDbContext : DbContext, IUnitOfWork
             entity.Property(o => o.Payload).HasColumnName("payload").IsRequired();
             entity.Property(o => o.CreatedAt).HasColumnName("created_at").IsRequired();
             entity.Property(o => o.ProcessedAt).HasColumnName("processed_at");
+            entity.Property(o => o.Attempts).HasColumnName("attempts").HasDefaultValue(0).IsRequired();
+            entity.Property(o => o.NextAttemptAt).HasColumnName("next_attempt_at");
+            entity.Property(o => o.LeaseExpiresAt).HasColumnName("lease_expires_at");
+            entity.Property(o => o.ClaimOwner).HasColumnName("claim_owner").HasMaxLength(128);
+            entity.Property(o => o.LastErrorCode).HasColumnName("last_error_code").HasMaxLength(64);
+            entity.Property(o => o.DeliveryState).HasColumnName("delivery_state").HasMaxLength(32).HasDefaultValue("Pending").IsRequired();
 
             entity.HasIndex(o => o.ProcessedAt).HasDatabaseName("idx_outbox_processed");
+            entity.HasIndex(o => new { o.DeliveryState, o.NextAttemptAt, o.LeaseExpiresAt }).HasDatabaseName("idx_outbox_claim");
         });
     }
 

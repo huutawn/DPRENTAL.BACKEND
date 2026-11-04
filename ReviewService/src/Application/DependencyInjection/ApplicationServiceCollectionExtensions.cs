@@ -38,6 +38,8 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IReviewQueryService, ReviewQueryService>();
         services.AddScoped<IReviewModerationService, ReviewModerationService>();
         services.AddScoped<IReviewMediaService, ReviewMediaService>();
+        services.AddSingleton<Dprental.ReviewService.Application.Kafka.Producers.IKafkaProducer, Dprental.ReviewService.Application.Kafka.Producers.NullKafkaProducer>();
+        services.AddHostedService<Dprental.ReviewService.Application.Kafka.Workers.OutboxPublisherWorker>();
         services.AddSingleton(TimeProvider.System);
 
         services.AddHttpClient<IRentalServiceClient, RentalServiceClient>((serviceProvider, client) =>
