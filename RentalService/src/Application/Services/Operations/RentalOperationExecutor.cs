@@ -52,6 +52,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
     private readonly string _rentalEventsTopic;
     private readonly IRentalEventProducer _rentalEvents;
     private readonly IOrderHubNotifier? _notifier;
+    private readonly IRenterBankAccountRepository? _bankAccounts;
     // Khởi tạo các dependency và cấu hình dùng cho service; kiểm tra dependency bắt buộc ngay khi dựng đối tượng.
     public RentalOperationExecutor(
         IRentalOrderRepository orderRepository,
@@ -68,7 +69,8 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         IRentalCheckoutOperationRepository? checkoutOperationRepo = null,
         TimeProvider? timeProvider = null,
         IRentalEventProducer? rentalEvents = null,
-        IOrderHubNotifier? notifier = null)
+        IOrderHubNotifier? notifier = null,
+        IRenterBankAccountRepository? bankAccounts = null)
     {
         // Kiểm tra tham số bắt buộc ở đầu hàm để không dùng một dependency/request rỗng trong các bước sau.
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
@@ -89,6 +91,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
             Microsoft.Extensions.Options.Options.Create(new Dprental.RentalService.Application.Kafka.Configuration.KafkaOptions { RentalEventsTopic = _rentalEventsTopic }),
             _timeProvider);
         _notifier = notifier;
+        _bankAccounts = bankAccounts;
     }
 
     // Khởi tạo các dependency và cấu hình dùng cho service; kiểm tra dependency bắt buộc ngay khi dựng đối tượng.

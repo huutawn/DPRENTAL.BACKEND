@@ -80,7 +80,11 @@ public sealed partial class RentalOperationExecutor
         }
 
         // Gọi service sở hữu dữ liệu/tác vụ bằng contract đã chuẩn bị; kết quả phải được kiểm tra trước khi chốt trạng thái local.
-        var result = await _paymentClient.SettleRentalAsync(request, ct);
+        var result = await _paymentClient.SettleRentalAsync(request with
+        {
+            SupplierAccount = await TransferRecipientResolver.FindSupplierAccountAsync(_bankAccounts, request.SupplierId, ct),
+            RenterRefundAccount = TransferRecipientResolver.RefundAccountOf(order.RefundDestinationRef)
+        }, ct);
 
         // Lấy mốc thời gian cho lần kiểm tra này; các deadline được đối chiếu với mốc của bước xử lý tương ứng.
         utcNow = _timeProvider.GetUtcNow();
