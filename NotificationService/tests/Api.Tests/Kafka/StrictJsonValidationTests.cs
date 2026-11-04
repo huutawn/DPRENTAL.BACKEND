@@ -235,7 +235,7 @@ public sealed class StrictJsonValidationTests
 
         var result = handler.ParseIntent(envelope);
         Assert.True(result.IsSuccess);
-        Assert.Equal(Guid.Parse("a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d"), result.Value.AggregateId);
+        Assert.Equal(Guid.Parse("a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d"), result.Value.OrderId);
         Assert.Equal(Guid.Parse("b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e"), result.Value.RenterId);
         Assert.Equal(1, result.Value.OrderVersion);
     }

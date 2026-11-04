@@ -4,6 +4,7 @@ using Dprental.NotificationService.Application.Clients;
 using Dprental.NotificationService.Application.DTOs;
 using Dprental.NotificationService.Application.Email;
 using Dprental.NotificationService.Application.Email.Workers;
+using Dprental.NotificationService.Application.Email.Services;
 using Dprental.NotificationService.Application.IServices;
 using Dprental.NotificationService.Application.Kafka.Contracts;
 using Dprental.NotificationService.Application.Kafka.Handlers;
@@ -103,6 +104,9 @@ public sealed class E2EScenariosHarnessTests
             services.AddSingleton(AuthClientMock.Object);
             services.AddSingleton(EmailSenderMock.Object);
             services.AddSingleton<INotificationTemplateRenderer>(templateRenderer);
+            services.AddSingleton<IAggregateWatermarkRepository>(watermarkRepo);
+            services.AddSingleton<IUnitOfWork>(uow);
+            services.AddScoped<IEmailDeliveryService, EmailDeliveryService>();
             ServiceProvider = services.BuildServiceProvider();
         }
 

@@ -110,6 +110,19 @@ public sealed partial class NotificationTemplateRenderer : INotificationTemplate
                 emailSubjectPattern = "[DPRental] Đơn thuê #{displayOrderCode} đã bị hủy";
                 emailBodyPattern = "<p>Kính gửi Quý khách,</p><p>Đơn thuê <strong>{displayOrderCode}</strong> đã bị hủy vì lý do: {reason}.</p><p>Các khoản tiền liên quan sẽ được xử lý theo chính sách hoàn tiền.</p><p>Chi tiết đơn thuê: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
                 break;
+            case "RENTAL_ITEM_EXPIRED":
+                titlePattern = "Thiết bị trong đơn thuê #{displayOrderCode} đã hết hạn";
+                bodyPattern = "Thiết bị {rentalItemId} trong đơn thuê {displayOrderCode} đã hết hạn do quá thời gian quy định ({reason}). Thiết bị đã được giải phóng.";
+                emailSubjectPattern = "[DPRental] Thiết bị trong đơn thuê #{displayOrderCode} đã hết hạn";
+                emailBodyPattern = "<p>Kính gửi Quý khách,</p><p>Thiết bị <strong>{rentalItemId}</strong> trong đơn thuê <strong>{displayOrderCode}</strong> đã hết hạn do quá thời gian quy định ({reason}).</p><p>Thiết bị đã được giải phóng.</p><p>Chi tiết: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
+                break;
+
+            case "RENTAL_ITEM_CANCELLED":
+                titlePattern = "Thiết bị trong đơn thuê #{displayOrderCode} đã bị hủy";
+                bodyPattern = "Thiết bị {rentalItemId} trong đơn thuê {displayOrderCode} đã bị hủy vì lý do: {reason}. Các phần thuê khác trong đơn (nếu có) vẫn tiếp tục được xử lý.";
+                emailSubjectPattern = "[DPRental] Thiết bị trong đơn thuê #{displayOrderCode} đã bị hủy";
+                emailBodyPattern = "<p>Kính gửi Quý khách,</p><p>Thiết bị <strong>{rentalItemId}</strong> trong đơn thuê <strong>{displayOrderCode}</strong> đã bị hủy vì lý do: {reason}.</p><p>Các phần thuê khác trong đơn (nếu có) vẫn tiếp tục được xử lý theo quy định.</p><p>Chi tiết: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
+                break;
 
             case "HANDOVER_COMPLETED":
                 titlePattern = "Bàn giao thiết bị thành công cho đơn thuê #{displayOrderCode}";

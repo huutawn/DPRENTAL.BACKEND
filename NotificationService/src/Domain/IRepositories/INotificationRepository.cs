@@ -11,5 +11,6 @@ public interface INotificationRepository
     Task<int> MarkAllAsReadAsync(Guid userId, DateTimeOffset cutoffUtc, DateTimeOffset readAt, CancellationToken cancellationToken = default);
     Task AddAsync(Notification notification, CancellationToken cancellationToken = default);
     Task AddRangeAsync(IEnumerable<Notification> notifications, CancellationToken cancellationToken = default);
-    Task SuppressPendingActionsForResourceAsync(string resourceType, string resourceId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Notification>> SuppressPendingActionsForResourceAsync(string resourceType, string resourceId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Notification>> SuppressPendingActionsForOrderAsync(Guid orderId, CancellationToken cancellationToken = default);
 }

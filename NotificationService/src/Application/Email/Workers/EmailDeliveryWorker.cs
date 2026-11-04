@@ -46,15 +46,7 @@ public sealed class EmailDeliveryWorker : BackgroundService
                 else
                 {
                     using var scope = _serviceProvider!.CreateScope();
-                    var deliveryService = scope.ServiceProvider.GetService<IEmailDeliveryService>()
-                        ?? new EmailDeliveryService(
-                            scope.ServiceProvider.GetRequiredService<IDeliveryJobRepository>(),
-                            scope.ServiceProvider.GetRequiredService<IPreferenceRepository>(),
-                            scope.ServiceProvider.GetRequiredService<IAuthContactClient>(),
-                            scope.ServiceProvider.GetRequiredService<INotificationTemplateRenderer>(),
-                            scope.ServiceProvider.GetRequiredService<IEmailSender>(),
-                            scope.ServiceProvider.GetService<ILogger<EmailDeliveryService>>() ?? NullLogger<EmailDeliveryService>.Instance);
-
+                    var deliveryService = scope.ServiceProvider.GetRequiredService<IEmailDeliveryService>();
                     deliveredCount = await deliveryService.DeliverPendingJobsAsync(_workerId, stoppingToken);
                 }
 

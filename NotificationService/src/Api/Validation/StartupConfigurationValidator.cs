@@ -39,5 +39,18 @@ public static class StartupConfigurationValidator
         {
             throw new InvalidOperationException("Thiếu cấu hình InternalAuthentication:ApiKey.");
         }
+
+        var redis = configuration.GetConnectionString("Redis") ?? configuration["Redis:ConnectionString"];
+        if (!string.IsNullOrWhiteSpace(redis))
+        {
+            try
+            {
+                StackExchange.Redis.ConfigurationOptions.Parse(redis);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Cấu hình ConnectionStrings:Redis không hợp lệ: {ex.Message}");
+            }
+        }
     }
 }

@@ -87,6 +87,8 @@ public sealed class EmailDeliveryWorkerTests
         services.AddSingleton(authClientMock.Object);
         services.AddSingleton(emailSenderMock.Object);
         services.AddSingleton<INotificationTemplateRenderer>(templateRenderer);
+        services.AddSingleton<IAggregateWatermarkRepository>(new AggregateWatermarkRepository(db));
+        services.AddSingleton<IUnitOfWork>(new UnitOfWork(db));
         services.AddSingleton<IEmailDeliveryService, EmailDeliveryService>();
         var sp = services.BuildServiceProvider();
 
@@ -174,6 +176,8 @@ public sealed class EmailDeliveryWorkerTests
         services.AddSingleton(authClientMock.Object);
         services.AddSingleton(emailSenderMock.Object);
         services.AddSingleton<INotificationTemplateRenderer>(templateRenderer);
+        services.AddSingleton<IAggregateWatermarkRepository>(new AggregateWatermarkRepository(db));
+        services.AddSingleton<IUnitOfWork>(new UnitOfWork(db));
         services.AddSingleton<IEmailDeliveryService, EmailDeliveryService>();
         var sp = services.BuildServiceProvider();
 
@@ -260,6 +264,8 @@ public sealed class EmailDeliveryWorkerTests
         services.AddSingleton(authClientMock.Object);
         services.AddSingleton(emailSenderMock.Object);
         services.AddSingleton<INotificationTemplateRenderer>(templateRenderer);
+        services.AddSingleton<IAggregateWatermarkRepository>(new AggregateWatermarkRepository(db));
+        services.AddSingleton<IUnitOfWork>(new UnitOfWork(db));
         services.AddSingleton<IEmailDeliveryService, EmailDeliveryService>();
         var sp = services.BuildServiceProvider();
 
@@ -337,6 +343,8 @@ public sealed class EmailDeliveryWorkerTests
         services.AddSingleton(authClientMock.Object);
         services.AddSingleton(emailSenderMock.Object);
         services.AddSingleton<INotificationTemplateRenderer>(templateRenderer);
+        services.AddSingleton<IAggregateWatermarkRepository>(new AggregateWatermarkRepository(db));
+        services.AddSingleton<IUnitOfWork>(new UnitOfWork(db));
         services.AddSingleton<IEmailDeliveryService, EmailDeliveryService>();
         var sp = services.BuildServiceProvider();
 
@@ -418,6 +426,8 @@ public sealed class EmailDeliveryWorkerTests
         services.AddSingleton(authClientMock.Object);
         services.AddSingleton(emailSenderMock.Object);
         services.AddSingleton<INotificationTemplateRenderer>(templateRenderer);
+        services.AddSingleton<IAggregateWatermarkRepository>(new AggregateWatermarkRepository(db));
+        services.AddSingleton<IUnitOfWork>(new UnitOfWork(db));
         services.AddSingleton<IEmailDeliveryService, EmailDeliveryService>();
         var sp = services.BuildServiceProvider();
 
@@ -505,6 +515,8 @@ public sealed class EmailDeliveryWorkerTests
         services.AddSingleton(authClientMock.Object);
         services.AddSingleton(emailSenderMock.Object);
         services.AddSingleton<INotificationTemplateRenderer>(templateRenderer);
+        services.AddSingleton<IAggregateWatermarkRepository>(new AggregateWatermarkRepository(db));
+        services.AddSingleton<IUnitOfWork>(new UnitOfWork(db));
         services.AddSingleton<IEmailDeliveryService, EmailDeliveryService>();
         var sp = services.BuildServiceProvider();
 
@@ -587,6 +599,8 @@ public sealed class EmailDeliveryWorkerTests
             authClientMock.Object,
             new NotificationTemplateRenderer(),
             emailSenderMock.Object,
+            new AggregateWatermarkRepository(db),
+            new UnitOfWork(db),
             NullLogger<EmailDeliveryService>.Instance);
 
         var processed = await service.DeliverPendingJobsAsync("worker-test", CancellationToken.None);
@@ -669,6 +683,8 @@ public sealed class EmailDeliveryWorkerTests
             authClientMock.Object,
             new NotificationTemplateRenderer(),
             emailSenderMock.Object,
+            new AggregateWatermarkRepository(db),
+            new UnitOfWork(db),
             NullLogger<EmailDeliveryService>.Instance);
 
         var processed = await service.DeliverPendingJobsAsync("worker-test", CancellationToken.None);
@@ -748,6 +764,8 @@ public sealed class EmailDeliveryWorkerTests
             authClientMock.Object,
             new NotificationTemplateRenderer(),
             emailSenderMock.Object,
+            new AggregateWatermarkRepository(db),
+            new UnitOfWork(db),
             NullLogger<EmailDeliveryService>.Instance);
 
         var processed = await service.DeliverPendingJobsAsync("worker-test", CancellationToken.None);
@@ -886,6 +904,8 @@ public sealed class EmailDeliveryWorkerTests
             authClientMock.Object,
             new NotificationTemplateRenderer(),
             emailSenderMock.Object,
+            new AggregateWatermarkRepository(db),
+            new UnitOfWork(db),
             NullLogger<EmailDeliveryService>.Instance);
 
         var processed = await service.DeliverPendingJobsAsync("worker-test", CancellationToken.None);
@@ -960,6 +980,8 @@ public sealed class EmailDeliveryWorkerTests
             authClientMock.Object,
             new NotificationTemplateRenderer(),
             emailSenderMock.Object,
+            new AggregateWatermarkRepository(db),
+            new UnitOfWork(db),
             NullLogger<EmailDeliveryService>.Instance);
 
         var processed = await service.DeliverPendingJobsAsync("worker-test", CancellationToken.None);

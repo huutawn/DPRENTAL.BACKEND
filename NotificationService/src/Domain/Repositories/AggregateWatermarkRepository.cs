@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Dprental.NotificationService.Domain.Entities;
 using Dprental.NotificationService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
@@ -9,53 +8,28 @@ namespace Dprental.NotificationService.Domain.Repositories;
 public sealed class AggregateWatermarkRepository : IAggregateWatermarkRepository
 {
     private readonly NotificationServiceDbContext _dbContext;
-    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> InMemorySemaphores = new();
-    private static readonly ConcurrentDictionary<Guid, int> InMemoryLockCounts = new();
 
     public AggregateWatermarkRepository(NotificationServiceDbContext dbContext)
     {
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     }
 
-    public static int GetInMemoryLockCount(Guid aggregateId)
-    {
-        return InMemoryLockCounts.TryGetValue(aggregateId, out var count) ? count : 0;
-    }
-
-    public static void ResetInMemoryLockCounts()
-    {
-        InMemoryLockCounts.Clear();
-    }
-
-    public async Task AcquireAdvisoryLockAsync(Guid aggregateId, CancellationToken cancellationToken = default)
+    public async Task AcquireAdvisoryLockAsync(Guid orderId, CancellationToken cancellationToken = default)
     {
         if (_dbContext.Database.IsNpgsql())
         {
-            var parameter = new NpgsqlParameter("@aggregateId", aggregateId.ToString());
+            var parameter = new NpgsqlParameter("@orderId", orderId.ToString());
             await _dbContext.Database.ExecuteSqlRawAsync(
-                "SELECT pg_advisory_xact_lock(hashtext(@aggregateId::text));",
+                "SELECT pg_advisory_xact_lock(hashtext(@orderId::text));",
                 new object[] { parameter },
                 cancellationToken);
-            return;
-        }
-
-        // In-memory provider fallback for unit tests using a lock/semaphore
-        var semaphore = InMemorySemaphores.GetOrAdd(aggregateId, _ => new SemaphoreSlim(1, 1));
-        await semaphore.WaitAsync(cancellationToken);
-        try
-        {
-            InMemoryLockCounts.AddOrUpdate(aggregateId, 1, (_, c) => c + 1);
-        }
-        finally
-        {
-            semaphore.Release();
         }
     }
 
     public async Task<NotificationAggregateWatermark?> GetWatermarkAsync(
+        string scope,
         Guid aggregateId,
         Guid recipientUserId,
-        string scope = NotificationWatermarkScope.RentalOrder,
         CancellationToken cancellationToken = default)
     {
         var effectiveScope = string.IsNullOrWhiteSpace(scope) ? NotificationWatermarkScope.RentalOrder : scope;
@@ -64,18 +38,9 @@ public sealed class AggregateWatermarkRepository : IAggregateWatermarkRepository
             .FirstOrDefaultAsync(w => w.Scope == effectiveScope && w.AggregateId == aggregateId && w.RecipientUserId == recipientUserId, cancellationToken);
     }
 
-    public Task<NotificationAggregateWatermark?> GetWatermarkAsync(
+    public async Task<IReadOnlyList<NotificationAggregateWatermark>> GetWatermarksForAggregateAsync(
         string scope,
         Guid aggregateId,
-        Guid recipientUserId,
-        CancellationToken cancellationToken = default)
-    {
-        return GetWatermarkAsync(aggregateId, recipientUserId, scope, cancellationToken);
-    }
-
-    public async Task<IReadOnlyList<NotificationAggregateWatermark>> GetWatermarksForAggregateAsync(
-        Guid aggregateId,
-        string scope = NotificationWatermarkScope.RentalOrder,
         CancellationToken cancellationToken = default)
     {
         var effectiveScope = string.IsNullOrWhiteSpace(scope) ? NotificationWatermarkScope.RentalOrder : scope;
@@ -83,14 +48,6 @@ public sealed class AggregateWatermarkRepository : IAggregateWatermarkRepository
             .AsNoTracking()
             .Where(w => w.Scope == effectiveScope && w.AggregateId == aggregateId)
             .ToListAsync(cancellationToken);
-    }
-
-    public Task<IReadOnlyList<NotificationAggregateWatermark>> GetWatermarksForAggregateAsync(
-        string scope,
-        Guid aggregateId,
-        CancellationToken cancellationToken = default)
-    {
-        return GetWatermarksForAggregateAsync(aggregateId, scope, cancellationToken);
     }
 
     public async Task UpsertWatermarkAsync(NotificationAggregateWatermark watermark, CancellationToken cancellationToken = default)
@@ -128,11 +85,15 @@ public sealed class AggregateWatermarkRepository : IAggregateWatermarkRepository
                     existing.TerminalState = watermark.TerminalState;
                 }
             }
-            // Watermark only advances version; older terminal events cannot overwrite newer terminal state.
 
             if (watermark.IsPaid)
             {
                 existing.IsPaid = true;
+            }
+
+            if (watermark.ParentOrderId.HasValue)
+            {
+                existing.ParentOrderId = watermark.ParentOrderId.Value;
             }
 
             existing.UpdatedAt = now;
@@ -140,14 +101,15 @@ public sealed class AggregateWatermarkRepository : IAggregateWatermarkRepository
     }
 
     public async Task UpsertWatermarksForRecipientsAsync(
+        string scope,
         Guid aggregateId,
         IEnumerable<Guid> recipientUserIds,
         long orderVersion,
         string? messageId,
         bool isTerminal,
         string? terminalState,
-        string scope = NotificationWatermarkScope.RentalOrder,
         bool isPaid = false,
+        Guid? parentOrderId = null,
         CancellationToken cancellationToken = default)
     {
         var recipientList = recipientUserIds.Distinct().ToList();
@@ -174,6 +136,7 @@ public sealed class AggregateWatermarkRepository : IAggregateWatermarkRepository
                     Scope = effectiveScope,
                     AggregateId = aggregateId,
                     RecipientUserId = recipientId,
+                    ParentOrderId = parentOrderId,
                     LastOrderVersion = orderVersion,
                     LastMessageId = messageId,
                     IsTerminal = isTerminal,
@@ -202,61 +165,19 @@ public sealed class AggregateWatermarkRepository : IAggregateWatermarkRepository
                         existing.TerminalState = terminalState;
                     }
                 }
-                // Watermark only advances version; older terminal events cannot overwrite newer terminal state.
 
                 if (isPaid)
                 {
                     existing.IsPaid = true;
                 }
 
+                if (parentOrderId.HasValue)
+                {
+                    existing.ParentOrderId = parentOrderId.Value;
+                }
+
                 existing.UpdatedAt = now;
             }
         }
-    }
-
-    public Task UpsertWatermarksForRecipientsAsync(
-        string scope,
-        Guid aggregateId,
-        IEnumerable<Guid> recipientUserIds,
-        long orderVersion,
-        string? messageId,
-        bool isTerminal,
-        string? terminalState,
-        bool isPaid = false,
-        CancellationToken cancellationToken = default)
-    {
-        return UpsertWatermarksForRecipientsAsync(
-            aggregateId,
-            recipientUserIds,
-            orderVersion,
-            messageId,
-            isTerminal,
-            terminalState,
-            scope,
-            isPaid,
-            cancellationToken);
-    }
-
-    public Task UpsertWatermarksAsync(
-        string scope,
-        Guid aggregateId,
-        IEnumerable<Guid> recipientUserIds,
-        long orderVersion,
-        string? messageId,
-        bool isTerminal,
-        string? terminalState,
-        bool isPaid = false,
-        CancellationToken cancellationToken = default)
-    {
-        return UpsertWatermarksForRecipientsAsync(
-            aggregateId,
-            recipientUserIds,
-            orderVersion,
-            messageId,
-            isTerminal,
-            terminalState,
-            scope,
-            isPaid,
-            cancellationToken);
     }
 }

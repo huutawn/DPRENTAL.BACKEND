@@ -2,6 +2,7 @@ using Dprental.NotificationService.Domain.IRepositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Dprental.NotificationService.Application.Diagnostics;
 
 namespace Dprental.NotificationService.Application.Email.Workers;
 
@@ -33,6 +34,7 @@ public sealed class EmailLeaseReconciliationWorker : BackgroundService
                 if (recoveredCount > 0)
                 {
                     _logger.LogInformation("EmailLeaseReconciliationWorker đã phục hồi {Count} job bị hết hạn lease.", recoveredCount);
+                    NotificationMetrics.LeaseRecoveryCounter.Add(recoveredCount);
                 }
 
                 await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);

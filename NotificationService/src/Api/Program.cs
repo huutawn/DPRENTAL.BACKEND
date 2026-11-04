@@ -1,4 +1,5 @@
 using System.IO;
+using Dprental.NotificationService.Api.HealthChecks;
 using Dprental.NotificationService.Api.Exceptions;
 using Dprental.NotificationService.Api.Hubs;
 using Dprental.NotificationService.Api.Security;
@@ -37,13 +38,29 @@ builder.Services.AddHttpClient<IAuthContactClient, AuthContactClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(10);
 });
 
-// Cấu hình SignalR Realtime Notifier
-builder.Services.AddSignalR();
-builder.Services.AddSingleton<INotificationRealtimeNotifier, SignalRNotificationRealtimeNotifier>();
+// Cấu hình SignalR Realtime Notifier & Redis Backplane
+var signalRBuilder = builder.Services.AddSignalR();
+var redisConnectionString = builder.Configuration.GetConnectionString("Redis")
+    ?? builder.Configuration["Redis:ConnectionString"];
 
+if (!string.IsNullOrWhiteSpace(redisConnectionString))
+{
+    var environmentName = builder.Environment.EnvironmentName;
+    var channelPrefix = $"dprental:{environmentName.ToLowerInvariant()}:notifications";
+    signalRBuilder.AddStackExchangeRedis(redisConnectionString, options =>
+    {
+        options.Configuration.ChannelPrefix = StackExchange.Redis.RedisChannel.Literal(channelPrefix);
+    });
+}
+
+builder.Services.AddSingleton<INotificationRealtimeNotifier, SignalRNotificationRealtimeNotifier>();
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<NotificationServiceDbContext>(
         "postgres",
+        failureStatus: HealthStatus.Unhealthy,
+        tags: ["ready"])
+    .AddCheck<DatabaseMigrationHealthCheck>(
+        "migrations",
         failureStatus: HealthStatus.Unhealthy,
         tags: ["ready"]);
 

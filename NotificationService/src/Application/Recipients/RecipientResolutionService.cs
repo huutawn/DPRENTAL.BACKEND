@@ -335,7 +335,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                 results.Add(new ResolvedRecipient(
                     RecipientUserId: renterId.Value,
                     RecipientRole: "Renter",
-                    NotificationType: "ORDER_EXPIRED",
+                    NotificationType: "RENTAL_ITEM_EXPIRED",
                     Category: "ORDER",
                     Severity: "WARNING",
                     IsActionable: false,
@@ -352,7 +352,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                 results.Add(new ResolvedRecipient(
                     RecipientUserId: renterId.Value,
                     RecipientRole: "Renter",
-                    NotificationType: "ORDER_CANCELLED",
+                    NotificationType: "RENTAL_ITEM_CANCELLED",
                     Category: "ORDER",
                     Severity: "WARNING",
                     IsActionable: false,

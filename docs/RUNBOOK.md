@@ -110,17 +110,34 @@ If SMTP provider experiences an outage:
 
 ---
 
-## 5. Database Rollback & Migration Preflight
-Before applying migrations:
-1. Verify database connectivity:
+## 5. Database Migration, Preflight & Safe Rollback
+
+### 5.1. Preflight Checklist
+1. Stop intake consumer and delivery workers (`KafkaConsumerHostedService`, `EmailDeliveryWorker`).
+2. Create full backup of the `notification` schema:
    ```bash
-   pg_isready -h localhost -p 5432 -U postgres -d dprental_notification
+   pg_dump -h localhost -p 20992 -U notificationservice -n notification -Fc -f notification_backup_$(date +%s).dump notificationservice
    ```
-2. Apply pending migrations:
+3. Check migration status via `GET /health/ready` or EF tools:
    ```bash
-   dotnet ef database update --project NotificationService/src/Domain --startup-project NotificationService/src/Api
+   dotnet ef migrations has-pending-model-changes --project NotificationService/src/Domain --startup-project NotificationService/src/Api
    ```
-3. Rollback (if necessary to rollback to initial clean state):
-   ```bash
-   dotnet ef database update 0 --project NotificationService/src/Domain --startup-project NotificationService/src/Api
-   ```
+
+### 5.2. Apply Upgrade Migration
+```bash
+dotnet ef database update --project NotificationService/src/Domain --startup-project NotificationService/src/Api
+```
+- Applies `20261104042342_AddNotificationSchemaUpgrades`.
+- Preserves all existing `notifications`, `inbox_receipts`, and `delivery_jobs`.
+- Renames columns to snake_case matching PostgreSQL conventions (`status`, `read_at`, `lease_token`, etc.).
+- Adds `scope` (defaults to `'RentalOrder'`), `is_paid` (defaults to `false`), and `parent_order_id`.
+- Backfills `is_paid = true` for orders with terminal state `PAID` or `RENTAL_ORDER_PAID` records.
+- Backfills `order_id` on notifications where `resource_type = 'RentalOrder'`.
+- Establishes partial indexes on `status` and `read_at`.
+
+### 5.3. Safe Rollback Procedure
+If rollback is necessary:
+```bash
+dotnet ef database update 20261102082253_InitialNotificationSchema --project NotificationService/src/Domain --startup-project NotificationService/src/Api
+```
+Do NOT run `database update 0` as that would drop all tables and destroy audit history.

@@ -12,22 +12,23 @@ public sealed class NotificationDeliveryJobConfiguration : IEntityTypeConfigurat
 
         builder.HasKey(j => j.Id);
 
-        builder.Property(j => j.NotificationId).IsRequired();
-        builder.Property(j => j.Channel).HasMaxLength(32).IsRequired();
-        builder.Property(j => j.RecipientUserId).IsRequired();
-        builder.Property(j => j.Status).HasMaxLength(32).IsRequired();
-        builder.Property(j => j.AttemptCount).IsRequired().HasDefaultValue(0);
-        builder.Property(j => j.MaxAttempts).IsRequired().HasDefaultValue(5);
-        builder.Property(j => j.NextAttemptAt).IsRequired().HasDefaultValueSql("NOW()");
-        builder.Property(j => j.LeaseToken).HasMaxLength(64);
-        builder.Property(j => j.LeaseExpiresAt);
-        builder.Property(j => j.ProviderMessageId).HasMaxLength(128);
-        builder.Property(j => j.LastErrorCode).HasMaxLength(64);
-        builder.Property(j => j.LastErrorDetail).HasColumnType("text");
-        builder.Property(j => j.DispatchStartedAt);
-        builder.Property(j => j.SentAt);
-        builder.Property(j => j.CreatedAt).IsRequired().HasDefaultValueSql("NOW()");
-        builder.Property(j => j.UpdatedAt).IsRequired().HasDefaultValueSql("NOW()");
+        builder.Property(j => j.Id).HasColumnName("id");
+        builder.Property(j => j.NotificationId).HasColumnName("notification_id").IsRequired();
+        builder.Property(j => j.Channel).HasColumnName("channel").HasMaxLength(32).IsRequired();
+        builder.Property(j => j.RecipientUserId).HasColumnName("recipient_user_id").IsRequired();
+        builder.Property(j => j.Status).HasColumnName("status").HasMaxLength(32).IsRequired();
+        builder.Property(j => j.AttemptCount).HasColumnName("attempt_count").IsRequired().HasDefaultValue(0);
+        builder.Property(j => j.MaxAttempts).HasColumnName("max_attempts").IsRequired().HasDefaultValue(5);
+        builder.Property(j => j.NextAttemptAt).HasColumnName("next_attempt_at").IsRequired().HasDefaultValueSql("NOW()");
+        builder.Property(j => j.LeaseToken).HasColumnName("lease_token").HasMaxLength(64);
+        builder.Property(j => j.LeaseExpiresAt).HasColumnName("lease_expires_at");
+        builder.Property(j => j.ProviderMessageId).HasColumnName("provider_message_id").HasMaxLength(128);
+        builder.Property(j => j.LastErrorCode).HasColumnName("last_error_code").HasMaxLength(64);
+        builder.Property(j => j.LastErrorDetail).HasColumnName("last_error_detail").HasColumnType("text");
+        builder.Property(j => j.DispatchStartedAt).HasColumnName("dispatch_started_at");
+        builder.Property(j => j.SentAt).HasColumnName("sent_at");
+        builder.Property(j => j.CreatedAt).HasColumnName("created_at").IsRequired().HasDefaultValueSql("NOW()");
+        builder.Property(j => j.UpdatedAt).HasColumnName("updated_at").IsRequired().HasDefaultValueSql("NOW()");
 
         builder.HasIndex(j => new { j.NotificationId, j.Channel })
             .IsUnique()

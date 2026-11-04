@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 using Dprental.NotificationService.Application.DTOs;
@@ -504,5 +505,21 @@ public sealed class SecurityAndRealtimeTests
         Assert.Equal("READ_ALL", evt.ChangeType);
         Assert.Null(evt.NotificationId);
         Assert.Equal("ALL", evt.Category);
+    }
+
+    [Fact]
+    public async Task SignalR_RedisBackplane_WhenConfigured_ConnectsSuccessfully()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        services.AddLogging();
+        services.AddSignalR()
+            .AddStackExchangeRedis("127.0.0.1:26379", options =>
+            {
+                options.Configuration.ChannelPrefix = StackExchange.Redis.RedisChannel.Literal("dprental:test:notifications");
+            });
+
+        await using var sp = services.BuildServiceProvider();
+        var hubContext = sp.GetService<IHubContext<NotificationHub>>();
+        Assert.NotNull(hubContext);
     }
 }

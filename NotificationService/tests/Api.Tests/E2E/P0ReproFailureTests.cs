@@ -3,6 +3,7 @@ using Dprental.NotificationService.Api.Tests.Fixtures;
 using Dprental.NotificationService.Application.Clients;
 using Dprental.NotificationService.Application.Email;
 using Dprental.NotificationService.Application.Email.Workers;
+using Dprental.NotificationService.Application.Email.Services;
 using Dprental.NotificationService.Application.Kafka.Contracts;
 using Dprental.NotificationService.Application.Kafka.Handlers;
 using Dprental.NotificationService.Application.Templates;
@@ -70,7 +71,7 @@ public sealed class P0ReproFailureTests
         var result = handler.ParseIntent(envelope);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(orderId, result.Value.AggregateId);
+        Assert.Equal(orderId, result.Value.OrderId);
         Assert.Equal(renterId, result.Value.RenterId);
         Assert.Equal(1, result.Value.OrderVersion);
         Assert.False(result.Value.IsTerminal);
@@ -171,6 +172,9 @@ public sealed class P0ReproFailureTests
         services.AddScoped<IAuthContactClient>(_ => authClientMock.Object);
         services.AddScoped<INotificationTemplateRenderer>(_ => new NotificationTemplateRenderer());
         services.AddScoped<IEmailSender>(_ => emailSenderMock.Object);
+        services.AddScoped<IAggregateWatermarkRepository>(_ => new AggregateWatermarkRepository(db));
+        services.AddScoped<IUnitOfWork>(_ => new UnitOfWork(db));
+        services.AddScoped<IEmailDeliveryService, EmailDeliveryService>();
         var sp = services.BuildServiceProvider();
 
         var worker = new EmailDeliveryWorker(sp, NullLogger<EmailDeliveryWorker>.Instance);

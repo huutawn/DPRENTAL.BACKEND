@@ -19,4 +19,6 @@ public interface IDeliveryJobRepository
         bool resetDispatchStartedAt = false,
         CancellationToken cancellationToken = default);
     Task<bool> RecordDispatchStartAsync(Guid jobId, string leaseToken, DateTimeOffset dispatchStartedAt, CancellationToken cancellationToken = default);
+    Task<int> SuppressPendingAndUndispatchedJobsForResourceAsync(string resourceType, string resourceId, string reason, CancellationToken cancellationToken = default);
+    Task<int> SuppressPendingAndUndispatchedJobsForOrderAsync(Guid orderId, string reason, CancellationToken cancellationToken = default);
 }

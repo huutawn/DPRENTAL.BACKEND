@@ -291,6 +291,52 @@ public sealed class NotificationPolicyAndTemplateTests
     }
 
     [Fact]
+    public void TemplateRenderer_RentalItemCancelled_DescribesItemOnly_DoesNotClaimEntireOrderCancelled()
+    {
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var data = new Dictionary<string, object?>
+        {
+            ["rentalOrderId"] = orderId,
+            ["rentalItemId"] = itemId,
+            ["orderCode"] = "RNT-20261104-0005",
+            ["reason"] = "Nhà cung cấp hết phụ kiện đi kèm"
+        };
+
+        var result = _renderer.Render("RENTAL_ITEM_CANCELLED", data);
+        Assert.True(result.IsSuccess);
+        Assert.Contains("RNT-20261104-0005", result.Value.Title);
+        Assert.Contains("Thiết bị trong đơn thuê", result.Value.Title);
+        Assert.Contains(itemId.ToString(), result.Value.Body);
+        Assert.Contains("Các phần thuê khác trong đơn (nếu có) vẫn tiếp tục được xử lý", result.Value.Body);
+        Assert.NotNull(result.Value.EmailBody);
+        Assert.Contains($"/renter/orders/{orderId}", result.Value.EmailBody);
+    }
+
+    [Fact]
+    public void TemplateRenderer_RentalItemExpired_DescribesItemOnly_DoesNotClaimEntireOrderExpired()
+    {
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var data = new Dictionary<string, object?>
+        {
+            ["rentalOrderId"] = orderId,
+            ["rentalItemId"] = itemId,
+            ["orderCode"] = "RNT-20261104-0006",
+            ["reason"] = "Hết hạn thanh toán cọc thiết bị"
+        };
+
+        var result = _renderer.Render("RENTAL_ITEM_EXPIRED", data);
+        Assert.True(result.IsSuccess);
+        Assert.Contains("RNT-20261104-0006", result.Value.Title);
+        Assert.Contains("Thiết bị trong đơn thuê", result.Value.Title);
+        Assert.Contains(itemId.ToString(), result.Value.Body);
+        Assert.Contains("Thiết bị đã được giải phóng", result.Value.Body);
+        Assert.NotNull(result.Value.EmailBody);
+        Assert.Contains($"/renter/orders/{orderId}", result.Value.EmailBody);
+    }
+
+    [Fact]
     public void TemplateRenderer_RefundCompleted_FormatsAmountAndDeepLink()
     {
         var orderId = Guid.NewGuid();
@@ -364,7 +410,7 @@ public sealed class NotificationPolicyAndTemplateTests
         var exp = expired.Value[0];
         Assert.Equal(renterId, exp.RecipientUserId);
         Assert.Equal("Renter", exp.RecipientRole);
-        Assert.Equal("ORDER_EXPIRED", exp.NotificationType);
+        Assert.Equal("RENTAL_ITEM_EXPIRED", exp.NotificationType);
         Assert.Equal("ORDER", exp.Category);
         Assert.Equal("WARNING", exp.Severity);
 
@@ -375,7 +421,7 @@ public sealed class NotificationPolicyAndTemplateTests
         var can = cancelled.Value[0];
         Assert.Equal(renterId, can.RecipientUserId);
         Assert.Equal("Renter", can.RecipientRole);
-        Assert.Equal("ORDER_CANCELLED", can.NotificationType);
+        Assert.Equal("RENTAL_ITEM_CANCELLED", can.NotificationType);
         Assert.Equal("ORDER", can.Category);
         Assert.Equal("WARNING", can.Severity);
 

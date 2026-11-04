@@ -528,6 +528,7 @@ public static class ProducerFixtures
         "supplierId": "{{supplierId}}",
         "orderCode": "{{orderCode}}",
         "returnedAt": "2026-11-04T10:00:00.0000000+00:00",
+        "returnsCompletedAt": "2026-11-04T10:00:00.0000000+00:00",
         "orderVersion": {{orderVersion}}
       }
     }
@@ -553,9 +554,9 @@ public static class ProducerFixtures
       "payload": {
         "rentalOrderId": "{{orderId}}",
         "rentalItemId": "{{itemId}}",
+        "userId": "{{renterId}}",
         "renterId": "{{renterId}}",
-        "supplierId": "{{supplierId}}",
-        "orderCode": "{{orderCode}}",
+        "supplierId": {{(supplierId != Guid.Empty ? $"\"{supplierId}\"" : "null")}},
         "completedAt": "2026-11-04T11:00:00.0000000+00:00",
         "orderVersion": {{orderVersion}}
       }

@@ -5,14 +5,20 @@ namespace Dprental.NotificationService.Application.Kafka.Handlers;
 
 public sealed record NotificationEventIntent(
     string EventType,
-    Guid AggregateId,
+    Guid? OrderId,
+    string ResourceType,
+    string ResourceId,
+    string? WatermarkScope,
+    Guid? WatermarkId,
     long OrderVersion,
     bool IsTerminal,
     string? TerminalState,
     Guid? RenterId,
     Guid? SupplierId,
     Guid? ReturnRequestId,
-    Dictionary<string, object?> RenderData);
+    Dictionary<string, object?> RenderData,
+    bool IsPaid = false,
+    Guid? FinancialId = null);
 
 public interface IKafkaEventHandler
 {

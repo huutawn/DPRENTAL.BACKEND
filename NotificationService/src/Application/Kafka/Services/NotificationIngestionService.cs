@@ -12,6 +12,7 @@ using Dprental.NotificationService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Dprental.NotificationService.Application.Diagnostics;
 namespace Dprental.NotificationService.Application.Kafka.Services;
 
 public enum IngestionOutcome
@@ -173,11 +174,10 @@ public sealed class NotificationIngestionService : INotificationIngestionService
         // 6. Recipient Resolution
         var recipientsResult = _recipientResolver.ResolveRecipients(
             intent.EventType,
-            intent.AggregateId,
+            intent.OrderId ?? intent.FinancialId ?? Guid.Empty,
             intent.RenterId,
             intent.SupplierId,
             intent.ReturnRequestId);
-
         if (recipientsResult.IsFailure)
         {
             _logger.LogWarning("Không xác định được người nhận hợp lệ ({Code}): {Message}. Đẩy vào DLQ: {MessageId}", recipientsResult.Error.Code, recipientsResult.Error.Message, envelope.MessageId);
@@ -190,7 +190,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
 
         var notificationsToCreate = new List<Notification>();
         var deliveryJobsToCreate = new List<NotificationDeliveryJob>();
-
+        var suppressedCtaNotifications = new List<Notification>();
         // 7. Atomic Transaction: Read Watermarks, Evaluate Suppression, Render & Persist
         try
         {
@@ -204,15 +204,10 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                 return IngestionOutcome.Duplicate;
             }
 
-            var isFinancialEvent = string.Equals(intent.EventType, "RefundCompletedFinancial", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(intent.EventType, "SupplierPayoutCompleted", StringComparison.OrdinalIgnoreCase);
-
-            var scope = ResolveScope(intent.EventType);
-
-            // Advisory lock BEFORE reading watermarks (decoupled from financial events)
-            if (!isFinancialEvent)
+            var hasRentalOrder = intent.OrderId.HasValue && intent.OrderId.Value != Guid.Empty && intent.WatermarkScope != null;
+            if (hasRentalOrder)
             {
-                await _watermarkRepo.AcquireAdvisoryLockAsync(intent.AggregateId, cancellationToken);
+                await _watermarkRepo.AcquireAdvisoryLockAsync(intent.OrderId!.Value, cancellationToken);
             }
 
             foreach (var recipient in recipients)
@@ -220,23 +215,23 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                 NotificationAggregateWatermark? watermark = null;
                 NotificationAggregateWatermark? parentOrderWatermark = null;
 
-                if (!isFinancialEvent)
+                if (intent.WatermarkScope != null && intent.WatermarkId.HasValue)
                 {
-                    watermark = await _watermarkRepo.GetWatermarkAsync(intent.AggregateId, recipient.RecipientUserId, scope, cancellationToken);
+                    watermark = await _watermarkRepo.GetWatermarkAsync(intent.WatermarkScope, intent.WatermarkId.Value, recipient.RecipientUserId, cancellationToken);
 
-                    // Nếu recipient mới xuất hiện nhưng aggregate đã có watermark từ trước trong cùng scope
                     if (watermark == null)
                     {
-                        var knownWatermarks = await _watermarkRepo.GetWatermarksForAggregateAsync(intent.AggregateId, scope, cancellationToken);
+                        var knownWatermarks = await _watermarkRepo.GetWatermarksForAggregateAsync(intent.WatermarkScope, intent.WatermarkId.Value, cancellationToken);
                         var terminalWatermark = knownWatermarks.FirstOrDefault(w => w.IsTerminal);
                         var paidWatermark = knownWatermarks.FirstOrDefault(w => w.IsPaid);
                         if (terminalWatermark != null || paidWatermark != null)
                         {
                             watermark = new NotificationAggregateWatermark
                             {
-                                Scope = scope,
-                                AggregateId = intent.AggregateId,
+                                Scope = intent.WatermarkScope,
+                                AggregateId = intent.WatermarkId.Value,
                                 RecipientUserId = recipient.RecipientUserId,
+                                ParentOrderId = intent.OrderId,
                                 LastOrderVersion = terminalWatermark?.LastOrderVersion ?? paidWatermark?.LastOrderVersion ?? 0,
                                 IsTerminal = terminalWatermark != null,
                                 TerminalState = terminalWatermark?.TerminalState,
@@ -267,10 +262,9 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                         }
                     }
 
-                    // Terminal order suppresses pending actions of items under it
-                    if (scope != NotificationWatermarkScope.RentalOrder)
+                    if (intent.WatermarkScope != NotificationWatermarkScope.RentalOrder && intent.OrderId.HasValue)
                     {
-                        parentOrderWatermark = await _watermarkRepo.GetWatermarkAsync(intent.AggregateId, recipient.RecipientUserId, NotificationWatermarkScope.RentalOrder, cancellationToken);
+                        parentOrderWatermark = await _watermarkRepo.GetWatermarkAsync(NotificationWatermarkScope.RentalOrder, intent.OrderId.Value, recipient.RecipientUserId, cancellationToken);
                     }
                 }
 
@@ -309,13 +303,14 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                 {
                     Id = Guid.NewGuid(),
                     RecipientUserId = recipient.RecipientUserId,
+                    OrderId = intent.OrderId,
                     NotificationType = recipient.NotificationType,
                     Category = recipient.Category,
                     Severity = recipient.Severity,
                     Title = rendered.Title,
                     Body = rendered.Body,
-                    ResourceType = "RentalOrder",
-                    ResourceId = intent.AggregateId.ToString(),
+                    ResourceType = intent.ResourceType,
+                    ResourceId = intent.ResourceId,
                     SourceEventId = messageId,
                     SourceProducer = envelope.Producer,
                     SourceEventType = envelope.MessageType,
@@ -329,7 +324,6 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                     OccurredAt = envelope.OccurredAt,
                     CreatedAt = now
                 };
-
                 notificationsToCreate.Add(notification);
 
                 // Channel policy and preference check for Email
@@ -382,45 +376,56 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                 await _deliveryJobRepo.AddRangeAsync(deliveryJobsToCreate, cancellationToken);
             }
 
-            // Terminal order suppresses pending actions of items under it
             if (intent.IsTerminal)
             {
-                await _notificationRepo.SuppressPendingActionsForResourceAsync("RentalOrder", intent.AggregateId.ToString(), cancellationToken);
+                var terminalReason = $"Đơn thuê / thiết bị đã ở trạng thái kết thúc ({intent.TerminalState ?? "TERMINATED"}).";
+                if (intent.WatermarkScope == NotificationWatermarkScope.RentalOrder && intent.OrderId.HasValue)
+                {
+                    var suppressed = await _notificationRepo.SuppressPendingActionsForOrderAsync(intent.OrderId.Value, cancellationToken);
+                    suppressedCtaNotifications.AddRange(suppressed);
+                    await _deliveryJobRepo.SuppressPendingAndUndispatchedJobsForOrderAsync(intent.OrderId.Value, terminalReason, cancellationToken);
+                }
+                else if (intent.WatermarkScope == NotificationWatermarkScope.RentalItem)
+                {
+                    var suppressed = await _notificationRepo.SuppressPendingActionsForResourceAsync("RentalItem", intent.ResourceId, cancellationToken);
+                    suppressedCtaNotifications.AddRange(suppressed);
+                    await _deliveryJobRepo.SuppressPendingAndUndispatchedJobsForResourceAsync("RentalItem", intent.ResourceId, terminalReason, cancellationToken);
+                }
             }
 
-            // Update watermarks for all resolved recipients (decoupled from financial events)
-            if (!isFinancialEvent)
+            if (intent.WatermarkScope != null && intent.WatermarkId.HasValue)
             {
-                var isPaidEvent = string.Equals(intent.EventType, "RentalOrderPaid", StringComparison.OrdinalIgnoreCase);
+                var isPaidEvent = intent.IsPaid;
                 var recipientIds = recipients.Select(r => r.RecipientUserId).Distinct().ToList();
                 await _watermarkRepo.UpsertWatermarksForRecipientsAsync(
-                    intent.AggregateId,
+                    intent.WatermarkScope,
+                    intent.WatermarkId.Value,
                     recipientIds,
                     intent.OrderVersion,
                     envelope.MessageId.ToString(),
                     intent.IsTerminal,
                     intent.TerminalState,
-                    scope,
                     isPaid: isPaidEvent,
-                    cancellationToken);
+                    parentOrderId: intent.OrderId,
+                    cancellationToken: cancellationToken);
 
-                // If terminal event, advance watermark terminal state for any previously known recipients of this aggregate
                 if (intent.IsTerminal)
                 {
-                    var allKnown = await _watermarkRepo.GetWatermarksForAggregateAsync(intent.AggregateId, scope, cancellationToken);
+                    var allKnown = await _watermarkRepo.GetWatermarksForAggregateAsync(intent.WatermarkScope, intent.WatermarkId.Value, cancellationToken);
                     var otherRecipients = allKnown.Select(w => w.RecipientUserId).Except(recipientIds).ToList();
                     if (otherRecipients.Count > 0)
                     {
                         await _watermarkRepo.UpsertWatermarksForRecipientsAsync(
-                            intent.AggregateId,
+                            intent.WatermarkScope,
+                            intent.WatermarkId.Value,
                             otherRecipients,
                             intent.OrderVersion,
                             envelope.MessageId.ToString(),
                             isTerminal: true,
-                            intent.TerminalState,
-                            scope,
+                            terminalState: intent.TerminalState,
                             isPaid: false,
-                            cancellationToken);
+                            parentOrderId: intent.OrderId,
+                            cancellationToken: cancellationToken);
                     }
                 }
             }
@@ -459,19 +464,24 @@ public sealed class NotificationIngestionService : INotificationIngestionService
             }
         }
 
-        return IngestionOutcome.Processed;
-    }
-
-    private static string ResolveScope(string eventType)
-    {
-        return eventType switch
+        foreach (var suppressed in suppressedCtaNotifications)
         {
-            "RentalItemHandoverCompleted" or "RentalHandoverOverdue" or "RentalItemConfirmed" or "RentalItemRejected"
-                or "RentalItemExpired" or "RentalItemCancelled" or "RentalItemReturned" or "RentalItemCompleted"
-                => NotificationWatermarkScope.RentalItem,
-            "ReturnConfirmationOverdue"
-                => NotificationWatermarkScope.ReturnRequest,
-            _ => NotificationWatermarkScope.RentalOrder
-        };
+            try
+            {
+                await _realtimeNotifier.NotifyInboxChangedAsync(
+                    suppressed.RecipientUserId,
+                    suppressed.Id,
+                    "UPDATED",
+                    suppressed.Category,
+                    suppressed.OccurredAt,
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Realtime UPDATED dispatch thất bại cho UserId={UserId}, NotificationId={Id}.", suppressed.RecipientUserId, suppressed.Id);
+            }
+        }
+        NotificationMetrics.IngestionCounter.Add(1, new KeyValuePair<string, object?>("status", "processed"));
+        return IngestionOutcome.Processed;
     }
 }

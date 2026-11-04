@@ -142,14 +142,14 @@ namespace NotificationService.Domain.Migrations
                 schema: "notification",
                 table: "delivery_jobs",
                 columns: new[] { "Status", "LeaseExpiresAt" },
-                filter: "status = 'Processing'");
+                filter: "\"Status\" = 'Processing'");
 
             migrationBuilder.CreateIndex(
                 name: "ix_delivery_jobs_pending_claim",
                 schema: "notification",
                 table: "delivery_jobs",
                 columns: new[] { "Status", "NextAttemptAt" },
-                filter: "status IN ('Pending', 'RetryScheduled')");
+                filter: "\"Status\" IN ('Pending', 'RetryScheduled')");
 
             migrationBuilder.CreateIndex(
                 name: "uq_delivery_jobs_notification_channel",
@@ -184,7 +184,7 @@ namespace NotificationService.Domain.Migrations
                 schema: "notification",
                 table: "notifications",
                 columns: new[] { "RecipientUserId", "ReadAt" },
-                filter: "read_at IS NULL");
+                filter: "\"ReadAt\" IS NULL");
 
             migrationBuilder.CreateIndex(
                 name: "uq_notifications_source_recipient_type",

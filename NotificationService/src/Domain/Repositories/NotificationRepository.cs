@@ -127,7 +127,7 @@ public sealed class NotificationRepository : INotificationRepository
         await _dbContext.Notifications.AddRangeAsync(notifications, cancellationToken);
     }
 
-    public async Task SuppressPendingActionsForResourceAsync(string resourceType, string resourceId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Notification>> SuppressPendingActionsForResourceAsync(string resourceType, string resourceId, CancellationToken cancellationToken = default)
     {
         var actionableNotifications = await _dbContext.Notifications
             .Where(n => n.ResourceType == resourceType && n.ResourceId == resourceId && n.IsActionable)
@@ -138,5 +138,23 @@ public sealed class NotificationRepository : INotificationRepository
             notification.IsActionable = false;
             notification.ActionUrl = null;
         }
+
+        return actionableNotifications;
+    }
+
+    public async Task<IReadOnlyList<Notification>> SuppressPendingActionsForOrderAsync(Guid orderId, CancellationToken cancellationToken = default)
+    {
+        var orderIdStr = orderId.ToString();
+        var actionableNotifications = await _dbContext.Notifications
+            .Where(n => (n.OrderId == orderId || (n.ResourceType == "RentalOrder" && n.ResourceId == orderIdStr)) && n.IsActionable)
+            .ToListAsync(cancellationToken);
+
+        foreach (var notification in actionableNotifications)
+        {
+            notification.IsActionable = false;
+            notification.ActionUrl = null;
+        }
+
+        return actionableNotifications;
     }
 }

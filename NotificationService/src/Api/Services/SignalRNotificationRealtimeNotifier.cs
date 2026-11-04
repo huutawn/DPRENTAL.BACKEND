@@ -2,6 +2,7 @@ using Dprental.NotificationService.Api.Hubs;
 using Dprental.NotificationService.Application.DTOs;
 using Dprental.NotificationService.Application.IServices;
 using Microsoft.AspNetCore.SignalR;
+using Dprental.NotificationService.Application.Diagnostics;
 
 namespace Dprental.NotificationService.Api.Services;
 
@@ -37,6 +38,7 @@ public sealed class SignalRNotificationRealtimeNotifier : INotificationRealtimeN
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Lỗi khi phát sự kiện NotificationInboxChanged tới {Group}", groupName);
+            NotificationMetrics.RealtimeFailureCounter.Add(1, new KeyValuePair<string, object?>("operation", changeEvent.ChangeType.ToLowerInvariant()));
         }
     }
 

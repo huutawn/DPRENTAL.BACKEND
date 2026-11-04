@@ -138,7 +138,7 @@ public sealed class NotificationDbContextTests
         });
         await context.SaveChangesAsync();
 
-        var watermark = await repo.GetWatermarkAsync(aggregateId, recipientId);
+        var watermark = await repo.GetWatermarkAsync(NotificationWatermarkScope.RentalOrder, aggregateId, recipientId);
         Assert.NotNull(watermark);
         Assert.Equal(2, watermark.LastOrderVersion);
 
@@ -153,7 +153,7 @@ public sealed class NotificationDbContextTests
         });
         await context.SaveChangesAsync();
 
-        watermark = await repo.GetWatermarkAsync(aggregateId, recipientId);
+        watermark = await repo.GetWatermarkAsync(NotificationWatermarkScope.RentalOrder, aggregateId, recipientId);
         Assert.NotNull(watermark);
         Assert.Equal(2, watermark.LastOrderVersion);
 
@@ -169,7 +169,7 @@ public sealed class NotificationDbContextTests
         });
         await context.SaveChangesAsync();
 
-        watermark = await repo.GetWatermarkAsync(aggregateId, recipientId);
+        watermark = await repo.GetWatermarkAsync(NotificationWatermarkScope.RentalOrder, aggregateId, recipientId);
         Assert.NotNull(watermark);
         Assert.Equal(3, watermark.LastOrderVersion);
         Assert.True(watermark.IsTerminal);
@@ -208,7 +208,7 @@ public sealed class NotificationDbContextTests
         });
         await context.SaveChangesAsync();
 
-        var watermark = await repo.GetWatermarkAsync(aggregateId, recipientId);
+        var watermark = await repo.GetWatermarkAsync(NotificationWatermarkScope.RentalOrder, aggregateId, recipientId);
         Assert.NotNull(watermark);
         Assert.Equal(3, watermark.LastOrderVersion);
         Assert.Equal("msg-completed-3", watermark.LastMessageId);
@@ -226,28 +226,28 @@ public sealed class NotificationDbContextTests
 
         // RentalOrder watermark
         await repo.UpsertWatermarksForRecipientsAsync(
+            NotificationWatermarkScope.RentalOrder,
             aggregateId,
             new[] { recipientId },
             orderVersion: 5,
             messageId: "order-msg-5",
             isTerminal: true,
-            terminalState: "COMPLETED",
-            scope: NotificationWatermarkScope.RentalOrder);
+            terminalState: "COMPLETED");
 
         // RentalItem watermark for the same aggregateId and recipient
         await repo.UpsertWatermarksForRecipientsAsync(
+            NotificationWatermarkScope.RentalItem,
             aggregateId,
             new[] { recipientId },
             orderVersion: 2,
             messageId: "item-msg-2",
             isTerminal: false,
-            terminalState: null,
-            scope: NotificationWatermarkScope.RentalItem);
+            terminalState: null);
 
         await context.SaveChangesAsync();
 
-        var orderWatermark = await repo.GetWatermarkAsync(aggregateId, recipientId, NotificationWatermarkScope.RentalOrder);
-        var itemWatermark = await repo.GetWatermarkAsync(aggregateId, recipientId, NotificationWatermarkScope.RentalItem);
+        var orderWatermark = await repo.GetWatermarkAsync(NotificationWatermarkScope.RentalOrder, aggregateId, recipientId);
+        var itemWatermark = await repo.GetWatermarkAsync(NotificationWatermarkScope.RentalItem, aggregateId, recipientId);
 
         Assert.NotNull(orderWatermark);
         Assert.Equal(NotificationWatermarkScope.RentalOrder, orderWatermark.Scope);
@@ -261,17 +261,14 @@ public sealed class NotificationDbContextTests
     }
 
     [Fact]
-    public async Task AggregateWatermarkRepository_AcquireAdvisoryLock_InMemoryFallback_ShouldSucceed()
+    public async Task AggregateWatermarkRepository_AcquireAdvisoryLock_InMemoryFallback_ShouldCompleteWithoutError()
     {
         using var context = CreateInMemoryDbContext();
         var repo = new AggregateWatermarkRepository(context);
         var aggregateId = Guid.NewGuid();
 
-        AggregateWatermarkRepository.ResetInMemoryLockCounts();
-        await repo.AcquireAdvisoryLockAsync(aggregateId);
-
-        var count = AggregateWatermarkRepository.GetInMemoryLockCount(aggregateId);
-        Assert.Equal(1, count);
+        var exception = await Record.ExceptionAsync(() => repo.AcquireAdvisoryLockAsync(aggregateId));
+        Assert.Null(exception);
     }
 
     [Fact]

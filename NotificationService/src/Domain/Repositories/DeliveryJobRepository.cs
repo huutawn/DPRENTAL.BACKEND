@@ -60,10 +60,13 @@ WHERE id IN (
 
             var rowsAffected = await _dbContext.Database.ExecuteSqlRawAsync(
                 sql,
-                new NpgsqlParameter("leaseToken", leaseToken),
-                new NpgsqlParameter("leaseExpiresAt", leaseExpiresAt),
-                new NpgsqlParameter("now", now),
-                new NpgsqlParameter("batchSize", batchSize),
+                new object[]
+                {
+                    new NpgsqlParameter("leaseToken", leaseToken),
+                    new NpgsqlParameter("leaseExpiresAt", leaseExpiresAt),
+                    new NpgsqlParameter("now", now),
+                    new NpgsqlParameter("batchSize", batchSize)
+                },
                 cancellationToken);
 
             if (rowsAffected == 0)
@@ -72,6 +75,7 @@ WHERE id IN (
             }
 
             return await _dbContext.DeliveryJobs
+                .AsNoTracking()
                 .Include(j => j.Notification)
                 .Where(j => j.LeaseToken == leaseToken)
                 .ToListAsync(cancellationToken);
@@ -266,6 +270,107 @@ WHERE id IN (
             job.UpdatedAt = DateTimeOffset.UtcNow;
             await _dbContext.SaveChangesAsync(cancellationToken);
             return true;
+        }
+    }
+
+    public async Task<int> SuppressPendingAndUndispatchedJobsForOrderAsync(Guid orderId, string reason, CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var orderIdStr = orderId.ToString();
+        var notifIds = await _dbContext.Notifications
+            .Where(n => n.OrderId == orderId || (n.ResourceType == "RentalOrder" && n.ResourceId == orderIdStr))
+            .Select(n => n.Id)
+            .ToListAsync(cancellationToken);
+
+        if (notifIds.Count == 0) return 0;
+
+        if (_dbContext.Database.IsNpgsql())
+        {
+            return await _dbContext.DeliveryJobs
+                .Where(j => notifIds.Contains(j.NotificationId)
+                    && (j.Status == "Pending" || j.Status == "RetryScheduled" || (j.Status == "Processing" && j.DispatchStartedAt == null)))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.Status, "Suppressed")
+                    .SetProperty(j => j.LastErrorCode, "STALE_EVENT_TERMINATED")
+                    .SetProperty(j => j.LastErrorDetail, reason)
+                    .SetProperty(j => j.LeaseToken, (string?)null)
+                    .SetProperty(j => j.LeaseExpiresAt, (DateTimeOffset?)null)
+                    .SetProperty(j => j.UpdatedAt, now),
+                    cancellationToken);
+        }
+        else
+        {
+            var jobs = await _dbContext.DeliveryJobs
+                .Where(j => notifIds.Contains(j.NotificationId)
+                    && (j.Status == "Pending" || j.Status == "RetryScheduled" || (j.Status == "Processing" && j.DispatchStartedAt == null)))
+                .ToListAsync(cancellationToken);
+
+            foreach (var job in jobs)
+            {
+                job.Status = "Suppressed";
+                job.LastErrorCode = "STALE_EVENT_TERMINATED";
+                job.LastErrorDetail = reason;
+                job.LeaseToken = null;
+                job.LeaseExpiresAt = null;
+                job.UpdatedAt = now;
+            }
+
+            if (jobs.Count > 0)
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+
+            return jobs.Count;
+        }
+    }
+
+    public async Task<int> SuppressPendingAndUndispatchedJobsForResourceAsync(string resourceType, string resourceId, string reason, CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var notifIds = await _dbContext.Notifications
+            .Where(n => n.ResourceType == resourceType && n.ResourceId == resourceId)
+            .Select(n => n.Id)
+            .ToListAsync(cancellationToken);
+
+        if (notifIds.Count == 0) return 0;
+
+        if (_dbContext.Database.IsNpgsql())
+        {
+            return await _dbContext.DeliveryJobs
+                .Where(j => notifIds.Contains(j.NotificationId)
+                    && (j.Status == "Pending" || j.Status == "RetryScheduled" || (j.Status == "Processing" && j.DispatchStartedAt == null)))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.Status, "Suppressed")
+                    .SetProperty(j => j.LastErrorCode, "STALE_EVENT_TERMINATED")
+                    .SetProperty(j => j.LastErrorDetail, reason)
+                    .SetProperty(j => j.LeaseToken, (string?)null)
+                    .SetProperty(j => j.LeaseExpiresAt, (DateTimeOffset?)null)
+                    .SetProperty(j => j.UpdatedAt, now),
+                    cancellationToken);
+        }
+        else
+        {
+            var jobs = await _dbContext.DeliveryJobs
+                .Where(j => notifIds.Contains(j.NotificationId)
+                    && (j.Status == "Pending" || j.Status == "RetryScheduled" || (j.Status == "Processing" && j.DispatchStartedAt == null)))
+                .ToListAsync(cancellationToken);
+
+            foreach (var job in jobs)
+            {
+                job.Status = "Suppressed";
+                job.LastErrorCode = "STALE_EVENT_TERMINATED";
+                job.LastErrorDetail = reason;
+                job.LeaseToken = null;
+                job.LeaseExpiresAt = null;
+                job.UpdatedAt = now;
+            }
+
+            if (jobs.Count > 0)
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+
+            return jobs.Count;
         }
     }
 }

@@ -328,6 +328,7 @@ public sealed class NotificationIngestionTests
         """;
         var contactBatch = JsonSerializer.Deserialize<Dprental.NotificationService.Application.Clients.AuthContactBatchResponse>(contactJson, webOptions);
         Assert.NotNull(contactBatch);
+        Assert.NotNull(contactBatch.Contacts);
         Assert.Single(contactBatch.Contacts);
         Assert.Equal("test@example.com", contactBatch.Contacts[0].Email);
         Assert.True(contactBatch.Contacts[0].IsActive);
@@ -374,6 +375,7 @@ public sealed class NotificationIngestionTests
 
         var orderId = Guid.NewGuid();
         var itemId = Guid.NewGuid();
+        var itemId2 = Guid.NewGuid();
         var renterId = Guid.NewGuid();
         var supplierId = Guid.NewGuid();
         var returnRequestId = Guid.NewGuid();
@@ -387,7 +389,7 @@ public sealed class NotificationIngestionTests
             ProducerFixtures.RentalOrderPaid(Guid.NewGuid(), orderId, renterId),
             ProducerFixtures.RentalSupplierConfirmationRequested(Guid.NewGuid(), orderId, itemId, supplierId),
             ProducerFixtures.RentalItemConfirmed(Guid.NewGuid(), orderId, itemId, supplierId, renterId),
-            ProducerFixtures.RentalItemRejected(Guid.NewGuid(), orderId, itemId, supplierId, renterId),
+            ProducerFixtures.RentalItemRejected(Guid.NewGuid(), orderId, itemId2, supplierId, renterId),
             ProducerFixtures.RentalItemHandoverCompleted(Guid.NewGuid(), orderId, itemId, renterId, supplierId),
             ProducerFixtures.RentalHandoverOverdue(Guid.NewGuid(), orderId, itemId, renterId, supplierId),
             ProducerFixtures.ReturnConfirmationOverdue(Guid.NewGuid(), orderId, itemId, returnRequestId, renterId, supplierId),
@@ -641,13 +643,10 @@ public sealed class NotificationIngestionTests
         var renterId = Guid.NewGuid();
         var messageId = Guid.NewGuid();
 
-        AggregateWatermarkRepository.ResetInMemoryLockCounts();
-
         var raw = ProducerFixtures.RentalOrderCreated(messageId, orderId, renterId, orderVersion: 1);
         var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 10);
 
         Assert.Equal(IngestionOutcome.Processed, outcome);
-        Assert.True(AggregateWatermarkRepository.GetInMemoryLockCount(orderId) >= 1);
     }
 
     [Fact]
@@ -814,14 +813,14 @@ public sealed class NotificationIngestionTests
         var notification = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == messageId);
         Assert.NotNull(notification);
         Assert.Equal(renterId, notification.RecipientUserId);
-        Assert.Equal("ORDER_EXPIRED", notification.NotificationType);
+        Assert.Equal("RENTAL_ITEM_EXPIRED", notification.NotificationType);
         Assert.Equal("ORDER", notification.Category);
         Assert.Equal("WARNING", notification.Severity);
 
-        // Non-terminal watermark since item scope
-        var watermark = await db.AggregateWatermarks.FirstOrDefaultAsync(w => w.AggregateId == orderId && w.RecipientUserId == renterId);
+        var watermark = await db.AggregateWatermarks.FirstOrDefaultAsync(w => w.Scope == NotificationWatermarkScope.RentalItem && w.AggregateId == itemId && w.RecipientUserId == renterId);
         Assert.NotNull(watermark);
-        Assert.False(watermark.IsTerminal);
+        Assert.True(watermark.IsTerminal);
+        Assert.Equal("EXPIRED", watermark.TerminalState);
     }
 
     [Fact]
@@ -842,14 +841,14 @@ public sealed class NotificationIngestionTests
         var notification = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == messageId);
         Assert.NotNull(notification);
         Assert.Equal(renterId, notification.RecipientUserId);
-        Assert.Equal("ORDER_CANCELLED", notification.NotificationType);
+        Assert.Equal("RENTAL_ITEM_CANCELLED", notification.NotificationType);
         Assert.Equal("ORDER", notification.Category);
         Assert.Equal("WARNING", notification.Severity);
 
-        // Non-terminal watermark since item scope
-        var watermark = await db.AggregateWatermarks.FirstOrDefaultAsync(w => w.AggregateId == orderId && w.RecipientUserId == renterId);
+        var watermark = await db.AggregateWatermarks.FirstOrDefaultAsync(w => w.Scope == NotificationWatermarkScope.RentalItem && w.AggregateId == itemId && w.RecipientUserId == renterId);
         Assert.NotNull(watermark);
-        Assert.False(watermark.IsTerminal);
+        Assert.True(watermark.IsTerminal);
+        Assert.Equal("CANCELLED", watermark.TerminalState);
     }
 
     [Fact]

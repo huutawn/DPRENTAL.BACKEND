@@ -223,8 +223,6 @@ public sealed class AuthContactClientTests
 
     [Theory]
     [InlineData(HttpStatusCode.BadRequest)]
-    [InlineData(HttpStatusCode.Unauthorized)]
-    [InlineData(HttpStatusCode.Forbidden)]
     [InlineData(HttpStatusCode.NotFound)]
     public async Task AuthContactClient_Client4xx_ReturnsDistinguished4xxFailure(HttpStatusCode statusCode)
     {
@@ -239,6 +237,23 @@ public sealed class AuthContactClientTests
         Assert.True(result.IsFailure);
         Assert.Equal("AUTH_SERVICE_4XX", result.Error.Code);
         Assert.Equal(ErrorType.Failure, result.Error.Type);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task AuthContactClient_UnauthorizedOrForbidden_ReturnsAuthConfigError(HttpStatusCode statusCode)
+    {
+        var handler = new MockHttpMessageHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(statusCode)));
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
+
+        var result = await client.GetUserContactsBatchAsync(new[] { Guid.NewGuid() });
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("AUTH_CONFIG_ERROR", result.Error.Code);
     }
 
     [Fact]
@@ -293,5 +308,189 @@ public sealed class AuthContactClientTests
         Assert.True(result.IsSuccess);
         Assert.NotNull(trackingContent);
         Assert.True(trackingContent.Disposed, "HttpResponseMessage and its content MUST be disposed properly.");
+    }
+
+    [Fact]
+    public async Task AuthContactClient_WhenGuidEmptyPassed_ReturnsValidationError()
+    {
+        var handler = new MockHttpMessageHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)));
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
+
+        var result = await client.GetUserContactsBatchAsync(new[] { Guid.NewGuid(), Guid.Empty });
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_USER_ID", result.Error.Code);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(100)]
+    [InlineData(101)]
+    [InlineData(250)]
+    public async Task AuthContactClient_BoundarySizes_ChunksProperly(int userCount)
+    {
+        var requestedUserIds = Enumerable.Range(0, userCount).Select(_ => Guid.NewGuid()).ToList();
+        var capturedBatches = new List<int>();
+
+        var handler = new MockHttpMessageHandler(async (req, ct) =>
+        {
+            var doc = await req.Content!.ReadFromJsonAsync<System.Text.Json.JsonElement>(cancellationToken: ct);
+            var ids = doc.GetProperty("userIds").EnumerateArray().Select(e => e.GetGuid()).ToList();
+            capturedBatches.Add(ids.Count);
+
+            var contacts = ids.Select(id => new AuthContactDto(id, $"{id}@example.com", true, true)).ToList();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new AuthContactBatchResponse(contacts))
+            };
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
+
+        var result = await client.GetUserContactsBatchAsync(requestedUserIds);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(userCount, result.Value.Count);
+
+        if (userCount == 0)
+        {
+            Assert.Empty(capturedBatches);
+        }
+        else if (userCount == 1)
+        {
+            Assert.Equal([1], capturedBatches);
+        }
+        else if (userCount == 100)
+        {
+            Assert.Equal([100], capturedBatches);
+        }
+        else if (userCount == 101)
+        {
+            Assert.Equal([100, 1], capturedBatches);
+        }
+        else if (userCount == 250)
+        {
+            Assert.Equal([100, 100, 50], capturedBatches);
+        }
+    }
+
+    [Fact]
+    public async Task AuthContactClient_DuplicateIdsInRequest_DeduplicatesBeforeChunking()
+    {
+        var id1 = Guid.NewGuid();
+        var id2 = Guid.NewGuid();
+        var requestedUserIds = new[] { id1, id2, id1, id2, id1 };
+        int capturedCount = 0;
+
+        var handler = new MockHttpMessageHandler(async (req, ct) =>
+        {
+            var doc = await req.Content!.ReadFromJsonAsync<System.Text.Json.JsonElement>(cancellationToken: ct);
+            var ids = doc.GetProperty("userIds").EnumerateArray().ToList();
+            capturedCount = ids.Count;
+
+            var contacts = ids.Select(e => new AuthContactDto(e.GetGuid(), "user@example.com", true, true)).ToList();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new AuthContactBatchResponse(contacts))
+            };
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
+
+        var result = await client.GetUserContactsBatchAsync(requestedUserIds);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, capturedCount);
+        Assert.Equal(2, result.Value.Count);
+    }
+
+    [Fact]
+    public async Task AuthContactClient_ResponseContainsDuplicateUserId_FailsValidation()
+    {
+        var id = Guid.NewGuid();
+        var handler = new MockHttpMessageHandler((_, _) =>
+        {
+            var contacts = new[]
+            {
+                new AuthContactDto(id, "u1@example.com", true, true),
+                new AuthContactDto(id, "u2@example.com", true, true)
+            };
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new AuthContactBatchResponse(contacts))
+            });
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
+
+        var result = await client.GetUserContactsBatchAsync(new[] { id });
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("AUTH_DUPLICATE_USER", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task AuthContactClient_ResponseContainsExtraUserId_FailsValidation()
+    {
+        var id = Guid.NewGuid();
+        var foreignId = Guid.NewGuid();
+        var handler = new MockHttpMessageHandler((_, _) =>
+        {
+            var contacts = new[]
+            {
+                new AuthContactDto(id, "u1@example.com", true, true),
+                new AuthContactDto(foreignId, "foreign@example.com", true, true)
+            };
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new AuthContactBatchResponse(contacts))
+            });
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
+
+        var result = await client.GetUserContactsBatchAsync(new[] { id });
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("AUTH_EXTRA_USER", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task AuthContactClient_LaterChunkFails_FailsWholeCallWithoutSuppressingEarlierChunk()
+    {
+        var requestedIds = Enumerable.Range(0, 150).Select(_ => Guid.NewGuid()).ToList();
+        int callIndex = 0;
+
+        var handler = new MockHttpMessageHandler((_, _) =>
+        {
+            callIndex++;
+            if (callIndex == 1)
+            {
+                // First chunk succeeds
+                var contacts = requestedIds.Take(100).Select(id => new AuthContactDto(id, "u@example.com", true, true)).ToList();
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new AuthContactBatchResponse(contacts))
+                });
+            }
+
+            // Second chunk fails with 500
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://auth-service:8080") };
+        var client = new AuthContactClient(httpClient, CreateTestConfig(), NullLogger<AuthContactClient>.Instance);
+
+        var result = await client.GetUserContactsBatchAsync(requestedIds);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("AUTH_SERVICE_5XX", result.Error.Code);
     }
 }

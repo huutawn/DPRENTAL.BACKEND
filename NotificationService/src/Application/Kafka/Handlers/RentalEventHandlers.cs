@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Dprental.NotificationService.Application.Kafka.Contracts;
 using Dprental.NotificationService.Common;
+using Dprental.NotificationService.Domain.Entities;
 
 namespace Dprental.NotificationService.Application.Kafka.Handlers;
 
@@ -307,7 +308,11 @@ public sealed class RentalOrderCreatedHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalOrder",
+            ResourceId: orderId.Value.ToString(),
+            WatermarkScope: NotificationWatermarkScope.RentalOrder,
+            WatermarkId: orderId.Value,
             OrderVersion: orderVersion,
             IsTerminal: false,
             TerminalState: null,
@@ -357,14 +362,19 @@ public sealed class RentalOrderPaidHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalOrder",
+            ResourceId: orderId.Value.ToString(),
+            WatermarkScope: NotificationWatermarkScope.RentalOrder,
+            WatermarkId: orderId.Value,
             OrderVersion: orderVersion,
             IsTerminal: false,
             TerminalState: null,
             RenterId: renterId,
             SupplierId: null,
             ReturnRequestId: null,
-            RenderData: renderData));
+            RenderData: renderData,
+            IsPaid: true));
     }
 }
 
@@ -407,7 +417,11 @@ public sealed class RentalSupplierConfirmationRequestedHandler : IKafkaEventHand
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalOrder",
+            ResourceId: orderId.Value.ToString(),
+            WatermarkScope: NotificationWatermarkScope.RentalOrder,
+            WatermarkId: orderId.Value,
             OrderVersion: orderVersion,
             IsTerminal: false,
             TerminalState: null,
@@ -455,7 +469,11 @@ public sealed class RentalOrderExpiredHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalOrder",
+            ResourceId: orderId.Value.ToString(),
+            WatermarkScope: NotificationWatermarkScope.RentalOrder,
+            WatermarkId: orderId.Value,
             OrderVersion: orderVersion,
             IsTerminal: true,
             TerminalState: "EXPIRED",
@@ -503,7 +521,11 @@ public sealed class RentalOrderCancelledHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalOrder",
+            ResourceId: orderId.Value.ToString(),
+            WatermarkScope: NotificationWatermarkScope.RentalOrder,
+            WatermarkId: orderId.Value,
             OrderVersion: orderVersion,
             IsTerminal: true,
             TerminalState: "CANCELLED",
@@ -554,7 +576,11 @@ public sealed class RentalItemHandoverCompletedHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalItem",
+            ResourceId: (itemId.HasValue ? itemId.Value.ToString() : orderId.Value.ToString()),
+            WatermarkScope: NotificationWatermarkScope.RentalItem,
+            WatermarkId: itemId ?? orderId.Value,
             OrderVersion: orderVersion,
             IsTerminal: false,
             TerminalState: null,
@@ -605,7 +631,11 @@ public sealed class RentalHandoverOverdueHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: itemId.HasValue ? "RentalItem" : "RentalOrder",
+            ResourceId: (itemId.HasValue ? itemId.Value.ToString() : orderId.Value.ToString()),
+            WatermarkScope: itemId.HasValue ? NotificationWatermarkScope.RentalItem : NotificationWatermarkScope.RentalOrder,
+            WatermarkId: itemId ?? orderId.Value,
             OrderVersion: orderVersion,
             IsTerminal: false,
             TerminalState: null,
@@ -658,7 +688,11 @@ public sealed class ReturnConfirmationOverdueHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "ReturnRequest",
+            ResourceId: (returnRequestId.HasValue ? returnRequestId.Value.ToString() : orderId.Value.ToString()),
+            WatermarkScope: NotificationWatermarkScope.ReturnRequest,
+            WatermarkId: returnRequestId ?? orderId.Value,
             OrderVersion: orderVersion,
             IsTerminal: false,
             TerminalState: null,
@@ -706,7 +740,11 @@ public sealed class RentalOrderCompletedHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalOrder",
+            ResourceId: orderId.Value.ToString(),
+            WatermarkScope: NotificationWatermarkScope.RentalOrder,
+            WatermarkId: orderId.Value,
             OrderVersion: orderVersion,
             IsTerminal: true,
             TerminalState: "COMPLETED",
@@ -754,7 +792,11 @@ public sealed class LatePaymentRefundRequestedHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalOrder",
+            ResourceId: orderId.Value.ToString(),
+            WatermarkScope: NotificationWatermarkScope.RentalOrder,
+            WatermarkId: orderId.Value,
             OrderVersion: orderVersion,
             IsTerminal: false,
             TerminalState: null,
@@ -811,7 +853,11 @@ public sealed class RentalItemConfirmedHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalItem",
+            ResourceId: (itemId.HasValue ? itemId.Value.ToString() : orderId.Value.ToString()),
+            WatermarkScope: NotificationWatermarkScope.RentalItem,
+            WatermarkId: itemId ?? orderId.Value,
             OrderVersion: orderVersion,
             IsTerminal: false,
             TerminalState: null,
@@ -870,10 +916,14 @@ public sealed class RentalItemRejectedHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalItem",
+            ResourceId: (itemId.HasValue ? itemId.Value.ToString() : orderId.Value.ToString()),
+            WatermarkScope: NotificationWatermarkScope.RentalItem,
+            WatermarkId: itemId ?? orderId.Value,
             OrderVersion: orderVersion,
-            IsTerminal: false,
-            TerminalState: null,
+            IsTerminal: true,
+            TerminalState: "REJECTED",
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: null,
@@ -905,9 +955,17 @@ public sealed class RefundCompletedFinancialHandler : IKafkaEventHandler
         }
 
         var refundId = payload.GetGuidFromAny("refundId");
-        var refundRef = payload.GetStringFromAny("refundRef") ?? (refundId.HasValue ? $"REF-{refundId.Value.ToString()[..8]}" : "REF-UNKNOWN");
+        if (!refundId.HasValue || refundId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_REFUND_ID", "refundId không thể để trống."));
+        }
+        var refundRef = payload.GetStringFromAny("refundRef") ?? $"REF-{refundId.Value.ToString()[..8]}";
         var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
         var renterId = payload.GetGuidFromAny("renterId", "userId");
+        if (!renterId.HasValue || renterId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_RENTER_ID", "renterId không thể để trống."));
+        }
         var refundKind = payload.GetStringFromAny("refundKind") ?? "FULL_CANCELLATION";
         var amount = payload.GetDecimalFromAny(0, "amount", "refundAmount");
         var currency = payload.GetStringFromAny("currency") ?? "VND";
@@ -933,14 +991,19 @@ public sealed class RefundCompletedFinancialHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
-            OrderVersion: orderVersion,
+            OrderId: orderId.Value,
+            ResourceType: "Refund",
+            ResourceId: refundId?.ToString() ?? Guid.NewGuid().ToString(),
+            WatermarkScope: null,
+            WatermarkId: null,
+            OrderVersion: 0,
             IsTerminal: false,
             TerminalState: null,
             RenterId: renterId,
             SupplierId: null,
             ReturnRequestId: null,
-            RenderData: renderData));
+            RenderData: renderData,
+            FinancialId: refundId));
     }
 }
 
@@ -961,16 +1024,24 @@ public sealed class SupplierPayoutCompletedHandler : IKafkaEventHandler
             return Result.Failure<NotificationEventIntent>(validation.Error);
         }
 
-        var settlementId = payload.GetGuidFromAny("settlementId", "rentalOrderId", "orderId") ?? (Guid.TryParse(envelope.AggregateId, out var g3) && g3 != Guid.Empty ? g3 : null);
+        var settlementId = payload.GetGuidFromAny("settlementId");
         if (!settlementId.HasValue || settlementId.Value == Guid.Empty)
         {
             return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_SETTLEMENT_ID", "settlementId không thể để trống."));
         }
 
         var payoutId = payload.GetGuidFromAny("payoutId");
-        var payoutRef = payload.GetStringFromAny("payoutRef") ?? (payoutId.HasValue ? $"PAYOUT-{payoutId.Value.ToString()[..8]}" : "PAYOUT-UNKNOWN");
+        if (!payoutId.HasValue || payoutId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_PAYOUT_ID", "payoutId không thể để trống."));
+        }
+        var payoutRef = payload.GetStringFromAny("payoutRef") ?? $"PAYOUT-{payoutId.Value.ToString()[..8]}";
         var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
         var supplierId = payload.GetGuidFromAny("supplierId");
+        if (!supplierId.HasValue || supplierId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_SUPPLIER_ID", "supplierId không thể để trống."));
+        }
         var amount = payload.GetDecimalFromAny(0, "amount", "payoutAmount");
         var currency = payload.GetStringFromAny("currency") ?? "VND";
         var completedAt = payload.GetStringFromAny("completedAt");
@@ -992,14 +1063,19 @@ public sealed class SupplierPayoutCompletedHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: settlementId.Value,
-            OrderVersion: orderVersion,
+            OrderId: settlementId.Value,
+            ResourceType: "SupplierPayout",
+            ResourceId: payoutId?.ToString() ?? settlementId.Value.ToString(),
+            WatermarkScope: null,
+            WatermarkId: null,
+            OrderVersion: 0,
             IsTerminal: false,
             TerminalState: null,
             RenterId: null,
             SupplierId: supplierId,
             ReturnRequestId: null,
-            RenderData: renderData));
+            RenderData: renderData,
+            FinancialId: payoutId ?? settlementId.Value));
     }
 }
 
@@ -1037,7 +1113,11 @@ public sealed class RentalOrderRejectedHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalOrder",
+            ResourceId: orderId.Value.ToString(),
+            WatermarkScope: NotificationWatermarkScope.RentalOrder,
+            WatermarkId: orderId.Value,
             OrderVersion: orderVersion,
             IsTerminal: true,
             TerminalState: "REJECTED",
@@ -1085,10 +1165,14 @@ public sealed class RentalItemExpiredHandler : IKafkaEventHandler
         // Item scope: Không phải terminal state của toàn bộ aggregate order
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalItem",
+            ResourceId: (itemId.HasValue ? itemId.Value.ToString() : orderId.Value.ToString()),
+            WatermarkScope: NotificationWatermarkScope.RentalItem,
+            WatermarkId: itemId ?? orderId.Value,
             OrderVersion: orderVersion,
-            IsTerminal: false,
-            TerminalState: null,
+            IsTerminal: true,
+            TerminalState: "EXPIRED",
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: null,
@@ -1133,10 +1217,14 @@ public sealed class RentalItemCancelledHandler : IKafkaEventHandler
         // Item scope: Không phải terminal state của toàn bộ aggregate order
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalItem",
+            ResourceId: (itemId.HasValue ? itemId.Value.ToString() : orderId.Value.ToString()),
+            WatermarkScope: NotificationWatermarkScope.RentalItem,
+            WatermarkId: itemId ?? orderId.Value,
             OrderVersion: orderVersion,
-            IsTerminal: false,
-            TerminalState: null,
+            IsTerminal: true,
+            TerminalState: "CANCELLED",
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: null,
@@ -1163,7 +1251,7 @@ public sealed class RentalItemReturnedHandler : IKafkaEventHandler
         var supplierId = payload.GetGuidFromAny("supplierId");
         var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
         var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
-        var returnedAt = payload.GetStringFromAny("returnedAt", "actualReturnAt");
+        var returnedAt = payload.GetStringFromAny("returnsCompletedAt", "returnedAt", "actualReturnAt");
 
         var renderData = new Dictionary<string, object?>
         {
@@ -1180,10 +1268,14 @@ public sealed class RentalItemReturnedHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalItem",
+            ResourceId: (itemId.HasValue ? itemId.Value.ToString() : orderId.Value.ToString()),
+            WatermarkScope: NotificationWatermarkScope.RentalItem,
+            WatermarkId: itemId ?? orderId.Value,
             OrderVersion: orderVersion,
-            IsTerminal: false,
-            TerminalState: null,
+            IsTerminal: true,
+            TerminalState: "RETURNED",
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: returnRequestId,
@@ -1225,10 +1317,14 @@ public sealed class RentalItemCompletedHandler : IKafkaEventHandler
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            AggregateId: orderId.Value,
+            OrderId: orderId.Value,
+            ResourceType: "RentalItem",
+            ResourceId: (itemId.HasValue ? itemId.Value.ToString() : orderId.Value.ToString()),
+            WatermarkScope: NotificationWatermarkScope.RentalItem,
+            WatermarkId: itemId ?? orderId.Value,
             OrderVersion: orderVersion,
-            IsTerminal: false,
-            TerminalState: null,
+            IsTerminal: true,
+            TerminalState: "COMPLETED",
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: null,

@@ -15,6 +15,7 @@ public sealed class NotificationAggregateWatermark
     public string Scope { get; set; } = NotificationWatermarkScope.RentalOrder;
     public Guid AggregateId { get; set; }
     public Guid RecipientUserId { get; set; }
+    public Guid? ParentOrderId { get; set; }
     public long LastOrderVersion { get; set; }
     public string? LastMessageId { get; set; }
     public bool IsTerminal { get; set; }
