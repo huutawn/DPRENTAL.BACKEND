@@ -2,6 +2,10 @@ using System.Security.Claims;
 using Dprental.NotificationService.Api.Hubs;
 using Dprental.NotificationService.Api.Security;
 using Dprental.NotificationService.Api.Services;
+using Dprental.NotificationService.Application.IServices;
+using Dprental.NotificationService.Application.Services;
+using Dprental.NotificationService.Domain.Entities;
+using Dprental.NotificationService.Domain.IRepositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
@@ -255,5 +259,109 @@ public sealed class SecurityAndRealtimeTests
         Assert.Contains("401 Unauthorized", ex.Message);
         mockContext.Verify(c => c.Abort(), Times.Once);
         mockGroups.Verify(g => g.AddToGroupAsync(It.IsAny<string>(), It.IsAny<string>(), default), Times.Never);
+    }
+
+    [Fact]
+    public async Task NotificationReadService_MarkAsRead_ShouldNotifyRealtimeOnSuccess()
+    {
+        var repoMock = new Mock<INotificationRepository>();
+        var notifierMock = new Mock<INotificationRealtimeNotifier>();
+        var userId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+        var existing = new Notification
+        {
+            Id = notificationId,
+            RecipientUserId = userId,
+            Category = "ORDER"
+        };
+
+        repoMock.Setup(r => r.GetByIdAndUserAsync(notificationId, userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+        repoMock.Setup(r => r.MarkAsReadAsync(notificationId, userId, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var readService = new NotificationReadService(repoMock.Object, notifierMock.Object);
+        var result = await readService.MarkAsReadAsync(notificationId, userId);
+
+        Assert.True(result.IsSuccess);
+        notifierMock.Verify(n => n.NotifyInboxChangedAsync(
+            userId,
+            notificationId,
+            "READ",
+            "ORDER",
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task NotificationReadService_MarkAsRead_NotFound_ShouldNotNotifyRealtime()
+    {
+        var repoMock = new Mock<INotificationRepository>();
+        var notifierMock = new Mock<INotificationRealtimeNotifier>();
+        var userId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+
+        repoMock.Setup(r => r.GetByIdAndUserAsync(notificationId, userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Notification?)null);
+
+        var readService = new NotificationReadService(repoMock.Object, notifierMock.Object);
+        var result = await readService.MarkAsReadAsync(notificationId, userId);
+
+        Assert.True(result.IsFailure);
+        notifierMock.Verify(n => n.NotifyInboxChangedAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task NotificationReadService_MarkAllAsRead_WithMarkedItems_ShouldNotifyRealtime()
+    {
+        var repoMock = new Mock<INotificationRepository>();
+        var notifierMock = new Mock<INotificationRealtimeNotifier>();
+        var userId = Guid.NewGuid();
+
+        repoMock.Setup(r => r.MarkAllAsReadAsync(userId, It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(3);
+
+        var readService = new NotificationReadService(repoMock.Object, notifierMock.Object);
+        var result = await readService.MarkAllAsReadAsync(userId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(3, result.Value.MarkedCount);
+        notifierMock.Verify(n => n.NotifyInboxChangedAsync(
+            userId,
+            Guid.Empty,
+            "READ_ALL",
+            "ALL",
+            result.Value.ReadAt,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task NotificationReadService_MarkAllAsRead_ZeroMarked_ShouldNotNotifyRealtime()
+    {
+        var repoMock = new Mock<INotificationRepository>();
+        var notifierMock = new Mock<INotificationRealtimeNotifier>();
+        var userId = Guid.NewGuid();
+
+        repoMock.Setup(r => r.MarkAllAsReadAsync(userId, It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+
+        var readService = new NotificationReadService(repoMock.Object, notifierMock.Object);
+        var result = await readService.MarkAllAsReadAsync(userId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(0, result.Value.MarkedCount);
+        notifierMock.Verify(n => n.NotifyInboxChangedAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 }

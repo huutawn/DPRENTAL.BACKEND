@@ -90,7 +90,7 @@ public sealed class E2EScenariosHarnessTests
                 NullLogger<NotificationIngestionService>.Instance);
 
             QueryService = new NotificationQueryService(notifRepo);
-            ReadService = new NotificationReadService(notifRepo);
+            ReadService = new NotificationReadService(notifRepo, RealtimeMock.Object);
             PreferenceService = new PreferenceService(prefRepo, uow);
 
             var services = new ServiceCollection();
@@ -188,6 +188,13 @@ public sealed class E2EScenariosHarnessTests
         var markAllResult = await ctx.ReadService.MarkAllAsReadAsync(renterId);
         Assert.True(markAllResult.IsSuccess);
         Assert.Equal(2, markAllResult.Value.MarkedCount);
+        ctx.RealtimeMock.Verify(r => r.NotifyInboxChangedAsync(
+            renterId,
+            Guid.Empty,
+            "READ_ALL",
+            "ALL",
+            markAllResult.Value.ReadAt,
+            It.IsAny<CancellationToken>()), Times.Once);
 
         var unreadAfter = await ctx.QueryService.GetUnreadCountAsync(renterId);
         Assert.Equal(0, unreadAfter.Value.UnreadCount);
