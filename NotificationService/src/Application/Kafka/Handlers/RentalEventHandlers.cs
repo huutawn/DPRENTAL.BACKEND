@@ -672,7 +672,17 @@ public sealed class ReturnConfirmationOverdueHandler : IKafkaEventHandler
         var supplierId = payload.GetGuidFromAny("supplierId");
         var renterId = payload.GetGuidFromAny("renterId", "userId");
         var returnRequestId = payload.GetGuidFromAny("returnRequestId");
+        if (!returnRequestId.HasValue || returnRequestId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_RETURN_REQUEST_ID", "returnRequestId không thể để trống."));
+        }
+
         var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
+        if (!itemId.HasValue || itemId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_RENTAL_ITEM_ID", "rentalItemId không thể để trống."));
+        }
+
         var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
         var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
         var confirmationDeadlineAt = payload.GetStringFromAny("confirmationDeadlineAt");
@@ -680,9 +690,9 @@ public sealed class ReturnConfirmationOverdueHandler : IKafkaEventHandler
         var renderData = new Dictionary<string, object?>
         {
             ["rentalOrderId"] = orderId.Value,
-            ["rentalItemId"] = itemId,
+            ["rentalItemId"] = itemId.Value,
             ["orderCode"] = orderCode,
-            ["returnRequestId"] = returnRequestId,
+            ["returnRequestId"] = returnRequestId.Value,
             ["confirmationDeadlineAt"] = confirmationDeadlineAt
         };
 
@@ -690,19 +700,19 @@ public sealed class ReturnConfirmationOverdueHandler : IKafkaEventHandler
             EventType: EventType,
             OrderId: orderId.Value,
             ResourceType: "ReturnRequest",
-            ResourceId: (returnRequestId.HasValue ? returnRequestId.Value.ToString() : orderId.Value.ToString()),
+            ResourceId: returnRequestId.Value.ToString(),
             WatermarkScope: NotificationWatermarkScope.ReturnRequest,
-            WatermarkId: returnRequestId ?? orderId.Value,
+            WatermarkId: returnRequestId.Value,
             OrderVersion: orderVersion,
             IsTerminal: false,
             TerminalState: null,
             RenterId: renterId,
             SupplierId: supplierId,
-            ReturnRequestId: returnRequestId,
-            RenderData: renderData));
+            ReturnRequestId: returnRequestId.Value,
+            RenderData: renderData,
+            RentalItemId: itemId.Value));
     }
 }
-
 public sealed class RentalOrderCompletedHandler : IKafkaEventHandler
 {
     public string EventType => "RentalOrderCompleted";
@@ -1290,7 +1300,8 @@ public sealed class RentalItemReturnedHandler : IKafkaEventHandler
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: returnRequestId,
-            RenderData: renderData));
+            RenderData: renderData,
+            RentalItemId: itemId));
     }
 }
 

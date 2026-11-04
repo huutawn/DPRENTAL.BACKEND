@@ -1051,4 +1051,195 @@ public sealed class NotificationIngestionTests
         var deliveryJobs = await db.DeliveryJobs.Where(j => j.NotificationId == supplierNotif.Id).ToListAsync();
         Assert.Empty(deliveryJobs);
     }
+
+    [Fact]
+    public void ReturnConfirmationOverdue_ParseIntent_ValidPayload_ExtractsRentalItemIdAndReturnRequestId()
+    {
+        var handler = new ReturnConfirmationOverdueHandler();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var returnReqId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+
+        var json = $$"""
+        {
+            "rentalOrderId": "{{orderId}}",
+            "rentalItemId": "{{itemId}}",
+            "returnRequestId": "{{returnReqId}}",
+            "supplierId": "{{supplierId}}",
+            "renterId": "{{renterId}}",
+            "confirmationDeadlineAt": "2026-11-04T12:00:00Z",
+            "orderVersion": 2
+        }
+        """;
+        using var doc = JsonDocument.Parse(json);
+        var envelope = new KafkaMessageEnvelope
+        {
+            MessageId = Guid.NewGuid(),
+            MessageType = "ReturnConfirmationOverdue",
+            Producer = "RentalService",
+            Version = 1,
+            OccurredAt = DateTimeOffset.UtcNow,
+            Payload = doc.RootElement
+        };
+
+        var result = handler.ParseIntent(envelope);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(orderId, result.Value.OrderId);
+        Assert.Equal(itemId, result.Value.RentalItemId);
+        Assert.Equal(returnReqId.ToString(), result.Value.ResourceId);
+        Assert.Equal("ReturnRequest", result.Value.ResourceType);
+        Assert.Equal(NotificationWatermarkScope.ReturnRequest, result.Value.WatermarkScope);
+        Assert.Equal(returnReqId, result.Value.WatermarkId);
+    }
+
+    [Fact]
+    public void ReturnConfirmationOverdue_ParseIntent_MissingReturnRequestId_ReturnsFailure()
+    {
+        var handler = new ReturnConfirmationOverdueHandler();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        var json = $$"""
+        {
+            "rentalOrderId": "{{orderId}}",
+            "rentalItemId": "{{itemId}}",
+            "confirmationDeadlineAt": "2026-11-04T12:00:00Z"
+        }
+        """;
+        using var doc = JsonDocument.Parse(json);
+        var envelope = new KafkaMessageEnvelope
+        {
+            MessageId = Guid.NewGuid(),
+            MessageType = "ReturnConfirmationOverdue",
+            Producer = "RentalService",
+            Version = 1,
+            OccurredAt = DateTimeOffset.UtcNow,
+            Payload = doc.RootElement
+        };
+
+        var result = handler.ParseIntent(envelope);
+        Assert.True(result.IsFailure);
+        Assert.Equal("MISSING_RETURN_REQUEST_ID", result.Error.Code);
+    }
+
+    [Fact]
+    public void ReturnConfirmationOverdue_ParseIntent_MissingRentalItemId_ReturnsFailure()
+    {
+        var handler = new ReturnConfirmationOverdueHandler();
+        var orderId = Guid.NewGuid();
+        var returnReqId = Guid.NewGuid();
+
+        var json = $$"""
+        {
+            "rentalOrderId": "{{orderId}}",
+            "returnRequestId": "{{returnReqId}}",
+            "confirmationDeadlineAt": "2026-11-04T12:00:00Z"
+        }
+        """;
+        using var doc = JsonDocument.Parse(json);
+        var envelope = new KafkaMessageEnvelope
+        {
+            MessageId = Guid.NewGuid(),
+            MessageType = "ReturnConfirmationOverdue",
+            Producer = "RentalService",
+            Version = 1,
+            OccurredAt = DateTimeOffset.UtcNow,
+            Payload = doc.RootElement
+        };
+
+        var result = handler.ParseIntent(envelope);
+        Assert.True(result.IsFailure);
+        Assert.Equal("MISSING_RENTAL_ITEM_ID", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Ingestion_ReturnConfirmationOverdue_SetsWatermarkParentItemAndParentOrder()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var messageId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var returnRequestId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        var raw = ProducerFixtures.ReturnConfirmationOverdue(messageId, orderId, itemId, returnRequestId, renterId, supplierId, orderVersion: 2);
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 30);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        // Verify notification has RentalItemId set
+        var notif = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == messageId);
+        Assert.NotNull(notif);
+        Assert.Equal(itemId, notif.RentalItemId);
+        Assert.Equal(returnRequestId.ToString(), notif.ResourceId);
+        Assert.Equal("ReturnRequest", notif.ResourceType);
+
+        // Verify watermark has ParentItemId and ParentOrderId set
+        var watermark = await db.AggregateWatermarks.FirstOrDefaultAsync(w => w.Scope == NotificationWatermarkScope.ReturnRequest && w.AggregateId == returnRequestId);
+        Assert.NotNull(watermark);
+        Assert.Equal(itemId, watermark.ParentItemId);
+        Assert.Equal(orderId, watermark.ParentOrderId);
+    }
+
+    [Fact]
+    public async Task Ingestion_RentalItemReturned_DismissesOverdueCtaAndSuppressesPendingJobs_EmitsSignalR()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var returnRequestId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        // 1. Ingest ReturnConfirmationOverdue
+        var overdueMsgId = Guid.NewGuid();
+        var overdueRaw = ProducerFixtures.ReturnConfirmationOverdue(overdueMsgId, orderId, itemId, returnRequestId, renterId, supplierId, orderVersion: 2);
+        var outcome1 = await service.IngestMessageAsync(overdueRaw, "rental.events.v1", 0, 31);
+        Assert.Equal(IngestionOutcome.Processed, outcome1);
+
+        var overdueNotif = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == overdueMsgId && n.RecipientUserId == supplierId);
+        Assert.NotNull(overdueNotif);
+        Assert.True(overdueNotif.IsActionable);
+
+        // Verify pending delivery job was created for supplier overdue email
+        var overdueJob = await db.DeliveryJobs.FirstOrDefaultAsync(j => j.NotificationId == overdueNotif.Id);
+        Assert.NotNull(overdueJob);
+        Assert.Equal("Pending", overdueJob.Status);
+
+        // 2. Ingest RentalItemReturned
+        var returnedMsgId = Guid.NewGuid();
+        var returnedRaw = ProducerFixtures.RentalItemReturned(returnedMsgId, orderId, itemId, renterId, supplierId);
+        var outcome2 = await service.IngestMessageAsync(returnedRaw, "rental.events.v1", 0, 32);
+        Assert.Equal(IngestionOutcome.Processed, outcome2);
+
+        // 3. Verify overdue notification CTA is dismissed
+        var updatedOverdueNotif = await db.Notifications.FirstOrDefaultAsync(n => n.Id == overdueNotif.Id);
+        Assert.NotNull(updatedOverdueNotif);
+        Assert.False(updatedOverdueNotif.IsActionable);
+        Assert.Null(updatedOverdueNotif.ActionUrl);
+
+        // 4. Verify overdue delivery job is suppressed
+        var updatedOverdueJob = await db.DeliveryJobs.FirstOrDefaultAsync(j => j.Id == overdueJob.Id);
+        Assert.NotNull(updatedOverdueJob);
+        Assert.Equal("Suppressed", updatedOverdueJob.Status);
+
+        // 5. Verify item watermark is terminal RETURNED
+        var itemWm = await db.AggregateWatermarks.FirstOrDefaultAsync(w => w.Scope == NotificationWatermarkScope.RentalItem && w.AggregateId == itemId);
+        Assert.NotNull(itemWm);
+        Assert.True(itemWm.IsTerminal);
+        Assert.Equal("RETURNED", itemWm.TerminalState);
+
+        // 6. Verify realtime notifier received UPDATED event for overdue notification
+        realtime.Verify(r => r.NotifyInboxChangedAsync(
+            supplierId,
+            overdueNotif.Id,
+            "UPDATED",
+            It.IsAny<string>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
 }

@@ -68,6 +68,34 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
                 Assert.Contains("ix_delivery_jobs_pending_claim", indexes);
                 Assert.Contains("ix_delivery_jobs_lease_recovery", indexes);
             }
+
+            // Verify new index on notifications.rental_item_id exists
+            await using (var notifIdxCmd = new NpgsqlCommand(
+                "SELECT indexname FROM pg_indexes WHERE schemaname = 'notification' AND tablename = 'notifications';",
+                conn))
+            {
+                var indexes = new List<string>();
+                await using var indexReader = await notifIdxCmd.ExecuteReaderAsync();
+                while (await indexReader.ReadAsync())
+                {
+                    indexes.Add(indexReader.GetString(0));
+                }
+                Assert.Contains("ix_notifications_rental_item", indexes);
+            }
+
+            // Verify new index on aggregate_watermarks.parent_item_id exists
+            await using (var wmIdxCmd = new NpgsqlCommand(
+                "SELECT indexname FROM pg_indexes WHERE schemaname = 'notification' AND tablename = 'aggregate_watermarks';",
+                conn))
+            {
+                var indexes = new List<string>();
+                await using var indexReader = await wmIdxCmd.ExecuteReaderAsync();
+                while (await indexReader.ReadAsync())
+                {
+                    indexes.Add(indexReader.GetString(0));
+                }
+                Assert.Contains("ix_aggregate_watermarks_parent_item", indexes);
+            }
         }
         finally
         {
@@ -188,6 +216,8 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
                 Assert.NotNull(watermark);
                 Assert.Equal("RentalOrder", watermark.Scope); // Backfilled default!
                 Assert.True(watermark.IsPaid); // Backfilled from terminal state PAID / RENTAL_ORDER_PAID!
+                Assert.False(watermark.IsTerminal); // Corrected from PAID terminal state!
+                Assert.Null(watermark.TerminalState);
                 Assert.Equal(3, watermark.LastOrderVersion);
             }
         }
@@ -197,6 +227,172 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
         }
     }
 
+    [Fact]
+    public async Task DatabaseAtF224363_UpgradeMigration_FixesPaidWatermarks_AndBackfillsLinkage()
+    {
+        var dbName = "notif_migr_test_f224363_" + Guid.NewGuid().ToString("N")[..8];
+        await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            // 1. Migrate only up to f224363 (AddNotificationSchemaUpgrades)
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                var migrator = context.GetService<IMigrator>();
+                await migrator.MigrateAsync("20261104042342_AddNotificationSchemaUpgrades");
+            }
+
+            // 2. Insert baseline test rows with raw SQL matching f224363 schema
+            var orderPaidId = Guid.NewGuid();
+            var orderCancelledId = Guid.NewGuid();
+            var orderCompletedId = Guid.NewGuid();
+            var returnRequestId = Guid.NewGuid();
+            var rentalItemId = Guid.NewGuid();
+            var userId = Guid.NewGuid();
+
+            await using (var conn = new NpgsqlConnection(connString))
+            {
+                await conn.OpenAsync();
+
+                // Watermark with terminal_state = 'PAID', is_terminal = true
+                var insertPaidWm = @"
+                    INSERT INTO notification.aggregate_watermarks
+                    (scope, aggregate_id, recipient_user_id, last_order_version, is_terminal, terminal_state, is_paid, updated_at)
+                    VALUES ('RentalOrder', @aggId, @userId, 2, true, 'PAID', false, NOW());";
+                await using (var cmd = new NpgsqlCommand(insertPaidWm, conn))
+                {
+                    cmd.Parameters.AddWithValue("aggId", orderPaidId);
+                    cmd.Parameters.AddWithValue("userId", userId);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // Watermark with terminal_state = 'CANCELLED', is_terminal = true
+                var insertCancelledWm = @"
+                    INSERT INTO notification.aggregate_watermarks
+                    (scope, aggregate_id, recipient_user_id, last_order_version, is_terminal, terminal_state, is_paid, updated_at)
+                    VALUES ('RentalOrder', @aggId, @userId, 3, true, 'CANCELLED', false, NOW());";
+                await using (var cmd = new NpgsqlCommand(insertCancelledWm, conn))
+                {
+                    cmd.Parameters.AddWithValue("aggId", orderCancelledId);
+                    cmd.Parameters.AddWithValue("userId", userId);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // Watermark with terminal_state = 'COMPLETED', is_terminal = true
+                var insertCompletedWm = @"
+                    INSERT INTO notification.aggregate_watermarks
+                    (scope, aggregate_id, recipient_user_id, last_order_version, is_terminal, terminal_state, is_paid, updated_at)
+                    VALUES ('RentalOrder', @aggId, @userId, 4, true, 'COMPLETED', true, NOW());";
+                await using (var cmd = new NpgsqlCommand(insertCompletedWm, conn))
+                {
+                    cmd.Parameters.AddWithValue("aggId", orderCompletedId);
+                    cmd.Parameters.AddWithValue("userId", userId);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // ReturnRequest watermark without parent_item_id
+                var insertReturnWm = @"
+                    INSERT INTO notification.aggregate_watermarks
+                    (scope, aggregate_id, recipient_user_id, parent_order_id, last_order_version, is_terminal, terminal_state, is_paid, updated_at)
+                    VALUES ('ReturnRequest', @aggId, @userId, @orderId, 1, false, NULL, false, NOW());";
+                await using (var cmd = new NpgsqlCommand(insertReturnWm, conn))
+                {
+                    cmd.Parameters.AddWithValue("aggId", returnRequestId);
+                    cmd.Parameters.AddWithValue("userId", userId);
+                    cmd.Parameters.AddWithValue("orderId", orderPaidId);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // Notification with ORDER_PAID
+                var notifPaidId = Guid.NewGuid();
+                var insertNotifPaid = @"
+                    INSERT INTO notification.notifications
+                    (id, recipient_user_id, order_id, notification_type, category, severity, title, body,
+                     resource_type, resource_id, source_event_id, source_producer, source_event_type, event_version,
+                     template_code, template_version, occurred_at, created_at)
+                    VALUES (@id, @userId, @orderId, 'ORDER_PAID', 'Order', 'Info', 'Paid', 'Order paid',
+                            'RentalOrder', @orderIdStr, @sourceId, 'RentalService', 'RentalOrderPaid', 2,
+                            'RENTAL_ORDER_PAID', '1.0', NOW(), NOW());";
+                await using (var cmd = new NpgsqlCommand(insertNotifPaid, conn))
+                {
+                    cmd.Parameters.AddWithValue("id", notifPaidId);
+                    cmd.Parameters.AddWithValue("userId", userId);
+                    cmd.Parameters.AddWithValue("orderId", orderPaidId);
+                    cmd.Parameters.AddWithValue("orderIdStr", orderPaidId.ToString());
+                    cmd.Parameters.AddWithValue("sourceId", Guid.NewGuid());
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // Notification with ReturnRequest and render_data_json containing rentalItemId
+                var notifReturnId = Guid.NewGuid();
+                var insertNotifReturn = @"
+                    INSERT INTO notification.notifications
+                    (id, recipient_user_id, order_id, notification_type, category, severity, title, body,
+                     resource_type, resource_id, source_event_id, source_producer, source_event_type, event_version,
+                     template_code, template_version, render_data_json, is_actionable, occurred_at, created_at)
+                    VALUES (@id, @userId, @orderId, 'RETURN_CONFIRMATION_OVERDUE_SUPPLIER', 'RETURN', 'ACTION_REQUIRED', 'Overdue', 'Return overdue',
+                            'ReturnRequest', @resId, @sourceId, 'RentalService', 'ReturnConfirmationOverdue', 2,
+                            'RETURN_CONFIRMATION_OVERDUE_SUPPLIER', '1.0', @renderData, true, NOW(), NOW());";
+                await using (var cmd = new NpgsqlCommand(insertNotifReturn, conn))
+                {
+                    cmd.Parameters.AddWithValue("id", notifReturnId);
+                    cmd.Parameters.AddWithValue("userId", userId);
+                    cmd.Parameters.AddWithValue("orderId", orderPaidId);
+                    cmd.Parameters.AddWithValue("resId", returnRequestId.ToString());
+                    cmd.Parameters.AddWithValue("sourceId", Guid.NewGuid());
+                    cmd.Parameters.AddWithValue("renderData", $"{{\"rentalOrderId\":\"{orderPaidId}\",\"rentalItemId\":\"{rentalItemId}\",\"returnRequestId\":\"{returnRequestId}\"}}");
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+
+            // 3. Migrate to latest (AddLinkageAndCorrectPaidMilestones)
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                await context.Database.MigrateAsync();
+            }
+
+            // 4. Verify post-upgrade state
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                // PAID watermark fixed
+                var paidWm = await context.AggregateWatermarks.FirstOrDefaultAsync(w => w.Scope == "RentalOrder" && w.AggregateId == orderPaidId && w.RecipientUserId == userId);
+                Assert.NotNull(paidWm);
+                Assert.True(paidWm.IsPaid, "PAID watermark must have is_paid = true");
+                Assert.False(paidWm.IsTerminal, "PAID watermark must NOT be terminal");
+                Assert.Null(paidWm.TerminalState);
+
+                // CANCELLED watermark preserved
+                var cancelWm = await context.AggregateWatermarks.FirstOrDefaultAsync(w => w.Scope == "RentalOrder" && w.AggregateId == orderCancelledId && w.RecipientUserId == userId);
+                Assert.NotNull(cancelWm);
+                Assert.True(cancelWm.IsTerminal, "CANCELLED order must remain terminal");
+                Assert.Equal("CANCELLED", cancelWm.TerminalState);
+
+                // COMPLETED watermark preserved
+                var compWm = await context.AggregateWatermarks.FirstOrDefaultAsync(w => w.Scope == "RentalOrder" && w.AggregateId == orderCompletedId && w.RecipientUserId == userId);
+                Assert.NotNull(compWm);
+                Assert.True(compWm.IsTerminal, "COMPLETED order must remain terminal");
+                Assert.Equal("COMPLETED", compWm.TerminalState);
+
+                // ReturnRequest watermark backfilled with parent_item_id
+                var returnWm = await context.AggregateWatermarks.FirstOrDefaultAsync(w => w.Scope == "ReturnRequest" && w.AggregateId == returnRequestId && w.RecipientUserId == userId);
+                Assert.NotNull(returnWm);
+                Assert.Equal(rentalItemId, returnWm.ParentItemId);
+
+                // Notification backfilled with rental_item_id
+                var returnNotif = await context.Notifications.FirstOrDefaultAsync(n => n.ResourceType == "ReturnRequest" && n.ResourceId == returnRequestId.ToString());
+                Assert.NotNull(returnNotif);
+                Assert.Equal(rentalItemId, returnNotif.RentalItemId);
+            }
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
+    }
     [Fact]
     public async Task PostgreSql_DeliveryJobRepository_ClaimPendingJobs_WithSkipLocked_ClaimsExclusively()
     {

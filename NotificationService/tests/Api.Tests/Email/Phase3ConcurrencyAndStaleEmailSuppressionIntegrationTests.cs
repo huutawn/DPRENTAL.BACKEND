@@ -2,6 +2,8 @@ using Dprental.NotificationService.Api.Tests.Fixtures;
 using Dprental.NotificationService.Application.Clients;
 using Dprental.NotificationService.Application.Email;
 using Dprental.NotificationService.Application.Email.Services;
+using Dprental.NotificationService.Application.Policies;
+using Dprental.NotificationService.Application.Reconciliation;
 using Dprental.NotificationService.Application.Templates;
 using Dprental.NotificationService.Domain.Entities;
 using Dprental.NotificationService.Domain.Repositories;
@@ -762,6 +764,589 @@ public sealed class Phase3ConcurrencyAndStaleEmailSuppressionIntegrationTests
             Assert.NotNull(updatedJobB2);
             Assert.Equal("Suppressed", updatedJobB2.Status);
             Assert.Equal("STALE_ACTION_SUPPRESSED", updatedJobB2.LastErrorCode);
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
+    }
+
+    [Fact]
+    public async Task OverduePending_ItemReturned_OverdueCtaDismissed_DeliveryJobSuppressed_NoSmtpCall()
+    {
+        var dbName = "notif_p3_overdue_ret_" + Guid.NewGuid().ToString("N")[..8];
+        await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            await using var context = new NotificationServiceDbContext(options);
+            await context.Database.MigrateAsync();
+
+            var orderId = Guid.NewGuid();
+            var itemId = Guid.NewGuid();
+            var returnRequestId = Guid.NewGuid();
+            var supplierId = Guid.NewGuid();
+            var notifId = Guid.NewGuid();
+            var jobId = Guid.NewGuid();
+
+            var notif = new Notification
+            {
+                Id = notifId,
+                OrderId = orderId,
+                RentalItemId = itemId,
+                RecipientUserId = supplierId,
+                NotificationType = "RETURN_CONFIRMATION_OVERDUE_SUPPLIER",
+                Category = "RETURN",
+                Severity = "ACTION_REQUIRED",
+                Title = "Return Confirmation Overdue",
+                Body = "Please confirm return",
+                ResourceType = "ReturnRequest",
+                ResourceId = returnRequestId.ToString(),
+                SourceEventId = Guid.NewGuid(),
+                SourceProducer = "RentalService",
+                SourceEventType = "ReturnConfirmationOverdue",
+                EventVersion = 2,
+                TemplateCode = "RETURN_CONFIRMATION_OVERDUE_SUPPLIER",
+                TemplateVersion = "1.0",
+                RenderDataJson = $"{{\"displayOrderCode\":\"RNT-P3-01\",\"confirmationDeadlineAt\":\"2026-11-04T12:00:00Z\",\"rentalItemId\":\"{itemId}\",\"returnRequestId\":\"{returnRequestId}\"}}",
+                IsActionable = true,
+                ActionUrl = $"/supplier/returns/{returnRequestId}",
+                OccurredAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            await context.Notifications.AddAsync(notif);
+
+            var job = new NotificationDeliveryJob
+            {
+                Id = jobId,
+                NotificationId = notifId,
+                Channel = "EMAIL",
+                RecipientUserId = supplierId,
+                Status = "Pending",
+                MaxAttempts = 5,
+                AttemptCount = 0,
+                NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            await context.DeliveryJobs.AddAsync(job);
+            await context.SaveChangesAsync();
+
+            var deliveryRepo = new DeliveryJobRepository(context);
+            var notifRepo = new NotificationRepository(context);
+            var prefRepo = new PreferenceRepository(context);
+            var watermarkRepo = new AggregateWatermarkRepository(context);
+            var uow = new UnitOfWork(context);
+
+            // Item returned event occurs:
+            // 1. Watermark updated for RentalItem to RETURNED (terminal)
+            await watermarkRepo.UpsertWatermarksForRecipientsAsync(
+                NotificationWatermarkScope.RentalItem,
+                itemId,
+                new[] { supplierId },
+                orderVersion: 3,
+                messageId: "msg-item-returned-3",
+                isTerminal: true,
+                terminalState: "RETURNED");
+
+            // 2. Dismiss return-overdue CTA for this item
+            var dismissed = await notifRepo.DismissReturnOverdueActionsForRentalItemAsync(itemId);
+            Assert.Single(dismissed);
+
+            // 3. Suppress pending delivery jobs for this item
+            var suppressedCount = await deliveryRepo.SuppressPendingAndUndispatchedJobsForRentalItemAsync(itemId, "Thiết bị đã được xác nhận trả.");
+            Assert.Equal(1, suppressedCount);
+            await context.SaveChangesAsync();
+
+            // Verify notification CTA is dismissed
+            var updatedNotif = await context.Notifications.AsNoTracking().FirstOrDefaultAsync(n => n.Id == notifId);
+            Assert.NotNull(updatedNotif);
+            Assert.False(updatedNotif.IsActionable);
+            Assert.Null(updatedNotif.ActionUrl);
+
+            // Verify delivery job is suppressed
+            var updatedJob = await context.DeliveryJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobId);
+            Assert.NotNull(updatedJob);
+            Assert.Equal("Suppressed", updatedJob.Status);
+            Assert.Equal("STALE_EVENT_TERMINATED", updatedJob.LastErrorCode);
+
+            // Worker runs: no jobs to claim and no SMTP calls made
+            var authClientMock = new Mock<IAuthContactClient>();
+            authClientMock.Setup(c => c.GetUserContactsBatchAsync(It.IsAny<IReadOnlyList<Guid>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Result.Success<IReadOnlyList<AuthContactDto>>(new[]
+                {
+                    new AuthContactDto(supplierId, "supplier@example.com", IsActive: true, IsEmailVerified: true)
+                }));
+
+            var emailSenderMock = new Mock<IEmailSender>();
+            var deliveryService = new EmailDeliveryService(
+                deliveryRepo,
+                prefRepo,
+                authClientMock.Object,
+                new NotificationTemplateRenderer(),
+                emailSenderMock.Object,
+                watermarkRepo,
+                uow,
+                NullLogger<EmailDeliveryService>.Instance);
+
+            var delivered = await deliveryService.DeliverPendingJobsAsync("worker-p3-test", CancellationToken.None);
+            Assert.Equal(0, delivered);
+            emailSenderMock.Verify(s => s.SendEmailAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
+    }
+
+    [Fact]
+    public async Task ItemReturnedFirst_OverdueArrivesLate_SuppressedImmediately()
+    {
+        var dbName = "notif_p3_late_overdue_" + Guid.NewGuid().ToString("N")[..8];
+        await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            await using var context = new NotificationServiceDbContext(options);
+            await context.Database.MigrateAsync();
+
+            var orderId = Guid.NewGuid();
+            var itemId = Guid.NewGuid();
+            var returnRequestId = Guid.NewGuid();
+            var supplierId = Guid.NewGuid();
+
+            var deliveryRepo = new DeliveryJobRepository(context);
+            var prefRepo = new PreferenceRepository(context);
+            var watermarkRepo = new AggregateWatermarkRepository(context);
+            var uow = new UnitOfWork(context);
+
+            // 1. Item is returned FIRST: Watermark is terminal (RETURNED)
+            await watermarkRepo.UpsertWatermarksForRecipientsAsync(
+                NotificationWatermarkScope.RentalItem,
+                itemId,
+                new[] { supplierId },
+                orderVersion: 5,
+                messageId: "msg-returned-first-5",
+                isTerminal: true,
+                terminalState: "RETURNED");
+            await context.SaveChangesAsync();
+
+            // 2. Late overdue event arrives: Evaluate staleness with parent item state
+            var itemState = await watermarkRepo.GetAggregateStateAsync(NotificationWatermarkScope.RentalItem, itemId);
+            Assert.NotNull(itemState);
+            Assert.True(itemState.IsTerminal);
+
+            var staleEval = StaleActionSuppressionPolicy.EvaluateWithParentState(
+                "RETURN_CONFIRMATION_OVERDUE_SUPPLIER",
+                incomingOrderVersion: 3,
+                currentAggregateState: null,
+                parentItemAggregateState: itemState,
+                parentOrderAggregateState: null);
+
+            Assert.True(staleEval.IsStale, "Must be considered stale because parent item is returned");
+            Assert.True(staleEval.SuppressAction, "Action must be suppressed");
+            Assert.True(staleEval.SuppressEmail, "Email must be suppressed");
+
+            // 3. Save notification with IsActionable = false and job as Suppressed
+            var notifId = Guid.NewGuid();
+            var jobId = Guid.NewGuid();
+            var notif = new Notification
+            {
+                Id = notifId,
+                OrderId = orderId,
+                RentalItemId = itemId,
+                RecipientUserId = supplierId,
+                NotificationType = "RETURN_CONFIRMATION_OVERDUE_SUPPLIER",
+                Category = "RETURN",
+                Severity = "ACTION_REQUIRED",
+                Title = "Late Overdue Notice",
+                Body = "Confirm return",
+                ResourceType = "ReturnRequest",
+                ResourceId = returnRequestId.ToString(),
+                SourceEventId = Guid.NewGuid(),
+                SourceProducer = "RentalService",
+                SourceEventType = "ReturnConfirmationOverdue",
+                EventVersion = 3,
+                TemplateCode = "RETURN_CONFIRMATION_OVERDUE_SUPPLIER",
+                TemplateVersion = "1.0",
+                RenderDataJson = $"{{\"displayOrderCode\":\"RNT-P3-02\",\"rentalItemId\":\"{itemId}\"}}",
+                IsActionable = false, // Suppressed at ingestion
+                OccurredAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            // If job were created as Pending (e.g. race condition), worker delivery checks parent item state
+            var job = new NotificationDeliveryJob
+            {
+                Id = jobId,
+                NotificationId = notifId,
+                Channel = "EMAIL",
+                RecipientUserId = supplierId,
+                Status = "Pending",
+                MaxAttempts = 5,
+                AttemptCount = 0,
+                NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            await context.Notifications.AddAsync(notif);
+            await context.DeliveryJobs.AddAsync(job);
+            await context.SaveChangesAsync();
+
+            // Worker runs: deliveryService checks parent item state via RentalItemId and suppresses the job
+            var authClientMock = new Mock<IAuthContactClient>();
+            authClientMock.Setup(c => c.GetUserContactsBatchAsync(It.IsAny<IReadOnlyList<Guid>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Result.Success<IReadOnlyList<AuthContactDto>>(new[]
+                {
+                    new AuthContactDto(supplierId, "supplier@example.com", IsActive: true, IsEmailVerified: true)
+                }));
+
+            var emailSenderMock = new Mock<IEmailSender>();
+            var deliveryService = new EmailDeliveryService(
+                deliveryRepo,
+                prefRepo,
+                authClientMock.Object,
+                new NotificationTemplateRenderer(),
+                emailSenderMock.Object,
+                watermarkRepo,
+                uow,
+                NullLogger<EmailDeliveryService>.Instance);
+
+            var delivered = await deliveryService.DeliverPendingJobsAsync("worker-p3-late-test", CancellationToken.None);
+            Assert.Equal(1, delivered);
+
+            var updatedJob = await context.DeliveryJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobId);
+            Assert.NotNull(updatedJob);
+            Assert.Equal("Suppressed", updatedJob.Status);
+            Assert.Equal("STALE_ACTION_SUPPRESSED", updatedJob.LastErrorCode);
+            emailSenderMock.Verify(s => s.SendEmailAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
+    }
+
+    [Fact]
+    public async Task ItemAReturned_DoesNotAffectOverdueOfItemB()
+    {
+        var dbName = "notif_p3_two_items_" + Guid.NewGuid().ToString("N")[..8];
+        await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            await using var context = new NotificationServiceDbContext(options);
+            await context.Database.MigrateAsync();
+
+            var orderId = Guid.NewGuid();
+            var itemAId = Guid.NewGuid();
+            var itemBId = Guid.NewGuid();
+            var returnReqAId = Guid.NewGuid();
+            var returnReqBId = Guid.NewGuid();
+            var supplierAId = Guid.NewGuid();
+            var supplierBId = Guid.NewGuid();
+
+            // Both Item A and Item B have overdue notifications with pending delivery jobs
+            var notifAId = Guid.NewGuid();
+            var jobAId = Guid.NewGuid();
+            var notifA = new Notification
+            {
+                Id = notifAId,
+                OrderId = orderId,
+                RentalItemId = itemAId,
+                RecipientUserId = supplierAId,
+                NotificationType = "RETURN_CONFIRMATION_OVERDUE_SUPPLIER",
+                Category = "RETURN",
+                Severity = "ACTION_REQUIRED",
+                Title = "Overdue Item A",
+                Body = "Confirm return A",
+                ResourceType = "ReturnRequest",
+                ResourceId = returnReqAId.ToString(),
+                SourceEventId = Guid.NewGuid(),
+                SourceProducer = "RentalService",
+                SourceEventType = "ReturnConfirmationOverdue",
+                EventVersion = 2,
+                TemplateCode = "RETURN_CONFIRMATION_OVERDUE_SUPPLIER",
+                TemplateVersion = "1.0",
+                RenderDataJson = $"{{\"displayOrderCode\":\"RNT-P3-A\",\"confirmationDeadlineAt\":\"2026-11-04T12:00:00Z\",\"rentalItemId\":\"{itemAId}\"}}",
+                IsActionable = true,
+                ActionUrl = $"/supplier/returns/{returnReqAId}",
+                OccurredAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            var jobA = new NotificationDeliveryJob
+            {
+                Id = jobAId,
+                NotificationId = notifAId,
+                Channel = "EMAIL",
+                RecipientUserId = supplierAId,
+                Status = "Pending",
+                MaxAttempts = 5,
+                AttemptCount = 0,
+                NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+
+            var notifBId = Guid.NewGuid();
+            var jobBId = Guid.NewGuid();
+            var notifB = new Notification
+            {
+                Id = notifBId,
+                OrderId = orderId,
+                RentalItemId = itemBId,
+                RecipientUserId = supplierBId,
+                NotificationType = "RETURN_CONFIRMATION_OVERDUE_SUPPLIER",
+                Category = "RETURN",
+                Severity = "ACTION_REQUIRED",
+                Title = "Overdue Item B",
+                Body = "Confirm return B",
+                ResourceType = "ReturnRequest",
+                ResourceId = returnReqBId.ToString(),
+                SourceEventId = Guid.NewGuid(),
+                SourceProducer = "RentalService",
+                SourceEventType = "ReturnConfirmationOverdue",
+                EventVersion = 2,
+                TemplateCode = "RETURN_CONFIRMATION_OVERDUE_SUPPLIER",
+                TemplateVersion = "1.0",
+                RenderDataJson = $"{{\"displayOrderCode\":\"RNT-P3-B\",\"confirmationDeadlineAt\":\"2026-11-04T12:00:00Z\",\"rentalItemId\":\"{itemBId}\"}}",
+                IsActionable = true,
+                ActionUrl = $"/supplier/returns/{returnReqBId}",
+                OccurredAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            var jobB = new NotificationDeliveryJob
+            {
+                Id = jobBId,
+                NotificationId = notifBId,
+                Channel = "EMAIL",
+                RecipientUserId = supplierBId,
+                Status = "Pending",
+                MaxAttempts = 5,
+                AttemptCount = 0,
+                NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+
+            await context.Notifications.AddRangeAsync(notifA, notifB);
+            await context.DeliveryJobs.AddRangeAsync(jobA, jobB);
+            await context.SaveChangesAsync();
+
+            var deliveryRepo = new DeliveryJobRepository(context);
+            var notifRepo = new NotificationRepository(context);
+            var prefRepo = new PreferenceRepository(context);
+            var watermarkRepo = new AggregateWatermarkRepository(context);
+            var uow = new UnitOfWork(context);
+
+            // Now Item A is returned:
+            await watermarkRepo.UpsertWatermarksForRecipientsAsync(
+                NotificationWatermarkScope.RentalItem,
+                itemAId,
+                new[] { supplierAId },
+                orderVersion: 3,
+                messageId: "msg-itemA-returned-3",
+                isTerminal: true,
+                terminalState: "RETURNED");
+            await notifRepo.DismissReturnOverdueActionsForRentalItemAsync(itemAId);
+            await deliveryRepo.SuppressPendingAndUndispatchedJobsForRentalItemAsync(itemAId, "Thiết bị A đã được trả lại.");
+            await context.SaveChangesAsync();
+
+            // Item A overdue notification CTA dismissed and job suppressed
+            var updatedNotifA = await context.Notifications.AsNoTracking().FirstOrDefaultAsync(n => n.Id == notifAId);
+            Assert.NotNull(updatedNotifA);
+            Assert.False(updatedNotifA.IsActionable);
+
+            var updatedJobA = await context.DeliveryJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobAId);
+            Assert.NotNull(updatedJobA);
+            Assert.Equal("Suppressed", updatedJobA.Status);
+
+            // Item B overdue notification and job remain unaffected!
+            var updatedNotifB = await context.Notifications.AsNoTracking().FirstOrDefaultAsync(n => n.Id == notifBId);
+            Assert.NotNull(updatedNotifB);
+            Assert.True(updatedNotifB.IsActionable);
+
+            var updatedJobB = await context.DeliveryJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobBId);
+            Assert.NotNull(updatedJobB);
+            Assert.Equal("Pending", updatedJobB.Status);
+
+            // Worker runs: delivers Job B successfully, sends exactly 1 email to Supplier B
+            var authClientMock = new Mock<IAuthContactClient>();
+            authClientMock.Setup(c => c.GetUserContactsBatchAsync(It.IsAny<IReadOnlyList<Guid>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Result.Success<IReadOnlyList<AuthContactDto>>(new[]
+                {
+                    new AuthContactDto(supplierAId, "supplierA@example.com", IsActive: true, IsEmailVerified: true),
+                    new AuthContactDto(supplierBId, "supplierB@example.com", IsActive: true, IsEmailVerified: true)
+                }));
+
+            var emailSenderMock = new Mock<IEmailSender>();
+            emailSenderMock.Setup(s => s.SendEmailAsync(jobBId, "supplierB@example.com", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EmailSendResult(EmailSendOutcome.Success, "msg-b-1", null, null));
+
+            var deliveryService = new EmailDeliveryService(
+                deliveryRepo,
+                prefRepo,
+                authClientMock.Object,
+                new NotificationTemplateRenderer(),
+                emailSenderMock.Object,
+                watermarkRepo,
+                uow,
+                NullLogger<EmailDeliveryService>.Instance);
+
+            var delivered = await deliveryService.DeliverPendingJobsAsync("worker-p3-itemb-test", CancellationToken.None);
+            Assert.Equal(1, delivered);
+
+            var finalJobB = await context.DeliveryJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == jobBId);
+            Assert.NotNull(finalJobB);
+            Assert.Equal("Succeeded", finalJobB.Status);
+            emailSenderMock.Verify(s => s.SendEmailAsync(jobBId, "supplierB@example.com", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+            emailSenderMock.Verify(s => s.SendEmailAsync(jobAId, "supplierA@example.com", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
+    }
+
+    [Fact]
+    public async Task JobReconciliationService_DryRunAndRequeue_ReconcilesSuppressedResultNotifications()
+    {
+        var dbName = "notif_p4_reconcile_" + Guid.NewGuid().ToString("N")[..8];
+        await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            await using var context = new NotificationServiceDbContext(options);
+            await context.Database.MigrateAsync();
+
+            var userId = Guid.NewGuid();
+            var orderId = Guid.NewGuid();
+
+            // Helper to create notification and suppressed job
+            async Task<(Guid NotifId, Guid JobId)> CreateSuppressedJobAsync(string notifType, DateTimeOffset? dispatchStartedAt = null)
+            {
+                var nId = Guid.NewGuid();
+                var jId = Guid.NewGuid();
+                var notif = new Notification
+                {
+                    Id = nId,
+                    OrderId = orderId,
+                    RecipientUserId = userId,
+                    NotificationType = notifType,
+                    Category = "ORDER",
+                    Severity = "INFO",
+                    Title = notifType,
+                    Body = notifType,
+                    ResourceType = "RentalOrder",
+                    ResourceId = orderId.ToString(),
+                    SourceEventId = Guid.NewGuid(),
+                    SourceProducer = "RentalService",
+                    SourceEventType = notifType,
+                    EventVersion = 1,
+                    TemplateCode = notifType,
+                    TemplateVersion = "1.0",
+                    OccurredAt = DateTimeOffset.UtcNow,
+                    CreatedAt = DateTimeOffset.UtcNow
+                };
+                var job = new NotificationDeliveryJob
+                {
+                    Id = jId,
+                    NotificationId = nId,
+                    Channel = "EMAIL",
+                    RecipientUserId = userId,
+                    Status = "Suppressed",
+                    LastErrorCode = "STALE_ACTION_SUPPRESSED",
+                    LastErrorDetail = "False suppression",
+                    DispatchStartedAt = dispatchStartedAt,
+                    MaxAttempts = 5,
+                    AttemptCount = 0,
+                    NextAttemptAt = DateTimeOffset.UtcNow,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                };
+                await context.Notifications.AddAsync(notif);
+                await context.DeliveryJobs.AddAsync(job);
+                return (nId, jId);
+            }
+
+            // 4 eligible result notifications:
+            var (_, jobPaidId) = await CreateSuppressedJobAsync("ORDER_PAID");
+            var (_, jobCompletedId) = await CreateSuppressedJobAsync("ORDER_COMPLETED");
+            var (_, jobRefundId) = await CreateSuppressedJobAsync("REFUND_COMPLETED");
+            var (_, jobPayoutId) = await CreateSuppressedJobAsync("PAYOUT_COMPLETED");
+
+            // 2 ineligible jobs:
+            var (_, jobCreatedId) = await CreateSuppressedJobAsync("ORDER_CREATED"); // not a result notification
+            var (_, jobDispatchedId) = await CreateSuppressedJobAsync("ORDER_PAID", dispatchStartedAt: DateTimeOffset.UtcNow); // dispatch started
+
+            await context.SaveChangesAsync();
+
+            var uow = new UnitOfWork(context);
+            var reconciler = new JobReconciliationService(context, uow);
+
+            // 1. Dry run
+            var dryRunReport = await reconciler.ReconcileSuppressedJobsAsync(dryRun: true);
+            Assert.True(dryRunReport.DryRun);
+            Assert.Equal(4, dryRunReport.CandidateCount);
+            Assert.Equal(0, dryRunReport.ReconciledCount);
+            Assert.Contains(jobPaidId, dryRunReport.JobIds);
+            Assert.Contains(jobCompletedId, dryRunReport.JobIds);
+            Assert.Contains(jobRefundId, dryRunReport.JobIds);
+            Assert.Contains(jobPayoutId, dryRunReport.JobIds);
+            Assert.DoesNotContain(jobCreatedId, dryRunReport.JobIds);
+            Assert.DoesNotContain(jobDispatchedId, dryRunReport.JobIds);
+
+            // Verify DB unchanged after dry run
+            var dbJobPaid = await context.DeliveryJobs.AsNoTracking().FirstAsync(j => j.Id == jobPaidId);
+            Assert.Equal("Suppressed", dbJobPaid.Status);
+
+            // 2. Requeue execution
+            var requeueReport = await reconciler.ReconcileSuppressedJobsAsync(dryRun: false);
+            Assert.False(requeueReport.DryRun);
+            Assert.Equal(4, requeueReport.CandidateCount);
+            Assert.Equal(4, requeueReport.ReconciledCount);
+
+            // Verify eligible jobs reset to Pending with audit message
+            var eligibleIds = new[] { jobPaidId, jobCompletedId, jobRefundId, jobPayoutId };
+            var reconciledJobs = await context.DeliveryJobs.AsNoTracking().Where(j => eligibleIds.Contains(j.Id)).ToListAsync();
+            Assert.Equal(4, reconciledJobs.Count);
+            foreach (var rJob in reconciledJobs)
+            {
+                Assert.Equal("Pending", rJob.Status);
+                Assert.Null(rJob.LastErrorCode);
+                Assert.NotNull(rJob.LastErrorDetail);
+                Assert.Contains("Reconciled from STALE_ACTION_SUPPRESSED", rJob.LastErrorDetail);
+                Assert.Null(rJob.LeaseToken);
+                Assert.Null(rJob.LeaseExpiresAt);
+            }
+
+            // Verify ineligible jobs remain Suppressed
+            var dbJobCreated = await context.DeliveryJobs.AsNoTracking().FirstAsync(j => j.Id == jobCreatedId);
+            Assert.Equal("Suppressed", dbJobCreated.Status);
+
+            var dbJobDispatched = await context.DeliveryJobs.AsNoTracking().FirstAsync(j => j.Id == jobDispatchedId);
+            Assert.Equal("Suppressed", dbJobDispatched.Status);
+
+            // 3. Idempotency: second run finds 0 candidates
+            var secondRunReport = await reconciler.ReconcileSuppressedJobsAsync(dryRun: false);
+            Assert.Equal(0, secondRunReport.CandidateCount);
+            Assert.Equal(0, secondRunReport.ReconciledCount);
         }
         finally
         {

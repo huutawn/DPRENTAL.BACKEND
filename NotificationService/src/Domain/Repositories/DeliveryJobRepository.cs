@@ -373,4 +373,56 @@ WHERE id IN (
             return jobs.Count;
         }
     }
+
+    public async Task<int> SuppressPendingAndUndispatchedJobsForRentalItemAsync(Guid rentalItemId, string reason, CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var itemIdStr = rentalItemId.ToString();
+        var notifIds = await _dbContext.Notifications
+            .Where(n => (n.RentalItemId == rentalItemId || (n.ResourceType == "RentalItem" && n.ResourceId == itemIdStr))
+                && (n.NotificationType == "RETURN_CONFIRMATION_OVERDUE_SUPPLIER" || n.IsActionable))
+            .Select(n => n.Id)
+            .ToListAsync(cancellationToken);
+
+        if (notifIds.Count == 0) return 0;
+
+        if (_dbContext.Database.IsNpgsql())
+        {
+            return await _dbContext.DeliveryJobs
+                .Where(j => notifIds.Contains(j.NotificationId)
+                    && (j.Status == "Pending" || j.Status == "RetryScheduled" || (j.Status == "Processing" && j.DispatchStartedAt == null)))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.Status, "Suppressed")
+                    .SetProperty(j => j.LastErrorCode, "STALE_EVENT_TERMINATED")
+                    .SetProperty(j => j.LastErrorDetail, reason)
+                    .SetProperty(j => j.LeaseToken, (string?)null)
+                    .SetProperty(j => j.LeaseExpiresAt, (DateTimeOffset?)null)
+                    .SetProperty(j => j.UpdatedAt, now),
+                    cancellationToken);
+        }
+        else
+        {
+            var jobs = await _dbContext.DeliveryJobs
+                .Where(j => notifIds.Contains(j.NotificationId)
+                    && (j.Status == "Pending" || j.Status == "RetryScheduled" || (j.Status == "Processing" && j.DispatchStartedAt == null)))
+                .ToListAsync(cancellationToken);
+
+            foreach (var job in jobs)
+            {
+                job.Status = "Suppressed";
+                job.LastErrorCode = "STALE_EVENT_TERMINATED";
+                job.LastErrorDetail = reason;
+                job.LeaseToken = null;
+                job.LeaseExpiresAt = null;
+                job.UpdatedAt = now;
+            }
+
+            if (jobs.Count > 0)
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+
+            return jobs.Count;
+        }
+    }
 }

@@ -36,5 +36,6 @@ public interface IAggregateWatermarkRepository
         string? terminalState,
         bool isPaid = false,
         Guid? parentOrderId = null,
+        Guid? parentItemId = null,
         CancellationToken cancellationToken = default);
 }

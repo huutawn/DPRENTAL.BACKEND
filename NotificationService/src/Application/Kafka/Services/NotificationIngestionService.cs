@@ -216,6 +216,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
 
             AggregateStateProjection? currentAggregateState = null;
             AggregateStateProjection? parentOrderAggregateState = null;
+            AggregateStateProjection? parentItemAggregateState = null;
 
             if (intent.WatermarkScope != null && intent.WatermarkId.HasValue)
             {
@@ -230,6 +231,24 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                         NotificationWatermarkScope.RentalOrder,
                         intent.OrderId.Value,
                         cancellationToken);
+                }
+
+                if (intent.WatermarkScope == NotificationWatermarkScope.ReturnRequest)
+                {
+                    var parentItemId = intent.RentalItemId;
+                    if (!parentItemId.HasValue)
+                    {
+                        var existingWm = await _watermarkRepo.GetWatermarksForAggregateAsync(NotificationWatermarkScope.ReturnRequest, intent.WatermarkId.Value, cancellationToken);
+                        parentItemId = existingWm.FirstOrDefault(w => w.ParentItemId.HasValue)?.ParentItemId;
+                    }
+
+                    if (parentItemId.HasValue && parentItemId.Value != Guid.Empty)
+                    {
+                        parentItemAggregateState = await _watermarkRepo.GetAggregateStateAsync(
+                            NotificationWatermarkScope.RentalItem,
+                            parentItemId.Value,
+                            cancellationToken);
+                    }
                 }
             }
 
@@ -268,15 +287,12 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                     }
                 }
 
-                StaleEvaluationResult staleEval;
-                if (parentOrderAggregateState?.IsTerminal == true)
-                {
-                    staleEval = StaleActionSuppressionPolicy.Evaluate(recipient.NotificationType, intent.OrderVersion, parentOrderAggregateState);
-                }
-                else
-                {
-                    staleEval = StaleActionSuppressionPolicy.Evaluate(recipient.NotificationType, intent.OrderVersion, currentAggregateState);
-                }
+                var staleEval = StaleActionSuppressionPolicy.EvaluateWithParentState(
+                    recipient.NotificationType,
+                    intent.OrderVersion,
+                    currentAggregateState,
+                    parentItemAggregateState,
+                    parentOrderAggregateState);
                 var renderResult = _templateRenderer.Render(
                     recipient.NotificationType,
                     intent.RenderData,
@@ -300,6 +316,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                     Id = Guid.NewGuid(),
                     RecipientUserId = recipient.RecipientUserId,
                     OrderId = intent.OrderId,
+                    RentalItemId = intent.RentalItemId,
                     NotificationType = recipient.NotificationType,
                     Category = recipient.Category,
                     Severity = recipient.Severity,
@@ -386,6 +403,14 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                     var suppressed = await _notificationRepo.SuppressPendingActionsForResourceAsync("RentalItem", intent.ResourceId, cancellationToken);
                     suppressedCtaNotifications.AddRange(suppressed);
                     await _deliveryJobRepo.SuppressPendingAndUndispatchedJobsForResourceAsync("RentalItem", intent.ResourceId, terminalReason, cancellationToken);
+
+                    var itemGuid = intent.RentalItemId ?? (Guid.TryParse(intent.ResourceId, out var parsedId) ? parsedId : (Guid?)null);
+                    if (itemGuid.HasValue)
+                    {
+                        var overdueSuppressed = await _notificationRepo.DismissReturnOverdueActionsForRentalItemAsync(itemGuid.Value, cancellationToken);
+                        suppressedCtaNotifications.AddRange(overdueSuppressed);
+                        await _deliveryJobRepo.SuppressPendingAndUndispatchedJobsForRentalItemAsync(itemGuid.Value, terminalReason, cancellationToken);
+                    }
                 }
             }
 
@@ -403,6 +428,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                     intent.TerminalState,
                     isPaid: isPaidEvent,
                     parentOrderId: intent.OrderId,
+                    parentItemId: intent.RentalItemId,
                     cancellationToken: cancellationToken);
 
                 if (intent.IsTerminal)
@@ -421,6 +447,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                             terminalState: intent.TerminalState,
                             isPaid: false,
                             parentOrderId: intent.OrderId,
+                            parentItemId: intent.RentalItemId,
                             cancellationToken: cancellationToken);
                     }
                 }

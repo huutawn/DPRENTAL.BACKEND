@@ -291,6 +291,35 @@ public sealed class EmailDeliveryService : IEmailDeliveryService
                             }
                         }
                     }
+
+                    if (!isStale && (string.Equals(notification.ResourceType, "ReturnRequest", StringComparison.OrdinalIgnoreCase) || notification.NotificationType == "RETURN_CONFIRMATION_OVERDUE_SUPPLIER"))
+                    {
+                        var parentItemId = notification.RentalItemId;
+                        if (!parentItemId.HasValue && Guid.TryParse(notification.ResourceId, out var returnReqId))
+                        {
+                            var wmList = await _watermarkRepo.GetWatermarksForAggregateAsync(NotificationWatermarkScope.ReturnRequest, returnReqId, cancellationToken);
+                            parentItemId = wmList.FirstOrDefault(w => w.ParentItemId.HasValue)?.ParentItemId;
+                        }
+
+                        if (parentItemId.HasValue && parentItemId.Value != Guid.Empty)
+                        {
+                            var itemAggregateState = await _watermarkRepo.GetAggregateStateAsync(
+                                NotificationWatermarkScope.RentalItem,
+                                parentItemId.Value,
+                                cancellationToken);
+
+                            var itemEval = StaleActionSuppressionPolicy.Evaluate(
+                                notification.NotificationType,
+                                notification.EventVersion,
+                                itemAggregateState);
+
+                            if (itemEval.SuppressEmail)
+                            {
+                                isStale = true;
+                                staleReason = itemEval.Reason;
+                            }
+                        }
+                    }
                 }
                 if (isStale)
                 {

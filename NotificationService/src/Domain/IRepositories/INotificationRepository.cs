@@ -13,4 +13,7 @@ public interface INotificationRepository
     Task AddRangeAsync(IEnumerable<Notification> notifications, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Notification>> SuppressPendingActionsForResourceAsync(string resourceType, string resourceId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Notification>> SuppressPendingActionsForOrderAsync(Guid orderId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Notification>> GetByRentalItemIdAsync(Guid rentalItemId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Notification>> DismissReturnOverdueActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Notification>> SuppressPendingActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default);
 }
