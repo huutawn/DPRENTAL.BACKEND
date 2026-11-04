@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Dprental.NotificationService.Application.Clients;
 using Dprental.NotificationService.Application.Email;
 using Dprental.NotificationService.Application.Email.Services;
@@ -1006,5 +1007,459 @@ public sealed class EmailDeliveryWorkerTests
         await worker.StopAsync(CancellationToken.None);
 
         serviceMock.Verify(s => s.DeliverPendingJobsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task EmailDeliveryService_OrderCompleted_IsNotSuppressedWhenOrderWatermarkIsCompleted()
+    {
+        using var db = CreateInMemoryDbContext();
+        var deliveryRepo = new DeliveryJobRepository(db);
+        var prefRepo = new PreferenceRepository(db);
+        var watermarkRepo = new AggregateWatermarkRepository(db);
+        var uow = new UnitOfWork(db);
+
+        var recipientId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+
+        await db.Notifications.AddAsync(new Notification
+        {
+            Id = notificationId,
+            RecipientUserId = recipientId,
+            OrderId = orderId,
+            NotificationType = "ORDER_COMPLETED",
+            Category = "ORDER",
+            Severity = "SUCCESS",
+            Title = "Order Completed",
+            Body = "Order completed",
+            ResourceType = "RentalOrder",
+            ResourceId = orderId.ToString(),
+            EventVersion = 5,
+            RenderDataJson = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["displayOrderCode"] = "ORD-COMPLETED-01",
+                ["completedAt"] = DateTimeOffset.UtcNow
+            }),
+            TemplateCode = "ORDER_COMPLETED",
+            TemplateVersion = "1.0",
+            OccurredAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        var job = new NotificationDeliveryJob
+        {
+            Id = Guid.NewGuid(),
+            NotificationId = notificationId,
+            Channel = "EMAIL",
+            RecipientUserId = recipientId,
+            Status = "Pending",
+            NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await db.DeliveryJobs.AddAsync(job);
+
+        await db.AggregateWatermarks.AddAsync(new NotificationAggregateWatermark
+        {
+            Scope = NotificationWatermarkScope.RentalOrder,
+            AggregateId = orderId,
+            RecipientUserId = recipientId,
+            LastOrderVersion = 5,
+            IsTerminal = true,
+            TerminalState = "COMPLETED",
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+
+        var authClientMock = new Mock<IAuthContactClient>();
+        authClientMock.Setup(c => c.GetUserContactsBatchAsync(It.IsAny<IReadOnlyList<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success<IReadOnlyList<AuthContactDto>>(new[]
+            {
+                new AuthContactDto(recipientId, "renter@example.com", IsActive: true, IsEmailVerified: true)
+            }));
+
+        var emailSenderMock = new Mock<IEmailSender>();
+        emailSenderMock.Setup(s => s.SendEmailAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EmailSendResult(Outcome: EmailSendOutcome.Success, ProviderMessageId: "prov-123", ErrorCode: null, ErrorDetail: null));
+
+        var service = new EmailDeliveryService(
+            deliveryRepo,
+            prefRepo,
+            authClientMock.Object,
+            new NotificationTemplateRenderer(),
+            emailSenderMock.Object,
+            watermarkRepo,
+            uow,
+            NullLogger<EmailDeliveryService>.Instance);
+
+        var processed = await service.DeliverPendingJobsAsync("worker-1", CancellationToken.None);
+        Assert.Equal(1, processed);
+
+        var updatedJob = await db.DeliveryJobs.FindAsync(job.Id);
+        Assert.NotNull(updatedJob);
+        Assert.Equal("Succeeded", updatedJob.Status);
+
+        emailSenderMock.Verify(s => s.SendEmailAsync(job.Id, "renter@example.com", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task EmailDeliveryService_RefundCompleted_IsNotSuppressedWhenOrderWatermarkIsCancelled()
+    {
+        using var db = CreateInMemoryDbContext();
+        var deliveryRepo = new DeliveryJobRepository(db);
+        var prefRepo = new PreferenceRepository(db);
+        var watermarkRepoMock = new Mock<IAggregateWatermarkRepository>();
+        var uow = new UnitOfWork(db);
+
+        var recipientId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+        var refundId = Guid.NewGuid();
+
+        await db.Notifications.AddAsync(new Notification
+        {
+            Id = notificationId,
+            RecipientUserId = recipientId,
+            OrderId = orderId,
+            NotificationType = "REFUND_COMPLETED",
+            Category = "PAYMENT",
+            Severity = "SUCCESS",
+            Title = "Refund Completed",
+            Body = "Refund completed",
+            ResourceType = "Refund",
+            ResourceId = refundId.ToString(),
+            EventVersion = 4,
+            RenderDataJson = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["displayOrderCode"] = "ORD-REFUND-01",
+                ["amount"] = 500000m,
+                ["currency"] = "VND",
+                ["completedAt"] = DateTimeOffset.UtcNow,
+                ["refundRef"] = "REF-9999",
+                ["refundKind"] = "FULL_CANCELLATION",
+                ["deepLinkUrl"] = $"/renter/orders/{orderId}"
+            }),
+            TemplateCode = "REFUND_COMPLETED",
+            TemplateVersion = "1.0",
+            OccurredAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        var job = new NotificationDeliveryJob
+        {
+            Id = Guid.NewGuid(),
+            NotificationId = notificationId,
+            Channel = "EMAIL",
+            RecipientUserId = recipientId,
+            Status = "Pending",
+            NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await db.DeliveryJobs.AddAsync(job);
+        await db.SaveChangesAsync();
+
+        var authClientMock = new Mock<IAuthContactClient>();
+        authClientMock.Setup(c => c.GetUserContactsBatchAsync(It.IsAny<IReadOnlyList<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success<IReadOnlyList<AuthContactDto>>(new[]
+            {
+                new AuthContactDto(recipientId, "renter@example.com", IsActive: true, IsEmailVerified: true)
+            }));
+
+        var emailSenderMock = new Mock<IEmailSender>();
+        emailSenderMock.Setup(s => s.SendEmailAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EmailSendResult(Outcome: EmailSendOutcome.Success, ProviderMessageId: "prov-refund-123", ErrorCode: null, ErrorDetail: null));
+
+        var service = new EmailDeliveryService(
+            deliveryRepo,
+            prefRepo,
+            authClientMock.Object,
+            new NotificationTemplateRenderer(),
+            emailSenderMock.Object,
+            watermarkRepoMock.Object,
+            uow,
+            NullLogger<EmailDeliveryService>.Instance);
+
+        var processed = await service.DeliverPendingJobsAsync("worker-1", CancellationToken.None);
+        Assert.Equal(1, processed);
+
+        var updatedJob = await db.DeliveryJobs.FindAsync(job.Id);
+        Assert.NotNull(updatedJob);
+        Assert.Equal("Succeeded", updatedJob.Status);
+
+        // Verify email was sent
+        emailSenderMock.Verify(s => s.SendEmailAsync(job.Id, "renter@example.com", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        // Invariant: Financial notifications must NOT acquire advisory lock and must NOT read rental order watermark
+        watermarkRepoMock.Verify(w => w.AcquireAdvisoryLockAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        watermarkRepoMock.Verify(w => w.GetWatermarkAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task EmailDeliveryService_SupplierConfirmationRequired_IsSuppressedWhenOrderWatermarkIsCancelled()
+    {
+        using var db = CreateInMemoryDbContext();
+        var deliveryRepo = new DeliveryJobRepository(db);
+        var prefRepo = new PreferenceRepository(db);
+        var watermarkRepo = new AggregateWatermarkRepository(db);
+        var uow = new UnitOfWork(db);
+
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+
+        await db.Notifications.AddAsync(new Notification
+        {
+            Id = notificationId,
+            RecipientUserId = supplierId,
+            OrderId = orderId,
+            NotificationType = "SUPPLIER_CONFIRMATION_REQUIRED",
+            Category = "ORDER",
+            Severity = "ACTION_REQUIRED",
+            Title = "Supplier Confirmation Required",
+            Body = "Please confirm",
+            ResourceType = "RentalOrder",
+            ResourceId = orderId.ToString(),
+            EventVersion = 2,
+            RenderDataJson = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["displayOrderCode"] = "ORD-CANCELLED-01",
+                ["supplierConfirmationDeadline"] = DateTimeOffset.UtcNow.AddHours(2)
+            }),
+            TemplateCode = "SUPPLIER_CONFIRMATION_REQUIRED",
+            TemplateVersion = "1.0",
+            OccurredAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        var job = new NotificationDeliveryJob
+        {
+            Id = Guid.NewGuid(),
+            NotificationId = notificationId,
+            Channel = "EMAIL",
+            RecipientUserId = supplierId,
+            Status = "Pending",
+            NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await db.DeliveryJobs.AddAsync(job);
+
+        await db.AggregateWatermarks.AddAsync(new NotificationAggregateWatermark
+        {
+            Scope = NotificationWatermarkScope.RentalOrder,
+            AggregateId = orderId,
+            RecipientUserId = supplierId,
+            LastOrderVersion = 3,
+            IsTerminal = true,
+            TerminalState = "CANCELLED",
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+
+        var authClientMock = new Mock<IAuthContactClient>();
+        authClientMock.Setup(c => c.GetUserContactsBatchAsync(It.IsAny<IReadOnlyList<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success<IReadOnlyList<AuthContactDto>>(new[]
+            {
+                new AuthContactDto(supplierId, "supplier@example.com", IsActive: true, IsEmailVerified: true)
+            }));
+
+        var emailSenderMock = new Mock<IEmailSender>();
+
+        var service = new EmailDeliveryService(
+            deliveryRepo,
+            prefRepo,
+            authClientMock.Object,
+            new NotificationTemplateRenderer(),
+            emailSenderMock.Object,
+            watermarkRepo,
+            uow,
+            NullLogger<EmailDeliveryService>.Instance);
+
+        var processed = await service.DeliverPendingJobsAsync("worker-1", CancellationToken.None);
+        Assert.Equal(1, processed);
+
+        var updatedJob = await db.DeliveryJobs.FindAsync(job.Id);
+        Assert.NotNull(updatedJob);
+        Assert.Equal("Suppressed", updatedJob.Status);
+        Assert.Equal("STALE_ACTION_SUPPRESSED", updatedJob.LastErrorCode);
+
+        // Verify email was NOT sent
+        emailSenderMock.Verify(s => s.SendEmailAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task EmailDeliveryService_WhenPreferenceDisabled_PreventsEmailDispatch()
+    {
+        using var db = CreateInMemoryDbContext();
+        var deliveryRepo = new DeliveryJobRepository(db);
+        var prefRepo = new PreferenceRepository(db);
+        var watermarkRepo = new AggregateWatermarkRepository(db);
+        var uow = new UnitOfWork(db);
+
+        var recipientId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+
+        await db.Notifications.AddAsync(new Notification
+        {
+            Id = notificationId,
+            RecipientUserId = recipientId,
+            NotificationType = "ORDER_PAID",
+            Category = "PAYMENT",
+            Severity = "SUCCESS",
+            Title = "Order Paid",
+            Body = "Order paid",
+            ResourceType = "RentalOrder",
+            ResourceId = Guid.NewGuid().ToString(),
+            EventVersion = 1,
+            RenderDataJson = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["displayOrderCode"] = "ORD-PREF-01",
+                ["paidAmount"] = 100000m,
+                ["invoiceRef"] = "INV-001"
+            }),
+            TemplateCode = "ORDER_PAID",
+            TemplateVersion = "1.0",
+            OccurredAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        // User disabled PAYMENT email preference
+        await db.Preferences.AddAsync(new NotificationPreference
+        {
+            Id = Guid.NewGuid(),
+            UserId = recipientId,
+            Category = "PAYMENT",
+            EmailEnabled = false,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        var job = new NotificationDeliveryJob
+        {
+            Id = Guid.NewGuid(),
+            NotificationId = notificationId,
+            Channel = "EMAIL",
+            RecipientUserId = recipientId,
+            Status = "Pending",
+            NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await db.DeliveryJobs.AddAsync(job);
+        await db.SaveChangesAsync();
+
+        var authClientMock = new Mock<IAuthContactClient>();
+        authClientMock.Setup(c => c.GetUserContactsBatchAsync(It.IsAny<IReadOnlyList<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success<IReadOnlyList<AuthContactDto>>(new[]
+            {
+                new AuthContactDto(recipientId, "user@example.com", IsActive: true, IsEmailVerified: true)
+            }));
+
+        var emailSenderMock = new Mock<IEmailSender>();
+
+        var service = new EmailDeliveryService(
+            deliveryRepo,
+            prefRepo,
+            authClientMock.Object,
+            new NotificationTemplateRenderer(),
+            emailSenderMock.Object,
+            watermarkRepo,
+            uow,
+            NullLogger<EmailDeliveryService>.Instance);
+
+        var processed = await service.DeliverPendingJobsAsync("worker-1", CancellationToken.None);
+        Assert.Equal(1, processed);
+
+        var updatedJob = await db.DeliveryJobs.FindAsync(job.Id);
+        Assert.NotNull(updatedJob);
+        Assert.Equal("Suppressed", updatedJob.Status);
+        Assert.Equal("PREFERENCE_DISABLED", updatedJob.LastErrorCode);
+
+        // Verify email was NOT sent
+        emailSenderMock.Verify(s => s.SendEmailAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task EmailDeliveryService_WhenContactInactive_PreventsEmailDispatch()
+    {
+        using var db = CreateInMemoryDbContext();
+        var deliveryRepo = new DeliveryJobRepository(db);
+        var prefRepo = new PreferenceRepository(db);
+        var watermarkRepo = new AggregateWatermarkRepository(db);
+        var uow = new UnitOfWork(db);
+
+        var recipientId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+
+        await db.Notifications.AddAsync(new Notification
+        {
+            Id = notificationId,
+            RecipientUserId = recipientId,
+            NotificationType = "ORDER_COMPLETED",
+            Category = "ORDER",
+            Severity = "SUCCESS",
+            Title = "Order Completed",
+            Body = "Order completed",
+            ResourceType = "RentalOrder",
+            ResourceId = Guid.NewGuid().ToString(),
+            EventVersion = 5,
+            RenderDataJson = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["displayOrderCode"] = "ORD-INACTIVE-01",
+                ["completedAt"] = DateTimeOffset.UtcNow
+            }),
+            TemplateCode = "ORDER_COMPLETED",
+            TemplateVersion = "1.0",
+            OccurredAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        var job = new NotificationDeliveryJob
+        {
+            Id = Guid.NewGuid(),
+            NotificationId = notificationId,
+            Channel = "EMAIL",
+            RecipientUserId = recipientId,
+            Status = "Pending",
+            NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await db.DeliveryJobs.AddAsync(job);
+        await db.SaveChangesAsync();
+
+        var authClientMock = new Mock<IAuthContactClient>();
+        // Contact is INACTIVE
+        authClientMock.Setup(c => c.GetUserContactsBatchAsync(It.IsAny<IReadOnlyList<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success<IReadOnlyList<AuthContactDto>>(new[]
+            {
+                new AuthContactDto(recipientId, "inactive@example.com", IsActive: false, IsEmailVerified: true)
+            }));
+
+        var emailSenderMock = new Mock<IEmailSender>();
+
+        var service = new EmailDeliveryService(
+            deliveryRepo,
+            prefRepo,
+            authClientMock.Object,
+            new NotificationTemplateRenderer(),
+            emailSenderMock.Object,
+            watermarkRepo,
+            uow,
+            NullLogger<EmailDeliveryService>.Instance);
+
+        var processed = await service.DeliverPendingJobsAsync("worker-1", CancellationToken.None);
+        Assert.Equal(1, processed);
+
+        var updatedJob = await db.DeliveryJobs.FindAsync(job.Id);
+        Assert.NotNull(updatedJob);
+        Assert.Equal("Suppressed", updatedJob.Status);
+        Assert.Equal("INACTIVE_OR_UNVERIFIED_EMAIL", updatedJob.LastErrorCode);
+
+        // Verify email was NOT sent
+        emailSenderMock.Verify(s => s.SendEmailAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

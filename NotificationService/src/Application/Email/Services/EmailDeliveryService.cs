@@ -4,6 +4,7 @@ using Dprental.NotificationService.Application.Templates;
 using Dprental.NotificationService.Domain.Entities;
 using Dprental.NotificationService.Application.Diagnostics;
 using Dprental.NotificationService.Domain.IRepositories;
+using Dprental.NotificationService.Application.Policies;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -240,49 +241,59 @@ public sealed class EmailDeliveryService : IEmailDeliveryService
             bool dispatchApproved = false;
             await using (var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken))
             {
-                // Advisory lock theo order ID (cùng cơ chế với ingestion để loại trừ race condition)
-                if (notification.OrderId.HasValue && notification.OrderId.Value != Guid.Empty)
-                {
-                    await _watermarkRepo.AcquireAdvisoryLockAsync(notification.OrderId.Value, cancellationToken);
-                }
-
-                // Kiểm tra watermark của order hoặc item
                 bool isStale = false;
                 string? staleReason = null;
 
-                if (notification.OrderId.HasValue && notification.OrderId.Value != Guid.Empty)
-                {
-                    var orderWatermark = await _watermarkRepo.GetWatermarkAsync(
-                        NotificationWatermarkScope.RentalOrder,
-                        notification.OrderId.Value,
-                        job.RecipientUserId,
-                        cancellationToken);
+                var isFinancialNotification = notification.NotificationType is "REFUND_COMPLETED" or "PAYOUT_COMPLETED";
 
-                    if (orderWatermark?.IsTerminal == true)
-                    {
-                        isStale = true;
-                        staleReason = $"Đơn thuê đã ở trạng thái kết thúc ({orderWatermark.TerminalState}).";
-                    }
-                }
-
-                if (!isStale && string.Equals(notification.ResourceType, "RentalItem", StringComparison.OrdinalIgnoreCase))
+                if (!isFinancialNotification)
                 {
-                    if (Guid.TryParse(notification.ResourceId, out var itemId))
+                    // Advisory lock theo order ID (cùng cơ chế với ingestion để loại trừ race condition)
+                    if (notification.OrderId.HasValue && notification.OrderId.Value != Guid.Empty)
                     {
-                        var itemWatermark = await _watermarkRepo.GetWatermarkAsync(
-                            NotificationWatermarkScope.RentalItem,
-                            itemId,
+                        await _watermarkRepo.AcquireAdvisoryLockAsync(notification.OrderId.Value, cancellationToken);
+
+                        var orderWatermark = await _watermarkRepo.GetWatermarkAsync(
+                            NotificationWatermarkScope.RentalOrder,
+                            notification.OrderId.Value,
                             job.RecipientUserId,
                             cancellationToken);
 
-                        if (itemWatermark?.IsTerminal == true)
+                        var orderEval = StaleActionSuppressionPolicy.Evaluate(
+                            notification.NotificationType,
+                            notification.EventVersion,
+                            orderWatermark);
+
+                        if (orderEval.SuppressEmail)
                         {
                             isStale = true;
-                            staleReason = $"Thiết bị thuê đã ở trạng thái kết thúc ({itemWatermark.TerminalState}).";
+                            staleReason = orderEval.Reason;
+                        }
+                    }
+
+                    if (!isStale && string.Equals(notification.ResourceType, "RentalItem", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (Guid.TryParse(notification.ResourceId, out var itemId))
+                        {
+                            var itemWatermark = await _watermarkRepo.GetWatermarkAsync(
+                                NotificationWatermarkScope.RentalItem,
+                                itemId,
+                                job.RecipientUserId,
+                                cancellationToken);
+
+                            var itemEval = StaleActionSuppressionPolicy.Evaluate(
+                                notification.NotificationType,
+                                notification.EventVersion,
+                                itemWatermark);
+
+                            if (itemEval.SuppressEmail)
+                            {
+                                isStale = true;
+                                staleReason = itemEval.Reason;
+                            }
                         }
                     }
                 }
-
                 if (isStale)
                 {
                     _logger.LogWarning("Chặn gửi email do hành động hoặc đơn/thiết bị đã lỗi thời: JobId={JobId}, Reason={Reason}",

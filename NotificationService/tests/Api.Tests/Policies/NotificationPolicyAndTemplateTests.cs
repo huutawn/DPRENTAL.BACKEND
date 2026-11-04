@@ -136,6 +136,96 @@ public sealed class NotificationPolicyAndTemplateTests
     }
 
     [Fact]
+    public void StaleActionSuppressionPolicy_OrderCompleted_IsNotSuppressedWhenOrderIsCompleted()
+    {
+        var watermark = new NotificationAggregateWatermark
+        {
+            AggregateId = Guid.NewGuid(),
+            RecipientUserId = Guid.NewGuid(),
+            LastOrderVersion = 5,
+            IsTerminal = true,
+            TerminalState = "COMPLETED"
+        };
+
+        var eval = StaleActionSuppressionPolicy.Evaluate("ORDER_COMPLETED", incomingOrderVersion: 5, watermark);
+        Assert.False(eval.IsStale);
+        Assert.False(eval.SuppressAction);
+        Assert.False(eval.SuppressEmail);
+    }
+
+    [Fact]
+    public void StaleActionSuppressionPolicy_RefundCompleted_IsNotSuppressedWhenOrderIsCancelled()
+    {
+        var watermark = new NotificationAggregateWatermark
+        {
+            AggregateId = Guid.NewGuid(),
+            RecipientUserId = Guid.NewGuid(),
+            LastOrderVersion = 4,
+            IsTerminal = true,
+            TerminalState = "CANCELLED"
+        };
+
+        var eval = StaleActionSuppressionPolicy.Evaluate("REFUND_COMPLETED", incomingOrderVersion: 4, watermark);
+        Assert.False(eval.IsStale);
+        Assert.False(eval.SuppressAction);
+        Assert.False(eval.SuppressEmail);
+    }
+
+    [Fact]
+    public void StaleActionSuppressionPolicy_SupplierConfirmationRequired_IsSuppressedWhenOrderIsCancelled()
+    {
+        var watermark = new NotificationAggregateWatermark
+        {
+            AggregateId = Guid.NewGuid(),
+            RecipientUserId = Guid.NewGuid(),
+            LastOrderVersion = 3,
+            IsTerminal = true,
+            TerminalState = "CANCELLED"
+        };
+
+        var eval = StaleActionSuppressionPolicy.Evaluate("SUPPLIER_CONFIRMATION_REQUIRED", incomingOrderVersion: 2, watermark);
+        Assert.True(eval.IsStale);
+        Assert.True(eval.SuppressAction);
+        Assert.True(eval.SuppressEmail);
+    }
+
+    [Fact]
+    public void StaleActionSuppressionPolicy_PayoutCompleted_IsNotSuppressedWhenWatermarkIsTerminal()
+    {
+        var watermark = new NotificationAggregateWatermark
+        {
+            AggregateId = Guid.NewGuid(),
+            RecipientUserId = Guid.NewGuid(),
+            LastOrderVersion = 4,
+            IsTerminal = true,
+            TerminalState = "COMPLETED"
+        };
+
+        var eval = StaleActionSuppressionPolicy.Evaluate("PAYOUT_COMPLETED", incomingOrderVersion: 4, watermark);
+        Assert.False(eval.IsStale);
+        Assert.False(eval.SuppressAction);
+        Assert.False(eval.SuppressEmail);
+    }
+
+    [Fact]
+    public void StaleActionSuppressionPolicy_OrderPaid_IsNotSuppressedWhenWatermarkIsTerminal()
+    {
+        var watermark = new NotificationAggregateWatermark
+        {
+            AggregateId = Guid.NewGuid(),
+            RecipientUserId = Guid.NewGuid(),
+            LastOrderVersion = 5,
+            IsTerminal = true,
+            TerminalState = "COMPLETED"
+        };
+
+        var eval = StaleActionSuppressionPolicy.Evaluate("ORDER_PAID", incomingOrderVersion: 5, watermark);
+        Assert.False(eval.IsStale);
+        Assert.False(eval.SuppressAction);
+        Assert.False(eval.SuppressEmail);
+    }
+
+    [Fact]
     public void TemplateRenderer_MissingOrderCode_ShouldFallbackToResourceId()
     {
         var orderId = Guid.NewGuid();

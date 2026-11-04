@@ -179,9 +179,18 @@ public sealed class P0ReproFailureTests
 
         var worker = new EmailDeliveryWorker(sp, NullLogger<EmailDeliveryWorker>.Instance);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         await worker.StartAsync(cts.Token);
-        await Task.Delay(200);
+        var timeout = DateTimeOffset.UtcNow.AddSeconds(2);
+        while (DateTimeOffset.UtcNow < timeout)
+        {
+            var checkJob = await db.DeliveryJobs.FindAsync(job.Id);
+            if (checkJob != null && checkJob.Status != "Pending" && checkJob.Status != "Processing")
+            {
+                break;
+            }
+            await Task.Delay(50);
+        }
         await worker.StopAsync(CancellationToken.None);
 
         var updatedJob = await db.DeliveryJobs.FindAsync(job.Id);
