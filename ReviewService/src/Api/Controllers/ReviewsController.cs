@@ -297,4 +297,185 @@ public sealed class ReviewsController : ControllerBase
             ? Ok(result.Value)
             : this.ToProblem(result.Error);
     }
+
+    /// <summary>
+    /// Lấy danh sách mục thuê đang chờ người dùng đánh giá (GET /api/v1/reviews/pending).
+    /// </summary>
+    [HttpGet("pending")]
+    public async Task<IActionResult> GetPendingReviews(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_callerContext.IsAuthenticated || !_callerContext.ActorId.HasValue)
+        {
+            return Unauthorized(new ProblemDetails
+            {
+                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+                Title = "Unauthorized",
+                Status = StatusCodes.Status401Unauthorized,
+                Detail = "Authentication is required to view pending reviews."
+            });
+        }
+
+        var result = await _reviewService.GetPendingReviewsAsync(
+            _callerContext.ActorId.Value, page, pageSize, cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : this.ToProblem(result.Error);
+    }
+
+    /// <summary>
+    /// Đọc danh sách đánh giá nhận được (GET /api/v1/reviews/my/received).
+    /// </summary>
+    [HttpGet("my/received")]
+    public async Task<IActionResult> GetReceivedReviews(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_callerContext.IsAuthenticated || !_callerContext.ActorId.HasValue)
+        {
+            return Unauthorized(new ProblemDetails
+            {
+                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+                Title = "Unauthorized",
+                Status = StatusCodes.Status401Unauthorized,
+                Detail = "Authentication is required."
+            });
+        }
+
+        var result = await _reviewService.GetReceivedReviewsAsync(
+            _callerContext.ActorId.Value, page, pageSize, cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : this.ToProblem(result.Error);
+    }
+
+    /// <summary>
+    /// Đọc điểm uy tín riêng tư của người thuê (GET /api/v1/reviews/my/reputation).
+    /// </summary>
+    [HttpGet("my/reputation")]
+    public async Task<IActionResult> GetRenterReputation(CancellationToken cancellationToken = default)
+    {
+        if (!_callerContext.IsAuthenticated || !_callerContext.ActorId.HasValue)
+        {
+            return Unauthorized(new ProblemDetails
+            {
+                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+                Title = "Unauthorized",
+                Status = StatusCodes.Status401Unauthorized,
+                Detail = "Authentication is required."
+            });
+        }
+
+        var result = await _reviewService.GetRenterReputationAsync(
+            _callerContext.ActorId.Value, cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : this.ToProblem(result.Error);
+    }
+
+    /// <summary>
+    /// Báo cáo vi phạm đánh giá (POST /api/v1/reviews/{reviewId}/reports).
+    /// </summary>
+    [HttpPost("{reviewId:guid}/reports")]
+    public async Task<IActionResult> CreateReport(
+        [FromRoute] Guid reviewId,
+        [FromBody] CreateReviewReportRequest request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_callerContext.IsAuthenticated || !_callerContext.ActorId.HasValue)
+        {
+            return Unauthorized(new ProblemDetails
+            {
+                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+                Title = "Unauthorized",
+                Status = StatusCodes.Status401Unauthorized,
+                Detail = "Authentication is required."
+            });
+        }
+
+        var result = await _reviewService.CreateReportAsync(
+            reviewId,
+            _callerContext.ActorId.Value,
+            request?.Reason ?? string.Empty,
+            idempotencyKey ?? Guid.NewGuid().ToString("N"),
+            cancellationToken);
+
+        return result.IsSuccess
+            ? StatusCode(StatusCodes.Status201Created, result.Value)
+            : this.ToProblem(result.Error);
+    }
+
+    /// <summary>
+    /// Đính kèm media vào đánh giá (POST /api/v1/reviews/{reviewId}/media).
+    /// </summary>
+    [HttpPost("{reviewId:guid}/media")]
+    public async Task<IActionResult> AttachMedia(
+        [FromRoute] Guid reviewId,
+        [FromBody] AttachMediaRequest request,
+        [FromHeader(Name = "If-Match")] string? ifMatch,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_callerContext.IsAuthenticated || !_callerContext.ActorId.HasValue)
+        {
+            return Unauthorized(new ProblemDetails
+            {
+                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+                Title = "Unauthorized",
+                Status = StatusCodes.Status401Unauthorized,
+                Detail = "Authentication is required."
+            });
+        }
+
+        var result = await _reviewService.AttachMediaAsync(
+            reviewId,
+            _callerContext.ActorId.Value,
+            request.MediaId,
+            request.MediaType,
+            ifMatch ?? string.Empty,
+            cancellationToken);
+
+        return result.IsSuccess
+            ? StatusCode(StatusCodes.Status201Created, result.Value)
+            : this.ToProblem(result.Error);
+    }
+
+    /// <summary>
+    /// Gỡ media khỏi đánh giá (DELETE /api/v1/reviews/{reviewId}/media/{mediaId}).
+    /// </summary>
+    [HttpDelete("{reviewId:guid}/media/{mediaId:guid}")]
+    public async Task<IActionResult> DetachMedia(
+        [FromRoute] Guid reviewId,
+        [FromRoute] Guid mediaId,
+        [FromHeader(Name = "If-Match")] string? ifMatch,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_callerContext.IsAuthenticated || !_callerContext.ActorId.HasValue)
+        {
+            return Unauthorized(new ProblemDetails
+            {
+                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+                Title = "Unauthorized",
+                Status = StatusCodes.Status401Unauthorized,
+                Detail = "Authentication is required."
+            });
+        }
+
+        var result = await _reviewService.DetachMediaAsync(
+            reviewId,
+            _callerContext.ActorId.Value,
+            mediaId,
+            ifMatch ?? string.Empty,
+            cancellationToken);
+
+        return result.IsSuccess
+            ? NoContent()
+            : this.ToProblem(result.Error);
+    }
 }

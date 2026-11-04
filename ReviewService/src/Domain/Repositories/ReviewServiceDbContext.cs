@@ -23,6 +23,24 @@ public sealed class ReviewServiceDbContext : DbContext
     /// <summary>Bảng lưu trữ bản ghi chống trùng lặp yêu cầu API.</summary>
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
 
+    /// <summary>Bảng lưu trữ báo cáo vi phạm đánh giá.</summary>
+    public DbSet<ReviewReport> ReviewReports => Set<ReviewReport>();
+
+    /// <summary>Bảng lưu trữ projection điều kiện đánh giá.</summary>
+    public DbSet<ReviewProjection> ReviewProjections => Set<ReviewProjection>();
+
+    /// <summary>Bảng transactional inbox deduplication sự kiện Kafka.</summary>
+    public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
+
+    /// <summary>Bảng lưu checkpoint đối soát sweep 30 ngày.</summary>
+    public DbSet<ReconciliationCheckpoint> ReconciliationCheckpoints => Set<ReconciliationCheckpoint>();
+
+    /// <summary>Bảng transactional outbox phát hành sự kiện ReviewService.</summary>
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
+    /// <summary>Bảng lưu trữ media đính kèm đánh giá.</summary>
+    public DbSet<ReviewMedia> ReviewMedia => Set<ReviewMedia>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -30,6 +48,12 @@ public sealed class ReviewServiceDbContext : DbContext
         ConfigureReviews(modelBuilder);
         ConfigureReviewAudits(modelBuilder);
         ConfigureIdempotencyRecords(modelBuilder);
+        ConfigureReviewReports(modelBuilder);
+        ConfigureReviewProjections(modelBuilder);
+        ConfigureInboxMessages(modelBuilder);
+        ConfigureReconciliationCheckpoints(modelBuilder);
+        ConfigureOutboxMessages(modelBuilder);
+        ConfigureReviewMedia(modelBuilder);
     }
 
     private static void ConfigureReviews(ModelBuilder modelBuilder)
@@ -284,6 +308,121 @@ public sealed class ReviewServiceDbContext : DbContext
 
             entity.HasIndex(r => r.ExpiresAt)
                 .HasDatabaseName("idx_idempotency_expires");
+        });
+    }
+
+    private static void ConfigureReviewReports(ModelBuilder modelBuilder)
+    {
+        var statusConverter = new ValueConverter<ReportStatus, string>(
+            v => v.ToString(),
+            v => Enum.Parse<ReportStatus>(v));
+
+        modelBuilder.Entity<ReviewReport>(entity =>
+        {
+            entity.ToTable("review_reports", t =>
+            {
+                t.HasCheckConstraint("chk_reports_status", "status IN ('PendingReview', 'ReviewedDismissed', 'ReviewedHidden')");
+            });
+
+            entity.HasKey(r => r.Id);
+            entity.Property(r => r.Id).HasColumnName("id");
+            entity.Property(r => r.ReviewId).HasColumnName("review_id").IsRequired();
+            entity.Property(r => r.ReporterId).HasColumnName("reporter_id").IsRequired();
+            entity.Property(r => r.Reason).HasColumnName("reason").HasMaxLength(1000).IsRequired();
+            entity.Property(r => r.Status).HasColumnName("status").HasConversion(statusConverter).HasMaxLength(32).IsRequired();
+            entity.Property(r => r.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(r => r.ResolvedAt).HasColumnName("resolved_at");
+            entity.Property(r => r.ResolvedBy).HasColumnName("resolved_by");
+
+            entity.HasIndex(r => new { r.ReviewId, r.ReporterId }).IsUnique().HasDatabaseName("uq_reports_review_reporter");
+            entity.HasIndex(r => r.Status).HasDatabaseName("idx_reports_status");
+        });
+    }
+
+    private static void ConfigureReviewProjections(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ReviewProjection>(entity =>
+        {
+            entity.ToTable("review_projections");
+            entity.HasKey(p => p.Id);
+            entity.Property(p => p.Id).HasColumnName("id");
+            entity.Property(p => p.OrderId).HasColumnName("order_id").IsRequired();
+            entity.Property(p => p.ItemId).HasColumnName("item_id").IsRequired();
+            entity.Property(p => p.RenterId).HasColumnName("renter_id").IsRequired();
+            entity.Property(p => p.SupplierId).HasColumnName("supplier_id").IsRequired();
+            entity.Property(p => p.EquipmentListingId).HasColumnName("equipment_listing_id").IsRequired();
+            entity.Property(p => p.CompletedAt).HasColumnName("completed_at");
+            entity.Property(p => p.DeadlineAt).HasColumnName("deadline_at");
+            entity.Property(p => p.IsEligible).HasColumnName("is_eligible").IsRequired();
+            entity.Property(p => p.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(p => p.UpdatedAt).HasColumnName("updated_at").IsRequired();
+
+            entity.HasIndex(p => p.ItemId).IsUnique().HasDatabaseName("uq_projections_item_id");
+            entity.HasIndex(p => new { p.RenterId, p.IsEligible }).HasDatabaseName("idx_projections_renter_eligible");
+            entity.HasIndex(p => new { p.SupplierId, p.IsEligible }).HasDatabaseName("idx_projections_supplier_eligible");
+        });
+    }
+
+    private static void ConfigureInboxMessages(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<InboxMessage>(entity =>
+        {
+            entity.ToTable("inbox_messages");
+            entity.HasKey(m => new { m.MessageId, m.ConsumerGroup });
+            entity.Property(m => m.MessageId).HasColumnName("message_id");
+            entity.Property(m => m.ConsumerGroup).HasColumnName("consumer_group").HasMaxLength(128).IsRequired();
+            entity.Property(m => m.MessageType).HasColumnName("message_type").HasMaxLength(128).IsRequired();
+            entity.Property(m => m.OccurredAt).HasColumnName("occurred_at").IsRequired();
+            entity.Property(m => m.ProcessedAt).HasColumnName("processed_at").IsRequired();
+        });
+    }
+
+    private static void ConfigureReconciliationCheckpoints(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ReconciliationCheckpoint>(entity =>
+        {
+            entity.ToTable("reconciliation_checkpoints");
+            entity.HasKey(c => c.SweepId);
+            entity.Property(c => c.SweepId).HasColumnName("sweep_id").HasMaxLength(64);
+            entity.Property(c => c.WindowStart).HasColumnName("window_start").IsRequired();
+            entity.Property(c => c.LastItemId).HasColumnName("last_item_id");
+            entity.Property(c => c.IsCompleted).HasColumnName("is_completed").IsRequired();
+            entity.Property(c => c.StartedAt).HasColumnName("started_at").IsRequired();
+            entity.Property(c => c.UpdatedAt).HasColumnName("updated_at").IsRequired();
+        });
+    }
+
+    private static void ConfigureOutboxMessages(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<OutboxMessage>(entity =>
+        {
+            entity.ToTable("outbox_messages");
+            entity.HasKey(o => o.Id);
+            entity.Property(o => o.Id).HasColumnName("id");
+            entity.Property(o => o.Topic).HasColumnName("topic").HasMaxLength(128).IsRequired();
+            entity.Property(o => o.EventType).HasColumnName("event_type").HasMaxLength(128).IsRequired();
+            entity.Property(o => o.PartitionKey).HasColumnName("partition_key").HasMaxLength(128).IsRequired();
+            entity.Property(o => o.Payload).HasColumnName("payload").IsRequired();
+            entity.Property(o => o.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(o => o.ProcessedAt).HasColumnName("processed_at");
+
+            entity.HasIndex(o => o.ProcessedAt).HasDatabaseName("idx_outbox_processed");
+        });
+    }
+
+    private static void ConfigureReviewMedia(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ReviewMedia>(entity =>
+        {
+            entity.ToTable("review_media");
+            entity.HasKey(m => m.Id);
+            entity.Property(m => m.Id).HasColumnName("id");
+            entity.Property(m => m.ReviewId).HasColumnName("review_id").IsRequired();
+            entity.Property(m => m.MediaId).HasColumnName("media_id").IsRequired();
+            entity.Property(m => m.MediaType).HasColumnName("media_type").HasMaxLength(32).IsRequired();
+            entity.Property(m => m.CreatedAt).HasColumnName("created_at").IsRequired();
+
+            entity.HasIndex(m => new { m.ReviewId, m.MediaId }).IsUnique().HasDatabaseName("uq_review_media_pair");
         });
     }
 }

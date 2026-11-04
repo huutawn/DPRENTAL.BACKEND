@@ -162,8 +162,28 @@ public sealed class ReviewService : IReviewService
                 Error.Unprocessable("RENTAL_ITEM_NOT_COMPLETED", "Mục thuê chưa hoàn tất toàn bộ quy trình hoàn trả và quyết toán."));
         }
 
-        // 5. Xác thực quyền tham gia của actor (direction = renter_to_supplier_listing)
-        if (actorId != snapshot.RenterId)
+        // 5. Xác thực quyền tham gia của actor (Phase 2 & Phase 5: renter hoặc supplier)
+        ReviewDirection direction;
+        Guid subjectId;
+        string actorRole;
+        if (actorId == snapshot.RenterId)
+        {
+            if (actorId == snapshot.SupplierId)
+            {
+                return Result.Failure<ReviewDetailResponse>(
+                    Error.Forbidden("ACTOR_NOT_PARTICIPANT", "Người thuê và Nhà cung cấp không được là cùng một tài khoản."));
+            }
+            direction = ReviewDirection.renter_to_supplier_listing;
+            subjectId = snapshot.SupplierId;
+            actorRole = "Renter";
+        }
+        else if (actorId == snapshot.SupplierId)
+        {
+            direction = ReviewDirection.supplier_to_renter;
+            subjectId = snapshot.RenterId;
+            actorRole = "Supplier";
+        }
+        else
         {
             return Result.Failure<ReviewDetailResponse>(
                 Error.Forbidden("ACTOR_NOT_PARTICIPANT", "Bạn không có quyền đánh giá mục thuê này do không phải là Người thuê hoặc Nhà cung cấp trong đơn hàng."));
@@ -192,9 +212,9 @@ public sealed class ReviewService : IReviewService
             id: Guid.NewGuid(),
             orderId: request.OrderId,
             itemId: request.ItemId,
-            direction: ReviewDirection.renter_to_supplier_listing,
+            direction: direction,
             authorId: actorId,
-            subjectId: snapshot.SupplierId,
+            subjectId: subjectId,
             equipmentListingId: snapshot.EquipmentListingId,
             rating: request.Rating,
             comment: request.Comment,
@@ -206,7 +226,7 @@ public sealed class ReviewService : IReviewService
             id: Guid.NewGuid(),
             reviewId: review.Id,
             actorId: actorId,
-            actorRole: "Renter",
+            actorRole: actorRole,
             action: ReviewAuditAction.Created,
             reason: "Initial review submission",
             oldValues: null,
@@ -989,5 +1009,477 @@ public sealed class ReviewService : IReviewService
             _dbContext.Reviews.Attach(review);
             entry.State = EntityState.Modified;
         }
+    }
+
+    public async Task<Result<PagedResult<PendingReviewItemResponse>>> GetPendingReviewsAsync(
+        Guid actorId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (actorId == Guid.Empty)
+        {
+            return Result.Failure<PagedResult<PendingReviewItemResponse>>(
+                Error.Unauthorized("UNAUTHORIZED", "Xác thực không hợp lệ."));
+        }
+
+        if (page < 1) page = 1;
+        if (pageSize < 1) pageSize = 20;
+        if (pageSize > 50) pageSize = 50;
+
+        var nowUtc = _timeProvider.GetUtcNow();
+
+        var query = _dbContext.ReviewProjections
+            .AsNoTracking()
+            .Where(p => (p.RenterId == actorId || p.SupplierId == actorId)
+                        && p.IsEligible
+                        && p.DeadlineAt.HasValue
+                        && p.DeadlineAt.Value > nowUtc)
+            .Where(p => !_dbContext.Reviews.Any(r =>
+                r.ItemId == p.ItemId &&
+                (p.RenterId == actorId
+                    ? r.Direction == ReviewDirection.renter_to_supplier_listing
+                    : r.Direction == ReviewDirection.supplier_to_renter)))
+            .OrderByDescending(p => p.CompletedAt)
+            .ThenByDescending(p => p.Id);
+
+        int totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        var responses = items.Select(p =>
+        {
+            var isRenter = p.RenterId == actorId;
+            var counterpartId = isRenter ? p.SupplierId : p.RenterId;
+            var dirStr = isRenter ? "renter_to_supplier_listing" : "supplier_to_renter";
+            var daysRemaining = (int)Math.Max(0, Math.Ceiling((p.DeadlineAt!.Value - nowUtc).TotalDays));
+
+            return new PendingReviewItemResponse(
+                OrderId: p.OrderId,
+                ItemId: p.ItemId,
+                EquipmentListingId: p.EquipmentListingId,
+                CounterpartId: counterpartId,
+                Direction: dirStr,
+                CompletedAt: p.CompletedAt!.Value,
+                DeadlineAt: p.DeadlineAt!.Value,
+                DaysRemaining: daysRemaining);
+        }).ToList();
+
+        return Result.Success(PagedResult<PendingReviewItemResponse>.Create(
+            items: responses,
+            page: page,
+            pageSize: pageSize,
+            totalCount: totalCount));
+    }
+
+    public async Task<Result<PagedResult<ReviewDetailResponse>>> GetReceivedReviewsAsync(
+        Guid actorId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (actorId == Guid.Empty)
+        {
+            return Result.Failure<PagedResult<ReviewDetailResponse>>(
+                Error.Unauthorized("UNAUTHORIZED", "Xác thực không hợp lệ."));
+        }
+
+        if (page < 1) page = 1;
+        if (pageSize < 1) pageSize = 20;
+        if (pageSize > 50) pageSize = 50;
+
+        var query = _dbContext.Reviews
+            .AsNoTracking()
+            .Where(r => r.SubjectId == actorId && r.AuthorState == AuthorState.Active && r.ModerationState == ModerationState.Visible)
+            .OrderByDescending(r => r.CreatedAt)
+            .ThenByDescending(r => r.Id);
+
+        int totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        var responses = items.Select(r => new ReviewDetailResponse(
+            ReviewId: r.Id,
+            OrderId: r.OrderId,
+            ItemId: r.ItemId,
+            Direction: r.Direction == ReviewDirection.supplier_to_renter ? "supplier_to_renter" : "renter_to_supplier_listing",
+            AuthorId: r.AuthorId,
+            SubjectId: r.SubjectId,
+            EquipmentListingId: r.EquipmentListingId,
+            Rating: r.Rating,
+            Comment: r.Comment,
+            AuthorState: r.AuthorState.ToString(),
+            ModerationState: r.ModerationState.ToString(),
+            Version: r.Version,
+            CreatedAt: r.CreatedAt,
+            UpdatedAt: r.UpdatedAt,
+            WithdrawnAt: r.WithdrawnAt,
+            CanEditUntil: r.CanEditUntil)).ToList();
+
+        return Result.Success(PagedResult<ReviewDetailResponse>.Create(
+            items: responses,
+            page: page,
+            pageSize: pageSize,
+            totalCount: totalCount));
+    }
+
+    public async Task<Result<RenterReputationResponse>> GetRenterReputationAsync(
+        Guid renterId,
+        CancellationToken cancellationToken = default)
+    {
+        if (renterId == Guid.Empty)
+        {
+            return Result.Failure<RenterReputationResponse>(
+                Error.Unauthorized("UNAUTHORIZED", "Xác thực không hợp lệ."));
+        }
+
+        var reviews = await _dbContext.Reviews
+            .AsNoTracking()
+            .Where(r => r.SubjectId == renterId &&
+                        r.Direction == ReviewDirection.supplier_to_renter &&
+                        r.AuthorState == AuthorState.Active &&
+                        r.ModerationState == ModerationState.Visible)
+            .Select(r => r.Rating)
+            .ToListAsync(cancellationToken);
+
+        int count = reviews.Count;
+        double? avg = count > 0 ? Math.Round(reviews.Average(), 1, MidpointRounding.AwayFromZero) : null;
+
+        var dist = new Dictionary<string, int>
+        {
+            ["5"] = reviews.Count(r => r == 5),
+            ["4"] = reviews.Count(r => r == 4),
+            ["3"] = reviews.Count(r => r == 3),
+            ["2"] = reviews.Count(r => r == 2),
+            ["1"] = reviews.Count(r => r == 1)
+        };
+
+        return Result.Success(new RenterReputationResponse(renterId, avg, count, dist));
+    }
+
+    public async Task<Result<ReviewReportResponse>> CreateReportAsync(
+        Guid reviewId,
+        Guid reporterId,
+        string reason,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (reviewId == Guid.Empty || reporterId == Guid.Empty || string.IsNullOrWhiteSpace(reason))
+        {
+            return Result.Failure<ReviewReportResponse>(
+                Error.Validation("VALIDATION_FAILED", "ReviewId, ReporterId và Reason là bắt buộc."));
+        }
+
+        var review = await _dbContext.Reviews.FirstOrDefaultAsync(r => r.Id == reviewId, cancellationToken);
+        if (review == null)
+        {
+            return Result.Failure<ReviewReportResponse>(
+                Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá cần báo cáo."));
+        }
+
+        var existingReport = await _dbContext.ReviewReports
+            .FirstOrDefaultAsync(r => r.ReviewId == reviewId && r.ReporterId == reporterId, cancellationToken);
+        if (existingReport != null)
+        {
+            return Result.Failure<ReviewReportResponse>(
+                Error.Conflict("REPORT_ALREADY_EXISTS", "Bạn đã gửi báo cáo vi phạm cho đánh giá này rồi."));
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        var report = new ReviewReport(Guid.NewGuid(), reviewId, reporterId, reason, now);
+        await _dbContext.ReviewReports.AddAsync(report, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(new ReviewReportResponse(
+            report.Id,
+            report.ReviewId,
+            report.ReporterId,
+            report.Reason,
+            report.Status.ToString(),
+            report.CreatedAt,
+            report.ResolvedAt,
+            report.ResolvedBy));
+    }
+
+    public async Task<Result<AdminModerationResponse>> HideReviewAsync(
+        Guid reviewId,
+        Guid adminId,
+        string? reason,
+        string ifMatch,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        var review = await _dbContext.Reviews.FirstOrDefaultAsync(r => r.Id == reviewId, cancellationToken);
+        if (review == null)
+        {
+            return Result.Failure<AdminModerationResponse>(
+                Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
+        }
+
+        if (!ParseIfMatch(ifMatch, review.Version, out var ifMatchError))
+        {
+            return Result.Failure<AdminModerationResponse>(ifMatchError!);
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        review.AdminHide(reason ?? "Nội dung vi phạm tiêu chuẩn cộng đồng.", now);
+
+        var audit = new ReviewAudit(
+            Guid.NewGuid(),
+            review.Id,
+            adminId,
+            "Admin",
+            ReviewAuditAction.Hidden,
+            reason,
+            null,
+            null,
+            now);
+
+        var outbox = new OutboxMessage(
+            Guid.NewGuid(),
+            "review.events.v1",
+            "ReviewHidden",
+            review.Id.ToString("D"),
+            JsonSerializer.Serialize(new { reviewId = review.Id, version = review.Version }),
+            now);
+
+        await _dbContext.ReviewAudits.AddAsync(audit, cancellationToken);
+        await _dbContext.OutboxMessages.AddAsync(outbox, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(new AdminModerationResponse(
+            review.Id,
+            review.AuthorState.ToString(),
+            review.ModerationState.ToString(),
+            review.Version,
+            now,
+            adminId,
+            review.AdminReason));
+    }
+
+    public async Task<Result<AdminModerationResponse>> RestoreReviewAsync(
+        Guid reviewId,
+        Guid adminId,
+        string? reason,
+        string ifMatch,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        var review = await _dbContext.Reviews.FirstOrDefaultAsync(r => r.Id == reviewId, cancellationToken);
+        if (review == null)
+        {
+            return Result.Failure<AdminModerationResponse>(
+                Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
+        }
+
+        if (!ParseIfMatch(ifMatch, review.Version, out var ifMatchError))
+        {
+            return Result.Failure<AdminModerationResponse>(ifMatchError!);
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        review.AdminRestore();
+
+        var audit = new ReviewAudit(
+            Guid.NewGuid(),
+            review.Id,
+            adminId,
+            "Admin",
+            ReviewAuditAction.Restored,
+            reason,
+            null,
+            null,
+            now);
+
+        var outbox = new OutboxMessage(
+            Guid.NewGuid(),
+            "review.events.v1",
+            "ReviewRestored",
+            review.Id.ToString("D"),
+            JsonSerializer.Serialize(new { reviewId = review.Id, version = review.Version }),
+            now);
+
+        await _dbContext.ReviewAudits.AddAsync(audit, cancellationToken);
+        await _dbContext.OutboxMessages.AddAsync(outbox, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(new AdminModerationResponse(
+            review.Id,
+            review.AuthorState.ToString(),
+            review.ModerationState.ToString(),
+            review.Version,
+            now,
+            adminId,
+            reason));
+    }
+
+    public async Task<Result<PagedResult<ReviewReportResponse>>> GetReportsAsync(
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (page < 1) page = 1;
+        if (pageSize < 1) pageSize = 20;
+        if (pageSize > 50) pageSize = 50;
+
+        var query = _dbContext.ReviewReports
+            .AsNoTracking()
+            .OrderByDescending(r => r.CreatedAt);
+
+        int totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        var responses = items.Select(r => new ReviewReportResponse(
+            r.Id,
+            r.ReviewId,
+            r.ReporterId,
+            r.Reason,
+            r.Status.ToString(),
+            r.CreatedAt,
+            r.ResolvedAt,
+            r.ResolvedBy)).ToList();
+
+        return Result.Success(PagedResult<ReviewReportResponse>.Create(
+            items: responses,
+            page: page,
+            pageSize: pageSize,
+            totalCount: totalCount));
+    }
+
+    public async Task<Result<ReviewReportResponse>> ResolveReportAsync(
+        Guid reportId,
+        Guid adminId,
+        string resolution,
+        CancellationToken cancellationToken = default)
+    {
+        var report = await _dbContext.ReviewReports.FirstOrDefaultAsync(r => r.Id == reportId, cancellationToken);
+        if (report == null)
+        {
+            return Result.Failure<ReviewReportResponse>(
+                Error.NotFound("REPORT_NOT_FOUND", "Không tìm thấy báo cáo vi phạm."));
+        }
+
+        if (!Enum.TryParse<ReportStatus>(resolution, true, out var status) || status == ReportStatus.PendingReview)
+        {
+            return Result.Failure<ReviewReportResponse>(
+                Error.Validation("INVALID_RESOLUTION", "Độ phân giải phải là 'ReviewedDismissed' hoặc 'ReviewedHidden'."));
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        report.Resolve(status, adminId, now);
+
+        if (status == ReportStatus.ReviewedHidden)
+        {
+            var review = await _dbContext.Reviews.FirstOrDefaultAsync(r => r.Id == report.ReviewId, cancellationToken);
+            if (review != null && review.ModerationState == ModerationState.Visible)
+            {
+                review.AdminHide(report.Reason, now);
+            }
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(new ReviewReportResponse(
+            report.Id,
+            report.ReviewId,
+            report.ReporterId,
+            report.Reason,
+            report.Status.ToString(),
+            report.CreatedAt,
+            report.ResolvedAt,
+            report.ResolvedBy));
+    }
+
+    public async Task<Result<ReviewMediaResponse>> AttachMediaAsync(
+        Guid reviewId,
+        Guid actorId,
+        Guid mediaId,
+        string? mediaType,
+        string ifMatch,
+        CancellationToken cancellationToken = default)
+    {
+        var review = await _dbContext.Reviews.FirstOrDefaultAsync(r => r.Id == reviewId, cancellationToken);
+        if (review == null)
+        {
+            return Result.Failure<ReviewMediaResponse>(
+                Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
+        }
+
+        if (review.AuthorId != actorId)
+        {
+            return Result.Failure<ReviewMediaResponse>(
+                Error.Forbidden("FORBIDDEN", "Chỉ tác giả mới có quyền đính kèm media vào đánh giá."));
+        }
+
+        if (!ParseIfMatch(ifMatch, review.Version, out var ifMatchError))
+        {
+            return Result.Failure<ReviewMediaResponse>(ifMatchError!);
+        }
+
+        int mediaCount = await _dbContext.ReviewMedia.CountAsync(m => m.ReviewId == reviewId, cancellationToken);
+        if (mediaCount >= 5)
+        {
+            return Result.Failure<ReviewMediaResponse>(
+                Error.Validation("MAX_MEDIA_EXCEEDED", "Mỗi đánh giá chỉ được đính kèm tối đa 5 hình ảnh."));
+        }
+
+        var existing = await _dbContext.ReviewMedia
+            .FirstOrDefaultAsync(m => m.ReviewId == reviewId && m.MediaId == mediaId, cancellationToken);
+        if (existing != null)
+        {
+            return Result.Failure<ReviewMediaResponse>(
+                Error.Conflict("MEDIA_ALREADY_ATTACHED", "Media này đã được đính kèm vào đánh giá."));
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        var media = new ReviewMedia(Guid.NewGuid(), reviewId, mediaId, mediaType ?? "image", now);
+        review.Version++;
+
+        await _dbContext.ReviewMedia.AddAsync(media, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(new ReviewMediaResponse(media.Id, media.ReviewId, media.MediaId, media.MediaType, media.CreatedAt));
+    }
+
+    public async Task<Result> DetachMediaAsync(
+        Guid reviewId,
+        Guid actorId,
+        Guid mediaId,
+        string ifMatch,
+        CancellationToken cancellationToken = default)
+    {
+        var review = await _dbContext.Reviews.FirstOrDefaultAsync(r => r.Id == reviewId, cancellationToken);
+        if (review == null)
+        {
+            return Result.Failure(Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
+        }
+
+        if (review.AuthorId != actorId)
+        {
+            return Result.Failure(Error.Forbidden("FORBIDDEN", "Chỉ tác giả mới có quyền gỡ media khỏi đánh giá."));
+        }
+
+        if (!ParseIfMatch(ifMatch, review.Version, out var ifMatchError))
+        {
+            return Result.Failure(ifMatchError!);
+        }
+
+        var media = await _dbContext.ReviewMedia
+            .FirstOrDefaultAsync(m => m.ReviewId == reviewId && m.MediaId == mediaId, cancellationToken);
+        if (media != null)
+        {
+            review.Version++;
+            _dbContext.ReviewMedia.Remove(media);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return Result.Success();
     }
 }

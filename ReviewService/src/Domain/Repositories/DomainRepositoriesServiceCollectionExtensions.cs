@@ -33,7 +33,9 @@ public static class DomainRepositoriesServiceCollectionExtensions
         services.AddScoped<IReviewRepository, ReviewRepository>();
         services.AddScoped<IReviewAuditRepository, ReviewAuditRepository>();
         services.AddScoped<IIdempotencyRepository, IdempotencyRepository>();
-
+        services.AddScoped<IReviewProjectionRepository, ReviewProjectionRepository>();
+        services.AddScoped<IReviewReportRepository, ReviewReportRepository>();
+        services.AddScoped<IOutboxRepository, OutboxRepository>();
         return services;
     }
 }

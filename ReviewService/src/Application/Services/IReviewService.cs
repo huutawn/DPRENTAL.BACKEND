@@ -231,4 +231,69 @@ public interface IReviewService
         string targetType,
         Guid targetId,
         CancellationToken cancellationToken = default);
+
+    Task<Result<PagedResult<PendingReviewItemResponse>>> GetPendingReviewsAsync(
+        Guid actorId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<PagedResult<ReviewDetailResponse>>> GetReceivedReviewsAsync(
+        Guid actorId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<RenterReputationResponse>> GetRenterReputationAsync(
+        Guid renterId,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ReviewReportResponse>> CreateReportAsync(
+        Guid reviewId,
+        Guid reporterId,
+        string reason,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<AdminModerationResponse>> HideReviewAsync(
+        Guid reviewId,
+        Guid adminId,
+        string? reason,
+        string ifMatch,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<AdminModerationResponse>> RestoreReviewAsync(
+        Guid reviewId,
+        Guid adminId,
+        string? reason,
+        string ifMatch,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<PagedResult<ReviewReportResponse>>> GetReportsAsync(
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ReviewReportResponse>> ResolveReportAsync(
+        Guid reportId,
+        Guid adminId,
+        string resolution,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<ReviewMediaResponse>> AttachMediaAsync(
+        Guid reviewId,
+        Guid actorId,
+        Guid mediaId,
+        string? mediaType,
+        string ifMatch,
+        CancellationToken cancellationToken = default);
+
+    Task<Result> DetachMediaAsync(
+        Guid reviewId,
+        Guid actorId,
+        Guid mediaId,
+        string ifMatch,
+        CancellationToken cancellationToken = default);
 }

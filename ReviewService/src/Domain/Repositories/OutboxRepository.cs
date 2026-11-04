@@ -1,0 +1,40 @@
+using Dprental.ReviewService.Domain.Entities;
+using Dprental.ReviewService.Domain.IRepositories;
+using Microsoft.EntityFrameworkCore;
+
+namespace Dprental.ReviewService.Domain.Repositories;
+
+public sealed class OutboxRepository : IOutboxRepository
+{
+    private readonly ReviewServiceDbContext _dbContext;
+
+    public OutboxRepository(ReviewServiceDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task AddAsync(OutboxMessage message, CancellationToken cancellationToken = default)
+    {
+        await _dbContext.OutboxMessages.AddAsync(message, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<OutboxMessage>> GetUnprocessedMessagesAsync(int batchSize, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.OutboxMessages
+            .Where(m => m.ProcessedAt == null)
+            .OrderBy(m => m.CreatedAt)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task MarkProcessedAsync(Guid messageId, DateTimeOffset processedAt, CancellationToken cancellationToken = default)
+    {
+        var message = await _dbContext.OutboxMessages.FindAsync([messageId], cancellationToken);
+        if (message != null)
+        {
+            message.MarkProcessed(processedAt);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+}
