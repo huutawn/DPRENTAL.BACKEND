@@ -241,6 +241,74 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     ActionUrl: null));
                 break;
 
+            case "RentalItemConfirmed":
+                if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                {
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "RentalItemConfirmed yêu cầu renterId hợp lệ."));
+                }
+                results.Add(new ResolvedRecipient(
+                    RecipientUserId: renterId.Value,
+                    RecipientRole: "Renter",
+                    NotificationType: "ORDER_CONFIRMED",
+                    Category: "ORDER",
+                    Severity: "INFO",
+                    IsActionable: false,
+                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    ActionUrl: null));
+                break;
+
+            case "RentalItemRejected":
+                if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                {
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "RentalItemRejected yêu cầu renterId hợp lệ."));
+                }
+                results.Add(new ResolvedRecipient(
+                    RecipientUserId: renterId.Value,
+                    RecipientRole: "Renter",
+                    NotificationType: "ORDER_REJECTED",
+                    Category: "ORDER",
+                    Severity: "WARNING",
+                    IsActionable: false,
+                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    ActionUrl: null));
+                break;
+
+            case "RefundCompletedFinancial":
+                if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                {
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "RefundCompletedFinancial yêu cầu renterId hợp lệ."));
+                }
+                results.Add(new ResolvedRecipient(
+                    RecipientUserId: renterId.Value,
+                    RecipientRole: "Renter",
+                    NotificationType: "REFUND_COMPLETED",
+                    Category: "PAYMENT",
+                    Severity: "SUCCESS",
+                    IsActionable: false,
+                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    ActionUrl: null));
+                break;
+
+            case "SupplierPayoutCompleted":
+                if (!supplierId.HasValue || supplierId.Value == Guid.Empty)
+                {
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "SupplierPayoutCompleted yêu cầu supplierId hợp lệ."));
+                }
+                results.Add(new ResolvedRecipient(
+                    RecipientUserId: supplierId.Value,
+                    RecipientRole: "Supplier",
+                    NotificationType: "PAYOUT_COMPLETED",
+                    Category: "PAYMENT",
+                    Severity: "SUCCESS",
+                    IsActionable: false,
+                    DeepLinkUrl: $"/supplier/settlements/{orderId}",
+                    ActionUrl: null));
+                break;
+
             default:
                 return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
                     Error.Validation("UNSUPPORTED_EVENT_TYPE", $"Loại sự kiện '{eventType}' không được hỗ trợ xử lý thông báo."));

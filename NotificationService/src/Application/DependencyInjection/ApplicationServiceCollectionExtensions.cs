@@ -21,7 +21,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<IRecipientResolutionService, RecipientResolutionService>();
         services.AddSingleton<INotificationTemplateRenderer, NotificationTemplateRenderer>();
 
-        // Kafka Event Handlers (all 10 events)
+        // Kafka Event Handlers (all 14 events)
         services.AddSingleton<IKafkaEventHandler, RentalOrderCreatedHandler>();
         services.AddSingleton<IKafkaEventHandler, RentalOrderPaidHandler>();
         services.AddSingleton<IKafkaEventHandler, RentalSupplierConfirmationRequestedHandler>();
@@ -32,7 +32,10 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<IKafkaEventHandler, ReturnConfirmationOverdueHandler>();
         services.AddSingleton<IKafkaEventHandler, RentalOrderCompletedHandler>();
         services.AddSingleton<IKafkaEventHandler, LatePaymentRefundRequestedHandler>();
-
+        services.AddSingleton<IKafkaEventHandler, RentalItemConfirmedHandler>();
+        services.AddSingleton<IKafkaEventHandler, RentalItemRejectedHandler>();
+        services.AddSingleton<IKafkaEventHandler, RefundCompletedFinancialHandler>();
+        services.AddSingleton<IKafkaEventHandler, SupplierPayoutCompletedHandler>();
         // Kafka Ingestion & DLQ
         services.AddSingleton<IKafkaDeadLetterPublisher, KafkaDeadLetterPublisher>();
         services.AddScoped<INotificationIngestionService, NotificationIngestionService>();

@@ -67,7 +67,11 @@ public sealed class E2EScenariosHarnessTests
                 new RentalHandoverOverdueHandler(),
                 new ReturnConfirmationOverdueHandler(),
                 new RentalOrderCompletedHandler(),
-                new LatePaymentRefundRequestedHandler()
+                new LatePaymentRefundRequestedHandler(),
+                new RentalItemConfirmedHandler(),
+                new RentalItemRejectedHandler(),
+                new RefundCompletedFinancialHandler(),
+                new SupplierPayoutCompletedHandler()
             };
 
             DlqMock = new Mock<IKafkaDeadLetterPublisher>();

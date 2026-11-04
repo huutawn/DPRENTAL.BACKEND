@@ -499,3 +499,201 @@ public sealed class LatePaymentRefundRequestedHandler : IKafkaEventHandler
             RenderData: renderData));
     }
 }
+
+public sealed class RentalItemConfirmedHandler : IKafkaEventHandler
+{
+    public string EventType => "RentalItemConfirmed";
+
+    public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
+    {
+        var payload = envelope.Payload;
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId") ?? (Guid.TryParse(envelope.AggregateId, out var g0) && g0 != Guid.Empty ? g0 : null);
+        if (!orderId.HasValue || orderId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
+        }
+
+        var renterId = payload.GetGuidFromAny("renterId", "userId", "customerId");
+        var supplierId = payload.GetGuidFromAny("supplierId");
+        var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var decisionAt = payload.GetStringFromAny("decisionAt");
+        var inventoryConfirmationRef = payload.GetStringFromAny("inventoryConfirmationRef") ?? string.Empty;
+
+        var renderData = new Dictionary<string, object?>
+        {
+            ["rentalOrderId"] = orderId.Value,
+            ["rentalItemId"] = itemId,
+            ["supplierId"] = supplierId,
+            ["renterId"] = renterId,
+            ["orderCode"] = orderCode,
+            ["decisionAt"] = decisionAt,
+            ["inventoryConfirmationRef"] = inventoryConfirmationRef,
+            ["orderVersion"] = orderVersion,
+            ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+        };
+
+        return Result.Success(new NotificationEventIntent(
+            EventType: EventType,
+            AggregateId: orderId.Value,
+            OrderVersion: orderVersion,
+            IsTerminal: false,
+            TerminalState: null,
+            RenterId: renterId,
+            SupplierId: supplierId,
+            ReturnRequestId: null,
+            RenderData: renderData));
+    }
+}
+
+public sealed class RentalItemRejectedHandler : IKafkaEventHandler
+{
+    public string EventType => "RentalItemRejected";
+
+    public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
+    {
+        var payload = envelope.Payload;
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId") ?? (Guid.TryParse(envelope.AggregateId, out var g1) && g1 != Guid.Empty ? g1 : null);
+        if (!orderId.HasValue || orderId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
+        }
+
+        var renterId = payload.GetGuidFromAny("renterId", "userId", "customerId");
+        var supplierId = payload.GetGuidFromAny("supplierId");
+        var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var decisionAt = payload.GetStringFromAny("decisionAt");
+        var reason = payload.GetStringFromAny("reason") ?? "Nhà cung cấp từ chối cung cấp thiết bị";
+        var optionalNote = payload.GetStringFromAny("optionalNote", "note");
+
+        var renderData = new Dictionary<string, object?>
+        {
+            ["rentalOrderId"] = orderId.Value,
+            ["rentalItemId"] = itemId,
+            ["supplierId"] = supplierId,
+            ["renterId"] = renterId,
+            ["orderCode"] = orderCode,
+            ["decisionAt"] = decisionAt,
+            ["reason"] = reason,
+            ["optionalNote"] = optionalNote,
+            ["orderVersion"] = orderVersion,
+            ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+        };
+
+        return Result.Success(new NotificationEventIntent(
+            EventType: EventType,
+            AggregateId: orderId.Value,
+            OrderVersion: orderVersion,
+            IsTerminal: false,
+            TerminalState: null,
+            RenterId: renterId,
+            SupplierId: supplierId,
+            ReturnRequestId: null,
+            RenderData: renderData));
+    }
+}
+
+public sealed class RefundCompletedFinancialHandler : IKafkaEventHandler
+{
+    public string EventType => "RefundCompletedFinancial";
+
+    public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
+    {
+        var payload = envelope.Payload;
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId") ?? (Guid.TryParse(envelope.AggregateId, out var g2) && g2 != Guid.Empty ? g2 : null);
+        if (!orderId.HasValue || orderId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
+        }
+
+        var refundId = payload.GetGuidFromAny("refundId");
+        var refundRef = payload.GetStringFromAny("refundRef") ?? (refundId.HasValue ? $"REF-{refundId.Value.ToString()[..8]}" : "REF-UNKNOWN");
+        var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
+        var renterId = payload.GetGuidFromAny("renterId", "userId");
+        var refundKind = payload.GetStringFromAny("refundKind") ?? "FULL_CANCELLATION";
+        var amount = payload.GetDecimalFromAny(0, "amount", "refundAmount");
+        var currency = payload.GetStringFromAny("currency") ?? "VND";
+        var completedAt = payload.GetStringFromAny("completedAt");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+
+        var renderData = new Dictionary<string, object?>
+        {
+            ["rentalOrderId"] = orderId.Value,
+            ["refundId"] = refundId,
+            ["refundRef"] = refundRef,
+            ["rentalItemId"] = itemId,
+            ["renterId"] = renterId,
+            ["refundKind"] = refundKind,
+            ["amount"] = amount,
+            ["currency"] = currency,
+            ["completedAt"] = completedAt,
+            ["orderCode"] = orderCode,
+            ["orderVersion"] = orderVersion,
+            ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+        };
+
+        return Result.Success(new NotificationEventIntent(
+            EventType: EventType,
+            AggregateId: orderId.Value,
+            OrderVersion: orderVersion,
+            IsTerminal: false,
+            TerminalState: null,
+            RenterId: renterId,
+            SupplierId: null,
+            ReturnRequestId: null,
+            RenderData: renderData));
+    }
+}
+
+public sealed class SupplierPayoutCompletedHandler : IKafkaEventHandler
+{
+    public string EventType => "SupplierPayoutCompleted";
+
+    public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
+    {
+        var payload = envelope.Payload;
+        var settlementId = payload.GetGuidFromAny("settlementId", "rentalOrderId", "orderId") ?? (Guid.TryParse(envelope.AggregateId, out var g3) && g3 != Guid.Empty ? g3 : null);
+        if (!settlementId.HasValue || settlementId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_SETTLEMENT_ID", "settlementId không thể để trống."));
+        }
+
+        var payoutId = payload.GetGuidFromAny("payoutId");
+        var payoutRef = payload.GetStringFromAny("payoutRef") ?? (payoutId.HasValue ? $"PAYOUT-{payoutId.Value.ToString()[..8]}" : "PAYOUT-UNKNOWN");
+        var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
+        var supplierId = payload.GetGuidFromAny("supplierId");
+        var amount = payload.GetDecimalFromAny(0, "amount", "payoutAmount");
+        var currency = payload.GetStringFromAny("currency") ?? "VND";
+        var completedAt = payload.GetStringFromAny("completedAt");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+
+        var renderData = new Dictionary<string, object?>
+        {
+            ["settlementId"] = settlementId.Value,
+            ["payoutId"] = payoutId,
+            ["payoutRef"] = payoutRef,
+            ["rentalItemId"] = itemId,
+            ["supplierId"] = supplierId,
+            ["amount"] = amount,
+            ["currency"] = currency,
+            ["completedAt"] = completedAt,
+            ["orderVersion"] = orderVersion,
+            ["deepLinkUrl"] = $"/supplier/settlements/{settlementId.Value}"
+        };
+
+        return Result.Success(new NotificationEventIntent(
+            EventType: EventType,
+            AggregateId: settlementId.Value,
+            OrderVersion: orderVersion,
+            IsTerminal: false,
+            TerminalState: null,
+            RenterId: null,
+            SupplierId: supplierId,
+            ReturnRequestId: null,
+            RenderData: renderData));
+    }
+}

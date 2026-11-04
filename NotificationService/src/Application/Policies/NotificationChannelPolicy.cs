@@ -14,6 +14,8 @@ public static class NotificationChannelPolicy
             "HANDOVER_OVERDUE_SUPPLIER" => string.Equals(recipientRole, "Supplier", StringComparison.OrdinalIgnoreCase),
             "RETURN_CONFIRMATION_OVERDUE_SUPPLIER" => string.Equals(recipientRole, "Supplier", StringComparison.OrdinalIgnoreCase),
             "ORDER_COMPLETED" => true,
+            "REFUND_COMPLETED" => string.Equals(recipientRole, "Renter", StringComparison.OrdinalIgnoreCase),
+            "PAYOUT_COMPLETED" => string.Equals(recipientRole, "Supplier", StringComparison.OrdinalIgnoreCase),
             _ => false
         };
     }
