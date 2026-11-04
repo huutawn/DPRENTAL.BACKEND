@@ -128,11 +128,77 @@ public class MediaController : ControllerBase
     [ProducesResponseType<MediaReadUrlDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> CreatePrivateAccess(
-        Guid mediaId, [FromBody] MediaAccessRequest request, CancellationToken cancellationToken)
+        Guid mediaId,
+        [FromBody] MediaAccessRequest request,
+        [FromQuery] string? purpose,
+        [FromQuery] int? lifetimeSeconds,
+        [FromQuery] string? actorId,
+        CancellationToken cancellationToken)
     {
-        var result = await _accessService.CreatePrivateReadUrlAsync(mediaId, request, cancellationToken);
+        string? resolvedActorId = request.ActorId
+            ?? actorId
+            ?? Request.Headers["X-Actor-Id"].FirstOrDefault()
+            ?? Request.Headers["X-User-Id"].FirstOrDefault()
+            ?? _userContext.UserId;
+
+        var effectiveRequest = request with
+        {
+            Purpose = request.Purpose ?? purpose,
+            ActorId = resolvedActorId
+        };
+
+        TimeSpan? lifetime = lifetimeSeconds.HasValue
+            ? TimeSpan.FromSeconds(lifetimeSeconds.Value)
+            : null;
+
+        var result = lifetime.HasValue
+            ? await _accessService.CreatePrivateReadUrlAsync(mediaId, effectiveRequest, lifetime.Value, cancellationToken)
+            : await _accessService.CreatePrivateReadUrlAsync(mediaId, effectiveRequest, cancellationToken);
+        Response.Headers.CacheControl = "no-store";
+        LogPrivateGrant(_logger, mediaId, result.IsSuccess ? "granted" : result.Error.Code, null);
+        return ToActionResult(result, StatusCodes.Status200OK);
+    }
+
+    /// <summary>Truy vấn URL đọc riêng tư ngắn hạn (hỗ trợ GET /api/v1/media/{mediaId}/access?purpose=review).</summary>
+    [HttpGet("{mediaId:guid}/access")]
+    [RequireApiKey]
+    [ProducesResponseType<MediaReadUrlDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetPrivateAccess(
+        Guid mediaId,
+        [FromQuery] string? purpose,
+        [FromQuery] string action = "read",
+        [FromQuery] bool download = false,
+        [FromQuery] string? variant = null,
+        [FromQuery] int? lifetimeSeconds = null,
+        [FromQuery] string? actorId = null,
+        CancellationToken cancellationToken = default)
+    {
+        string? resolvedActorId = actorId
+            ?? Request.Headers["X-Actor-Id"].FirstOrDefault()
+            ?? Request.Headers["X-User-Id"].FirstOrDefault()
+            ?? _userContext.UserId;
+
+        var request = new MediaAccessRequest(
+            Action: action,
+            Download: download,
+            Variant: variant,
+            Purpose: purpose,
+            ActorId: resolvedActorId);
+
+        TimeSpan? lifetime = lifetimeSeconds.HasValue
+            ? TimeSpan.FromSeconds(lifetimeSeconds.Value)
+            : null;
+
+        var result = lifetime.HasValue
+            ? await _accessService.CreatePrivateReadUrlAsync(mediaId, request, lifetime.Value, cancellationToken)
+            : await _accessService.CreatePrivateReadUrlAsync(mediaId, request, cancellationToken);
         Response.Headers.CacheControl = "no-store";
         LogPrivateGrant(_logger, mediaId, result.IsSuccess ? "granted" : result.Error.Code, null);
         return ToActionResult(result, StatusCodes.Status200OK);

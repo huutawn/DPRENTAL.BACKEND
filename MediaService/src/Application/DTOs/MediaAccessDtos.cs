@@ -17,7 +17,9 @@ public sealed record MediaMetadataDto(
 public sealed record MediaAccessRequest(
     string Action,
     bool Download = false,
-    string? Variant = null);
+    string? Variant = null,
+    string? Purpose = null,
+    string? ActorId = null);
 
 public sealed record MediaReadUrlDto(Guid MediaId, string Url, DateTimeOffset ExpiresAtUtc);
 

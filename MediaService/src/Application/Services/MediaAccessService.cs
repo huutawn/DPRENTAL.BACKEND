@@ -100,8 +100,12 @@ public sealed class MediaAccessService : IMediaAccessService
             asset.Visibility.ToString(), asset.CreatedAtUtc,
             variantDtos));
     }
-    public async Task<Result<MediaReadUrlDto>> CreatePrivateReadUrlAsync(
+    public Task<Result<MediaReadUrlDto>> CreatePrivateReadUrlAsync(
         Guid mediaId, MediaAccessRequest request, CancellationToken cancellationToken = default)
+        => CreatePrivateReadUrlAsync(mediaId, request, null, cancellationToken);
+
+    public async Task<Result<MediaReadUrlDto>> CreatePrivateReadUrlAsync(
+        Guid mediaId, MediaAccessRequest request, TimeSpan? lifetime, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!string.Equals(request.Action, "read", StringComparison.OrdinalIgnoreCase))
@@ -131,9 +135,66 @@ public sealed class MediaAccessService : IMediaAccessService
                 Error.Conflict("MediaNotReady", "Media chưa sẵn sàng để truy cập."));
         }
 
+        bool isReviewAccess = string.Equals(request.Purpose?.Trim(), "review", StringComparison.OrdinalIgnoreCase);
+        TimeSpan effectiveLifetime;
+
+        if (isReviewAccess)
+        {
+            // Verify content type is image/*
+            string? contentType = asset.ActualContentType ?? asset.DeclaredContentType;
+            if (string.IsNullOrWhiteSpace(contentType) || !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                return Result.Failure<MediaReadUrlDto>(
+                    Error.Validation("InvalidContentType", "Chỉ hỗ trợ tệp định dạng hình ảnh cho đánh giá."));
+            }
+
+            // Verify uploader matches actor if actor is specified
+            if (!string.IsNullOrWhiteSpace(request.ActorId) &&
+                !string.Equals(asset.CreatedByUserId, request.ActorId.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return Result.Failure<MediaReadUrlDto>(
+                    Error.Forbidden("MediaOwnershipMismatch", "Người dùng không phải là người tải lên tệp media này."));
+            }
+
+            // Enforce lifetime <= 60 seconds (default 60s)
+            if (lifetime.HasValue)
+            {
+                if (lifetime.Value.TotalSeconds <= 0)
+                {
+                    return Result.Failure<MediaReadUrlDto>(
+                        Error.Validation("InvalidLifetime", "Thời gian sống của URL phải lớn hơn 0 giây."));
+                }
+
+                effectiveLifetime = lifetime.Value > TimeSpan.FromSeconds(60)
+                    ? TimeSpan.FromSeconds(60)
+                    : lifetime.Value;
+            }
+            else
+            {
+                effectiveLifetime = TimeSpan.FromSeconds(60);
+            }
+        }
+        else
+        {
+            if (lifetime.HasValue)
+            {
+                if (lifetime.Value.TotalSeconds is < 1 or > 900)
+                {
+                    return Result.Failure<MediaReadUrlDto>(
+                        Error.Validation("InvalidLifetime", "Thời gian sống của URL phải từ 1 đến 900 giây."));
+                }
+
+                effectiveLifetime = lifetime.Value;
+            }
+            else
+            {
+                effectiveLifetime = _readUrlLifetime;
+            }
+        }
+
         if (isOriginalVariant)
         {
-            return await CreateSignedReadUrlAsync(asset, request.Download, cancellationToken);
+            return await CreateSignedReadUrlAsync(asset, request.Download, effectiveLifetime, cancellationToken);
         }
 
         if (!string.IsNullOrWhiteSpace(request.Variant))
@@ -154,9 +215,10 @@ public sealed class MediaAccessService : IMediaAccessService
                     Error.NotFound("VariantNotFound", "Biến thể hình ảnh không tồn tại."));
             }
 
-            return await CreateSignedVariantReadUrlAsync(asset, variant, cancellationToken);
+            return await CreateSignedVariantReadUrlAsync(asset, variant, effectiveLifetime, cancellationToken);
         }
-        return await CreateSignedReadUrlAsync(asset, request.Download, cancellationToken);
+
+        return await CreateSignedReadUrlAsync(asset, request.Download, effectiveLifetime, cancellationToken);
     }
     public async Task<Result<MediaReadUrlDto>> CreateUploaderPreviewUrlAsync(
         string authenticatedUserId, Guid mediaId, CancellationToken cancellationToken = default)
@@ -185,10 +247,10 @@ public sealed class MediaAccessService : IMediaAccessService
 
         if (mediumVariant != null)
         {
-            return await CreateSignedVariantReadUrlAsync(asset, mediumVariant, cancellationToken);
+            return await CreateSignedVariantReadUrlAsync(asset, mediumVariant, _readUrlLifetime, cancellationToken);
         }
 
-        return await CreateSignedReadUrlAsync(asset, false, cancellationToken);
+        return await CreateSignedReadUrlAsync(asset, false, _readUrlLifetime, cancellationToken);
     }
 
     public async Task<Result<MediaReadUrlDto>> CreatePublicReadUrlAsync(
@@ -205,8 +267,7 @@ public sealed class MediaAccessService : IMediaAccessService
         {
             return Result.Failure<MediaReadUrlDto>(MediaNotFound());
         }
-
-        return await CreateSignedReadUrlAsync(asset, download, cancellationToken);
+        return await CreateSignedReadUrlAsync(asset, download, _readUrlLifetime, cancellationToken);
     }
 
     public async Task<Result<MediaVariantContentDto>> GetPublicVariantContentAsync(
@@ -307,15 +368,15 @@ public sealed class MediaAccessService : IMediaAccessService
     }
 
     private async Task<Result<MediaReadUrlDto>> CreateSignedVariantReadUrlAsync(
-        MediaAsset asset, MediaImageVariant variant, CancellationToken cancellationToken)
+        MediaAsset asset, MediaImageVariant variant, TimeSpan lifetime, CancellationToken cancellationToken)
     {
         try
         {
-            DateTimeOffset expiresAt = DateTimeOffset.UtcNow.Add(_readUrlLifetime);
+            DateTimeOffset expiresAt = DateTimeOffset.UtcNow.Add(lifetime);
             string fileName = $"{Path.GetFileNameWithoutExtension(asset.OriginalFileName)}_{variant.VariantName}.webp";
             string url = await _storage.GeneratePresignedReadUrlAsync(
                 variant.StorageKey, variant.ContentType,
-                fileName, false, _readUrlLifetime, cancellationToken);
+                fileName, false, lifetime, cancellationToken);
             return Result.Success(new MediaReadUrlDto(asset.Id, url, expiresAt));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -407,7 +468,7 @@ public sealed class MediaAccessService : IMediaAccessService
     }
 
     private async Task<Result<MediaReadUrlDto>> CreateSignedReadUrlAsync(
-        MediaAsset asset, bool download, CancellationToken cancellationToken)
+        MediaAsset asset, bool download, TimeSpan lifetime, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(asset.StorageKey))
         {
@@ -423,10 +484,10 @@ public sealed class MediaAccessService : IMediaAccessService
                 return Result.Failure<MediaReadUrlDto>(MediaNotFound());
             }
 
-            DateTimeOffset expiresAt = DateTimeOffset.UtcNow.Add(_readUrlLifetime);
+            DateTimeOffset expiresAt = DateTimeOffset.UtcNow.Add(lifetime);
             string url = await _storage.GeneratePresignedReadUrlAsync(
                 asset.StorageKey, asset.ActualContentType ?? asset.DeclaredContentType,
-                asset.OriginalFileName, download, _readUrlLifetime, cancellationToken);
+                asset.OriginalFileName, download, lifetime, cancellationToken);
             return Result.Success(new MediaReadUrlDto(asset.Id, url, expiresAt));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

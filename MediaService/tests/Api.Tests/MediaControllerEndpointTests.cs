@@ -264,6 +264,9 @@ public class MediaControllerEndpointTests
 
         var visResp = await client.PutAsJsonAsync($"/api/v1/media/{mediaId}/visibility", new ChangeMediaVisibilityRequest("public"));
         Assert.Equal(HttpStatusCode.OK, visResp.StatusCode);
+
+        var getAccessResp = await client.GetAsync($"/api/v1/media/{mediaId}/access?purpose=review");
+        Assert.Equal(HttpStatusCode.OK, getAccessResp.StatusCode);
     }
 
     [Fact]

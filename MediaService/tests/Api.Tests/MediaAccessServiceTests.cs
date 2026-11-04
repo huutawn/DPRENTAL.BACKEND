@@ -223,4 +223,117 @@ public class MediaAccessServiceTests
         var raced = await _sut.SetVisibilityAsync(asset.Id, request);
         Assert.True(raced.IsSuccess);
     }
+
+    [Fact]
+    public async Task PrivateAccess_WithCustomLifetime_UsesSpecifiedLifetime()
+    {
+        MediaAsset asset = Asset();
+        Store(asset);
+        ConfigureStorage();
+        var request = new MediaAccessRequest("read");
+
+        var granted = await _sut.CreatePrivateReadUrlAsync(asset.Id, request, TimeSpan.FromSeconds(120));
+        Assert.True(granted.IsSuccess);
+        Assert.InRange(granted.Value.ExpiresAtUtc, DateTimeOffset.UtcNow.AddSeconds(110), DateTimeOffset.UtcNow.AddSeconds(130));
+        await _storage.Received(1).GeneratePresignedReadUrlAsync(
+            asset.StorageKey!, "image/jpeg", asset.OriginalFileName, false,
+            TimeSpan.FromSeconds(120), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PrivateAccess_ForReview_DefaultsTtlTo60Seconds()
+    {
+        MediaAsset asset = Asset();
+        Store(asset);
+        ConfigureStorage();
+        var request = new MediaAccessRequest("read", Purpose: "review");
+
+        var granted = await _sut.CreatePrivateReadUrlAsync(asset.Id, request);
+        Assert.True(granted.IsSuccess);
+        Assert.InRange(granted.Value.ExpiresAtUtc, DateTimeOffset.UtcNow.AddSeconds(55), DateTimeOffset.UtcNow.AddSeconds(65));
+        await _storage.Received(1).GeneratePresignedReadUrlAsync(
+            asset.StorageKey!, "image/jpeg", asset.OriginalFileName, false,
+            TimeSpan.FromSeconds(60), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PrivateAccess_ForReview_CapsTtlAt60Seconds()
+    {
+        MediaAsset asset = Asset();
+        Store(asset);
+        ConfigureStorage();
+        var request = new MediaAccessRequest("read", Purpose: "review");
+
+        var granted = await _sut.CreatePrivateReadUrlAsync(asset.Id, request, TimeSpan.FromSeconds(300));
+        Assert.True(granted.IsSuccess);
+        Assert.InRange(granted.Value.ExpiresAtUtc, DateTimeOffset.UtcNow.AddSeconds(55), DateTimeOffset.UtcNow.AddSeconds(65));
+        await _storage.Received(1).GeneratePresignedReadUrlAsync(
+            asset.StorageKey!, "image/jpeg", asset.OriginalFileName, false,
+            TimeSpan.FromSeconds(60), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PrivateAccess_ForReview_AllowsTtlBelow60Seconds()
+    {
+        MediaAsset asset = Asset();
+        Store(asset);
+        ConfigureStorage();
+        var request = new MediaAccessRequest("read", Purpose: "review");
+
+        var granted = await _sut.CreatePrivateReadUrlAsync(asset.Id, request, TimeSpan.FromSeconds(30));
+        Assert.True(granted.IsSuccess);
+        Assert.InRange(granted.Value.ExpiresAtUtc, DateTimeOffset.UtcNow.AddSeconds(25), DateTimeOffset.UtcNow.AddSeconds(35));
+        await _storage.Received(1).GeneratePresignedReadUrlAsync(
+            asset.StorageKey!, "image/jpeg", asset.OriginalFileName, false,
+            TimeSpan.FromSeconds(30), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PrivateAccess_ForReview_ValidatesContentTypeIsImage()
+    {
+        MediaAsset asset = Asset();
+        asset.ActualContentType = "application/pdf";
+        asset.DeclaredContentType = "application/pdf";
+        Store(asset);
+        ConfigureStorage();
+        var request = new MediaAccessRequest("read", Purpose: "review");
+
+        var result = await _sut.CreatePrivateReadUrlAsync(asset.Id, request);
+        Assert.False(result.IsSuccess);
+        Assert.Equal("InvalidContentType", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task PrivateAccess_ForReview_ValidatesUploaderMatchesActor()
+    {
+        MediaAsset asset = Asset();
+        asset.CreatedByUserId = "author-123";
+        Store(asset);
+        ConfigureStorage();
+
+        // Mismatch actor
+        var mismatchReq = new MediaAccessRequest("read", Purpose: "review", ActorId: "other-user");
+        var mismatchResult = await _sut.CreatePrivateReadUrlAsync(asset.Id, mismatchReq);
+        Assert.False(mismatchResult.IsSuccess);
+        Assert.Equal("MediaOwnershipMismatch", mismatchResult.Error.Code);
+
+        // Matching actor
+        var matchReq = new MediaAccessRequest("read", Purpose: "review", ActorId: "author-123");
+        var matchResult = await _sut.CreatePrivateReadUrlAsync(asset.Id, matchReq);
+        Assert.True(matchResult.IsSuccess);
+    }
+
+    [Fact]
+    public async Task PrivateAccess_ForReview_RequiresReadyStatus()
+    {
+        MediaAsset asset = Asset();
+        asset.Status = MediaStatus.PendingUpload;
+        Store(asset);
+        ConfigureStorage();
+        var request = new MediaAccessRequest("read", Purpose: "review");
+
+        var result = await _sut.CreatePrivateReadUrlAsync(asset.Id, request);
+        Assert.False(result.IsSuccess);
+        Assert.Equal("MediaNotReady", result.Error.Code);
+    }
 }
