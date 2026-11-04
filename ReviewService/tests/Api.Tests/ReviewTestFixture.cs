@@ -34,6 +34,7 @@ public sealed class ReviewTestFixture : WebApplicationFactory<Program>
 
     public DateTimeOffset CurrentTime { get; } = new(2026, 11, 4, 10, 0, 0, TimeSpan.Zero);
     public TestRentalServiceClient RentalClient { get; } = new();
+    public TestMediaServiceClient MediaClient { get; } = new();
     public TestTimeProvider TimeProvider { get; }
     public ReviewTestFixture()
     {
@@ -54,6 +55,8 @@ public sealed class ReviewTestFixture : WebApplicationFactory<Program>
             services.RemoveAll<IRentalServiceClient>();
             services.AddSingleton<IRentalServiceClient>(RentalClient);
 
+            services.RemoveAll<IMediaServiceClient>();
+            services.AddSingleton<IMediaServiceClient>(MediaClient);
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(TimeProvider);
             services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
@@ -206,5 +209,45 @@ public sealed class TestRentalServiceClient : IRentalServiceClient
 
         return Task.FromResult(Result.Failure<RentalItemReviewSnapshotDto>(
             Error.NotFound("RENTAL_ITEM_NOT_FOUND", "Mục thuê không tồn tại trong hệ thống RentalService.")));
+    }
+
+    public Task<Result<ReconciliationBatchDto>> GetReconciliationBatchAsync(
+        string? cursor = null,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        var items = _snapshots.Values.Take(limit).ToList();
+        return Task.FromResult(Result.Success(new ReconciliationBatchDto(items, null, false)));
+    }
+}
+
+/// <summary>
+/// Client giả lập MediaService phục vụ kiểm thử tích hợp.
+/// </summary>
+public sealed class TestMediaServiceClient : IMediaServiceClient
+{
+    private readonly ConcurrentDictionary<Guid, Dprental.ReviewService.Application.DTOs.Media.MediaVerifyDto> _media = new();
+
+    public void RegisterMedia(Guid mediaId, Guid uploadedBy, string status = "Ready", string contentType = "image/jpeg")
+    {
+        _media[mediaId] = new Dprental.ReviewService.Application.DTOs.Media.MediaVerifyDto(mediaId, uploadedBy, status, contentType);
+    }
+
+    public Task<Result<Dprental.ReviewService.Application.DTOs.Media.MediaVerifyDto>> VerifyMediaAsync(Guid mediaId, CancellationToken cancellationToken = default)
+    {
+        if (_media.TryGetValue(mediaId, out var dto))
+        {
+            return Task.FromResult(Result.Success(dto));
+        }
+
+        return Task.FromResult(Result.Success(new Dprental.ReviewService.Application.DTOs.Media.MediaVerifyDto(mediaId, Guid.Empty, "Ready", "image/jpeg")));
+    }
+
+    public Task<Result<Dprental.ReviewService.Application.DTOs.Media.MediaAccessDto>> CreatePrivateReadAccessAsync(Guid mediaId, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(Result.Success(new Dprental.ReviewService.Application.DTOs.Media.MediaAccessDto(
+            mediaId,
+            $"https://media.test/private/{mediaId}?sig=test-sig",
+            DateTimeOffset.UtcNow.AddSeconds(60))));
     }
 }

@@ -19,4 +19,12 @@ public interface IRentalServiceClient
         Guid orderId,
         Guid itemId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách đối soát mục thuê hoàn tất theo lô dựa trên cursor (GET /internal/orders/review-reconciliation).
+    /// </summary>
+    Task<Result<ReconciliationBatchDto>> GetReconciliationBatchAsync(
+        string? cursor = null,
+        int limit = 100,
+        CancellationToken cancellationToken = default);
 }

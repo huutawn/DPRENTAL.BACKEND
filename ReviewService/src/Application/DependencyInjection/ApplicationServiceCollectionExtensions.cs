@@ -28,6 +28,9 @@ public static class ApplicationServiceCollectionExtensions
         {
             var rentalSection = configuration.GetSection(RentalServiceOptions.SectionName);
             services.Configure<RentalServiceOptions>(rentalSection);
+
+            var mediaSection = configuration.GetSection(MediaServiceOptions.SectionName);
+            services.Configure<MediaServiceOptions>(mediaSection);
         }
 
         services.AddScoped<IIdempotencyService, IdempotencyService>();
@@ -40,6 +43,23 @@ public static class ApplicationServiceCollectionExtensions
         services.AddHttpClient<IRentalServiceClient, RentalServiceClient>((serviceProvider, client) =>
         {
             var options = serviceProvider.GetService<IOptions<RentalServiceOptions>>()?.Value ?? new RentalServiceOptions();
+
+            if (!string.IsNullOrWhiteSpace(options.BaseUrl))
+            {
+                client.BaseAddress = new Uri(options.BaseUrl);
+            }
+
+            if (!string.IsNullOrWhiteSpace(options.ApiKey))
+            {
+                client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", options.ApiKey);
+            }
+
+            client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds > 0 ? options.TimeoutSeconds : 5);
+        });
+
+        services.AddHttpClient<IMediaServiceClient, MediaServiceClient>((serviceProvider, client) =>
+        {
+            var options = serviceProvider.GetService<IOptions<MediaServiceOptions>>()?.Value ?? new MediaServiceOptions();
 
             if (!string.IsNullOrWhiteSpace(options.BaseUrl))
             {

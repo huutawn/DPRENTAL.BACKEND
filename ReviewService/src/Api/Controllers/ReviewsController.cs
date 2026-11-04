@@ -488,4 +488,24 @@ public sealed class ReviewsController : ControllerBase
             ? NoContent()
             : this.ToProblem(result.Error);
     }
+
+    /// <summary>
+    /// Lấy URL đọc riêng tư ngắn hạn cho tệp media đính kèm (GET /api/v1/reviews/{reviewId}/media/{mediaId}/access).
+    /// </summary>
+    [HttpGet("{reviewId:guid}/media/{mediaId:guid}/access")]
+    public async Task<IActionResult> GetMediaAccess(
+        [FromRoute] Guid reviewId,
+        [FromRoute] Guid mediaId,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _mediaService.GetMediaPrivateAccessAsync(
+            reviewId,
+            mediaId,
+            _callerContext.ToActorContext(),
+            cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : this.ToProblem(result.Error);
+    }
 }

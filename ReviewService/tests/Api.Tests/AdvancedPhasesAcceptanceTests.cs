@@ -394,6 +394,70 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
         Assert.Equal(HttpStatusCode.Conflict, resolveRes2.StatusCode);
     }
 
+    [Fact]
+    public async Task Phase7_GetMediaAccess_PublicReview_SucceedsWithShortLivedUrl()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review có ảnh"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // Đính kèm ảnh
+        var mediaId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(mediaId, renterId, "Ready", "image/jpeg");
+
+        using var attachReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(mediaId, "image/jpeg"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        var attachRes = await _client.SendAsync(attachReq);
+        Assert.Equal(HttpStatusCode.Created, attachRes.StatusCode);
+
+        // Lấy private access URL
+        using var accessReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media/{mediaId}/access",
+            token: GenerateJwt(renterId));
+        var accessRes = await _client.SendAsync(accessReq);
+        Assert.Equal(HttpStatusCode.OK, accessRes.StatusCode);
+
+        var accessContent = await accessRes.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(accessContent);
+        Assert.True(doc.RootElement.TryGetProperty("url", out var urlProp));
+        Assert.Contains("test-sig", urlProp.GetString());
+    }
+
+    [Fact]
+    public async Task Phase7_AttachMedia_OwnershipMismatch_Returns403Forbidden()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review tác giả A"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // Media do user khác tải lên
+        var mediaId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(mediaId, otherUserId, "Ready", "image/jpeg");
+
+        using var attachReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(mediaId, "image/jpeg"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        var attachRes = await _client.SendAsync(attachReq);
+        Assert.Equal(HttpStatusCode.Forbidden, attachRes.StatusCode);
+    }
+
     #endregion
 
     private static HttpRequestMessage CreateRequest(

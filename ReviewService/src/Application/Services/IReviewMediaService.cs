@@ -28,4 +28,13 @@ public interface IReviewMediaService
         Guid mediaId,
         string ifMatch,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Yêu cầu sinh URL đọc riêng tư ngắn hạn cho một media đính kèm sau khi kiểm tra visibility.
+    /// </summary>
+    Task<Result<Dprental.ReviewService.Application.DTOs.Media.MediaAccessDto>> GetMediaPrivateAccessAsync(
+        Guid reviewId,
+        Guid mediaId,
+        ReviewActorContext actor,
+        CancellationToken cancellationToken = default);
 }
