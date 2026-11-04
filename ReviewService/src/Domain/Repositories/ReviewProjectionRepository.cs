@@ -60,6 +60,18 @@ public sealed class ReviewProjectionRepository : IReviewProjectionRepository
 
     public async Task UpsertAsync(ReviewProjection projection, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(projection);
+
+        if (!projection.CompletedAt.HasValue || projection.CompletedAt.Value == default)
+        {
+            throw new ArgumentException("CompletedAt must have a valid authoritative timestamp and cannot be null or default.", nameof(projection));
+        }
+
+        if (!projection.DeadlineAt.HasValue || projection.DeadlineAt.Value == default)
+        {
+            throw new ArgumentException("DeadlineAt must have a valid timestamp and cannot be null or default.", nameof(projection));
+        }
+
         var existing = await _dbContext.ReviewProjections
             .FirstOrDefaultAsync(p => p.ItemId == projection.ItemId, cancellationToken);
 
@@ -69,10 +81,13 @@ public sealed class ReviewProjectionRepository : IReviewProjectionRepository
         }
         else
         {
+            DateTimeOffset completedAt = existing.CompletedAt ?? projection.CompletedAt.Value;
+            DateTimeOffset deadlineAt = existing.DeadlineAt ?? projection.DeadlineAt.Value;
+
             existing.UpdateEligibility(
                 projection.SupplierId,
-                projection.CompletedAt ?? DateTimeOffset.UtcNow,
-                projection.DeadlineAt ?? DateTimeOffset.UtcNow.AddDays(30),
+                completedAt,
+                deadlineAt,
                 projection.IsEligible,
                 DateTimeOffset.UtcNow);
         }

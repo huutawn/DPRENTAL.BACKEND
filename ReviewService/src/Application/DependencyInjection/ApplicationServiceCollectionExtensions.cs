@@ -39,8 +39,11 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IReviewQueryService, ReviewQueryService>();
         services.AddScoped<IReviewModerationService, ReviewModerationService>();
         services.AddScoped<IReviewMediaService, ReviewMediaService>();
+        services.AddScoped<IReviewEligibilityService, ReviewEligibilityService>();
+        services.AddScoped<Dprental.ReviewService.Application.Kafka.Consumers.IRentalItemCompletedConsumer, Dprental.ReviewService.Application.Kafka.Consumers.RentalItemCompletedConsumer>();
         services.AddSingleton<IKafkaProducer, KafkaProducer>();
         services.AddHostedService<Dprental.ReviewService.Application.Kafka.Workers.OutboxPublisherWorker>();
+        services.AddHostedService<Dprental.ReviewService.Application.Kafka.Workers.RentalReconciliationSweepWorker>();
         services.AddSingleton(TimeProvider.System);
 
         services.AddHttpClient<IRentalServiceClient, RentalServiceClient>((serviceProvider, client) =>

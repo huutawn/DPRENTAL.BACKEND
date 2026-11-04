@@ -38,6 +38,8 @@ public static class DomainRepositoriesServiceCollectionExtensions
         services.AddScoped<IReviewReportRepository, ReviewReportRepository>();
         services.AddScoped<IOutboxRepository, OutboxRepository>();
         services.AddScoped<IReviewMediaRepository, ReviewMediaRepository>();
+        services.AddScoped<IInboxRepository, InboxRepository>();
+        services.AddScoped<IReconciliationRepository, ReconciliationRepository>();
         return services;
     }
 }
