@@ -17,6 +17,11 @@ public interface IAggregateWatermarkRepository
         Guid aggregateId,
         CancellationToken cancellationToken = default);
 
+    Task<AggregateStateProjection?> GetAggregateStateAsync(
+        string scope,
+        Guid aggregateId,
+        CancellationToken cancellationToken = default);
+
     Task UpsertWatermarkAsync(
         NotificationAggregateWatermark watermark,
         CancellationToken cancellationToken = default);

@@ -50,6 +50,71 @@ public sealed class AggregateWatermarkRepository : IAggregateWatermarkRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<AggregateStateProjection?> GetAggregateStateAsync(
+        string scope,
+        Guid aggregateId,
+        CancellationToken cancellationToken = default)
+    {
+        var effectiveScope = string.IsNullOrWhiteSpace(scope) ? NotificationWatermarkScope.RentalOrder : scope;
+
+        var watermarks = await _dbContext.AggregateWatermarks
+            .AsNoTracking()
+            .Where(w => w.Scope == effectiveScope && w.AggregateId == aggregateId)
+            .ToListAsync(cancellationToken);
+
+        if (watermarks.Count == 0)
+        {
+            return null;
+        }
+
+        var maxVersion = watermarks.Max(w => w.LastOrderVersion);
+        var isPaid = watermarks.Any(w => w.IsPaid || string.Equals(w.TerminalState, "PAID", StringComparison.OrdinalIgnoreCase));
+
+        var terminalWatermarks = watermarks
+            .Where(w => w.IsTerminal && !string.IsNullOrWhiteSpace(w.TerminalState) && !string.Equals(w.TerminalState, "PAID", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        bool isTerminal;
+        string? terminalState = null;
+        long? terminalVersion = null;
+
+        if (terminalWatermarks.Count > 0)
+        {
+            var highestTerminalVersion = terminalWatermarks.Max(w => w.LastOrderVersion);
+            var highestTerminalRecords = terminalWatermarks
+                .Where(w => w.LastOrderVersion == highestTerminalVersion)
+                .ToList();
+
+            var distinctStates = highestTerminalRecords
+                .Select(w => w.TerminalState!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (distinctStates.Count > 1)
+            {
+                throw new InvalidOperationException(
+                    $"Data integrity error: Conflicting terminal states ({string.Join(", ", distinctStates)}) found for aggregate {aggregateId} in scope {effectiveScope} at version {highestTerminalVersion}.");
+            }
+
+            isTerminal = true;
+            terminalState = highestTerminalRecords[0].TerminalState;
+            terminalVersion = highestTerminalVersion;
+        }
+        else
+        {
+            isTerminal = false;
+        }
+
+        return new AggregateStateProjection(
+            Scope: effectiveScope,
+            AggregateId: aggregateId,
+            MaxVersion: maxVersion,
+            IsPaid: isPaid,
+            IsTerminal: isTerminal,
+            TerminalState: terminalState,
+            TerminalVersion: terminalVersion);
+    }
+
     public async Task UpsertWatermarkAsync(NotificationAggregateWatermark watermark, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(watermark);

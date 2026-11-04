@@ -273,6 +273,150 @@ public sealed class NotificationDbContextTests
     }
 
     [Fact]
+    public async Task AggregateWatermarkRepository_GetAggregateStateAsync_ReturnsCorrectMaxVersionIsPaidIsTerminalAcrossMultipleRecipients()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new AggregateWatermarkRepository(context);
+        var aggregateId = Guid.NewGuid();
+        var recipient1 = Guid.NewGuid();
+        var recipient2 = Guid.NewGuid();
+        var recipient3 = Guid.NewGuid();
+
+        // Recipient 1: Version 2, Paid
+        await repo.UpsertWatermarksForRecipientsAsync(
+            NotificationWatermarkScope.RentalOrder,
+            aggregateId,
+            new[] { recipient1 },
+            orderVersion: 2,
+            messageId: "msg-r1",
+            isTerminal: false,
+            terminalState: null,
+            isPaid: true);
+
+        // Recipient 2: Version 5, Completed (Terminal)
+        await repo.UpsertWatermarksForRecipientsAsync(
+            NotificationWatermarkScope.RentalOrder,
+            aggregateId,
+            new[] { recipient2 },
+            orderVersion: 5,
+            messageId: "msg-r2",
+            isTerminal: true,
+            terminalState: "COMPLETED",
+            isPaid: false);
+
+        // Recipient 3: Version 3, Active
+        await repo.UpsertWatermarksForRecipientsAsync(
+            NotificationWatermarkScope.RentalOrder,
+            aggregateId,
+            new[] { recipient3 },
+            orderVersion: 3,
+            messageId: "msg-r3",
+            isTerminal: false,
+            terminalState: null,
+            isPaid: false);
+
+        await context.SaveChangesAsync();
+
+        var state = await repo.GetAggregateStateAsync(NotificationWatermarkScope.RentalOrder, aggregateId);
+
+        Assert.NotNull(state);
+        Assert.Equal(NotificationWatermarkScope.RentalOrder, state.Scope);
+        Assert.Equal(aggregateId, state.AggregateId);
+        Assert.Equal(5, state.MaxVersion);
+        Assert.True(state.IsPaid);
+        Assert.True(state.IsTerminal);
+        Assert.Equal("COMPLETED", state.TerminalState);
+        Assert.Equal(5, state.TerminalVersion);
+    }
+
+    [Fact]
+    public async Task AggregateWatermarkRepository_GetAggregateStateAsync_ConflictingTerminalStatesAtSameVersion_ThrowsInvalidOperationException()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new AggregateWatermarkRepository(context);
+        var aggregateId = Guid.NewGuid();
+        var recipient1 = Guid.NewGuid();
+        var recipient2 = Guid.NewGuid();
+
+        // Recipient 1: Version 4, CANCELLED
+        await repo.UpsertWatermarksForRecipientsAsync(
+            NotificationWatermarkScope.RentalOrder,
+            aggregateId,
+            new[] { recipient1 },
+            orderVersion: 4,
+            messageId: "msg-r1",
+            isTerminal: true,
+            terminalState: "CANCELLED");
+
+        // Recipient 2: Version 4, COMPLETED (Conflict!)
+        await repo.UpsertWatermarksForRecipientsAsync(
+            NotificationWatermarkScope.RentalOrder,
+            aggregateId,
+            new[] { recipient2 },
+            orderVersion: 4,
+            messageId: "msg-r2",
+            isTerminal: true,
+            terminalState: "COMPLETED");
+
+        await context.SaveChangesAsync();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repo.GetAggregateStateAsync(NotificationWatermarkScope.RentalOrder, aggregateId));
+
+        Assert.Contains("Data integrity error", ex.Message);
+        Assert.Contains("Conflicting terminal states", ex.Message);
+    }
+
+    [Fact]
+    public async Task AggregateWatermarkRepository_GetAggregateStateAsync_ReturnsNullWhenAggregateDoesNotExist()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new AggregateWatermarkRepository(context);
+
+        var state = await repo.GetAggregateStateAsync(NotificationWatermarkScope.RentalOrder, Guid.NewGuid());
+        Assert.Null(state);
+    }
+
+    [Fact]
+    public async Task AggregateWatermarkRepository_GetAggregateStateAsync_PicksTerminalStateFromHighestVersionWhenNoConflict()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new AggregateWatermarkRepository(context);
+        var aggregateId = Guid.NewGuid();
+        var recipient1 = Guid.NewGuid();
+        var recipient2 = Guid.NewGuid();
+
+        // Recipient 1: Version 2, CANCELLED
+        await repo.UpsertWatermarksForRecipientsAsync(
+            NotificationWatermarkScope.RentalOrder,
+            aggregateId,
+            new[] { recipient1 },
+            orderVersion: 2,
+            messageId: "msg-r1",
+            isTerminal: true,
+            terminalState: "CANCELLED");
+
+        // Recipient 2: Version 4, COMPLETED
+        await repo.UpsertWatermarksForRecipientsAsync(
+            NotificationWatermarkScope.RentalOrder,
+            aggregateId,
+            new[] { recipient2 },
+            orderVersion: 4,
+            messageId: "msg-r2",
+            isTerminal: true,
+            terminalState: "COMPLETED");
+
+        await context.SaveChangesAsync();
+
+        var state = await repo.GetAggregateStateAsync(NotificationWatermarkScope.RentalOrder, aggregateId);
+        Assert.NotNull(state);
+        Assert.Equal(4, state.MaxVersion);
+        Assert.True(state.IsTerminal);
+        Assert.Equal("COMPLETED", state.TerminalState);
+        Assert.Equal(4, state.TerminalVersion);
+    }
+
+    [Fact]
     public async Task InboxReceiptRepository_ShouldTrackIdempotency()
     {
         using var context = CreateInMemoryDbContext();

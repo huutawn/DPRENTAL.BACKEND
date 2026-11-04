@@ -960,4 +960,95 @@ public sealed class NotificationIngestionTests
         Assert.Equal("ORDER", supplierNotif.Category);
         Assert.Equal("SUCCESS", supplierNotif.Severity);
     }
+
+    [Fact]
+    public async Task Ingestion_OrderCancelledWithOnlyRenterWatermark_LateSupplierConfirmation_IsSuppressed()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        // Order was cancelled: only renter watermark is in the database!
+        await db.AggregateWatermarks.AddAsync(new NotificationAggregateWatermark
+        {
+            Scope = NotificationWatermarkScope.RentalOrder,
+            AggregateId = orderId,
+            RecipientUserId = renterId,
+            LastOrderVersion = 3,
+            IsTerminal = true,
+            TerminalState = "CANCELLED",
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var messageId = Guid.NewGuid();
+        var raw = ProducerFixtures.RentalSupplierConfirmationRequested(messageId, orderId, renterId, supplierId, orderVersion: 2);
+
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 25);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var notifications = await db.Notifications.Where(n => n.SourceEventId == messageId).ToListAsync();
+        var supplierNotif = notifications.FirstOrDefault(n => n.RecipientUserId == supplierId);
+        Assert.NotNull(supplierNotif);
+        Assert.False(supplierNotif.IsActionable);
+        Assert.Null(supplierNotif.ActionUrl);
+
+        // No email delivery jobs should be created because email was suppressed
+        var deliveryJobs = await db.DeliveryJobs.Where(j => j.NotificationId == supplierNotif.Id).ToListAsync();
+        Assert.Empty(deliveryJobs);
+    }
+
+    [Fact]
+    public async Task Ingestion_ItemCompletedWithOnlyRenterWatermark_LateSupplierHandoverOverdue_IsSuppressed()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        // Parent order watermark is active
+        await db.AggregateWatermarks.AddAsync(new NotificationAggregateWatermark
+        {
+            Scope = NotificationWatermarkScope.RentalOrder,
+            AggregateId = orderId,
+            RecipientUserId = renterId,
+            LastOrderVersion = 2,
+            IsTerminal = false,
+            TerminalState = null,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        // Item watermark is completed only for renter
+        await db.AggregateWatermarks.AddAsync(new NotificationAggregateWatermark
+        {
+            Scope = NotificationWatermarkScope.RentalItem,
+            AggregateId = itemId,
+            RecipientUserId = renterId,
+            ParentOrderId = orderId,
+            LastOrderVersion = 4,
+            IsTerminal = true,
+            TerminalState = "COMPLETED",
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var messageId = Guid.NewGuid();
+        var raw = ProducerFixtures.RentalHandoverOverdue(messageId, orderId, itemId, renterId, supplierId, orderVersion: 3);
+
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 26);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var notifications = await db.Notifications.Where(n => n.SourceEventId == messageId).ToListAsync();
+        var supplierNotif = notifications.FirstOrDefault(n => n.RecipientUserId == supplierId && n.NotificationType == "HANDOVER_OVERDUE_SUPPLIER");
+        Assert.NotNull(supplierNotif);
+        Assert.False(supplierNotif.IsActionable);
+        Assert.Null(supplierNotif.ActionUrl);
+
+        var deliveryJobs = await db.DeliveryJobs.Where(j => j.NotificationId == supplierNotif.Id).ToListAsync();
+        Assert.Empty(deliveryJobs);
+    }
 }

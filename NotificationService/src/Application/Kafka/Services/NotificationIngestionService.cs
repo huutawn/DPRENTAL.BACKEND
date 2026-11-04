@@ -214,35 +214,36 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                 await _watermarkRepo.AcquireAdvisoryLockAsync(intent.OrderId!.Value, cancellationToken);
             }
 
+            AggregateStateProjection? currentAggregateState = null;
+            AggregateStateProjection? parentOrderAggregateState = null;
+
+            if (intent.WatermarkScope != null && intent.WatermarkId.HasValue)
+            {
+                currentAggregateState = await _watermarkRepo.GetAggregateStateAsync(
+                    intent.WatermarkScope,
+                    intent.WatermarkId.Value,
+                    cancellationToken);
+
+                if (intent.OrderId.HasValue && intent.WatermarkScope != NotificationWatermarkScope.RentalOrder)
+                {
+                    parentOrderAggregateState = await _watermarkRepo.GetAggregateStateAsync(
+                        NotificationWatermarkScope.RentalOrder,
+                        intent.OrderId.Value,
+                        cancellationToken);
+                }
+            }
+
             foreach (var recipient in recipients)
             {
                 NotificationAggregateWatermark? watermark = null;
-                NotificationAggregateWatermark? parentOrderWatermark = null;
 
                 if (intent.WatermarkScope != null && intent.WatermarkId.HasValue)
                 {
-                    watermark = await _watermarkRepo.GetWatermarkAsync(intent.WatermarkScope, intent.WatermarkId.Value, recipient.RecipientUserId, cancellationToken);
-
-                    if (watermark == null)
-                    {
-                        var knownWatermarks = await _watermarkRepo.GetWatermarksForAggregateAsync(intent.WatermarkScope, intent.WatermarkId.Value, cancellationToken);
-                        var terminalWatermark = knownWatermarks.FirstOrDefault(w => w.IsTerminal);
-                        var paidWatermark = knownWatermarks.FirstOrDefault(w => w.IsPaid);
-                        if (terminalWatermark != null || paidWatermark != null)
-                        {
-                            watermark = new NotificationAggregateWatermark
-                            {
-                                Scope = intent.WatermarkScope,
-                                AggregateId = intent.WatermarkId.Value,
-                                RecipientUserId = recipient.RecipientUserId,
-                                ParentOrderId = intent.OrderId,
-                                LastOrderVersion = terminalWatermark?.LastOrderVersion ?? paidWatermark?.LastOrderVersion ?? 0,
-                                IsTerminal = terminalWatermark != null,
-                                TerminalState = terminalWatermark?.TerminalState,
-                                IsPaid = paidWatermark != null
-                            };
-                        }
-                    }
+                    watermark = await _watermarkRepo.GetWatermarkAsync(
+                        intent.WatermarkScope,
+                        intent.WatermarkId.Value,
+                        recipient.RecipientUserId,
+                        cancellationToken);
 
                     // Conflicting state check at same version:
                     // Two different messageIds with same version are processed; conflicting states at same version return validation error.
@@ -265,21 +266,16 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                             }
                         }
                     }
-
-                    if (intent.WatermarkScope != NotificationWatermarkScope.RentalOrder && intent.OrderId.HasValue)
-                    {
-                        parentOrderWatermark = await _watermarkRepo.GetWatermarkAsync(NotificationWatermarkScope.RentalOrder, intent.OrderId.Value, recipient.RecipientUserId, cancellationToken);
-                    }
                 }
 
                 StaleEvaluationResult staleEval;
-                if (parentOrderWatermark?.IsTerminal == true)
+                if (parentOrderAggregateState?.IsTerminal == true)
                 {
-                    staleEval = StaleActionSuppressionPolicy.Evaluate(recipient.NotificationType, intent.OrderVersion, parentOrderWatermark);
+                    staleEval = StaleActionSuppressionPolicy.Evaluate(recipient.NotificationType, intent.OrderVersion, parentOrderAggregateState);
                 }
                 else
                 {
-                    staleEval = StaleActionSuppressionPolicy.Evaluate(recipient.NotificationType, intent.OrderVersion, watermark);
+                    staleEval = StaleActionSuppressionPolicy.Evaluate(recipient.NotificationType, intent.OrderVersion, currentAggregateState);
                 }
                 var renderResult = _templateRenderer.Render(
                     recipient.NotificationType,

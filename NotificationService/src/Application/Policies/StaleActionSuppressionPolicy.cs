@@ -27,12 +27,12 @@ public static class StaleActionSuppressionPolicy
     };
 
     /// <summary>
-    /// Đánh giá xem sự kiện hoặc thông báo có bị coi là lỗi thời dựa trên watermark của aggregate không.
+    /// Đánh giá xem sự kiện hoặc thông báo có bị coi là lỗi thời dựa trên trạng thái tổng hợp (aggregate state projection) không.
     /// </summary>
     public static StaleEvaluationResult Evaluate(
         string notificationType,
         long incomingOrderVersion,
-        NotificationAggregateWatermark? watermark)
+        AggregateStateProjection? aggregateState)
     {
         // Financial notifications (REFUND_COMPLETED, PAYOUT_COMPLETED): NEVER apply Rental stale suppression
         if (notificationType is "REFUND_COMPLETED" or "PAYOUT_COMPLETED")
@@ -54,7 +54,7 @@ public static class StaleActionSuppressionPolicy
                 Reason: null);
         }
 
-        if (watermark == null)
+        if (aggregateState == null)
         {
             return new StaleEvaluationResult(
                 IsStale: false,
@@ -65,15 +65,15 @@ public static class StaleActionSuppressionPolicy
 
         // Trường hợp 1: Order/Aggregate đã ở trạng thái terminal (CANCELLED, COMPLETED, EXPIRED, REJECTED)
         // PAID milestone KHÔNG coi là terminal
-        var isPaidMilestone = watermark.IsPaid || string.Equals(watermark.TerminalState, "PAID", StringComparison.OrdinalIgnoreCase);
+        var isPaidMilestone = aggregateState.IsPaid || string.Equals(aggregateState.TerminalState, "PAID", StringComparison.OrdinalIgnoreCase);
         var isTerminal = !isPaidMilestone && (
-            (!string.IsNullOrWhiteSpace(watermark.TerminalState) && TerminalStates.Contains(watermark.TerminalState)) ||
-            (watermark.IsTerminal && (string.IsNullOrWhiteSpace(watermark.TerminalState) || TerminalStates.Contains(watermark.TerminalState)))
+            (!string.IsNullOrWhiteSpace(aggregateState.TerminalState) && TerminalStates.Contains(aggregateState.TerminalState)) ||
+            (aggregateState.IsTerminal && (string.IsNullOrWhiteSpace(aggregateState.TerminalState) || TerminalStates.Contains(aggregateState.TerminalState)))
         );
 
         if (isTerminal)
         {
-            var terminal = !string.IsNullOrWhiteSpace(watermark.TerminalState) ? watermark.TerminalState.ToUpperInvariant() : "TERMINAL";
+            var terminal = !string.IsNullOrWhiteSpace(aggregateState.TerminalState) ? aggregateState.TerminalState.ToUpperInvariant() : "TERMINAL";
 
             // Khi ở trạng thái terminal, CHỈ chặn các thông báo có tính hành động (actionable)
             if (ActionableNotificationTypes.Contains(notificationType))
@@ -107,14 +107,14 @@ public static class StaleActionSuppressionPolicy
         }
 
         // Trường hợp 3: incomingOrderVersion nhỏ hơn phiên bản watermark hiện tại
-        if (incomingOrderVersion > 0 && incomingOrderVersion < watermark.LastOrderVersion)
+        if (incomingOrderVersion > 0 && incomingOrderVersion < aggregateState.MaxVersion)
         {
             var suppressAction = ActionableNotificationTypes.Contains(notificationType);
             return new StaleEvaluationResult(
                 IsStale: suppressAction,
                 SuppressAction: suppressAction,
                 SuppressEmail: suppressAction,
-                Reason: suppressAction ? $"Phiên bản sự kiện ({incomingOrderVersion}) nhỏ hơn phiên bản hiện tại ({watermark.LastOrderVersion})." : null);
+                Reason: suppressAction ? $"Phiên bản sự kiện ({incomingOrderVersion}) nhỏ hơn phiên bản hiện tại ({aggregateState.MaxVersion})." : null);
         }
 
         return new StaleEvaluationResult(
@@ -122,5 +122,30 @@ public static class StaleActionSuppressionPolicy
             SuppressAction: false,
             SuppressEmail: false,
             Reason: null);
+    }
+
+    /// <summary>
+    /// Đánh giá xem sự kiện hoặc thông báo có bị coi là lỗi thời dựa trên watermark của aggregate không (backwards-compatible).
+    /// </summary>
+    public static StaleEvaluationResult Evaluate(
+        string notificationType,
+        long incomingOrderVersion,
+        NotificationAggregateWatermark? watermark)
+    {
+        if (watermark == null)
+        {
+            return Evaluate(notificationType, incomingOrderVersion, (AggregateStateProjection?)null);
+        }
+
+        var projection = new AggregateStateProjection(
+            Scope: watermark.Scope,
+            AggregateId: watermark.AggregateId,
+            MaxVersion: watermark.LastOrderVersion,
+            IsPaid: watermark.IsPaid,
+            IsTerminal: watermark.IsTerminal,
+            TerminalState: watermark.TerminalState,
+            TerminalVersion: watermark.IsTerminal ? watermark.LastOrderVersion : null);
+
+        return Evaluate(notificationType, incomingOrderVersion, projection);
     }
 }

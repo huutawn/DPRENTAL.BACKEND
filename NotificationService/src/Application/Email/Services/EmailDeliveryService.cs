@@ -253,16 +253,15 @@ public sealed class EmailDeliveryService : IEmailDeliveryService
                     {
                         await _watermarkRepo.AcquireAdvisoryLockAsync(notification.OrderId.Value, cancellationToken);
 
-                        var orderWatermark = await _watermarkRepo.GetWatermarkAsync(
+                        var orderAggregateState = await _watermarkRepo.GetAggregateStateAsync(
                             NotificationWatermarkScope.RentalOrder,
                             notification.OrderId.Value,
-                            job.RecipientUserId,
                             cancellationToken);
 
                         var orderEval = StaleActionSuppressionPolicy.Evaluate(
                             notification.NotificationType,
                             notification.EventVersion,
-                            orderWatermark);
+                            orderAggregateState);
 
                         if (orderEval.SuppressEmail)
                         {
@@ -275,16 +274,15 @@ public sealed class EmailDeliveryService : IEmailDeliveryService
                     {
                         if (Guid.TryParse(notification.ResourceId, out var itemId))
                         {
-                            var itemWatermark = await _watermarkRepo.GetWatermarkAsync(
+                            var itemAggregateState = await _watermarkRepo.GetAggregateStateAsync(
                                 NotificationWatermarkScope.RentalItem,
                                 itemId,
-                                job.RecipientUserId,
                                 cancellationToken);
 
                             var itemEval = StaleActionSuppressionPolicy.Evaluate(
                                 notification.NotificationType,
                                 notification.EventVersion,
-                                itemWatermark);
+                                itemAggregateState);
 
                             if (itemEval.SuppressEmail)
                             {
