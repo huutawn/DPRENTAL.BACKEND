@@ -37,4 +37,47 @@ public interface IReviewRepository
     /// Tìm đánh giá theo mục thuê và chiều đánh giá.
     /// </summary>
     Task<Review?> GetByItemAndDirectionAsync(Guid itemId, ReviewDirection direction, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách đánh giá công khai của một thiết bị kèm tổng số lượng (phân trang).
+    /// Lọc: direction == renter_to_supplier_listing && authorState == Active && moderationState == Visible && equipmentListingId == listingId.
+    /// Sắp xếp: CreatedAt DESC, Id DESC.
+    /// </summary>
+    Task<(IReadOnlyList<Review> Items, int TotalCount)> GetPublicListingReviewsAsync(
+        Guid listingId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách đánh giá công khai của một nhà cung cấp kèm tổng số lượng (phân trang).
+    /// Lọc: direction == renter_to_supplier_listing && authorState == Active && moderationState == Visible && subjectId == supplierId.
+    /// Sắp xếp: CreatedAt DESC, Id DESC.
+    /// </summary>
+    Task<(IReadOnlyList<Review> Items, int TotalCount)> GetPublicSupplierReviewsAsync(
+        Guid supplierId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách đánh giá của chính tác giả kèm tổng số lượng (phân trang, bao gồm Active và Withdrawn).
+    /// Lọc: authorId == authorId.
+    /// Sắp xếp: CreatedAt DESC, Id DESC.
+    /// </summary>
+    Task<(IReadOnlyList<Review> Items, int TotalCount)> GetMyReviewsAsync(
+        Guid authorId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tính toán tổng hợp điểm đánh giá cho thiết bị hoặc nhà cung cấp.
+    /// TargetType 'listing': equipmentListingId == targetId. TargetType 'supplier': subjectId == targetId.
+    /// Lọc: direction == renter_to_supplier_listing && authorState == Active && moderationState == Visible.
+    /// </summary>
+    Task<(int TotalCount, double? AverageRating, Dictionary<int, int> Distribution)> GetRatingSummaryAsync(
+        string targetType,
+        Guid targetId,
+        CancellationToken cancellationToken = default);
 }
