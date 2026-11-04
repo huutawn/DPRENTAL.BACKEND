@@ -28,4 +28,6 @@ public interface IUserRepository : IRepo<User, Guid>
     /// <summary>Kiểm tra user tồn tại và đang active.</summary>
     Task<bool> IsUserActiveAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<User?> GetByIdWithRolesAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<User>> GetUsersByIdsAsync(IReadOnlyList<Guid> ids, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<User>>(Array.Empty<User>());
 }
