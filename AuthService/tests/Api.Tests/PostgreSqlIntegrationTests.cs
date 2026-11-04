@@ -53,7 +53,7 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PostgreSqlOrganizationLookupFindsActiveOwnerMembership()
+    public async Task PostgreSqlOrganizationLookupProjectsPublicFields()
     {
         await using var db = CreateDbContext();
         string suffix = Guid.NewGuid().ToString("N");
@@ -68,10 +68,11 @@ public sealed class PostgreSqlIntegrationTests : IAsyncLifetime
         });
         await db.SaveChangesAsync();
         var repository = new EfOrganizationLookupRepository(db);
-        var result = await repository.FindByOwnerAsync(ownerId);
-        Assert.Equal(organization.Id, Assert.Single(result).Id);
-        Assert.Equal("0281234567", (await repository.FindByIdAsync(organization.Id))!.ContactPhone);
-        Assert.Empty(await repository.FindByOwnerAsync(Guid.NewGuid()));
+        var result = await repository.FindByIdAsync(organization.Id);
+        Assert.NotNull(result);
+        Assert.Equal(organization.Id, result.Id);
+        Assert.Equal("0281234567", result.ContactPhone);
+        Assert.Null(await repository.FindByIdAsync(Guid.NewGuid()));
     }
 
     [Theory]

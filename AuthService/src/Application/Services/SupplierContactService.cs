@@ -1,25 +1,27 @@
 using Dprental.AuthService.Application.DTOs.Organization;
+using Dprental.AuthService.Application.Clients;
 using Dprental.AuthService.Common;
 using Dprental.AuthService.Common.Enums;
 using Dprental.AuthService.Domain.IRepositories;
 
 namespace Dprental.AuthService.Application.Services;
 
-public sealed class SupplierContactService(ISupplierContactRepository repository)
+public sealed class SupplierContactService(IOrganizationLookupRepository repository, IMediaUrlResolver mediaUrlResolver)
 {
-    public async Task<Result<SupplierContactResponse>> GetAsync(Guid organizationId, CancellationToken cancellationToken = default)
+    public async Task<Result<OrganizationPublicResponse>> GetAsync(Guid organizationId, CancellationToken cancellationToken = default)
     {
         if (organizationId == Guid.Empty)
         {
-            return Result.Failure<SupplierContactResponse>(AuthErrors.Organization.OrganizationNotFound);
+            return Result.Failure<OrganizationPublicResponse>(AuthErrors.Organization.OrganizationNotFound);
         }
 
-        var contact = await repository.FindAsync(organizationId, cancellationToken);
+        var contact = await repository.FindByIdAsync(organizationId, cancellationToken);
         if (contact is null || contact.Type != OrganizationType.Supplier || contact.Status != OrganizationStatus.Active)
         {
-            return Result.Failure<SupplierContactResponse>(AuthErrors.Organization.OrganizationNotFound);
+            return Result.Failure<OrganizationPublicResponse>(AuthErrors.Organization.OrganizationNotFound);
         }
 
-        return Result.Success(new SupplierContactResponse(contact.Name, contact.ContactPhone));
+        return Result.Success(new OrganizationPublicResponse(contact.Id, contact.Name, contact.Slug, contact.Type,
+            contact.Status, contact.ContactPhone, contact.LogoMediaId, mediaUrlResolver.ResolvePublicUrl(contact.LogoMediaId)));
     }
 }

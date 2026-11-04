@@ -22,18 +22,6 @@ public sealed class OrganizationLookupService(IOrganizationService ownerService,
         return Result.Success<object>(ToPublic(record));
     }
 
-    public async Task<Result<OrganizationPublicResponse>> GetByOwnerAsync(Guid actorId, Guid ownerId, CancellationToken cancellationToken = default)
-    {
-        if (actorId == Guid.Empty || ownerId == Guid.Empty)
-            return Result.Failure<OrganizationPublicResponse>(AuthErrors.Organization.OrganizationNotFound);
-        var records = await repository.FindByOwnerAsync(ownerId, cancellationToken);
-        if (records.Count > 1)
-            return Result.Failure<OrganizationPublicResponse>(Error.Conflict("Organization.AmbiguousOwner", "Chủ tài khoản có nhiều tổ chức; không thể xác định tổ chức của tin đăng."));
-        if (records.Count == 0 || (actorId != ownerId && records[0].Status != OrganizationStatus.Active))
-            return Result.Failure<OrganizationPublicResponse>(AuthErrors.Organization.OrganizationNotFound);
-        return Result.Success(ToPublic(records[0]));
-    }
-
     private OrganizationPublicResponse ToPublic(OrganizationPublicRecord record) => new(record.Id, record.Name, record.Slug,
         record.Type, record.Status, record.ContactPhone, record.LogoMediaId, mediaUrlResolver.ResolvePublicUrl(record.LogoMediaId));
 }
