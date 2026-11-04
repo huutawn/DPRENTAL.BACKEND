@@ -71,6 +71,16 @@ public sealed class OrganizationIntegrationTests
             Assert.Equal(PublicOrganizationFields,
                 doc.RootElement.EnumerateObject().Select(p => p.Name).OrderBy(x => x, StringComparer.Ordinal).ToArray());
         }
+        foreach (HttpClient client in new[] { anonymous, owner, other })
+        {
+            using var response = await client.GetAsync($"/api/v1/auth/organizations/by-owner/{ownerId}/supplier-contact");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var doc = await response.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+            Assert.Equal(activeId, doc.RootElement.GetProperty("id").GetGuid());
+            Assert.Equal("0281234567", doc.RootElement.GetProperty("contactPhone").GetString());
+            Assert.Equal(PublicOrganizationFields, doc.RootElement.EnumerateObject().Select(p => p.Name).OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        }
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync($"/api/v1/auth/organizations/by-owner/{Guid.NewGuid()}/supplier-contact")).StatusCode);
         foreach (Guid id in new[] { pendingId, suspendedId, renterId, Guid.NewGuid(), Guid.Empty })
         {
             Assert.Equal(HttpStatusCode.NotFound,
@@ -82,6 +92,28 @@ public sealed class OrganizationIntegrationTests
             (await other.GetAsync($"/api/v1/auth/organizations/{activeId}")).StatusCode);
         Assert.Equal(HttpStatusCode.OK,
             (await owner.GetAsync($"/api/v1/auth/organizations/{activeId}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task PublicSupplierByOwnerRejectsAmbiguousOrInactiveMembership()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+        Guid ownerId = Guid.NewGuid();
+        await CreateUserAsync(factory, ownerId, "lookup-owner@example.com", "Owner", CustomerRoleId);
+        Guid firstId = await SeedOrganizationAsync(factory, ownerId, "lookup-active-one", OrganizationStatus.Active);
+        Guid secondId = await SeedOrganizationAsync(factory, ownerId, "lookup-active-two", OrganizationStatus.Active);
+        using var anonymous = factory.CreateClient();
+        string route = $"/api/v1/auth/organizations/by-owner/{ownerId}/supplier-contact";
+        Assert.Equal(HttpStatusCode.Conflict, (await anonymous.GetAsync(route)).StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            (await db.Organizations.SingleAsync(o => o.Id == firstId)).Status = OrganizationStatus.Pending;
+            (await db.Organizations.SingleAsync(o => o.Id == secondId)).Status = OrganizationStatus.Suspended;
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync(route)).StatusCode);
     }
 
     [Fact]
