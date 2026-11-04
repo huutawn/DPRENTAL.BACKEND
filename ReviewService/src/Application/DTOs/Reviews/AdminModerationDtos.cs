@@ -21,6 +21,7 @@ public sealed record ReviewReportResponse(
     string Status,
     DateTimeOffset CreatedAt,
     DateTimeOffset? ResolvedAt,
-    Guid? ResolvedBy);
+    Guid? ResolvedBy,
+    long Version = 1);
 
 public sealed record ResolveReviewReportRequest(string Resolution);

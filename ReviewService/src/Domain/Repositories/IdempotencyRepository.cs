@@ -33,28 +33,6 @@ public sealed class IdempotencyRepository : IIdempotencyRepository
                 cancellationToken);
     }
 
-    public Task<IdempotencyRecord?> GetAsync(
-        string idempotencyKey,
-        Guid actorId,
-        CancellationToken cancellationToken = default)
-    {
-        return GetAsync(actorId, idempotencyKey, cancellationToken);
-    }
-
-    public async Task<IdempotencyRecord?> GetAsync(
-        string idempotencyKey,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(idempotencyKey))
-        {
-            return null;
-        }
-
-        return await _dbContext.IdempotencyRecords
-            .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.IdempotencyKey == idempotencyKey, cancellationToken);
-    }
-
     public async Task SaveAsync(IdempotencyRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -67,12 +45,8 @@ public sealed class IdempotencyRepository : IIdempotencyRepository
         if (existing == null)
         {
             await _dbContext.IdempotencyRecords.AddAsync(record, cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
         }
-        else
-        {
-            _dbContext.Entry(existing).CurrentValues.SetValues(record);
-        }
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        // If already existing, receipt is immutable - do not overwrite
     }
 }

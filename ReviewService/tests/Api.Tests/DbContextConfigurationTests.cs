@@ -126,4 +126,39 @@ public sealed class DbContextConfigurationTests
         Assert.NotNull(uniqueIndex);
         Assert.Equal("uq_idempotency_actor_key", uniqueIndex.GetDatabaseName());
     }
+
+    [Fact]
+    public void DbContext_ConfiguresConcurrencyTokenOnReviewReportVersion()
+    {
+        using var context = CreateDbContext();
+        var reportEntity = context.Model.FindEntityType(typeof(ReviewReport));
+        Assert.NotNull(reportEntity);
+
+        var versionProperty = reportEntity.FindProperty(nameof(ReviewReport.Version));
+        Assert.NotNull(versionProperty);
+        Assert.True(versionProperty.IsConcurrencyToken);
+        Assert.Equal("version", versionProperty.GetColumnName());
+    }
+
+    [Fact]
+    public void DbContext_ConfiguresForeignKeysForReportAndMediaToReview()
+    {
+        using var context = CreateDbContext();
+
+        // 1. Report -> Review FK
+        var reportEntity = context.Model.FindEntityType(typeof(ReviewReport));
+        Assert.NotNull(reportEntity);
+        var reportFk = reportEntity.GetForeignKeys().FirstOrDefault(f => f.PrincipalEntityType.ClrType == typeof(Review));
+        Assert.NotNull(reportFk);
+        Assert.Equal(DeleteBehavior.Restrict, reportFk.DeleteBehavior);
+        Assert.Equal("fk_reports_review", reportFk.GetConstraintName());
+
+        // 2. Media -> Review FK
+        var mediaEntity = context.Model.FindEntityType(typeof(ReviewMedia));
+        Assert.NotNull(mediaEntity);
+        var mediaFk = mediaEntity.GetForeignKeys().FirstOrDefault(f => f.PrincipalEntityType.ClrType == typeof(Review));
+        Assert.NotNull(mediaFk);
+        Assert.Equal(DeleteBehavior.Cascade, mediaFk.DeleteBehavior);
+        Assert.Equal("fk_review_media_review", mediaFk.GetConstraintName());
+    }
 }

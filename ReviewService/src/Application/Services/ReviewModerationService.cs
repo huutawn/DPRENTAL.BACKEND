@@ -100,7 +100,8 @@ public sealed class ReviewModerationService : IReviewModerationService
             report.Status.ToString(),
             report.CreatedAt,
             report.ResolvedAt,
-            report.ResolvedBy));
+            report.ResolvedBy,
+            report.Version));
     }
 
     /// <inheritdoc />
@@ -263,7 +264,8 @@ public sealed class ReviewModerationService : IReviewModerationService
             r.Status.ToString(),
             r.CreatedAt,
             r.ResolvedAt,
-            r.ResolvedBy)).ToList();
+            r.ResolvedBy,
+            r.Version)).ToList();
 
         return Result.Success(PagedResult<ReviewReportResponse>.Create(
             items: responses,
@@ -329,7 +331,8 @@ public sealed class ReviewModerationService : IReviewModerationService
             report.Status.ToString(),
             report.CreatedAt,
             report.ResolvedAt,
-            report.ResolvedBy));
+            report.ResolvedBy,
+            report.Version));
     }
 
     private static bool ParseIfMatch(string? ifMatch, long currentVersion, out Error? error)

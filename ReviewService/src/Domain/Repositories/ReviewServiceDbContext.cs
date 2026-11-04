@@ -365,6 +365,13 @@ public sealed class ReviewServiceDbContext : DbContext, IUnitOfWork
             entity.Property(r => r.CreatedAt).HasColumnName("created_at").IsRequired();
             entity.Property(r => r.ResolvedAt).HasColumnName("resolved_at");
             entity.Property(r => r.ResolvedBy).HasColumnName("resolved_by");
+            entity.Property(r => r.Version).HasColumnName("version").HasDefaultValue(1L).IsConcurrencyToken().IsRequired();
+
+            entity.HasOne<Review>()
+                .WithMany()
+                .HasForeignKey(r => r.ReviewId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("fk_reports_review");
 
             entity.HasIndex(r => new { r.ReviewId, r.ReporterId }).IsUnique().HasDatabaseName("uq_reports_review_reporter");
             entity.HasIndex(r => r.Status).HasDatabaseName("idx_reports_status");
@@ -453,6 +460,12 @@ public sealed class ReviewServiceDbContext : DbContext, IUnitOfWork
             entity.Property(m => m.MediaId).HasColumnName("media_id").IsRequired();
             entity.Property(m => m.MediaType).HasColumnName("media_type").HasMaxLength(32).IsRequired();
             entity.Property(m => m.CreatedAt).HasColumnName("created_at").IsRequired();
+
+            entity.HasOne<Review>()
+                .WithMany()
+                .HasForeignKey(m => m.ReviewId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_review_media_review");
 
             entity.HasIndex(m => new { m.ReviewId, m.MediaId }).IsUnique().HasDatabaseName("uq_review_media_pair");
         });

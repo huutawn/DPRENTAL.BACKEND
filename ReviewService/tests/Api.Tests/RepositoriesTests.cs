@@ -219,23 +219,13 @@ public sealed class RepositoriesTests
         Assert.NotNull(fetched1);
         Assert.Equal(201, fetched1.ResponseStatusCode);
 
-        // Get by key and actorId
-        var fetched2 = await repository.GetAsync(key, actorId);
-        Assert.NotNull(fetched2);
-        Assert.Equal(201, fetched2.ResponseStatusCode);
-
-        // Get by key
-        var fetched3 = await repository.GetAsync(key);
-        Assert.NotNull(fetched3);
-        Assert.Equal(201, fetched3.ResponseStatusCode);
-
         // Non-existent key returns null
         Assert.Null(await repository.GetAsync(actorId, "non-existent"));
-        Assert.Null(await repository.GetAsync("non-existent"));
+        Assert.Null(await repository.GetAsync(Guid.NewGuid(), key));
     }
 
     [Fact]
-    public async Task IdempotencyRepository_SaveAsync_UpdatesExistingRecord()
+    public async Task IdempotencyRepository_SaveAsync_ReceiptIsImmutable_DoesNotOverwrite()
     {
         using var context = CreateDbContext();
         var repository = new IdempotencyRepository(context);
@@ -259,14 +249,16 @@ public sealed class RepositoriesTests
 
         await repository.SaveAsync(record);
 
+        // Attempt to overwrite
         record.ResponseBody = "{\"updated\":true}";
         record.ResponseStatusCode = 201;
         await repository.SaveAsync(record);
 
+        // Must remain initial (immutable)
         var fetched = await repository.GetAsync(actorId, key);
         Assert.NotNull(fetched);
-        Assert.Equal(201, fetched.ResponseStatusCode);
-        Assert.Equal("{\"updated\":true}", fetched.ResponseBody);
+        Assert.Equal(200, fetched.ResponseStatusCode);
+        Assert.Equal("{\"initial\":true}", fetched.ResponseBody);
     }
 
     [Fact]

@@ -15,7 +15,7 @@ public sealed class ReviewReport
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? ResolvedAt { get; private set; }
     public Guid? ResolvedBy { get; private set; }
-
+    public long Version { get; private set; } = 1;
     private ReviewReport() { }
 
     public ReviewReport(
@@ -52,5 +52,6 @@ public sealed class ReviewReport
         Status = resolution;
         ResolvedBy = resolvedByAdmin;
         ResolvedAt = resolvedAt.ToUniversalTime();
+        Version++;
     }
 }
