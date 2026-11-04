@@ -83,6 +83,31 @@ public sealed class InternalApiKeyMiddleware
             return;
         }
 
+
+        if (context.Request.Headers.TryGetValue("Authorization", out var authValues) &&
+            authValues.Count > 0 &&
+            authValues[0] != null &&
+            authValues[0]!.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            string? pathStr = context.Request.Path.Value;
+            if (pathStr != null && (pathStr.Contains("review-snapshot", StringComparison.OrdinalIgnoreCase) ||
+                                    pathStr.Contains("review-reconciliation", StringComparison.OrdinalIgnoreCase) ||
+                                    pathStr.Contains("reconciliation/rental-items", StringComparison.OrdinalIgnoreCase)))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                context.Response.ContentType = "application/problem+json";
+                var problem = new ProblemDetails
+                {
+                    Type = "https://tools.ietf.org/html/rfc9110#section-15.5.4",
+                    Title = "Forbidden",
+                    Status = StatusCodes.Status403Forbidden,
+                    Detail = "Bearer tokens are not accepted for internal review integration endpoints. Use X-Api-Key.",
+                    Instance = context.Request.Path
+                };
+                await context.Response.WriteAsJsonAsync(problem, options: null, contentType: "application/problem+json");
+                return;
+            }
+        }
         context.Items["InternalApiKeyVerified"] = true;
         await _next(context);
     }
