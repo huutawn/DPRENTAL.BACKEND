@@ -31,7 +31,10 @@ public static class ApplicationServiceCollectionExtensions
         }
 
         services.AddScoped<IIdempotencyService, IdempotencyService>();
-        services.AddScoped<IReviewService, Dprental.ReviewService.Application.Services.ReviewService>();
+        services.AddScoped<IReviewAuthoringService, ReviewAuthoringService>();
+        services.AddScoped<IReviewQueryService, ReviewQueryService>();
+        services.AddScoped<IReviewModerationService, ReviewModerationService>();
+        services.AddScoped<IReviewMediaService, ReviewMediaService>();
         services.AddSingleton(TimeProvider.System);
 
         services.AddHttpClient<IRentalServiceClient, RentalServiceClient>((serviceProvider, client) =>

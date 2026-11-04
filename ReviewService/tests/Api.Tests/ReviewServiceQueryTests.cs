@@ -23,21 +23,17 @@ public sealed class ReviewServiceQueryTests
         return new ReviewServiceDbContext(options);
     }
 
-    private static (Application.Services.ReviewService Service, ReviewRepository Repository, TestTimeProvider TimeProvider) CreateService(ReviewServiceDbContext dbContext)
+    private static (ReviewQueryService Service, ReviewRepository Repository, TestTimeProvider TimeProvider) CreateService(ReviewServiceDbContext dbContext)
     {
         var repository = new ReviewRepository(dbContext);
-        var idempotencyRepository = new IdempotencyRepository(dbContext);
+        var projectionRepository = new ReviewProjectionRepository(dbContext);
         var timeProvider = new TestTimeProvider(new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero));
-        var idempotencyService = new IdempotencyService(idempotencyRepository);
-        var fakeRentalClient = new TestRentalServiceClient();
 
-        var service = new Application.Services.ReviewService(
-            dbContext,
+        var service = new ReviewQueryService(
             repository,
-            idempotencyService,
-            fakeRentalClient,
+            projectionRepository,
             timeProvider,
-            NullLogger<Application.Services.ReviewService>.Instance);
+            NullLogger<ReviewQueryService>.Instance);
 
         return (service, repository, timeProvider);
     }
@@ -218,32 +214,21 @@ public sealed class ReviewServiceQueryTests
     }
 
     [Fact]
-    public async Task GetMyReviewsAsync_StringOverload_ValidatesActorProperly()
+    public async Task GetMyReviewsAsync_GuidActorId_ValidatesActorProperly()
     {
         using var dbContext = CreateDbContext();
         var (service, _, _) = CreateService(dbContext);
 
-        // Null string
-        var nullResult = await service.GetMyReviewsAsync((string?)null, 1, 20);
-        Assert.True(nullResult.IsFailure);
-        Assert.Equal("UNAUTHORIZED", nullResult.Error.Code);
+        // Empty GUID
+        var emptyResult = await service.GetMyReviewsAsync(Guid.Empty, 1, 20);
+        Assert.True(emptyResult.IsFailure);
+        Assert.Equal("UNAUTHORIZED", emptyResult.Error.Code);
 
-        // Invalid GUID string
-        var invalidResult = await service.GetMyReviewsAsync("not-a-guid", 1, 20);
-        Assert.True(invalidResult.IsFailure);
-        Assert.Equal("UNAUTHORIZED", invalidResult.Error.Code);
-
-        // Service token string
-        var svcResult = await service.GetMyReviewsAsync("svc", 1, 20);
-        Assert.True(svcResult.IsFailure);
-        Assert.Equal("FORBIDDEN_SERVICE_TOKEN", svcResult.Error.Code);
-
-        // Valid GUID string
+        // Valid GUID
         var validActorId = Guid.NewGuid();
-        var validResult = await service.GetMyReviewsAsync(validActorId.ToString(), 1, 20);
+        var validResult = await service.GetMyReviewsAsync(validActorId, 1, 20);
         Assert.True(validResult.IsSuccess);
     }
-
     [Fact]
     public async Task GetMyReviewsAsync_ReviewActorContextOverload_Works()
     {

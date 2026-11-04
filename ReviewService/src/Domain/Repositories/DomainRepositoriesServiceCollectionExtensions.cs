@@ -30,12 +30,14 @@ public static class DomainRepositoriesServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddReviewServiceRepositories(this IServiceCollection services)
     {
+        services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<ReviewServiceDbContext>());
         services.AddScoped<IReviewRepository, ReviewRepository>();
         services.AddScoped<IReviewAuditRepository, ReviewAuditRepository>();
         services.AddScoped<IIdempotencyRepository, IdempotencyRepository>();
         services.AddScoped<IReviewProjectionRepository, ReviewProjectionRepository>();
         services.AddScoped<IReviewReportRepository, ReviewReportRepository>();
         services.AddScoped<IOutboxRepository, OutboxRepository>();
+        services.AddScoped<IReviewMediaRepository, ReviewMediaRepository>();
         return services;
     }
 }

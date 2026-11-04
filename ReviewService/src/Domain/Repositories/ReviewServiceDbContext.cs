@@ -1,17 +1,49 @@
 using Dprental.ReviewService.Common.Enums;
 using Dprental.ReviewService.Domain.Entities;
+using Dprental.ReviewService.Domain.IRepositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-
 namespace Dprental.ReviewService.Domain.Repositories;
 
 /// <summary>
 /// DbContext quản lý dữ liệu ReviewService trên PostgreSQL.
 /// </summary>
-public sealed class ReviewServiceDbContext : DbContext
+public sealed class ReviewServiceDbContext : DbContext, IUnitOfWork
 {
+    public bool HasActiveTransaction => Database.CurrentTransaction != null;
+
     public ReviewServiceDbContext(DbContextOptions<ReviewServiceDbContext> options) : base(options)
     {
+    }
+
+    public Task<int> CommitAsync(CancellationToken cancellationToken = default) => SaveChangesAsync(cancellationToken);
+
+    public void DiscardChanges() => ChangeTracker.Clear();
+
+    public async Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+    {
+        if (Database.IsRelational())
+        {
+            var tx = await Database.BeginTransactionAsync(cancellationToken);
+            return new RelationalUnitOfWorkTransaction(tx);
+        }
+
+        return new NoOpUnitOfWorkTransaction();
+    }
+
+    private sealed class RelationalUnitOfWorkTransaction(IDbContextTransaction tx) : IUnitOfWorkTransaction
+    {
+        public Task CommitAsync(CancellationToken cancellationToken = default) => tx.CommitAsync(cancellationToken);
+        public Task RollbackAsync(CancellationToken cancellationToken = default) => tx.RollbackAsync(cancellationToken);
+        public ValueTask DisposeAsync() => tx.DisposeAsync();
+    }
+
+    private sealed class NoOpUnitOfWorkTransaction : IUnitOfWorkTransaction
+    {
+        public Task CommitAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RollbackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     /// <summary>Bảng lưu trữ đánh giá người dùng.</summary>

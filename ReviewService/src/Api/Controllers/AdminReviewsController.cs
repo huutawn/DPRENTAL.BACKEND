@@ -17,14 +17,14 @@ namespace Dprental.ReviewService.Api.Controllers;
 [Route("admin/reviews")]
 public sealed class AdminReviewsController : ControllerBase
 {
-    private readonly IReviewService _reviewService;
+    private readonly IReviewModerationService _moderationService;
     private readonly IReviewCallerContext _callerContext;
 
     public AdminReviewsController(
-        IReviewService reviewService,
+        IReviewModerationService moderationService,
         IReviewCallerContext callerContext)
     {
-        _reviewService = reviewService ?? throw new ArgumentNullException(nameof(reviewService));
+        _moderationService = moderationService ?? throw new ArgumentNullException(nameof(moderationService));
         _callerContext = callerContext ?? throw new ArgumentNullException(nameof(callerContext));
     }
 
@@ -61,7 +61,7 @@ public sealed class AdminReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.HideReviewAsync(
+        var result = await _moderationService.HideReviewAsync(
             reviewId,
             _callerContext.ActorId.Value,
             request?.Reason,
@@ -111,7 +111,7 @@ public sealed class AdminReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.RestoreReviewAsync(
+        var result = await _moderationService.RestoreReviewAsync(
             reviewId,
             _callerContext.ActorId.Value,
             request?.Reason,
@@ -159,7 +159,7 @@ public sealed class AdminReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.GetReportsAsync(page, pageSize, cancellationToken);
+        var result = await _moderationService.GetReportsAsync(page, pageSize, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : this.ToProblem(result.Error);
     }
 
@@ -194,7 +194,7 @@ public sealed class AdminReviewsController : ControllerBase
             });
         }
 
-        var result = await _reviewService.ResolveReportAsync(
+        var result = await _moderationService.ResolveReportAsync(
             reportId,
             _callerContext.ActorId.Value,
             request.Resolution,

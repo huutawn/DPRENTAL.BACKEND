@@ -1,0 +1,31 @@
+using Dprental.ReviewService.Application.DTOs.Reviews;
+using Dprental.ReviewService.Common;
+
+namespace Dprental.ReviewService.Application.Services;
+
+/// <summary>
+/// Hợp đồng điều phối các use case đính kèm và gỡ media của đánh giá.
+/// </summary>
+public interface IReviewMediaService
+{
+    /// <summary>
+    /// Đính kèm media vào đánh giá đã tạo.
+    /// </summary>
+    Task<Result<ReviewMediaResponse>> AttachMediaAsync(
+        Guid reviewId,
+        Guid actorId,
+        Guid mediaId,
+        string? mediaType,
+        string ifMatch,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gỡ media khỏi đánh giá.
+    /// </summary>
+    Task<Result> DetachMediaAsync(
+        Guid reviewId,
+        Guid actorId,
+        Guid mediaId,
+        string ifMatch,
+        CancellationToken cancellationToken = default);
+}
