@@ -1195,6 +1195,7 @@ public sealed class EmailDeliveryWorkerTests
         // Invariant: Financial notifications must NOT acquire advisory lock and must NOT read rental order watermark
         watermarkRepoMock.Verify(w => w.AcquireAdvisoryLockAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         watermarkRepoMock.Verify(w => w.GetWatermarkAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        watermarkRepoMock.Verify(w => w.GetAggregateStateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

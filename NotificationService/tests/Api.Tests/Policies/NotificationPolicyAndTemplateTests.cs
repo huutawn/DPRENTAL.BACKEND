@@ -227,6 +227,139 @@ public sealed class NotificationPolicyAndTemplateTests
     }
 
     [Fact]
+    public void StaleActionSuppressionPolicy_OrderCancelled_WithOnlyRenterWatermark_SuppressesSupplierEvents()
+    {
+        var orderId = Guid.NewGuid();
+        // Order aggregate state projected from renter's CANCELLED watermark
+        var orderAggregateState = new AggregateStateProjection(
+            Scope: NotificationWatermarkScope.RentalOrder,
+            AggregateId: orderId,
+            MaxVersion: 3,
+            IsPaid: true,
+            IsTerminal: true,
+            TerminalState: "CANCELLED",
+            TerminalVersion: 3);
+
+        // Late supplier confirmation required must be suppressed
+        var supplierConfirmEval = StaleActionSuppressionPolicy.Evaluate(
+            "SUPPLIER_CONFIRMATION_REQUIRED",
+            incomingOrderVersion: 2,
+            orderAggregateState);
+        Assert.True(supplierConfirmEval.IsStale);
+        Assert.True(supplierConfirmEval.SuppressAction);
+        Assert.True(supplierConfirmEval.SuppressEmail);
+
+        // Late handover overdue supplier must be suppressed
+        var handoverOverdueEval = StaleActionSuppressionPolicy.Evaluate(
+            "HANDOVER_OVERDUE_SUPPLIER",
+            incomingOrderVersion: 2,
+            orderAggregateState);
+        Assert.True(handoverOverdueEval.IsStale);
+        Assert.True(handoverOverdueEval.SuppressAction);
+        Assert.True(handoverOverdueEval.SuppressEmail);
+    }
+
+    [Fact]
+    public void StaleActionSuppressionPolicy_ItemCompleted_WithOnlyRenterWatermark_SuppressesLateSupplierNotification()
+    {
+        var itemId = Guid.NewGuid();
+        // Item aggregate state projected from renter's COMPLETED watermark
+        var itemAggregateState = new AggregateStateProjection(
+            Scope: NotificationWatermarkScope.RentalItem,
+            AggregateId: itemId,
+            MaxVersion: 4,
+            IsPaid: false,
+            IsTerminal: true,
+            TerminalState: "COMPLETED",
+            TerminalVersion: 4);
+
+        // Late supplier notification on completed item must be suppressed
+        var supplierEval = StaleActionSuppressionPolicy.Evaluate(
+            "HANDOVER_OVERDUE_SUPPLIER",
+            incomingOrderVersion: 3,
+            itemAggregateState);
+        Assert.True(supplierEval.IsStale);
+        Assert.True(supplierEval.SuppressAction);
+        Assert.True(supplierEval.SuppressEmail);
+    }
+
+    [Fact]
+    public void StaleActionSuppressionPolicy_TwoSuppliersOnSameOrder_ShareOrderAggregateState_IndependentItemAggregateStates()
+    {
+        var orderId = Guid.NewGuid();
+        var itemAId = Guid.NewGuid();
+        var itemBId = Guid.NewGuid();
+
+        // Active order aggregate state (version 5, paid, not terminal)
+        var orderAggregateState = new AggregateStateProjection(
+            Scope: NotificationWatermarkScope.RentalOrder,
+            AggregateId: orderId,
+            MaxVersion: 5,
+            IsPaid: true,
+            IsTerminal: false,
+            TerminalState: null,
+            TerminalVersion: null);
+
+        // Supplier A's item is COMPLETED (terminal)
+        var itemAState = new AggregateStateProjection(
+            Scope: NotificationWatermarkScope.RentalItem,
+            AggregateId: itemAId,
+            MaxVersion: 4,
+            IsPaid: false,
+            IsTerminal: true,
+            TerminalState: "COMPLETED",
+            TerminalVersion: 4);
+
+        // Supplier B's item is still active (not terminal)
+        var itemBState = new AggregateStateProjection(
+            Scope: NotificationWatermarkScope.RentalItem,
+            AggregateId: itemBId,
+            MaxVersion: 2,
+            IsPaid: false,
+            IsTerminal: false,
+            TerminalState: null,
+            TerminalVersion: null);
+
+        // Item A actionable notification is suppressed because Item A is completed
+        var itemAEval = StaleActionSuppressionPolicy.Evaluate(
+            "HANDOVER_OVERDUE_SUPPLIER",
+            incomingOrderVersion: 4,
+            itemAState);
+        Assert.True(itemAEval.SuppressAction);
+        Assert.True(itemAEval.SuppressEmail);
+
+        // Item B actionable notification is NOT suppressed because Item B is active and Order is active
+        var itemBEval = StaleActionSuppressionPolicy.Evaluate(
+            "HANDOVER_OVERDUE_SUPPLIER",
+            incomingOrderVersion: 2,
+            itemBState);
+        Assert.False(itemBEval.SuppressAction);
+        Assert.False(itemBEval.SuppressEmail);
+
+        // Now Order is cancelled:
+        var cancelledOrderState = orderAggregateState with
+        {
+            IsTerminal = true,
+            TerminalState = "CANCELLED",
+            TerminalVersion = 6,
+            MaxVersion = 6
+        };
+
+        // Because order aggregate state is CANCELLED, both suppliers are suppressed at the order level!
+        var supplierAOrderEval = StaleActionSuppressionPolicy.Evaluate(
+            "SUPPLIER_CONFIRMATION_REQUIRED",
+            incomingOrderVersion: 2,
+            cancelledOrderState);
+        var supplierBOrderEval = StaleActionSuppressionPolicy.Evaluate(
+            "SUPPLIER_CONFIRMATION_REQUIRED",
+            incomingOrderVersion: 2,
+            cancelledOrderState);
+
+        Assert.True(supplierAOrderEval.SuppressAction);
+        Assert.True(supplierBOrderEval.SuppressAction);
+    }
+
+    [Fact]
     public void TemplateRenderer_MissingOrderCode_ShouldFallbackToResourceId()
     {
         var orderId = Guid.NewGuid();
