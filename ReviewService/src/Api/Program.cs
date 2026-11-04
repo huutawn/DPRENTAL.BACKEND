@@ -1,12 +1,28 @@
 using System.IO;
 using Dprental.ReviewService.Api.Exceptions;
+using Dprental.ReviewService.Api.Security;
+using Dprental.ReviewService.Application.DependencyInjection;
+using Dprental.ReviewService.Application.Security;
 using Dprental.ReviewService.Domain.Repositories;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddReviewServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
+
+builder.Services.AddReviewServiceApplication(builder.Configuration);
+
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddAuthentication(JwtAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, JwtAuthenticationHandler>(JwtAuthenticationHandler.SchemeName, _ => { });
+builder.Services.AddAuthorization();
+
+builder.Services.AddScoped<IReviewCallerContext>(sp =>
+{
+    var httpContext = sp.GetRequiredService<IHttpContextAccessor>().HttpContext;
+    return ReviewCallerContext.FromClaimsPrincipal(httpContext?.User);
+});
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<ReviewServiceDbContext>(
@@ -37,6 +53,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+app.UseAuthentication();
+app.UseAuthorization();
+
 
 HealthCheckOptions livenessOptions = new()
 {
