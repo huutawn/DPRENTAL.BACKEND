@@ -309,6 +309,127 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     ActionUrl: null));
                 break;
 
+            case "RentalOrderRejected":
+                if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                {
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "RentalOrderRejected yêu cầu renterId hợp lệ."));
+                }
+                results.Add(new ResolvedRecipient(
+                    RecipientUserId: renterId.Value,
+                    RecipientRole: "Renter",
+                    NotificationType: "ORDER_REJECTED",
+                    Category: "ORDER",
+                    Severity: "WARNING",
+                    IsActionable: false,
+                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    ActionUrl: null));
+                break;
+
+            case "RentalItemExpired":
+                if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                {
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "RentalItemExpired yêu cầu renterId hợp lệ."));
+                }
+                results.Add(new ResolvedRecipient(
+                    RecipientUserId: renterId.Value,
+                    RecipientRole: "Renter",
+                    NotificationType: "ORDER_EXPIRED",
+                    Category: "ORDER",
+                    Severity: "WARNING",
+                    IsActionable: false,
+                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    ActionUrl: null));
+                break;
+
+            case "RentalItemCancelled":
+                if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                {
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "RentalItemCancelled yêu cầu renterId hợp lệ."));
+                }
+                results.Add(new ResolvedRecipient(
+                    RecipientUserId: renterId.Value,
+                    RecipientRole: "Renter",
+                    NotificationType: "ORDER_CANCELLED",
+                    Category: "ORDER",
+                    Severity: "WARNING",
+                    IsActionable: false,
+                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    ActionUrl: null));
+                break;
+
+            case "RentalItemReturned":
+                if ((!renterId.HasValue || renterId.Value == Guid.Empty) &&
+                    (!supplierId.HasValue || supplierId.Value == Guid.Empty))
+                {
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "RentalItemReturned yêu cầu ít nhất renterId hoặc supplierId hợp lệ."));
+                }
+                if (renterId.HasValue && renterId.Value != Guid.Empty)
+                {
+                    results.Add(new ResolvedRecipient(
+                        RecipientUserId: renterId.Value,
+                        RecipientRole: "Renter",
+                        NotificationType: "RETURN_CONFIRMED",
+                        Category: "RETURN",
+                        Severity: "INFO",
+                        IsActionable: false,
+                        DeepLinkUrl: $"/renter/orders/{orderId}",
+                        ActionUrl: null));
+                }
+                if (supplierId.HasValue && supplierId.Value != Guid.Empty)
+                {
+                    var returnedLink = returnRequestId.HasValue && returnRequestId.Value != Guid.Empty
+                        ? $"/supplier/returns/{returnRequestId.Value}"
+                        : $"/supplier/returns/{orderId}";
+
+                    results.Add(new ResolvedRecipient(
+                        RecipientUserId: supplierId.Value,
+                        RecipientRole: "Supplier",
+                        NotificationType: "RETURN_CONFIRMED",
+                        Category: "RETURN",
+                        Severity: "INFO",
+                        IsActionable: false,
+                        DeepLinkUrl: returnedLink,
+                        ActionUrl: null));
+                }
+                break;
+
+            case "RentalItemCompleted":
+                if ((!renterId.HasValue || renterId.Value == Guid.Empty) &&
+                    (!supplierId.HasValue || supplierId.Value == Guid.Empty))
+                {
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "RentalItemCompleted yêu cầu ít nhất renterId hoặc supplierId hợp lệ."));
+                }
+                if (renterId.HasValue && renterId.Value != Guid.Empty)
+                {
+                    results.Add(new ResolvedRecipient(
+                        RecipientUserId: renterId.Value,
+                        RecipientRole: "Renter",
+                        NotificationType: "RENTAL_COMPLETED",
+                        Category: "ORDER",
+                        Severity: "SUCCESS",
+                        IsActionable: false,
+                        DeepLinkUrl: $"/renter/orders/{orderId}",
+                        ActionUrl: null));
+                }
+                if (supplierId.HasValue && supplierId.Value != Guid.Empty)
+                {
+                    results.Add(new ResolvedRecipient(
+                        RecipientUserId: supplierId.Value,
+                        RecipientRole: "Supplier",
+                        NotificationType: "RENTAL_COMPLETED",
+                        Category: "ORDER",
+                        Severity: "SUCCESS",
+                        IsActionable: false,
+                        DeepLinkUrl: $"/supplier/sub-orders/{orderId}",
+                        ActionUrl: null));
+                }
+                break;
+
             default:
                 return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
                     Error.Validation("UNSUPPORTED_EVENT_TYPE", $"Loại sự kiện '{eventType}' không được hỗ trợ xử lý thông báo."));

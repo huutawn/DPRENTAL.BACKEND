@@ -23,12 +23,6 @@ public sealed class NotificationReadService : INotificationReadService
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    public NotificationReadService(
-        INotificationRepository notificationRepo,
-        TimeProvider? timeProvider = null)
-        : this(notificationRepo, NoOpNotificationRealtimeNotifier.Instance, timeProvider)
-    {
-    }
 
     public async Task<Result> MarkAsReadAsync(
         Guid notificationId,
@@ -43,8 +37,11 @@ public sealed class NotificationReadService : INotificationReadService
         }
 
         var readAt = _timeProvider.GetUtcNow();
-        await _notificationRepo.MarkAsReadAsync(notificationId, userId, readAt, cancellationToken);
-        await _realtimeNotifier.NotifyInboxChangedAsync(userId, notificationId, "READ", existing.Category, readAt, cancellationToken);
+        var wasUpdated = await _notificationRepo.MarkAsReadAsync(notificationId, userId, readAt, cancellationToken);
+        if (wasUpdated)
+        {
+            await _realtimeNotifier.NotifyInboxChangedAsync(userId, notificationId, "READ", existing.Category, readAt, cancellationToken);
+        }
         return Result.Success();
     }
 
@@ -60,7 +57,7 @@ public sealed class NotificationReadService : INotificationReadService
 
         if (markedCount > 0)
         {
-            await _realtimeNotifier.NotifyInboxChangedAsync(userId, Guid.Empty, "READ_ALL", "ALL", readAt, cancellationToken);
+            await _realtimeNotifier.NotifyInboxChangedAsync(userId, null, "READ_ALL", "ALL", readAt, cancellationToken);
         }
         return Result.Success(new MarkAllReadResponseDto(
             MarkedCount: markedCount,
@@ -69,15 +66,3 @@ public sealed class NotificationReadService : INotificationReadService
     }
 }
 
-internal sealed class NoOpNotificationRealtimeNotifier : INotificationRealtimeNotifier
-{
-    public static readonly NoOpNotificationRealtimeNotifier Instance = new();
-
-    public Task NotifyInboxChangedAsync(
-        Guid userId,
-        Guid notificationId,
-        string changeType,
-        string category,
-        DateTimeOffset occurredAt,
-        CancellationToken cancellationToken = default) => Task.CompletedTask;
-}

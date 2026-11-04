@@ -12,6 +12,9 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
+using Dprental.NotificationService.Application.DTOs;
+using Dprental.NotificationService.Domain.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.NotificationService.Api.Tests.Security;
 
@@ -334,7 +337,7 @@ public sealed class SecurityAndRealtimeTests
         Assert.Equal(3, result.Value.MarkedCount);
         notifierMock.Verify(n => n.NotifyInboxChangedAsync(
             userId,
-            Guid.Empty,
+            (Guid?)null,
             "READ_ALL",
             "ALL",
             result.Value.ReadAt,
@@ -363,5 +366,143 @@ public sealed class SecurityAndRealtimeTests
             It.IsAny<string>(),
             It.IsAny<DateTimeOffset>(),
             It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task NotificationReadService_MarkAsRead_AlreadyRead_ReturnsFalse_DoesNotNotifyRealtime()
+    {
+        var repoMock = new Mock<INotificationRepository>();
+        var notifierMock = new Mock<INotificationRealtimeNotifier>();
+        var userId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+        var existing = new Notification
+        {
+            Id = notificationId,
+            RecipientUserId = userId,
+            Category = "ORDER",
+            ReadAt = DateTimeOffset.UtcNow.AddMinutes(-5)
+        };
+
+        repoMock.Setup(r => r.GetByIdAndUserAsync(notificationId, userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existing);
+        // MarkAsReadAsync returns false when the row was already read
+        repoMock.Setup(r => r.MarkAsReadAsync(notificationId, userId, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var readService = new NotificationReadService(repoMock.Object, notifierMock.Object);
+        var result = await readService.MarkAsReadAsync(notificationId, userId);
+
+        Assert.True(result.IsSuccess);
+        notifierMock.Verify(n => n.NotifyInboxChangedAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<Guid?>(),
+            It.IsAny<string>(),
+            It.IsAny<string?>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task NotificationRepository_MarkAsReadAsync_ReturnsTrueOnlyWhenRowChangedFromUnread()
+    {
+        var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+            .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+            .Options;
+        using var db = new NotificationServiceDbContext(options);
+        var repo = new NotificationRepository(db);
+
+        var userId = Guid.NewGuid();
+        var notificationId = Guid.NewGuid();
+        var unreadNotification = new Notification
+        {
+            Id = notificationId,
+            RecipientUserId = userId,
+            NotificationType = "ORDER_CREATED",
+            Category = "ORDER",
+            Severity = "INFO",
+            Title = "Test",
+            Body = "Test",
+            ResourceType = "RentalOrder",
+            ResourceId = Guid.NewGuid().ToString(),
+            SourceEventId = Guid.NewGuid(),
+            SourceProducer = "RentalService",
+            SourceEventType = "RentalOrderCreated",
+            TemplateCode = "ORDER_CREATED",
+            TemplateVersion = "1.0",
+            OccurredAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow,
+            ReadAt = null
+        };
+        await db.Notifications.AddAsync(unreadNotification);
+        await db.SaveChangesAsync();
+
+        // First call on unread notification: must return true
+        var firstResult = await repo.MarkAsReadAsync(notificationId, userId, DateTimeOffset.UtcNow);
+        Assert.True(firstResult);
+
+        // Second call on now-read notification: must return false (no row changed from unread to read)
+        var secondResult = await repo.MarkAsReadAsync(notificationId, userId, DateTimeOffset.UtcNow);
+        Assert.False(secondResult);
+
+        // Call on non-existent notification: must return false
+        var thirdResult = await repo.MarkAsReadAsync(Guid.NewGuid(), userId, DateTimeOffset.UtcNow);
+        Assert.False(thirdResult);
+
+        // Call with wrong user ID: must return false
+        var fourthResult = await repo.MarkAsReadAsync(notificationId, Guid.NewGuid(), DateTimeOffset.UtcNow);
+        Assert.False(fourthResult);
+    }
+
+    [Fact]
+    public async Task SignalRNotificationRealtimeNotifier_SendsStandardizedNotificationInboxChangedEvent()
+    {
+        var hubContextMock = new Mock<IHubContext<NotificationHub>>();
+        var hubClientsMock = new Mock<IHubClients>();
+        var clientProxyMock = new Mock<IClientProxy>();
+
+        hubContextMock.Setup(h => h.Clients).Returns(hubClientsMock.Object);
+        hubClientsMock.Setup(c => c.Group("user:d7b0034a-939b-4395-bfa3-d143da9666c8"))
+            .Returns(clientProxyMock.Object);
+
+        var notifier = new SignalRNotificationRealtimeNotifier(
+            hubContextMock.Object,
+            NullLogger<SignalRNotificationRealtimeNotifier>.Instance);
+
+        var targetUserId = Guid.Parse("d7b0034a-939b-4395-bfa3-d143da9666c8");
+        var notificationId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        var changeEvent = new NotificationInboxChangedEvent(
+            ChangeType: NotificationChangeTypes.Created,
+            NotificationId: notificationId,
+            Category: "ORDER",
+            OccurredAt: now);
+
+        await notifier.NotifyInboxChangedAsync(targetUserId, changeEvent);
+
+        clientProxyMock.Verify(c => c.SendCoreAsync(
+            "NotificationInboxChanged",
+            It.Is<object?[]>(args =>
+                args.Length == 1 &&
+                args[0] is NotificationInboxChangedEvent &&
+                ((NotificationInboxChangedEvent)args[0]!).ChangeType == "CREATED" &&
+                ((NotificationInboxChangedEvent)args[0]!).NotificationId == notificationId &&
+                ((NotificationInboxChangedEvent)args[0]!).Category == "ORDER" &&
+                ((NotificationInboxChangedEvent)args[0]!).OccurredAt == now),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void StandardizedNotificationInboxChangedEvent_ContainsExpectedChangeTypes()
+    {
+        Assert.Equal("CREATED", NotificationChangeTypes.Created);
+        Assert.Equal("READ", NotificationChangeTypes.Read);
+        Assert.Equal("READ_ALL", NotificationChangeTypes.ReadAll);
+        Assert.Equal("UPDATED", NotificationChangeTypes.Updated);
+
+        var evt = new NotificationInboxChangedEvent("READ_ALL", null, "ALL", DateTimeOffset.UtcNow);
+        Assert.Equal("READ_ALL", evt.ChangeType);
+        Assert.Null(evt.NotificationId);
+        Assert.Equal("ALL", evt.Category);
     }
 }

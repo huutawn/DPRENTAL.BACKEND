@@ -414,4 +414,151 @@ public static class ProducerFixtures
       }
     }
     """;
+
+    public static string RentalOrderRejected(
+        Guid messageId,
+        Guid orderId,
+        Guid renterId,
+        Guid? supplierId = null,
+        string reason = "Đơn thuê bị từ chối",
+        string orderCode = "RNT-20261102-0001",
+        long orderVersion = 3) => $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RentalOrderRejected",
+      "version": 1,
+      "producer": "RentalService",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-04T08:30:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "rentalOrderId": "{{orderId}}",
+        "renterId": "{{renterId}}",
+        "supplierId": {{(supplierId.HasValue ? $"\"{supplierId.Value}\"" : "null")}},
+        "orderCode": "{{orderCode}}",
+        "decisionAt": "2026-11-04T08:30:00.0000000+00:00",
+        "reason": "{{reason}}",
+        "orderVersion": {{orderVersion}}
+      }
+    }
+    """;
+
+    public static string RentalItemExpired(
+        Guid messageId,
+        Guid orderId,
+        Guid itemId,
+        Guid renterId,
+        string reason = "Hết hạn giữ chỗ",
+        string orderCode = "RNT-20261102-0001",
+        long orderVersion = 3) => $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RentalItemExpired",
+      "version": 1,
+      "producer": "RentalService",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-04T08:30:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "rentalOrderId": "{{orderId}}",
+        "rentalItemId": "{{itemId}}",
+        "renterId": "{{renterId}}",
+        "orderCode": "{{orderCode}}",
+        "reason": "{{reason}}",
+        "expiredAt": "2026-11-04T08:30:00.0000000+00:00",
+        "orderVersion": {{orderVersion}}
+      }
+    }
+    """;
+
+    public static string RentalItemCancelled(
+        Guid messageId,
+        Guid orderId,
+        Guid itemId,
+        Guid renterId,
+        string reason = "Hủy món đồ",
+        string orderCode = "RNT-20261102-0001",
+        long orderVersion = 3) => $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RentalItemCancelled",
+      "version": 1,
+      "producer": "RentalService",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-04T08:30:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "rentalOrderId": "{{orderId}}",
+        "rentalItemId": "{{itemId}}",
+        "renterId": "{{renterId}}",
+        "orderCode": "{{orderCode}}",
+        "reason": "{{reason}}",
+        "cancelledAt": "2026-11-04T08:30:00.0000000+00:00",
+        "orderVersion": {{orderVersion}}
+      }
+    }
+    """;
+
+    public static string RentalItemReturned(
+        Guid messageId,
+        Guid orderId,
+        Guid itemId,
+        Guid renterId,
+        Guid supplierId,
+        Guid? returnRequestId = null,
+        string orderCode = "RNT-20261102-0001",
+        long orderVersion = 4) => $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RentalItemReturned",
+      "version": 1,
+      "producer": "RentalService",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-04T10:00:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "rentalOrderId": "{{orderId}}",
+        "rentalItemId": "{{itemId}}",
+        "returnRequestId": {{(returnRequestId.HasValue ? $"\"{returnRequestId.Value}\"" : "null")}},
+        "renterId": "{{renterId}}",
+        "supplierId": "{{supplierId}}",
+        "orderCode": "{{orderCode}}",
+        "returnedAt": "2026-11-04T10:00:00.0000000+00:00",
+        "orderVersion": {{orderVersion}}
+      }
+    }
+    """;
+
+    public static string RentalItemCompleted(
+        Guid messageId,
+        Guid orderId,
+        Guid itemId,
+        Guid renterId,
+        Guid supplierId,
+        string orderCode = "RNT-20261102-0001",
+        long orderVersion = 5) => $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RentalItemCompleted",
+      "version": 1,
+      "producer": "RentalService",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-04T11:00:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "rentalOrderId": "{{orderId}}",
+        "rentalItemId": "{{itemId}}",
+        "renterId": "{{renterId}}",
+        "supplierId": "{{supplierId}}",
+        "orderCode": "{{orderCode}}",
+        "completedAt": "2026-11-04T11:00:00.0000000+00:00",
+        "orderVersion": {{orderVersion}}
+      }
+    }
+    """;
 }

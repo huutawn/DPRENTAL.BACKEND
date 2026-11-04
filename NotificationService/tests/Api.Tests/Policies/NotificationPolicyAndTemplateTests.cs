@@ -337,4 +337,103 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Contains("900.000", result.Value.EmailBody);
         Assert.Contains($"/supplier/settlements/{settlementId}", result.Value.EmailBody);
     }
+
+    [Fact]
+    public void RecipientResolution_FiveMissingRentalLifecycleEvents_ShouldMatchAcceptanceCriteria()
+    {
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var returnRequestId = Guid.NewGuid();
+
+        // 1. RentalOrderRejected: Renter, Category ORDER, Severity WARNING, NotificationType ORDER_REJECTED
+        var rejected = _recipientResolver.ResolveRecipients("RentalOrderRejected", orderId, renterId, supplierId);
+        Assert.True(rejected.IsSuccess);
+        Assert.Single(rejected.Value);
+        var rj = rejected.Value[0];
+        Assert.Equal(renterId, rj.RecipientUserId);
+        Assert.Equal("Renter", rj.RecipientRole);
+        Assert.Equal("ORDER_REJECTED", rj.NotificationType);
+        Assert.Equal("ORDER", rj.Category);
+        Assert.Equal("WARNING", rj.Severity);
+
+        // 2. RentalItemExpired: Renter, Category ORDER, Severity WARNING, NotificationType ORDER_EXPIRED, item scope
+        var expired = _recipientResolver.ResolveRecipients("RentalItemExpired", orderId, renterId, supplierId);
+        Assert.True(expired.IsSuccess);
+        Assert.Single(expired.Value);
+        var exp = expired.Value[0];
+        Assert.Equal(renterId, exp.RecipientUserId);
+        Assert.Equal("Renter", exp.RecipientRole);
+        Assert.Equal("ORDER_EXPIRED", exp.NotificationType);
+        Assert.Equal("ORDER", exp.Category);
+        Assert.Equal("WARNING", exp.Severity);
+
+        // 3. RentalItemCancelled: Renter, Category ORDER, Severity WARNING, NotificationType ORDER_CANCELLED, item scope
+        var cancelled = _recipientResolver.ResolveRecipients("RentalItemCancelled", orderId, renterId, supplierId);
+        Assert.True(cancelled.IsSuccess);
+        Assert.Single(cancelled.Value);
+        var can = cancelled.Value[0];
+        Assert.Equal(renterId, can.RecipientUserId);
+        Assert.Equal("Renter", can.RecipientRole);
+        Assert.Equal("ORDER_CANCELLED", can.NotificationType);
+        Assert.Equal("ORDER", can.Category);
+        Assert.Equal("WARNING", can.Severity);
+
+        // 4. RentalItemReturned: Renter & Supplier, Category RETURN, Severity INFO, NotificationType RETURN_CONFIRMED
+        var returned = _recipientResolver.ResolveRecipients("RentalItemReturned", orderId, renterId, supplierId, returnRequestId);
+        Assert.True(returned.IsSuccess);
+        Assert.Equal(2, returned.Value.Count);
+        var retRenter = returned.Value.First(r => r.RecipientRole == "Renter");
+        Assert.Equal(renterId, retRenter.RecipientUserId);
+        Assert.Equal("RETURN_CONFIRMED", retRenter.NotificationType);
+        Assert.Equal("RETURN", retRenter.Category);
+        Assert.Equal("INFO", retRenter.Severity);
+        var retSupplier = returned.Value.First(r => r.RecipientRole == "Supplier");
+        Assert.Equal(supplierId, retSupplier.RecipientUserId);
+        Assert.Equal("RETURN_CONFIRMED", retSupplier.NotificationType);
+        Assert.Equal("RETURN", retSupplier.Category);
+        Assert.Equal("INFO", retSupplier.Severity);
+
+        // 5. RentalItemCompleted: Renter & Supplier, Category ORDER, Severity SUCCESS, NotificationType RENTAL_COMPLETED
+        var completed = _recipientResolver.ResolveRecipients("RentalItemCompleted", orderId, renterId, supplierId);
+        Assert.True(completed.IsSuccess);
+        Assert.Equal(2, completed.Value.Count);
+        var compRenter = completed.Value.First(r => r.RecipientRole == "Renter");
+        Assert.Equal(renterId, compRenter.RecipientUserId);
+        Assert.Equal("RENTAL_COMPLETED", compRenter.NotificationType);
+        Assert.Equal("ORDER", compRenter.Category);
+        Assert.Equal("SUCCESS", compRenter.Severity);
+        var compSupplier = completed.Value.First(r => r.RecipientRole == "Supplier");
+        Assert.Equal(supplierId, compSupplier.RecipientUserId);
+        Assert.Equal("RENTAL_COMPLETED", compSupplier.NotificationType);
+        Assert.Equal("ORDER", compSupplier.Category);
+        Assert.Equal("SUCCESS", compSupplier.Severity);
+    }
+
+    [Fact]
+    public void TemplateRenderer_MissingRentalLifecycleEvents_RendersVietnameseTemplates()
+    {
+        var orderId = Guid.NewGuid();
+        var data = new Dictionary<string, object?>
+        {
+            ["rentalOrderId"] = orderId,
+            ["orderCode"] = "RNT-20261104-0010"
+        };
+
+        // RETURN_CONFIRMED
+        var returnResult = _renderer.Render("RETURN_CONFIRMED", data);
+        Assert.True(returnResult.IsSuccess);
+        Assert.Contains("hoàn trả", returnResult.Value.Title.ToLowerInvariant());
+        Assert.Contains("xác nhận hoàn tất", returnResult.Value.Body.ToLowerInvariant());
+        Assert.NotNull(returnResult.Value.EmailSubject);
+        Assert.NotNull(returnResult.Value.EmailBody);
+
+        // RENTAL_COMPLETED
+        var completedResult = _renderer.Render("RENTAL_COMPLETED", data);
+        Assert.True(completedResult.IsSuccess);
+        Assert.Contains("hoàn tất", completedResult.Value.Title.ToLowerInvariant());
+        Assert.Contains("chu kỳ thuê", completedResult.Value.Body.ToLowerInvariant());
+        Assert.NotNull(completedResult.Value.EmailSubject);
+        Assert.NotNull(completedResult.Value.EmailBody);
+    }
 }

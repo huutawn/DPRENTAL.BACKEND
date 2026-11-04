@@ -14,7 +14,8 @@ public static class StaleActionSuppressionPolicy
     {
         "EXPIRED",
         "CANCELLED",
-        "COMPLETED"
+        "COMPLETED",
+        "REJECTED"
     };
 
     /// <summary>

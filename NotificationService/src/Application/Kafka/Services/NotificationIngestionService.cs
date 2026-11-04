@@ -467,6 +467,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
         return eventType switch
         {
             "RentalItemHandoverCompleted" or "RentalHandoverOverdue" or "RentalItemConfirmed" or "RentalItemRejected"
+                or "RentalItemExpired" or "RentalItemCancelled" or "RentalItemReturned" or "RentalItemCompleted"
                 => NotificationWatermarkScope.RentalItem,
             "ReturnConfirmationOverdue"
                 => NotificationWatermarkScope.ReturnRequest,

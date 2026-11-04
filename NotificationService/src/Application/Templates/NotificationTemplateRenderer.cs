@@ -100,11 +100,15 @@ public sealed partial class NotificationTemplateRenderer : INotificationTemplate
             case "ORDER_EXPIRED":
                 titlePattern = "Đơn thuê #{displayOrderCode} đã hết hạn";
                 bodyPattern = "Đơn thuê {displayOrderCode} đã hết hạn do quá thời gian quy định ({reason}). Thiết bị đã được giải phóng.";
+                emailSubjectPattern = "[DPRental] Đơn thuê #{displayOrderCode} đã hết hạn";
+                emailBodyPattern = "<p>Kính gửi Quý khách,</p><p>Đơn thuê <strong>{displayOrderCode}</strong> đã hết hạn do quá thời gian quy định ({reason}).</p><p>Thiết bị đã được giải phóng.</p><p>Chi tiết đơn thuê: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
                 break;
 
             case "ORDER_CANCELLED":
                 titlePattern = "Đơn thuê #{displayOrderCode} đã bị hủy";
                 bodyPattern = "Đơn thuê {displayOrderCode} đã bị hủy vì lý do: {reason}. Các khoản tiền liên quan sẽ được xử lý theo chính sách hoàn tiền.";
+                emailSubjectPattern = "[DPRental] Đơn thuê #{displayOrderCode} đã bị hủy";
+                emailBodyPattern = "<p>Kính gửi Quý khách,</p><p>Đơn thuê <strong>{displayOrderCode}</strong> đã bị hủy vì lý do: {reason}.</p><p>Các khoản tiền liên quan sẽ được xử lý theo chính sách hoàn tiền.</p><p>Chi tiết đơn thuê: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
                 break;
 
             case "HANDOVER_COMPLETED":
@@ -161,6 +165,20 @@ public sealed partial class NotificationTemplateRenderer : INotificationTemplate
                 bodyPattern = "Nhà cung cấp đã từ chối yêu cầu thuê thiết bị cho đơn thuê {displayOrderCode}. Lý do: {reason}.";
                 emailSubjectPattern = "[DPRental] Yêu cầu thuê thiết bị đơn #{displayOrderCode} đã bị từ chối";
                 emailBodyPattern = "<p>Kính gửi Quý khách,</p><p>Nhà cung cấp đã từ chối yêu cầu thuê thiết bị cho đơn thuê <strong>{displayOrderCode}</strong>.</p><p>Lý do: {reason}.</p><p>Chi tiết đơn thuê: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
+                break;
+
+            case "RETURN_CONFIRMED":
+                titlePattern = "Xác nhận hoàn trả thiết bị đơn thuê #{displayOrderCode}";
+                bodyPattern = "Thiết bị trong đơn thuê {displayOrderCode} đã được hoàn trả và kiểm tra xác nhận hoàn tất.";
+                emailSubjectPattern = "[DPRental] Xác nhận hoàn trả thiết bị đơn thuê #{displayOrderCode}";
+                emailBodyPattern = "<p>Kính gửi Quý khách / Quý Đối tác,</p><p>Thiết bị trong đơn thuê <strong>{displayOrderCode}</strong> đã được hoàn trả và kiểm tra xác nhận hoàn tất.</p><p>Chi tiết đơn thuê: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
+                break;
+
+            case "RENTAL_COMPLETED":
+                titlePattern = "Thiết bị đơn thuê #{displayOrderCode} đã hoàn tất";
+                bodyPattern = "Thiết bị trong đơn thuê {displayOrderCode} đã hoàn tất chu kỳ thuê thành công.";
+                emailSubjectPattern = "[DPRental] Hoàn tất thuê thiết bị đơn #{displayOrderCode}";
+                emailBodyPattern = "<p>Kính gửi Quý khách / Quý Đối tác,</p><p>Thiết bị trong đơn thuê <strong>{displayOrderCode}</strong> đã hoàn tất chu kỳ thuê thành công.</p><p>Cảm ơn bạn đã đồng hành cùng DPRental.</p><p>Chi tiết: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
                 break;
 
             case "REFUND_COMPLETED":

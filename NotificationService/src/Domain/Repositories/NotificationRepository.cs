@@ -67,8 +67,8 @@ public sealed class NotificationRepository : INotificationRepository
         if (_dbContext.Database.IsNpgsql())
         {
             var updated = await _dbContext.Notifications
-                .Where(n => n.Id == id && n.RecipientUserId == userId)
-                .ExecuteUpdateAsync(s => s.SetProperty(n => n.ReadAt, n => n.ReadAt ?? readAt), cancellationToken);
+                .Where(n => n.Id == id && n.RecipientUserId == userId && n.ReadAt == null)
+                .ExecuteUpdateAsync(s => s.SetProperty(n => n.ReadAt, readAt), cancellationToken);
 
             return updated > 0;
         }
@@ -77,12 +77,12 @@ public sealed class NotificationRepository : INotificationRepository
             var entity = await _dbContext.Notifications
                 .FirstOrDefaultAsync(n => n.Id == id && n.RecipientUserId == userId, cancellationToken);
 
-            if (entity == null)
+            if (entity == null || entity.ReadAt != null)
             {
                 return false;
             }
 
-            entity.ReadAt ??= readAt;
+            entity.ReadAt = readAt;
             await _dbContext.SaveChangesAsync(cancellationToken);
             return true;
         }
