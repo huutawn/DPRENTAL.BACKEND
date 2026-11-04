@@ -49,6 +49,7 @@ if (app.Environment.IsDevelopment())
         options.SwaggerEndpoint("/rental/swagger/v1/swagger.json", "RentalService");
         options.SwaggerEndpoint("/api/v1/payment/swagger/v1/swagger.json", "PaymentService");
         options.SwaggerEndpoint("/analytics/swagger/v1/swagger.json", "AnalyticsService");
+        options.SwaggerEndpoint("/notifications/swagger/v1/swagger.json", "NotificationService");
     });
 }
 

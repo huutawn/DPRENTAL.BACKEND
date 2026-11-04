@@ -74,6 +74,21 @@
           "scope": "internal:blocked"
         }
       }
+    },
+    {
+      "Key": "notification-service-openapi",
+      "UpstreamPathTemplate": "/notifications/swagger/v1/swagger.json",
+      "DownstreamPathTemplate": "/swagger/v1/swagger.json",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 40992
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
     }
   ]
 }

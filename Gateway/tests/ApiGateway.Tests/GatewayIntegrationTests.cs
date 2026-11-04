@@ -110,7 +110,7 @@ public sealed class GatewayIntegrationTests
     }
 
     [Fact]
-    public async Task GatewaySwaggerOffersAuthAndMediaDocuments()
+    public async Task GatewaySwaggerOffersServiceDocuments()
     {
         using RSA signingKey = RSA.Create(2048);
         await using LoopbackAuthService upstream = new(CreateJwks(signingKey, "key-1"));
@@ -125,6 +125,10 @@ public sealed class GatewayIntegrationTests
         Assert.Equal(HttpStatusCode.OK, responseMediaJson.StatusCode);
         Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
 
+        using HttpResponseMessage notificationJson = await client.GetAsync("/notifications/swagger/v1/swagger.json");
+        Assert.Equal(HttpStatusCode.OK, notificationJson.StatusCode);
+        Assert.Equal("/swagger/v1/swagger.json", upstream.LastRequest.Path);
+
         using HttpResponseMessage responseUi = await client.GetAsync("/swagger/index.html");
         Assert.Equal(HttpStatusCode.OK, responseUi.StatusCode);
         Assert.Contains("index.js", await responseUi.Content.ReadAsStringAsync());
@@ -132,6 +136,8 @@ public sealed class GatewayIntegrationTests
         using HttpResponseMessage initializer = await client.GetAsync("/swagger/index.js");
         Assert.Equal(HttpStatusCode.OK, initializer.StatusCode);
         string uiConfiguration = await initializer.Content.ReadAsStringAsync();
+        Assert.Contains("NotificationService", uiConfiguration);
+        Assert.Contains("/notifications/swagger/v1/swagger.json", uiConfiguration);
         Assert.Contains("AuthService", uiConfiguration);
         Assert.Contains("MediaService", uiConfiguration);
         Assert.Contains("CatalogService", uiConfiguration);
