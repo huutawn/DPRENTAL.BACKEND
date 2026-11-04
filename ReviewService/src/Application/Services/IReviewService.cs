@@ -159,4 +159,76 @@ public interface IReviewService
         Guid reviewId,
         ReviewActorContext actor,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách đánh giá công khai của một thiết bị (kèm phân trang).
+    /// </summary>
+    /// <param name="listingId">Mã thiết bị (UUID).</param>
+    /// <param name="page">Số trang (mặc định 1).</param>
+    /// <param name="pageSize">Kích thước trang (mặc định 20, tối đa 50).</param>
+    /// <param name="cancellationToken">Token hủy thao tác.</param>
+    /// <returns>Result chứa PagedResult của PublicReviewItemResponse.</returns>
+    Task<Result<PagedResult<PublicReviewItemResponse>>> GetListingReviewsAsync(
+        Guid listingId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách đánh giá công khai của một nhà cung cấp (kèm phân trang).
+    /// </summary>
+    /// <param name="supplierId">Mã nhà cung cấp (UUID).</param>
+    /// <param name="page">Số trang (mặc định 1).</param>
+    /// <param name="pageSize">Kích thước trang (mặc định 20, tối đa 50).</param>
+    /// <param name="cancellationToken">Token hủy thao tác.</param>
+    /// <returns>Result chứa PagedResult của PublicReviewItemResponse.</returns>
+    Task<Result<PagedResult<PublicReviewItemResponse>>> GetSupplierReviewsAsync(
+        Guid supplierId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách đánh giá do chính người dùng hiện tại viết (kèm phân trang, bao gồm cả Active và Withdrawn).
+    /// </summary>
+    /// <param name="actorId">Mã người dùng (UUID).</param>
+    /// <param name="page">Số trang (mặc định 1).</param>
+    /// <param name="pageSize">Kích thước trang (mặc định 20, tối đa 50).</param>
+    /// <param name="cancellationToken">Token hủy thao tác.</param>
+    /// <returns>Result chứa PagedResult của ReviewDetailResponse.</returns>
+    Task<Result<PagedResult<ReviewDetailResponse>>> GetMyReviewsAsync(
+        Guid actorId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách đánh giá của chính người dùng (với actorId dạng chuỗi).
+    /// </summary>
+    Task<Result<PagedResult<ReviewDetailResponse>>> GetMyReviewsAsync(
+        string? actorId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách đánh giá của chính người dùng với ngữ cảnh người dùng.
+    /// </summary>
+    Task<Result<PagedResult<ReviewDetailResponse>>> GetMyReviewsAsync(
+        ReviewActorContext actor,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tính toán và lấy thông tin tổng hợp điểm đánh giá cho thiết bị hoặc nhà cung cấp.
+    /// </summary>
+    /// <param name="targetType">Loại đối tượng ('listing' hoặc 'supplier', không phân biệt hoa thường).</param>
+    /// <param name="targetId">Mã định danh đối tượng (UUID).</param>
+    /// <param name="cancellationToken">Token hủy thao tác.</param>
+    /// <returns>Result chứa ReviewSummaryResponse nếu hợp lệ, hoặc Error.Validation nếu targetType không hợp lệ.</returns>
+    Task<Result<ReviewSummaryResponse>> GetSummaryAsync(
+        string targetType,
+        Guid targetId,
+        CancellationToken cancellationToken = default);
 }

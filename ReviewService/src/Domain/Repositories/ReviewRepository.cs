@@ -84,4 +84,143 @@ public sealed class ReviewRepository : IReviewRepository
         return await _dbContext.Reviews
             .FirstOrDefaultAsync(r => r.ItemId == itemId && r.Direction == direction, cancellationToken);
     }
+
+    public async Task<(IReadOnlyList<Review> Items, int TotalCount)> GetPublicListingReviewsAsync(
+        Guid listingId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Max(0, pageSize);
+        var skip = (safePage - 1) * safePageSize;
+
+        var query = _dbContext.Reviews
+            .AsNoTracking()
+            .Where(r => r.Direction == ReviewDirection.renter_to_supplier_listing
+                     && r.AuthorState == AuthorState.Active
+                     && r.ModerationState == ModerationState.Visible
+                     && r.EquipmentListingId == listingId);
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
+            .OrderByDescending(r => r.CreatedAt)
+            .ThenByDescending(r => r.Id)
+            .Skip(skip)
+            .Take(safePageSize)
+            .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
+
+    public async Task<(IReadOnlyList<Review> Items, int TotalCount)> GetPublicSupplierReviewsAsync(
+        Guid supplierId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Max(0, pageSize);
+        var skip = (safePage - 1) * safePageSize;
+
+        var query = _dbContext.Reviews
+            .AsNoTracking()
+            .Where(r => r.Direction == ReviewDirection.renter_to_supplier_listing
+                     && r.AuthorState == AuthorState.Active
+                     && r.ModerationState == ModerationState.Visible
+                     && r.SubjectId == supplierId);
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
+            .OrderByDescending(r => r.CreatedAt)
+            .ThenByDescending(r => r.Id)
+            .Skip(skip)
+            .Take(safePageSize)
+            .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
+
+    public async Task<(IReadOnlyList<Review> Items, int TotalCount)> GetMyReviewsAsync(
+        Guid authorId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Max(0, pageSize);
+        var skip = (safePage - 1) * safePageSize;
+
+        var query = _dbContext.Reviews
+            .AsNoTracking()
+            .Where(r => r.AuthorId == authorId);
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
+            .OrderByDescending(r => r.CreatedAt)
+            .ThenByDescending(r => r.Id)
+            .Skip(skip)
+            .Take(safePageSize)
+            .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
+
+    public async Task<(int TotalCount, double? AverageRating, Dictionary<int, int> Distribution)> GetRatingSummaryAsync(
+        string targetType,
+        Guid targetId,
+        CancellationToken cancellationToken = default)
+    {
+        var isListing = string.Equals(targetType, "listing", StringComparison.OrdinalIgnoreCase);
+        var isSupplier = string.Equals(targetType, "supplier", StringComparison.OrdinalIgnoreCase);
+
+        if (!isListing && !isSupplier)
+        {
+            throw new ArgumentException($"Invalid target type: '{targetType}'. Expected 'listing' or 'supplier'.", nameof(targetType));
+        }
+
+        var baseQuery = _dbContext.Reviews
+            .AsNoTracking()
+            .Where(r => r.Direction == ReviewDirection.renter_to_supplier_listing
+                     && r.AuthorState == AuthorState.Active
+                     && r.ModerationState == ModerationState.Visible);
+
+        var query = isListing
+            ? baseQuery.Where(r => r.EquipmentListingId == targetId)
+            : baseQuery.Where(r => r.SubjectId == targetId);
+
+        var distribution = new Dictionary<int, int>
+        {
+            [1] = 0,
+            [2] = 0,
+            [3] = 0,
+            [4] = 0,
+            [5] = 0
+        };
+
+        var ratingGroups = await query
+            .GroupBy(r => r.Rating)
+            .Select(g => new { Rating = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+
+        var totalCount = 0;
+        long totalSum = 0;
+
+        foreach (var group in ratingGroups)
+        {
+            if (distribution.ContainsKey(group.Rating))
+            {
+                distribution[group.Rating] = group.Count;
+            }
+
+            totalCount += group.Count;
+            totalSum += (long)group.Rating * group.Count;
+        }
+
+        double? averageRating = totalCount == 0
+            ? null
+            : Math.Round((double)totalSum / totalCount, 1, MidpointRounding.AwayFromZero);
+
+        return (totalCount, averageRating, distribution);
+    }
 }

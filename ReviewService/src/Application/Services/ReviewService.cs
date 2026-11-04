@@ -725,6 +725,189 @@ public sealed class ReviewService : IReviewService
         return GetReviewDetailAsync(reviewId, actor.ActorId, actor.IsAdmin, cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<Result<PagedResult<PublicReviewItemResponse>>> GetListingReviewsAsync(
+        Guid listingId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (listingId == Guid.Empty)
+        {
+            return Result.Failure<PagedResult<PublicReviewItemResponse>>(
+                Error.Validation("INVALID_LISTING_ID", "Mã thiết bị không hợp lệ."));
+        }
+
+        var safePage = Math.Max(1, page);
+        var safePageSize = pageSize < 1 ? 20 : Math.Min(pageSize, 50);
+
+        var (items, totalCount) = await _reviewRepository.GetPublicListingReviewsAsync(
+            listingId,
+            safePage,
+            safePageSize,
+            cancellationToken);
+
+        var mappedItems = items
+            .Select(r => PublicReviewItemResponse.FromEntity(r))
+            .ToList();
+
+        var totalPages = totalCount <= 0 ? 0 : (int)Math.Ceiling((double)totalCount / safePageSize);
+
+        return Result.Success(new PagedResult<PublicReviewItemResponse>(
+            mappedItems,
+            safePage,
+            safePageSize,
+            totalCount,
+            totalPages));
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<PagedResult<PublicReviewItemResponse>>> GetSupplierReviewsAsync(
+        Guid supplierId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (supplierId == Guid.Empty)
+        {
+            return Result.Failure<PagedResult<PublicReviewItemResponse>>(
+                Error.Validation("INVALID_SUPPLIER_ID", "Mã nhà cung cấp không hợp lệ."));
+        }
+
+        var safePage = Math.Max(1, page);
+        var safePageSize = pageSize < 1 ? 20 : Math.Min(pageSize, 50);
+
+        var (items, totalCount) = await _reviewRepository.GetPublicSupplierReviewsAsync(
+            supplierId,
+            safePage,
+            safePageSize,
+            cancellationToken);
+
+        var mappedItems = items
+            .Select(r => PublicReviewItemResponse.FromEntity(r))
+            .ToList();
+
+        var totalPages = totalCount <= 0 ? 0 : (int)Math.Ceiling((double)totalCount / safePageSize);
+
+        return Result.Success(new PagedResult<PublicReviewItemResponse>(
+            mappedItems,
+            safePage,
+            safePageSize,
+            totalCount,
+            totalPages));
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<PagedResult<ReviewDetailResponse>>> GetMyReviewsAsync(
+        Guid actorId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (actorId == Guid.Empty)
+        {
+            return Result.Failure<PagedResult<ReviewDetailResponse>>(
+                Error.Unauthorized("UNAUTHORIZED", "Mã người dùng không hợp lệ."));
+        }
+
+        var safePage = Math.Max(1, page);
+        var safePageSize = pageSize < 1 ? 20 : Math.Min(pageSize, 50);
+
+        var (items, totalCount) = await _reviewRepository.GetMyReviewsAsync(
+            actorId,
+            safePage,
+            safePageSize,
+            cancellationToken);
+
+        var mappedItems = items
+            .Select(ReviewDetailResponse.FromEntity)
+            .ToList();
+
+        var totalPages = totalCount <= 0 ? 0 : (int)Math.Ceiling((double)totalCount / safePageSize);
+
+        return Result.Success(new PagedResult<ReviewDetailResponse>(
+            mappedItems,
+            safePage,
+            safePageSize,
+            totalCount,
+            totalPages));
+    }
+
+    /// <inheritdoc />
+    public Task<Result<PagedResult<ReviewDetailResponse>>> GetMyReviewsAsync(
+        string? actorId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (!ParseActorId(actorId, null, out var parsedActorId, out var error))
+        {
+            return Task.FromResult(Result.Failure<PagedResult<ReviewDetailResponse>>(error!));
+        }
+
+        return GetMyReviewsAsync(parsedActorId, page, pageSize, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<Result<PagedResult<ReviewDetailResponse>>> GetMyReviewsAsync(
+        ReviewActorContext actor,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        return GetMyReviewsAsync(actor.ActorId, page, pageSize, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<ReviewSummaryResponse>> GetSummaryAsync(
+        string targetType,
+        Guid targetId,
+        CancellationToken cancellationToken = default)
+    {
+        var isListing = string.Equals(targetType, "listing", StringComparison.OrdinalIgnoreCase);
+        var isSupplier = string.Equals(targetType, "supplier", StringComparison.OrdinalIgnoreCase);
+
+        if (!isListing && !isSupplier)
+        {
+            return Result.Failure<ReviewSummaryResponse>(
+                Error.Validation(
+                    "INVALID_TARGET_TYPE",
+                    $"Loại đối tượng không hợp lệ: '{targetType}'. Chỉ chấp nhận 'listing' hoặc 'supplier'."));
+        }
+
+        if (targetId == Guid.Empty)
+        {
+            return Result.Failure<ReviewSummaryResponse>(
+                Error.Validation("INVALID_TARGET_ID", "Mã đối tượng không hợp lệ."));
+        }
+
+        var normalizedTargetType = isListing ? "listing" : "supplier";
+
+        var (totalCount, averageRating, distribution) = await _reviewRepository.GetRatingSummaryAsync(
+            normalizedTargetType,
+            targetId,
+            cancellationToken);
+
+        var stringDistribution = new Dictionary<string, int>
+        {
+            ["5"] = distribution != null && distribution.TryGetValue(5, out var c5) ? c5 : 0,
+            ["4"] = distribution != null && distribution.TryGetValue(4, out var c4) ? c4 : 0,
+            ["3"] = distribution != null && distribution.TryGetValue(3, out var c3) ? c3 : 0,
+            ["2"] = distribution != null && distribution.TryGetValue(2, out var c2) ? c2 : 0,
+            ["1"] = distribution != null && distribution.TryGetValue(1, out var c1) ? c1 : 0
+        };
+
+        var response = new ReviewSummaryResponse(
+            normalizedTargetType,
+            targetId,
+            totalCount == 0 ? null : averageRating,
+            totalCount,
+            stringDistribution);
+
+        return Result.Success(response);
+    }
+
     private static Error? ValidateActor(Guid actorId, string? userType)
     {
         if (string.Equals(userType, "svc", StringComparison.OrdinalIgnoreCase))
