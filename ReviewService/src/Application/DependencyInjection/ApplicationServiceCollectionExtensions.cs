@@ -31,6 +31,8 @@ public static class ApplicationServiceCollectionExtensions
         }
 
         services.AddScoped<IIdempotencyService, IdempotencyService>();
+        services.AddScoped<IReviewService, Dprental.ReviewService.Application.Services.ReviewService>();
+        services.AddSingleton(TimeProvider.System);
 
         services.AddHttpClient<IRentalServiceClient, RentalServiceClient>((serviceProvider, client) =>
         {

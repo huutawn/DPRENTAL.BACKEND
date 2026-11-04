@@ -11,7 +11,9 @@ public enum ErrorType
     Conflict = 4,
     Expired = 5,
     Unprocessable = 6,
-    Failure = 7
+    Failure = 7,
+    PreconditionFailed = 8,
+    PreconditionRequired = 9
 }
 
 [SuppressMessage("Naming", "CA1716:Identifiers should not match keywords", Justification = "Consumed only from C#.")]
@@ -42,5 +44,11 @@ public sealed record Error(string Code, string Message, ErrorType Type = ErrorTy
 
     public static Error Failure(string code, string message) =>
         new(code, message, ErrorType.Failure);
+
+    public static Error PreconditionFailed(string code, string message) =>
+        new(code, message, ErrorType.PreconditionFailed);
+
+    public static Error PreconditionRequired(string code, string message) =>
+        new(code, message, ErrorType.PreconditionRequired);
 }
 
