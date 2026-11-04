@@ -205,4 +205,96 @@ public sealed class ReviewsController : ControllerBase
         Response.Headers.ETag = $"\"{result.Value.Version}\"";
         return Ok(result.Value);
     }
+
+    /// <summary>
+    /// Đọc danh sách đánh giá do người gọi viết (GET /api/v1/reviews/my).
+    /// </summary>
+    [HttpGet("my")]
+    public async Task<IActionResult> GetMyReviews(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_callerContext.IsAuthenticated || !_callerContext.ActorId.HasValue)
+        {
+            return Unauthorized(new ProblemDetails
+            {
+                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.2",
+                Title = "Unauthorized",
+                Status = StatusCodes.Status401Unauthorized,
+                Detail = "Authentication is required to view your reviews."
+            });
+        }
+
+        var result = await _reviewService.GetMyReviewsAsync(
+            _callerContext.ActorId.Value, page, pageSize, cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : this.ToProblem(result.Error);
+    }
+
+    /// <summary>
+    /// Đọc danh sách đánh giá công khai của một thiết bị (GET /api/v1/reviews/listings/{listingId}).
+    /// </summary>
+    [HttpGet("listings/{listingId:guid}")]
+    public async Task<IActionResult> GetListingReviews(
+        [FromRoute] Guid listingId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _reviewService.GetListingReviewsAsync(
+            listingId, page, pageSize, cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : this.ToProblem(result.Error);
+    }
+
+    /// <summary>
+    /// Đọc danh sách đánh giá công khai của nhà cung cấp (GET /api/v1/reviews/suppliers/{supplierId}).
+    /// </summary>
+    [HttpGet("suppliers/{supplierId:guid}")]
+    public async Task<IActionResult> GetSupplierReviews(
+        [FromRoute] Guid supplierId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _reviewService.GetSupplierReviewsAsync(
+            supplierId, page, pageSize, cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : this.ToProblem(result.Error);
+    }
+
+    /// <summary>
+    /// Xem tổng hợp điểm đánh giá cho listing hoặc supplier (GET /api/v1/reviews/summary).
+    /// </summary>
+    [HttpGet("summary")]
+    public async Task<IActionResult> GetSummary(
+        [FromQuery] string? targetType,
+        [FromQuery] Guid? targetId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(targetType) || !targetId.HasValue || targetId.Value == Guid.Empty)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+                Title = "Validation.Error",
+                Status = StatusCodes.Status400BadRequest,
+                Detail = "Both targetType ('listing' or 'supplier') and targetId (non-empty UUID) are required."
+            });
+        }
+
+        var result = await _reviewService.GetSummaryAsync(
+            targetType, targetId.Value, cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : this.ToProblem(result.Error);
+    }
 }

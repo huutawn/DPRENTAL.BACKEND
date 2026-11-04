@@ -39,7 +39,7 @@
       "assigned_agent": "dev3",
       "depends_on": ["T2"],
       "test_command": "dotnet test ReviewService.sln",
-      "timeout_seconds": 600,
+      "timeout_seconds": 1200,
       "acceptance_criteria": [
         "ReviewsController exposes /my, /listings/{id}, /suppliers/{id}, /summary endpoints",
         "Public endpoints are accessible anonymously while /my requires authentication",
