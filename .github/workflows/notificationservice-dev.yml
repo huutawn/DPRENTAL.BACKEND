@@ -35,10 +35,10 @@ jobs:
         include:
           - name: runtime
             target: runtime
-            image_name: dpnotification-notification
+            image_name: dprental-notification
           - name: migrator
             target: migrator
-            image_name: dpnotification-notification-migrator
+            image_name: dprental-notification-migrator
     permissions:
       contents: read
       packages: write
@@ -106,7 +106,7 @@ jobs:
           set -euo pipefail
           [[ "$IMAGE_NAMESPACE" =~ ^[a-z0-9][a-z0-9._-]*$ ]]
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          for image in dpnotification-notification dpnotification-notification-migrator; do
+          for image in dprental-notification dprental-notification-migrator; do
             timeout 60s docker manifest inspect "ghcr.io/$IMAGE_NAMESPACE/$image:$RELEASE_SHA" >/dev/null
             printf 'Readable image: %s\n' "$image"
           done
@@ -119,11 +119,11 @@ jobs:
       - self-hosted
       - linux
       - x64
-      - dpnotification-deploy
+      - dprental-deploy
     environment: dev
     timeout-minutes: 45
     concurrency:
-      group: dpnotification-dev
+      group: dprental-dev
       cancel-in-progress: false
     permissions:
       contents: read
@@ -140,4 +140,4 @@ jobs:
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test -n "$GHCR_USERNAME"
           test -n "$GHCR_TOKEN"
-          printf '%s\n' "$GHCR_USERNAME" "$GHCR_TOKEN" | sudo -n /usr/local/sbin/dpnotification-deploy notification "$RELEASE_SHA"
+          printf '%s\n' "$GHCR_USERNAME" "$GHCR_TOKEN" | sudo -n /usr/local/sbin/dprental-deploy notification "$RELEASE_SHA"

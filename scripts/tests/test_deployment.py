@@ -9,7 +9,7 @@ import unittest
 
 SERVICE = 'notification'
 NAME = 'notificationservice'
-IMAGES = {'NOTIFICATION_SERVICE_IMAGE': 'dpnotification-notification', 'NOTIFICATION_MIGRATOR_IMAGE': 'dpnotification-notification-migrator'}
+IMAGES = {'NOTIFICATION_SERVICE_IMAGE': 'dprental-notification', 'NOTIFICATION_MIGRATOR_IMAGE': 'dprental-notification-migrator'}
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / 'scripts' / f'deploy-{NAME}.sh'
 SHA = 'a' * 40
@@ -73,6 +73,16 @@ if '/api/v1/notifications/unread-count' in sys.argv[-1]: print('401', end='')
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_workflow_uses_existing_platform_runner_and_entrypoint(self):
+        workflow = (ROOT / '.github/workflows/notificationservice-dev.yml').read_text()
+        self.assertIn('- dprental-deploy', workflow)
+        self.assertIn('group: dprental-dev', workflow)
+        self.assertIn('/usr/local/sbin/dprental-deploy notification', workflow)
+        self.assertIn('image_name: dprental-notification\n', workflow)
+        self.assertIn('image_name: dprental-notification-migrator\n', workflow)
+        self.assertIn('- notification/develop-ci-cd', workflow)
+        self.assertIn('/opt/dprental/dev', SCRIPT.read_text())
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

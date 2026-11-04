@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-readonly DEPLOY_DIRECTORY="${DPR_DEPLOY_DIRECTORY:-/opt/dpnotification/dev}"
+readonly DEPLOY_DIRECTORY="${DPR_DEPLOY_DIRECTORY:-/opt/dprental/dev}"
 readonly ENVIRONMENT_FILE="$DEPLOY_DIRECTORY/.env"
 readonly RELEASE_FILE="$DEPLOY_DIRECTORY/release.env"
 readonly COMPOSE_FILE="$DEPLOY_DIRECTORY/compose.yaml"
@@ -106,7 +106,7 @@ begin_deployment notification
 dev_domain="$(read_environment_value DEV_DOMAIN)"
 
 printf 'Đang phát hành NotificationService revision %s...\n' "$release_sha"
-prepare_release NOTIFICATION_SERVICE_IMAGE=dpnotification-notification NOTIFICATION_MIGRATOR_IMAGE=dpnotification-notification-migrator
+prepare_release NOTIFICATION_SERVICE_IMAGE=dprental-notification NOTIFICATION_MIGRATOR_IMAGE=dprental-notification-migrator
 
 "${compose_command[@]}" --profile migration pull notification-service notification-migrate
 require_dependencies postgres valkey auth-service kafka
