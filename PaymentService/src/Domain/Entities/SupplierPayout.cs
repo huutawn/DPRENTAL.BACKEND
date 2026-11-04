@@ -30,6 +30,11 @@ public sealed class SupplierPayout
     [Required, MaxLength(14)]
     public string TransferCode { get; private set; } = default!;
 
+    // Tài khoản nhà cung cấp chốt lúc quyết toán; số tài khoản được mã hóa khi lưu (PaymentServiceDbContext).
+    [MaxLength(32)] public string? RecipientBankCode { get; private set; }
+    [MaxLength(512)] public string? RecipientAccountNumber { get; private set; }
+    [MaxLength(128)] public string? RecipientAccountHolderName { get; private set; }
+
     [Required, MaxLength(32)]
     public string Status { get; private set; } = default!;
 
@@ -46,7 +51,7 @@ public sealed class SupplierPayout
     // Subtask này chỉ có thao tác tạo PENDING_PAYOUT.
     internal static SupplierPayout CreatePending(
         Guid settlementId, Guid rentalItemId, Guid supplierId,
-        decimal amount, string currency, DateTimeOffset now)
+        decimal amount, string currency, DateTimeOffset now, TransferRecipient? recipient = null)
     {
         if (settlementId == Guid.Empty || rentalItemId == Guid.Empty || supplierId == Guid.Empty)
             throw new ArgumentException("Settlement, rental item and supplier IDs are required.");
@@ -65,6 +70,9 @@ public sealed class SupplierPayout
             Amount = amount,
             Currency = "VND",
             TransferCode = PaymentCodeGenerator.Generate(PaymentCodeGenerator.PayoutPrefix),
+            RecipientBankCode = recipient?.BankCode,
+            RecipientAccountNumber = recipient?.AccountNumber,
+            RecipientAccountHolderName = recipient?.AccountHolderName,
             Status = StatusPendingPayout,
             CreatedAt = now.ToUniversalTime()
         };

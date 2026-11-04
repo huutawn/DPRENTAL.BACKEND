@@ -97,7 +97,8 @@ public sealed class EfFinancialReadRepository(PaymentServiceDbContext db) : IFin
                 x.CompletedBy, x.CreatedAt, x.CompletedAt,
                 db.Invoices.Where(i => i.Id == x.Settlement!.InvoiceId).Select(i => i.RentalOrderId).First(),
                 db.Invoices.Where(i => i.Id == x.Settlement!.InvoiceId).Select(i => i.OrderCode).First(),
-                x.Settlement!.RentalAmount, x.Settlement!.PlatformFeeAmount, x.Settlement!.FinalDeductionAmount))
+                x.Settlement!.RentalAmount, x.Settlement!.PlatformFeeAmount, x.Settlement!.FinalDeductionAmount,
+                x.RecipientBankCode, x.RecipientAccountNumber, x.RecipientAccountHolderName))
             .ToListAsync(ct);
 
         return new ReadPage<AdminPayoutRow>(items, total);
@@ -118,7 +119,8 @@ public sealed class EfFinancialReadRepository(PaymentServiceDbContext db) : IFin
             .Select(x => new ManualRefundRow(
                 x.Id, x.RequirementRef, x.Settlement == null ? null : x.Settlement.SettlementRef, x.RentalItemId, x.RenterId,
                 x.Amount, x.Status, x.TransferCode, x.ExternalTransferReference,
-                x.CompletedBy, x.CreatedAt, x.CompletedAt))
+                x.CompletedBy, x.CreatedAt, x.CompletedAt,
+                x.RecipientBankCode, x.RecipientAccountNumber, x.RecipientAccountHolderName))
             .ToListAsync(ct);
 
         return new ReadPage<ManualRefundRow>(items, total);

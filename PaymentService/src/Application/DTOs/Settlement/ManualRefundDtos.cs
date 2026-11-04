@@ -16,5 +16,6 @@ public sealed record ManualRefundItemDto(Guid RentalItemId, decimal RentalAmount
 public sealed record ManualRefundDetails(Guid Id, string RequirementRef, string OperationKey, string Kind,
     string Status, Guid InvoiceId, string PaymentRef, decimal Amount, string Reason,
     IReadOnlyList<ManualRefundItemDto> Items, DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt,
-    string? ExternalTransferReference, string TransferCode);
+    string? ExternalTransferReference, string TransferCode,
+    string? RecipientBankCode, string? RecipientAccountNumber, string? RecipientAccountHolderName, string? QrUrl);
 public sealed record ManualRefundPage(IReadOnlyList<ManualRefundDetails> Items, Guid? NextCursor);

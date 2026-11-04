@@ -14,5 +14,6 @@ namespace Dprental.PaymentService.Application.DTOs.Payout
         decimal Amount, string Currency, string Status, string TransferCode, string? ExternalTransferReference,
         Guid? CompletedBy, DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt,
         Guid RentalOrderId, string OrderCode,
-        decimal RentalAmount, decimal PlatformFeeAmount, decimal FinalDeductionAmount);
+        decimal RentalAmount, decimal PlatformFeeAmount, decimal FinalDeductionAmount,
+        string? RecipientBankCode, string? RecipientAccountNumber, string? RecipientAccountHolderName, string? QrUrl);
 }
