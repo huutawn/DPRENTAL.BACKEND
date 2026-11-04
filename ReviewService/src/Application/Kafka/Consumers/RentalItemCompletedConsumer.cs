@@ -86,13 +86,35 @@ public sealed class RentalItemCompletedConsumer : IRentalItemCompletedConsumer
         {
             var root = doc.RootElement;
 
-            // 1. Kiểm tra messageType trên topic dùng chung (shared topic)
-            string? messageType = null;
-            if (root.TryGetProperty("messageType", out var mtProp) || root.TryGetProperty("MessageType", out mtProp))
+            // 1. Kiểm tra root phải là JSON Object
+            if (root.ValueKind != JsonValueKind.Object)
             {
-                messageType = mtProp.GetString();
+                _logger?.LogWarning("Bản tin không phải là JSON Object trên topic {Topic}, partition {Partition}, offset {Offset}",
+                    context.Topic, context.Partition, context.Offset);
+                bool dlqAck = await PublishDlqAsync(context, "INVALID_ROOT_TYPE", null, cancellationToken);
+                return dlqAck ? ProcessOutcome.DeadLettered : ProcessOutcome.Retry;
             }
 
+            // 2. Phân biệt messageType hợp lệ với thiếu / sai kiểu messageType
+            bool hasMessageType = root.TryGetProperty("messageType", out var mtProp) || root.TryGetProperty("MessageType", out mtProp);
+            if (!hasMessageType || mtProp.ValueKind != JsonValueKind.String)
+            {
+                _logger?.LogWarning("Envelope thiếu hoặc sai kiểu dữ liệu messageType trên topic {Topic}, offset {Offset}",
+                    context.Topic, context.Offset);
+                bool dlqAck = await PublishDlqAsync(context, "INVALID_MESSAGE_TYPE", null, cancellationToken);
+                return dlqAck ? ProcessOutcome.DeadLettered : ProcessOutcome.Retry;
+            }
+
+            string? messageType = mtProp.GetString();
+            if (string.IsNullOrWhiteSpace(messageType))
+            {
+                _logger?.LogWarning("Envelope có messageType rỗng trên topic {Topic}, offset {Offset}",
+                    context.Topic, context.Offset);
+                bool dlqAck = await PublishDlqAsync(context, "EMPTY_MESSAGE_TYPE", null, cancellationToken);
+                return dlqAck ? ProcessOutcome.DeadLettered : ProcessOutcome.Retry;
+            }
+
+            // Event type hợp lệ nhưng không thuộc Review trên topic dùng chung -> Ignored và commit offset an toàn
             if (!string.Equals(messageType, "RentalItemCompleted", StringComparison.OrdinalIgnoreCase))
             {
                 _logger?.LogInformation("Event type '{MessageType}' trên topic {Topic} được bỏ qua bởi review consumer.",
@@ -100,38 +122,43 @@ public sealed class RentalItemCompletedConsumer : IRentalItemCompletedConsumer
                 return ProcessOutcome.Ignored;
             }
 
-            // 2. Kiểm tra envelope trước khi dùng payload
+            // 3. Kiểm tra envelope trước khi dùng payload
             Guid messageId = Guid.Empty;
-            if (root.TryGetProperty("messageId", out var midProp) || root.TryGetProperty("MessageId", out midProp))
+            bool hasMessageId = root.TryGetProperty("messageId", out var midProp) || root.TryGetProperty("MessageId", out midProp);
+            if (!hasMessageId || midProp.ValueKind != JsonValueKind.String || !midProp.TryGetGuid(out messageId) || messageId == Guid.Empty)
             {
-                midProp.TryGetGuid(out messageId);
-            }
-
-            int version = 0;
-            if (root.TryGetProperty("version", out var vProp) || root.TryGetProperty("Version", out vProp))
-            {
-                vProp.TryGetInt32(out version);
-            }
-
-            string? producer = null;
-            if (root.TryGetProperty("producer", out var pProp) || root.TryGetProperty("Producer", out pProp))
-            {
-                producer = pProp.GetString();
-            }
-
-            if (messageId == Guid.Empty || version != 1 || string.IsNullOrWhiteSpace(producer))
-            {
-                _logger?.LogWarning("Envelope validation không hợp lệ trên topic {Topic}, offset {Offset}. MessageId: {MessageId}, Version: {Version}, Producer: {Producer}",
-                    context.Topic, context.Offset, messageId, version, producer);
-                bool dlqAck = await PublishDlqAsync(context, "INVALID_ENVELOPE", messageId == Guid.Empty ? null : messageId, cancellationToken);
+                _logger?.LogWarning("Envelope thiếu hoặc sai định dạng messageId (phải là UUID string) trên topic {Topic}, offset {Offset}",
+                    context.Topic, context.Offset);
+                bool dlqAck = await PublishDlqAsync(context, "INVALID_MESSAGE_ID", null, cancellationToken);
                 return dlqAck ? ProcessOutcome.DeadLettered : ProcessOutcome.Retry;
             }
 
-            // 3. Payload validation
-            if (!root.TryGetProperty("payload", out var payloadElement) && !root.TryGetProperty("Payload", out payloadElement))
+            int version = 0;
+            bool hasVersion = root.TryGetProperty("version", out var vProp) || root.TryGetProperty("Version", out vProp);
+            if (!hasVersion || vProp.ValueKind != JsonValueKind.Number || !vProp.TryGetInt32(out version) || version != 1)
             {
-                _logger?.LogWarning("Bản tin {MessageId} thiếu trường payload.", messageId);
-                bool dlqAck = await PublishDlqAsync(context, "MISSING_PAYLOAD", messageId, cancellationToken);
+                _logger?.LogWarning("Envelope thiếu hoặc sai định dạng version (phải là số nguyên 1) trên topic {Topic}, offset {Offset}",
+                    context.Topic, context.Offset);
+                bool dlqAck = await PublishDlqAsync(context, "INVALID_VERSION", messageId, cancellationToken);
+                return dlqAck ? ProcessOutcome.DeadLettered : ProcessOutcome.Retry;
+            }
+
+            string? producer = null;
+            bool hasProducer = root.TryGetProperty("producer", out var pProp) || root.TryGetProperty("Producer", out pProp);
+            if (!hasProducer || pProp.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(producer = pProp.GetString()))
+            {
+                _logger?.LogWarning("Envelope thiếu hoặc sai định dạng producer (phải là chuỗi không rỗng) trên topic {Topic}, offset {Offset}",
+                    context.Topic, context.Offset);
+                bool dlqAck = await PublishDlqAsync(context, "INVALID_PRODUCER", messageId, cancellationToken);
+                return dlqAck ? ProcessOutcome.DeadLettered : ProcessOutcome.Retry;
+            }
+
+            // 4. Payload validation
+            bool hasPayload = root.TryGetProperty("payload", out var payloadElement) || root.TryGetProperty("Payload", out payloadElement);
+            if (!hasPayload || payloadElement.ValueKind != JsonValueKind.Object)
+            {
+                _logger?.LogWarning("Bản tin {MessageId} thiếu trường payload hoặc payload không phải JSON Object.", messageId);
+                bool dlqAck = await PublishDlqAsync(context, "INVALID_PAYLOAD_OBJECT", messageId, cancellationToken);
                 return dlqAck ? ProcessOutcome.DeadLettered : ProcessOutcome.Retry;
             }
 
@@ -154,7 +181,7 @@ public sealed class RentalItemCompletedConsumer : IRentalItemCompletedConsumer
                 return dlqAck ? ProcessOutcome.DeadLettered : ProcessOutcome.Retry;
             }
 
-            // 4. Kiểm tra chống trùng lặp (Transactional Inbox)
+            // 5. Kiểm tra chống trùng lặp (Transactional Inbox)
             bool alreadyProcessed = await _inboxRepository.ExistsAsync(messageId, ConsumerGroup, cancellationToken);
             if (alreadyProcessed)
             {
