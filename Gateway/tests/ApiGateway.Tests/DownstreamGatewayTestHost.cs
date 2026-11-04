@@ -208,7 +208,7 @@ internal static class DownstreamGatewayTestHost
                 headers,
                 await bodyReader.ReadToEndAsync(cancellationTokenSource.Token));
 
-            await WriteResponseAsync(context.Response, ResponseBody, ResponseContentType, ResponseStatusCode);
+            await WriteResponseAsync(context.Response, req.HttpMethod == "HEAD" ? string.Empty : ResponseBody, ResponseContentType, ResponseStatusCode);
         }
 
         private static async Task WriteResponseAsync(HttpListenerResponse response, string content, string contentType, int statusCode = (int)HttpStatusCode.OK)
