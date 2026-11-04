@@ -19,6 +19,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Kafka;
 
+[Trait("Category", "Unit")]
 public sealed class NotificationIngestionTests
 {
     private static NotificationServiceDbContext CreateInMemoryDbContext()

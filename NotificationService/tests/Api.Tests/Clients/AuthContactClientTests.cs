@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Clients;
 
+[Trait("Category", "Unit")]
 public sealed class AuthContactClientTests
 {
     private sealed class MockHttpMessageHandler : HttpMessageHandler

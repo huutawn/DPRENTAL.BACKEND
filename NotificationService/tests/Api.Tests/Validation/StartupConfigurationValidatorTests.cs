@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Validation;
 
+[Trait("Category", "Unit")]
 public sealed class StartupConfigurationValidatorTests
 {
     private static Dictionary<string, string?> CreateValidConfigDict() =>

@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Persistence;
 
+[Trait("Category", "Unit")]
 public sealed class NotificationDbContextTests
 {
     private static NotificationServiceDbContext CreateInMemoryDbContext()

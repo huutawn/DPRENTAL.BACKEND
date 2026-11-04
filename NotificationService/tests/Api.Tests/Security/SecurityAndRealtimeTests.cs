@@ -19,6 +19,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Dprental.NotificationService.Api.Tests.Security;
 
+[Trait("Category", "Unit")]
 public sealed class SecurityAndRealtimeTests
 {
     [Fact]

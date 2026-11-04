@@ -1,3 +1,4 @@
+using Dprental.NotificationService.Api.Tests.Fixtures;
 using Dprental.NotificationService.Domain.Entities;
 using Dprental.NotificationService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -8,456 +9,437 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Persistence;
 
+[Trait("Category", "Integration")]
 public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
 {
-    private const string BaseConnectionString = "Host=127.0.0.1;Port=20992;Username=notificationservice;Password=postgres;Database=";
-
-    private static string GetTestConnectionString(string dbName) => BaseConnectionString + dbName + ";";
-
-    private static async Task<bool> IsPostgreSqlAvailableAsync()
-    {
-        try
-        {
-            await using var conn = new NpgsqlConnection(BaseConnectionString + "notificationservice;");
-            await conn.OpenAsync();
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static async Task RecreateDatabaseAsync(string dbName)
-    {
-        await using var conn = new NpgsqlConnection(BaseConnectionString + "postgres;");
-        await conn.OpenAsync();
-
-        // Terminate existing connections
-        var terminateSql = $@"
-            SELECT pg_terminate_backend(pid) 
-            FROM pg_stat_activity 
-            WHERE datname = '{dbName}' AND pid <> pg_backend_pid();";
-        await using (var termCmd = new NpgsqlCommand(terminateSql, conn))
-        {
-            await termCmd.ExecuteNonQueryAsync();
-        }
-
-        var dropSql = $"DROP DATABASE IF EXISTS \"{dbName}\";";
-        await using (var dropCmd = new NpgsqlCommand(dropSql, conn))
-        {
-            await dropCmd.ExecuteNonQueryAsync();
-        }
-
-        var createSql = $"CREATE DATABASE \"{dbName}\" OWNER notificationservice;";
-        await using (var createCmd = new NpgsqlCommand(createSql, conn))
-        {
-            await createCmd.ExecuteNonQueryAsync();
-        }
-    }
+    private static string GetTestConnectionString(string dbName) => TestEnvironment.GetPostgreSqlConnectionString(dbName);
+    private static Task RecreateDatabaseAsync(string dbName) => TestEnvironment.RecreateDatabaseAsync(dbName);
 
     [Fact]
     public async Task EmptyDatabase_MigrateAsync_AppliesAllMigrationsSuccessfully()
     {
-        if (!await IsPostgreSqlAvailableAsync()) return;
-
         var dbName = "notif_migr_test_clean_" + Guid.NewGuid().ToString("N")[..8];
         await RecreateDatabaseAsync(dbName);
-
-        var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
-            .UseNpgsql(GetTestConnectionString(dbName))
-            .Options;
-
-        await using (var context = new NotificationServiceDbContext(options))
+        try
         {
-            await context.Database.MigrateAsync();
-        }
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(GetTestConnectionString(dbName))
+                .Options;
 
-        // Verify tables exist in schema 'notification' using separate connection
-        await using var conn = new NpgsqlConnection(GetTestConnectionString(dbName));
-        await conn.OpenAsync();
-
-        await using (var cmd = new NpgsqlCommand(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'notification' ORDER BY table_name;",
-            conn))
-        {
-            var tables = new List<string>();
-            await using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            await using (var context = new NotificationServiceDbContext(options))
             {
-                tables.Add(reader.GetString(0));
+                await context.Database.MigrateAsync();
             }
 
-            Assert.Contains("aggregate_watermarks", tables);
-            Assert.Contains("delivery_jobs", tables);
-            Assert.Contains("inbox_receipts", tables);
-            Assert.Contains("notifications", tables);
-            Assert.Contains("preferences", tables);
-        }
+            // Verify tables exist in schema 'notification' using separate connection
+            await using var conn = new NpgsqlConnection(GetTestConnectionString(dbName));
+            await conn.OpenAsync();
 
-        // Verify partial index on delivery_jobs exists and works
-        await using (var indexCmd = new NpgsqlCommand(
-            "SELECT indexname FROM pg_indexes WHERE schemaname = 'notification' AND tablename = 'delivery_jobs';",
-            conn))
-        {
-            var indexes = new List<string>();
-            await using var indexReader = await indexCmd.ExecuteReaderAsync();
-            while (await indexReader.ReadAsync())
+            await using (var cmd = new NpgsqlCommand(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'notification' ORDER BY table_name;",
+                conn))
             {
-                indexes.Add(indexReader.GetString(0));
+                var tables = new List<string>();
+                await using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    tables.Add(reader.GetString(0));
+                }
+
+                Assert.Contains("aggregate_watermarks", tables);
+                Assert.Contains("delivery_jobs", tables);
+                Assert.Contains("inbox_receipts", tables);
+                Assert.Contains("notifications", tables);
+                Assert.Contains("preferences", tables);
             }
 
-            Assert.Contains("ix_delivery_jobs_pending_claim", indexes);
-            Assert.Contains("ix_delivery_jobs_lease_recovery", indexes);
-        }
+            // Verify partial index on delivery_jobs exists and works
+            await using (var indexCmd = new NpgsqlCommand(
+                "SELECT indexname FROM pg_indexes WHERE schemaname = 'notification' AND tablename = 'delivery_jobs';",
+                conn))
+            {
+                var indexes = new List<string>();
+                await using var indexReader = await indexCmd.ExecuteReaderAsync();
+                while (await indexReader.ReadAsync())
+                {
+                    indexes.Add(indexReader.GetString(0));
+                }
 
+                Assert.Contains("ix_delivery_jobs_pending_claim", indexes);
+                Assert.Contains("ix_delivery_jobs_lease_recovery", indexes);
+            }
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
     }
 
     [Fact]
     public async Task BaselineDatabase_UpgradeMigration_PreservesDataAndAppliesBackfills()
     {
-        if (!await IsPostgreSqlAvailableAsync()) return;
-
         var dbName = "notif_migr_test_upgrade_" + Guid.NewGuid().ToString("N")[..8];
         await RecreateDatabaseAsync(dbName);
-
-        var connString = GetTestConnectionString(dbName);
-        var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
-            .UseNpgsql(connString)
-            .Options;
-
-        // 1. Migrate only to initial migration
-        await using (var context = new NotificationServiceDbContext(options))
+        try
         {
-            var migrator = context.GetService<IMigrator>();
-            await migrator.MigrateAsync("20261102082253_InitialNotificationSchema");
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            // 1. Migrate only to initial migration
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                var migrator = context.GetService<IMigrator>();
+                await migrator.MigrateAsync("20261102082253_InitialNotificationSchema");
+            }
+
+            // 2. Insert baseline test rows using raw SQL to match initial schema
+            var orderId = Guid.NewGuid();
+            var userId = Guid.NewGuid();
+            var notifId = Guid.NewGuid();
+            var jobId = Guid.NewGuid();
+            var receiptId = Guid.NewGuid();
+
+            await using (var conn = new NpgsqlConnection(connString))
+            {
+                await conn.OpenAsync();
+
+                // Insert watermark without scope or is_paid
+                var insertWatermarkSql = @"
+                    INSERT INTO notification.aggregate_watermarks 
+                    (""AggregateId"", ""RecipientUserId"", ""LastOrderVersion"", ""IsTerminal"", ""TerminalState"", ""UpdatedAt"")
+                    VALUES (@aggId, @userId, 3, true, 'PAID', NOW());";
+                await using (var cmd = new NpgsqlCommand(insertWatermarkSql, conn))
+                {
+                    cmd.Parameters.AddWithValue("aggId", orderId);
+                    cmd.Parameters.AddWithValue("userId", userId);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // Insert notification
+                var insertNotifSql = @"
+                    INSERT INTO notification.notifications
+                    (""Id"", ""RecipientUserId"", ""NotificationType"", ""Category"", ""Severity"", ""Title"", ""Body"", 
+                     ""ResourceType"", ""ResourceId"", ""SourceEventId"", ""SourceProducer"", ""SourceEventType"", ""EventVersion"",
+                     ""TemplateCode"", ""TemplateVersion"", ""OccurredAt"", ""CreatedAt"")
+                    VALUES (@id, @userId, 'RENTAL_ORDER_PAID', 'Order', 'Info', 'Paid', 'Your order was paid',
+                            'RentalOrder', @resourceId, @sourceEventId, 'RentalService', 'RentalOrderPaid', 3,
+                            'RENTAL_ORDER_PAID_TEMPLATE', 'v1', NOW(), NOW());";
+                await using (var cmd = new NpgsqlCommand(insertNotifSql, conn))
+                {
+                    cmd.Parameters.AddWithValue("id", notifId);
+                    cmd.Parameters.AddWithValue("userId", userId);
+                    cmd.Parameters.AddWithValue("resourceId", orderId.ToString());
+                    cmd.Parameters.AddWithValue("sourceEventId", Guid.NewGuid());
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // Insert delivery job
+                var insertJobSql = @"
+                    INSERT INTO notification.delivery_jobs
+                    (""Id"", ""NotificationId"", ""Channel"", ""RecipientUserId"", ""Status"", ""AttemptCount"", ""MaxAttempts"", ""NextAttemptAt"", ""CreatedAt"", ""UpdatedAt"")
+                    VALUES (@id, @notifId, 'EMAIL', @userId, 'Pending', 0, 5, NOW(), NOW(), NOW());";
+                await using (var cmd = new NpgsqlCommand(insertJobSql, conn))
+                {
+                    cmd.Parameters.AddWithValue("id", jobId);
+                    cmd.Parameters.AddWithValue("notifId", notifId);
+                    cmd.Parameters.AddWithValue("userId", userId);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // Insert inbox receipt
+                var insertReceiptSql = @"
+                    INSERT INTO notification.inbox_receipts
+                    (""Id"", ""ConsumerName"", ""MessageId"", ""Producer"", ""MessageType"", ""Status"", ""ProcessedAt"")
+                    VALUES (@id, 'RentalOrderConsumer', @msgId, 'RentalService', 'RentalOrderPaid', 'Processed', NOW());";
+                await using (var cmd = new NpgsqlCommand(insertReceiptSql, conn))
+                {
+                    cmd.Parameters.AddWithValue("id", receiptId);
+                    cmd.Parameters.AddWithValue("msgId", Guid.NewGuid());
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+
+            // 3. Apply the upgrade migration
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                await context.Database.MigrateAsync();
+            }
+
+            // 4. Verify data preservation, column renames, and backfills
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                var notif = await context.Notifications.FirstOrDefaultAsync(n => n.Id == notifId);
+                Assert.NotNull(notif);
+                Assert.Equal("RENTAL_ORDER_PAID", notif.NotificationType);
+                Assert.Equal(orderId, notif.OrderId); // Backfilled from resourceId!
+
+                var job = await context.DeliveryJobs.FirstOrDefaultAsync(j => j.Id == jobId);
+                Assert.NotNull(job);
+                Assert.Equal("Pending", job.Status);
+                Assert.Equal(notifId, job.NotificationId);
+
+                var receipt = await context.InboxReceipts.FirstOrDefaultAsync(r => r.Id == receiptId);
+                Assert.NotNull(receipt);
+                Assert.Equal("Processed", receipt.Status);
+
+                var watermark = await context.AggregateWatermarks.FirstOrDefaultAsync(w => w.AggregateId == orderId && w.RecipientUserId == userId);
+                Assert.NotNull(watermark);
+                Assert.Equal("RentalOrder", watermark.Scope); // Backfilled default!
+                Assert.True(watermark.IsPaid); // Backfilled from terminal state PAID / RENTAL_ORDER_PAID!
+                Assert.Equal(3, watermark.LastOrderVersion);
+            }
         }
-
-        // 2. Insert baseline test rows using raw SQL to match initial schema
-        var orderId = Guid.NewGuid();
-        var userId = Guid.NewGuid();
-        var notifId = Guid.NewGuid();
-        var jobId = Guid.NewGuid();
-        var receiptId = Guid.NewGuid();
-
-        await using (var conn = new NpgsqlConnection(connString))
+        finally
         {
-            await conn.OpenAsync();
-
-            // Insert watermark without scope or is_paid
-            var insertWatermarkSql = @"
-                INSERT INTO notification.aggregate_watermarks 
-                (""AggregateId"", ""RecipientUserId"", ""LastOrderVersion"", ""IsTerminal"", ""TerminalState"", ""UpdatedAt"")
-                VALUES (@aggId, @userId, 3, true, 'PAID', NOW());";
-            await using (var cmd = new NpgsqlCommand(insertWatermarkSql, conn))
-            {
-                cmd.Parameters.AddWithValue("aggId", orderId);
-                cmd.Parameters.AddWithValue("userId", userId);
-                await cmd.ExecuteNonQueryAsync();
-            }
-
-            // Insert notification
-            var insertNotifSql = @"
-                INSERT INTO notification.notifications
-                (""Id"", ""RecipientUserId"", ""NotificationType"", ""Category"", ""Severity"", ""Title"", ""Body"", 
-                 ""ResourceType"", ""ResourceId"", ""SourceEventId"", ""SourceProducer"", ""SourceEventType"", ""EventVersion"",
-                 ""TemplateCode"", ""TemplateVersion"", ""OccurredAt"", ""CreatedAt"")
-                VALUES (@id, @userId, 'RENTAL_ORDER_PAID', 'Order', 'Info', 'Paid', 'Your order was paid',
-                        'RentalOrder', @resourceId, @sourceEventId, 'RentalService', 'RentalOrderPaid', 3,
-                        'RENTAL_ORDER_PAID_TEMPLATE', 'v1', NOW(), NOW());";
-            await using (var cmd = new NpgsqlCommand(insertNotifSql, conn))
-            {
-                cmd.Parameters.AddWithValue("id", notifId);
-                cmd.Parameters.AddWithValue("userId", userId);
-                cmd.Parameters.AddWithValue("resourceId", orderId.ToString());
-                cmd.Parameters.AddWithValue("sourceEventId", Guid.NewGuid());
-                await cmd.ExecuteNonQueryAsync();
-            }
-
-            // Insert delivery job
-            var insertJobSql = @"
-                INSERT INTO notification.delivery_jobs
-                (""Id"", ""NotificationId"", ""Channel"", ""RecipientUserId"", ""Status"", ""AttemptCount"", ""MaxAttempts"", ""NextAttemptAt"", ""CreatedAt"", ""UpdatedAt"")
-                VALUES (@id, @notifId, 'EMAIL', @userId, 'Pending', 0, 5, NOW(), NOW(), NOW());";
-            await using (var cmd = new NpgsqlCommand(insertJobSql, conn))
-            {
-                cmd.Parameters.AddWithValue("id", jobId);
-                cmd.Parameters.AddWithValue("notifId", notifId);
-                cmd.Parameters.AddWithValue("userId", userId);
-                await cmd.ExecuteNonQueryAsync();
-            }
-
-            // Insert inbox receipt
-            var insertReceiptSql = @"
-                INSERT INTO notification.inbox_receipts
-                (""Id"", ""ConsumerName"", ""MessageId"", ""Producer"", ""MessageType"", ""Status"", ""ProcessedAt"")
-                VALUES (@id, 'RentalOrderConsumer', @msgId, 'RentalService', 'RentalOrderPaid', 'Processed', NOW());";
-            await using (var cmd = new NpgsqlCommand(insertReceiptSql, conn))
-            {
-                cmd.Parameters.AddWithValue("id", receiptId);
-                cmd.Parameters.AddWithValue("msgId", Guid.NewGuid());
-                await cmd.ExecuteNonQueryAsync();
-            }
-        }
-
-        // 3. Apply the upgrade migration
-        await using (var context = new NotificationServiceDbContext(options))
-        {
-            await context.Database.MigrateAsync();
-        }
-
-        // 4. Verify data preservation, column renames, and backfills
-        await using (var context = new NotificationServiceDbContext(options))
-        {
-            var notif = await context.Notifications.FirstOrDefaultAsync(n => n.Id == notifId);
-            Assert.NotNull(notif);
-            Assert.Equal("RENTAL_ORDER_PAID", notif.NotificationType);
-            Assert.Equal(orderId, notif.OrderId); // Backfilled from resourceId!
-
-            var job = await context.DeliveryJobs.FirstOrDefaultAsync(j => j.Id == jobId);
-            Assert.NotNull(job);
-            Assert.Equal("Pending", job.Status);
-            Assert.Equal(notifId, job.NotificationId);
-
-            var receipt = await context.InboxReceipts.FirstOrDefaultAsync(r => r.Id == receiptId);
-            Assert.NotNull(receipt);
-            Assert.Equal("Processed", receipt.Status);
-
-            var watermark = await context.AggregateWatermarks.FirstOrDefaultAsync(w => w.AggregateId == orderId && w.RecipientUserId == userId);
-            Assert.NotNull(watermark);
-            Assert.Equal("RentalOrder", watermark.Scope); // Backfilled default!
-            Assert.True(watermark.IsPaid); // Backfilled from terminal state PAID / RENTAL_ORDER_PAID!
-            Assert.Equal(3, watermark.LastOrderVersion);
+            await TestEnvironment.DropDatabaseAsync(dbName);
         }
     }
 
     [Fact]
     public async Task PostgreSql_DeliveryJobRepository_ClaimPendingJobs_WithSkipLocked_ClaimsExclusively()
     {
-        if (!await IsPostgreSqlAvailableAsync()) return;
-
         var dbName = "notif_repo_test_claim_" + Guid.NewGuid().ToString("N")[..8];
         await RecreateDatabaseAsync(dbName);
-
-        var connString = GetTestConnectionString(dbName);
-        var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
-            .UseNpgsql(connString)
-            .Options;
-
-        await using var context = new NotificationServiceDbContext(options);
-        await context.Database.MigrateAsync();
-
-        var notifId = Guid.NewGuid();
-        var userId = Guid.NewGuid();
-        var notif = new Notification
+        try
         {
-            Id = notifId,
-            RecipientUserId = userId,
-            NotificationType = "RENTAL_ORDER_CREATED",
-            Category = "Order",
-            Severity = "Info",
-            Title = "Order Created",
-            Body = "Order created",
-            ResourceType = "RentalOrder",
-            ResourceId = Guid.NewGuid().ToString(),
-            SourceEventId = Guid.NewGuid(),
-            SourceProducer = "RentalService",
-            SourceEventType = "RentalOrderCreated",
-            EventVersion = 1,
-            TemplateCode = "RENTAL_ORDER_CREATED_TEMPLATE",
-            TemplateVersion = "v1",
-            OccurredAt = DateTimeOffset.UtcNow,
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-        await context.Notifications.AddAsync(notif);
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
 
-        var job = new NotificationDeliveryJob
+            await using var context = new NotificationServiceDbContext(options);
+            await context.Database.MigrateAsync();
+
+            var notifId = Guid.NewGuid();
+            var userId = Guid.NewGuid();
+            var notif = new Notification
+            {
+                Id = notifId,
+                RecipientUserId = userId,
+                NotificationType = "RENTAL_ORDER_CREATED",
+                Category = "Order",
+                Severity = "Info",
+                Title = "Order Created",
+                Body = "Order created",
+                ResourceType = "RentalOrder",
+                ResourceId = Guid.NewGuid().ToString(),
+                SourceEventId = Guid.NewGuid(),
+                SourceProducer = "RentalService",
+                SourceEventType = "RentalOrderCreated",
+                EventVersion = 1,
+                TemplateCode = "RENTAL_ORDER_CREATED_TEMPLATE",
+                TemplateVersion = "v1",
+                OccurredAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            await context.Notifications.AddAsync(notif);
+
+            var job = new NotificationDeliveryJob
+            {
+                Id = Guid.NewGuid(),
+                NotificationId = notifId,
+                Channel = "EMAIL",
+                RecipientUserId = userId,
+                Status = "Pending",
+                AttemptCount = 0,
+                MaxAttempts = 5,
+                NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            await context.DeliveryJobs.AddAsync(job);
+            await context.SaveChangesAsync();
+
+            var repo = new DeliveryJobRepository(context);
+            var claimed = await repo.ClaimPendingJobsAsync("worker-1", TimeSpan.FromMinutes(5), 10);
+
+            Assert.Single(claimed);
+            Assert.Equal(job.Id, claimed[0].Id);
+            Assert.Equal("Processing", claimed[0].Status);
+            Assert.StartsWith("worker-1_", claimed[0].LeaseToken);
+            Assert.NotNull(claimed[0].LeaseExpiresAt);
+
+            // Second claim should return empty due to status = 'Processing'
+            var secondClaim = await repo.ClaimPendingJobsAsync("worker-2", TimeSpan.FromMinutes(5), 10);
+            Assert.Empty(secondClaim);
+        }
+        finally
         {
-            Id = Guid.NewGuid(),
-            NotificationId = notifId,
-            Channel = "EMAIL",
-            RecipientUserId = userId,
-            Status = "Pending",
-            AttemptCount = 0,
-            MaxAttempts = 5,
-            NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1),
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
-        await context.DeliveryJobs.AddAsync(job);
-        await context.SaveChangesAsync();
-
-        var repo = new DeliveryJobRepository(context);
-        var claimed = await repo.ClaimPendingJobsAsync("worker-1", TimeSpan.FromMinutes(5), 10);
-
-        Assert.Single(claimed);
-        Assert.Equal(job.Id, claimed[0].Id);
-        Assert.Equal("Processing", claimed[0].Status);
-        Assert.StartsWith("worker-1_", claimed[0].LeaseToken);
-        Assert.NotNull(claimed[0].LeaseExpiresAt);
-
-        // Second claim should return empty due to status = 'Processing'
-        var secondClaim = await repo.ClaimPendingJobsAsync("worker-2", TimeSpan.FromMinutes(5), 10);
-        Assert.Empty(secondClaim);
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
     }
 
     [Fact]
     public async Task PostgreSql_ScopedWatermarks_TwoItemsInSameOrder_CreateIndependentWatermarks()
     {
-        if (!await IsPostgreSqlAvailableAsync()) return;
-
         var dbName = "notif_repo_test_items_" + Guid.NewGuid().ToString("N")[..8];
         await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
 
-        var connString = GetTestConnectionString(dbName);
-        var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
-            .UseNpgsql(connString)
-            .Options;
+            await using var context = new NotificationServiceDbContext(options);
+            await context.Database.MigrateAsync();
 
-        await using var context = new NotificationServiceDbContext(options);
-        await context.Database.MigrateAsync();
+            var orderId = Guid.NewGuid();
+            var itemA = Guid.NewGuid();
+            var itemB = Guid.NewGuid();
+            var renterId = Guid.NewGuid();
 
-        var orderId = Guid.NewGuid();
-        var itemA = Guid.NewGuid();
-        var itemB = Guid.NewGuid();
-        var renterId = Guid.NewGuid();
+            var repo = new AggregateWatermarkRepository(context);
 
-        var repo = new AggregateWatermarkRepository(context);
+            // Upsert Item A: version 3, terminal COMPLETED
+            await repo.UpsertWatermarksForRecipientsAsync(
+                NotificationWatermarkScope.RentalItem,
+                itemA,
+                new[] { renterId },
+                orderVersion: 3,
+                messageId: "msg-itemA-3",
+                isTerminal: true,
+                terminalState: "COMPLETED",
+                parentOrderId: orderId);
 
-        // Upsert Item A: version 3, terminal COMPLETED
-        await repo.UpsertWatermarksForRecipientsAsync(
-            NotificationWatermarkScope.RentalItem,
-            itemA,
-            new[] { renterId },
-            orderVersion: 3,
-            messageId: "msg-itemA-3",
-            isTerminal: true,
-            terminalState: "COMPLETED",
-            parentOrderId: orderId);
+            // Upsert Item B: version 2, active (not terminal)
+            await repo.UpsertWatermarksForRecipientsAsync(
+                NotificationWatermarkScope.RentalItem,
+                itemB,
+                new[] { renterId },
+                orderVersion: 2,
+                messageId: "msg-itemB-2",
+                isTerminal: false,
+                terminalState: null,
+                parentOrderId: orderId);
 
-        // Upsert Item B: version 2, active (not terminal)
-        await repo.UpsertWatermarksForRecipientsAsync(
-            NotificationWatermarkScope.RentalItem,
-            itemB,
-            new[] { renterId },
-            orderVersion: 2,
-            messageId: "msg-itemB-2",
-            isTerminal: false,
-            terminalState: null,
-            parentOrderId: orderId);
+            await context.SaveChangesAsync();
 
-        await context.SaveChangesAsync();
+            // Read watermarks
+            var wmItemA = await repo.GetWatermarkAsync(NotificationWatermarkScope.RentalItem, itemA, renterId);
+            var wmItemB = await repo.GetWatermarkAsync(NotificationWatermarkScope.RentalItem, itemB, renterId);
 
-        // Read watermarks
-        var wmItemA = await repo.GetWatermarkAsync(NotificationWatermarkScope.RentalItem, itemA, renterId);
-        var wmItemB = await repo.GetWatermarkAsync(NotificationWatermarkScope.RentalItem, itemB, renterId);
+            Assert.NotNull(wmItemA);
+            Assert.True(wmItemA.IsTerminal);
+            Assert.Equal("COMPLETED", wmItemA.TerminalState);
+            Assert.Equal(orderId, wmItemA.ParentOrderId);
 
-        Assert.NotNull(wmItemA);
-        Assert.True(wmItemA.IsTerminal);
-        Assert.Equal("COMPLETED", wmItemA.TerminalState);
-        Assert.Equal(orderId, wmItemA.ParentOrderId);
+            Assert.NotNull(wmItemB);
+            Assert.False(wmItemB.IsTerminal);
+            Assert.Null(wmItemB.TerminalState);
+            Assert.Equal(orderId, wmItemB.ParentOrderId);
 
-        Assert.NotNull(wmItemB);
-        Assert.False(wmItemB.IsTerminal);
-        Assert.Null(wmItemB.TerminalState);
-        Assert.Equal(orderId, wmItemB.ParentOrderId);
-
-        // Terminal Item A does NOT make Item B stale!
-        var evalB = Dprental.NotificationService.Application.Policies.StaleActionSuppressionPolicy.Evaluate("ORDER_CREATED", 2, wmItemB);
-        Assert.False(evalB.IsStale);
-        Assert.False(evalB.SuppressAction);
+            // Terminal Item A does NOT make Item B stale!
+            var evalB = Dprental.NotificationService.Application.Policies.StaleActionSuppressionPolicy.Evaluate("ORDER_CREATED", 2, wmItemB);
+            Assert.False(evalB.IsStale);
+            Assert.False(evalB.SuppressAction);
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
     }
 
     [Fact]
     public async Task PostgreSql_AdvisoryLock_SerializesSameOrder_AndReleasesOnRollback()
     {
-        if (!await IsPostgreSqlAvailableAsync()) return;
-
         var dbName = "notif_lock_test_" + Guid.NewGuid().ToString("N")[..8];
         await RecreateDatabaseAsync(dbName);
-
-        var connString = GetTestConnectionString(dbName);
-        var orderId1 = Guid.NewGuid();
-        var orderId2 = Guid.NewGuid();
-
-        await using var conn1 = new NpgsqlConnection(connString);
-        await conn1.OpenAsync();
-        await using var tx1 = await conn1.BeginTransactionAsync();
-
-        // Tx 1 acquires advisory lock on orderId1
-        await using (var cmd1 = new NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtext(@orderId::text));", conn1, tx1))
+        try
         {
-            cmd1.Parameters.AddWithValue("orderId", orderId1.ToString());
-            await cmd1.ExecuteNonQueryAsync();
-        }
+            var connString = GetTestConnectionString(dbName);
+            var orderId1 = Guid.NewGuid();
+            var orderId2 = Guid.NewGuid();
 
-        // Tx 2 on different orderId2 acquires lock immediately without blocking
-        await using var conn2 = new NpgsqlConnection(connString);
-        await conn2.OpenAsync();
-        await using var tx2 = await conn2.BeginTransactionAsync();
-        await using (var cmd2 = new NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtext(@orderId::text));", conn2, tx2))
+            await using var conn1 = new NpgsqlConnection(connString);
+            await conn1.OpenAsync();
+            await using var tx1 = await conn1.BeginTransactionAsync();
+
+            // Tx 1 acquires advisory lock on orderId1
+            await using (var cmd1 = new NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtext(@orderId::text));", conn1, tx1))
+            {
+                cmd1.Parameters.AddWithValue("orderId", orderId1.ToString());
+                await cmd1.ExecuteNonQueryAsync();
+            }
+
+            // Tx 2 on different orderId2 acquires lock immediately without blocking
+            await using var conn2 = new NpgsqlConnection(connString);
+            await conn2.OpenAsync();
+            await using var tx2 = await conn2.BeginTransactionAsync();
+            await using (var cmd2 = new NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtext(@orderId::text));", conn2, tx2))
+            {
+                cmd2.Parameters.AddWithValue("orderId", orderId2.ToString());
+                await cmd2.ExecuteNonQueryAsync();
+            }
+            await tx2.CommitAsync();
+
+            // Tx 3 on same orderId1 attempts non-blocking try_lock: must return false (currently locked by Tx 1)
+            await using var conn3 = new NpgsqlConnection(connString);
+            await conn3.OpenAsync();
+            await using var tx3 = await conn3.BeginTransactionAsync();
+            bool lockAcquiredWhileTx1Active;
+            await using (var cmd3 = new NpgsqlCommand("SELECT pg_try_advisory_xact_lock(hashtext(@orderId::text));", conn3, tx3))
+            {
+                cmd3.Parameters.AddWithValue("orderId", orderId1.ToString());
+                lockAcquiredWhileTx1Active = (bool)(await cmd3.ExecuteScalarAsync())!;
+            }
+            Assert.False(lockAcquiredWhileTx1Active, "Lock on orderId1 must be held by tx1 and reject concurrent try_lock");
+
+            // Rollback Tx 1 -> releases advisory lock
+            await tx1.RollbackAsync();
+
+            // Now Tx 3 can acquire lock on orderId1
+            bool lockAcquiredAfterRollback;
+            await using (var cmd3Retry = new NpgsqlCommand("SELECT pg_try_advisory_xact_lock(hashtext(@orderId::text));", conn3, tx3))
+            {
+                cmd3Retry.Parameters.AddWithValue("orderId", orderId1.ToString());
+                lockAcquiredAfterRollback = (bool)(await cmd3Retry.ExecuteScalarAsync())!;
+            }
+            Assert.True(lockAcquiredAfterRollback, "Rollback of tx1 must release advisory lock immediately");
+            await tx3.CommitAsync();
+        }
+        finally
         {
-            cmd2.Parameters.AddWithValue("orderId", orderId2.ToString());
-            await cmd2.ExecuteNonQueryAsync();
+            await TestEnvironment.DropDatabaseAsync(dbName);
         }
-        await tx2.CommitAsync();
-
-        // Tx 3 on same orderId1 attempts non-blocking try_lock: must return false (currently locked by Tx 1)
-        await using var conn3 = new NpgsqlConnection(connString);
-        await conn3.OpenAsync();
-        await using var tx3 = await conn3.BeginTransactionAsync();
-        bool lockAcquiredWhileTx1Active;
-        await using (var cmd3 = new NpgsqlCommand("SELECT pg_try_advisory_xact_lock(hashtext(@orderId::text));", conn3, tx3))
-        {
-            cmd3.Parameters.AddWithValue("orderId", orderId1.ToString());
-            lockAcquiredWhileTx1Active = (bool)(await cmd3.ExecuteScalarAsync())!;
-        }
-        Assert.False(lockAcquiredWhileTx1Active, "Lock on orderId1 must be held by tx1 and reject concurrent try_lock");
-
-        // Rollback Tx 1 -> releases advisory lock
-        await tx1.RollbackAsync();
-
-        // Now Tx 3 can acquire lock on orderId1
-        bool lockAcquiredAfterRollback;
-        await using (var cmd3Retry = new NpgsqlCommand("SELECT pg_try_advisory_xact_lock(hashtext(@orderId::text));", conn3, tx3))
-        {
-            cmd3Retry.Parameters.AddWithValue("orderId", orderId1.ToString());
-            lockAcquiredAfterRollback = (bool)(await cmd3Retry.ExecuteScalarAsync())!;
-        }
-        Assert.True(lockAcquiredAfterRollback, "Rollback of tx1 must release advisory lock immediately");
-        await tx3.CommitAsync();
     }
 
     [Fact]
     public async Task PostgreSql_DatabaseMigrationHealthCheck_DetectsPendingMigrations_AndReportsUnhealthy()
     {
-        if (!await IsPostgreSqlAvailableAsync()) return;
-
         var dbName = "notif_health_test_" + Guid.NewGuid().ToString("N")[..8];
         await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
 
-        var connString = GetTestConnectionString(dbName);
-        var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
-            .UseNpgsql(connString)
-            .Options;
+            await using var context = new NotificationServiceDbContext(options);
+            var migrator = context.GetService<IMigrator>();
 
-        await using var context = new NotificationServiceDbContext(options);
-        var migrator = context.GetService<IMigrator>();
+            // 1. Apply only initial migration -> second migration is pending
+            await migrator.MigrateAsync("20261102082253_InitialNotificationSchema");
 
-        // 1. Apply only initial migration -> second migration is pending
-        await migrator.MigrateAsync("20261102082253_InitialNotificationSchema");
+            var healthCheck = new Dprental.NotificationService.Api.HealthChecks.DatabaseMigrationHealthCheck(context);
+            var checkContext = new Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckContext();
 
-        var healthCheck = new Dprental.NotificationService.Api.HealthChecks.DatabaseMigrationHealthCheck(context);
-        var checkContext = new Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckContext();
+            var resultPending = await healthCheck.CheckHealthAsync(checkContext);
+            Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy, resultPending.Status);
+            Assert.Contains("migration chưa được áp dụng", resultPending.Description);
 
-        var resultPending = await healthCheck.CheckHealthAsync(checkContext);
-        Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy, resultPending.Status);
-        Assert.Contains("migration chưa được áp dụng", resultPending.Description);
+            // 2. Migrate to latest
+            await context.Database.MigrateAsync();
 
-        // 2. Migrate to latest
-        await context.Database.MigrateAsync();
-
-        var resultLatest = await healthCheck.CheckHealthAsync(checkContext);
-        Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy, resultLatest.Status);
+            var resultLatest = await healthCheck.CheckHealthAsync(checkContext);
+            Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy, resultLatest.Status);
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
     }
 }
