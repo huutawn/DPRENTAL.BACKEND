@@ -1,0 +1,43 @@
+# Merge these services into the administrator-owned /opt/dprental/dev/compose.yaml.
+# Network definitions and shared dependencies are owned by the existing platform compose.
+services:
+  notification-service:
+    image: ${NOTIFICATION_SERVICE_IMAGE:?Set NOTIFICATION_SERVICE_IMAGE in release.env}
+    restart: unless-stopped
+    env_file:
+      - ./notification-smtp.env
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Staging}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB};Username=${POSTGRES_USER:?Set POSTGRES_USER};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      ConnectionStrings__Redis: valkey:6379,abortConnect=false
+      Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER}
+      Jwt__Audience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE}
+      Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
+      Services__AuthService__BaseUrl: http://auth-service:8080
+      InternalAuthentication__ApiKey: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
+      Kafka__BootstrapServers: kafka:9092
+      Kafka__Topics__0: rental.events.v1
+      Kafka__Topics__1: payment.analytics.v1
+      Kafka__GroupId: ${NOTIFICATION_KAFKA_GROUP_ID:?Initialize notification consumer offsets before starting}
+      Kafka__DlqTopic: rental.events.v1.notification.dlq
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks: [services, egress]
+  notification-migrate:
+    image: ${NOTIFICATION_MIGRATOR_IMAGE:?Set NOTIFICATION_MIGRATOR_IMAGE in release.env}
+    profiles: [migration]
+    restart: "no"
+    environment:
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:?Set POSTGRES_DB};Username=${POSTGRES_USER:?Set POSTGRES_USER};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [services]

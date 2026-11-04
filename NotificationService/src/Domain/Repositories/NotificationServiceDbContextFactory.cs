@@ -8,7 +8,9 @@ public sealed class NotificationServiceDbContextFactory : IDesignTimeDbContextFa
     public NotificationServiceDbContext CreateDbContext(string[] args)
     {
         var optionsBuilder = new DbContextOptionsBuilder<NotificationServiceDbContext>();
-        optionsBuilder.UseNpgsql("Host=localhost;Database=dprental_notification;Username=postgres;Password=postgres");
+        var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Postgres")
+            ?? "Host=notification-design.invalid;Database=notification_design;Username=design;Timeout=1";
+        optionsBuilder.UseNpgsql(connectionString);
 
         return new NotificationServiceDbContext(optionsBuilder.Options);
     }
