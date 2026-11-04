@@ -67,6 +67,23 @@ public sealed class ReviewModerationService : IReviewModerationService
                 Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá cần báo cáo."));
         }
 
+        // Kiểm tra quyền nhìn thấy review: người thứ ba không được biết sự tồn tại của review riêng tư hoặc đã bị ẩn/rút
+        bool isPublic = review.Direction == ReviewDirection.renter_to_supplier_listing &&
+                        review.AuthorState == AuthorState.Active &&
+                        review.ModerationState == ModerationState.Visible;
+        bool isParticipant = reporterId == review.AuthorId || reporterId == review.SubjectId;
+
+        if (!isPublic && !isParticipant)
+        {
+            return Result.Failure<ReviewReportResponse>(
+                Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá cần báo cáo."));
+        }
+
+        if (reason.Length > 1000)
+        {
+            return Result.Failure<ReviewReportResponse>(
+                Error.Validation("INVALID_REASON_LENGTH", "Lý do báo cáo không được vượt quá 1.000 ký tự."));
+        }
         var existingReport = await _reportRepository.GetByReviewAndReporterAsync(reviewId, reporterId, cancellationToken);
         if (existingReport != null)
         {
@@ -288,6 +305,12 @@ public sealed class ReviewModerationService : IReviewModerationService
                 Error.NotFound("REPORT_NOT_FOUND", "Không tìm thấy báo cáo vi phạm."));
         }
 
+        if (report.Status != ReportStatus.PendingReview)
+        {
+            return Result.Failure<ReviewReportResponse>(
+                Error.Conflict("REPORT_ALREADY_RESOLVED", "Báo cáo vi phạm này đã được xử lý trước đó."));
+        }
+
         if (!Enum.TryParse<ReportStatus>(resolution, true, out var status) || status == ReportStatus.PendingReview)
         {
             return Result.Failure<ReviewReportResponse>(
@@ -309,6 +332,28 @@ public sealed class ReviewModerationService : IReviewModerationService
                 {
                     review.AdminHide(report.Reason, now);
                     await _reviewRepository.UpdateAsync(review, cancellationToken);
+
+                    var audit = new ReviewAudit(
+                        Guid.NewGuid(),
+                        review.Id,
+                        adminId,
+                        "Admin",
+                        ReviewAuditAction.Hidden,
+                        report.Reason,
+                        null,
+                        null,
+                        now);
+
+                    var outbox = new OutboxMessage(
+                        Guid.NewGuid(),
+                        "review.events.v1",
+                        "ReviewHidden",
+                        review.Id.ToString("D"),
+                        JsonSerializer.Serialize(new { reviewId = review.Id, version = review.Version }),
+                        now);
+
+                    await _auditRepository.AddAsync(audit, cancellationToken);
+                    await _outboxRepository.AddAsync(outbox, cancellationToken);
                 }
             }
 

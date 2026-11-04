@@ -331,6 +331,68 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
 
         Assert.Equal(HttpStatusCode.NoContent, detachRes.StatusCode);
     }
+    [Fact]
+    public async Task Phase6_ReportPrivateReview_ByThirdParty_Returns404NotFound_NoExistenceLeak()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        // Supplier đánh giá renter (supplier_to_renter -> private)
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Đánh giá nội bộ"), GenerateJwt(supplierId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // Người thứ ba cố gắng báo cáo review riêng tư này -> 404 Not Found (không làm rò rỉ sự tồn tại)
+        var thirdPartyId = Guid.NewGuid();
+        var reportBody = new CreateReviewReportRequest("Spam");
+        using var repReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/reports", reportBody, GenerateJwt(thirdPartyId), Guid.NewGuid().ToString("N"));
+        using var repRes = await _client.SendAsync(repReq);
+
+        Assert.Equal(HttpStatusCode.NotFound, repRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task Phase6_ResolveReport_AlreadyResolved_Returns409Conflict()
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review công khai"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // Báo cáo
+        var reporterId = Guid.NewGuid();
+        using var repReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/reports",
+            new CreateReviewReportRequest("Quảng cáo sai"), GenerateJwt(reporterId), Guid.NewGuid().ToString("N"));
+        var repRes = await _client.SendAsync(repReq);
+        var report = JsonSerializer.Deserialize<ReviewReportResponse>(await repRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // Admin resolve lần 1 -> 200 OK
+        var adminId = Guid.NewGuid();
+        using var resolveReq1 = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/reports/{report.Id}/resolve",
+            new ResolveReviewReportRequest("ReviewedDismissed"), GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"));
+        var resolveRes1 = await _client.SendAsync(resolveReq1);
+        Assert.Equal(HttpStatusCode.OK, resolveRes1.StatusCode);
+
+        // Admin resolve lần 2 -> 409 Conflict (đã giải quyết)
+        using var resolveReq2 = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/reports/{report.Id}/resolve",
+            new ResolveReviewReportRequest("ReviewedHidden"), GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"));
+        var resolveRes2 = await _client.SendAsync(resolveReq2);
+        Assert.Equal(HttpStatusCode.Conflict, resolveRes2.StatusCode);
+    }
 
     #endregion
 
