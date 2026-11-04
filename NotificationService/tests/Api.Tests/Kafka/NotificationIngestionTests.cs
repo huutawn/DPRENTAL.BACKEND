@@ -623,6 +623,9 @@ public sealed class NotificationIngestionTests
         Assert.False(notification.IsActionable);
         Assert.Contains("850.000", notification.Body);
         Assert.Equal($"/supplier/settlements/{settlementId}", notification.DeepLinkUrl);
+        Assert.Null(notification.OrderId);
+        Assert.Equal("Settlement", notification.ResourceType);
+        Assert.Equal(settlementId.ToString(), notification.ResourceId);
 
         // SupplierPayoutCompleted sends email
         var deliveryJob = await db.DeliveryJobs.FirstOrDefaultAsync(j => j.NotificationId == notification.Id);
@@ -634,6 +637,52 @@ public sealed class NotificationIngestionTests
         // Financial event is decoupled: does NOT create or update watermarks
         var watermarks = await db.AggregateWatermarks.ToListAsync();
         Assert.Empty(watermarks);
+    }
+
+    [Fact]
+    public async Task Ingestion_SupplierPayoutCompleted_WhenProducerSuppliesRealOrderId_ShouldStoreRealOrderId()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var messageId = Guid.NewGuid();
+        var payoutId = Guid.NewGuid();
+        var settlementId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var realOrderId = Guid.NewGuid();
+
+        var raw = $$"""
+        {
+          "messageId": "{{messageId}}",
+          "messageType": "SupplierPayoutCompleted",
+          "version": 1,
+          "producer": "payment-service",
+          "aggregateId": "{{settlementId}}",
+          "occurredAt": "2026-11-04T12:00:00.0000000+00:00",
+          "correlationId": "corr-{{settlementId}}",
+          "causationId": null,
+          "payload": {
+            "payoutId": "{{payoutId}}",
+            "payoutRef": "PAYOUT-{{payoutId.ToString()[..8]}}",
+            "settlementId": "{{settlementId}}",
+            "rentalOrderId": "{{realOrderId}}",
+            "rentalItemId": "{{itemId}}",
+            "supplierId": "{{supplierId}}",
+            "amount": 900000,
+            "currency": "VND",
+            "completedAt": "2026-11-04T12:00:00.0000000+00:00"
+          }
+        }
+        """;
+
+        var outcome = await service.IngestMessageAsync(raw, "payment.analytics.v1", 0, 14);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var notification = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == messageId);
+        Assert.NotNull(notification);
+        Assert.Equal(realOrderId, notification.OrderId);
+        Assert.Equal("Settlement", notification.ResourceType);
+        Assert.Equal(settlementId.ToString(), notification.ResourceId);
     }
 
     [Fact]

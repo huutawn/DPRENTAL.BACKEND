@@ -1047,6 +1047,12 @@ public sealed class SupplierPayoutCompletedHandler : IKafkaEventHandler
         var completedAt = payload.GetStringFromAny("completedAt");
         var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
 
+        var realOrderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
+        if (realOrderId.HasValue && realOrderId.Value == Guid.Empty)
+        {
+            realOrderId = null;
+        }
+
         var renderData = new Dictionary<string, object?>
         {
             ["settlementId"] = settlementId.Value,
@@ -1061,11 +1067,16 @@ public sealed class SupplierPayoutCompletedHandler : IKafkaEventHandler
             ["deepLinkUrl"] = $"/supplier/settlements/{settlementId.Value}"
         };
 
+        if (realOrderId.HasValue)
+        {
+            renderData["rentalOrderId"] = realOrderId.Value;
+        }
+
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
-            OrderId: settlementId.Value,
-            ResourceType: "SupplierPayout",
-            ResourceId: payoutId?.ToString() ?? settlementId.Value.ToString(),
+            OrderId: realOrderId,
+            ResourceType: "Settlement",
+            ResourceId: settlementId.Value.ToString(),
             WatermarkScope: null,
             WatermarkId: null,
             OrderVersion: 0,
@@ -1075,7 +1086,7 @@ public sealed class SupplierPayoutCompletedHandler : IKafkaEventHandler
             SupplierId: supplierId,
             ReturnRequestId: null,
             RenderData: renderData,
-            FinancialId: payoutId ?? settlementId.Value));
+            FinancialId: settlementId.Value));
     }
 }
 

@@ -172,9 +172,13 @@ public sealed class NotificationIngestionService : INotificationIngestionService
         var intent = intentResult.Value;
 
         // 6. Recipient Resolution
+        var primaryId = string.Equals(intent.ResourceType, "Settlement", StringComparison.OrdinalIgnoreCase)
+            ? (Guid.TryParse(intent.ResourceId, out var resGuid) ? resGuid : (intent.FinancialId ?? intent.OrderId ?? Guid.Empty))
+            : (intent.OrderId ?? intent.FinancialId ?? Guid.Empty);
+
         var recipientsResult = _recipientResolver.ResolveRecipients(
             intent.EventType,
-            intent.OrderId ?? intent.FinancialId ?? Guid.Empty,
+            primaryId,
             intent.RenterId,
             intent.SupplierId,
             intent.ReturnRequestId);
@@ -271,11 +275,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                 StaleEvaluationResult staleEval;
                 if (parentOrderWatermark?.IsTerminal == true)
                 {
-                    staleEval = new StaleEvaluationResult(
-                        IsStale: true,
-                        SuppressAction: true,
-                        SuppressEmail: true,
-                        Reason: $"Đơn thuê đã ở trạng thái kết thúc ({parentOrderWatermark.TerminalState}).");
+                    staleEval = StaleActionSuppressionPolicy.Evaluate(recipient.NotificationType, intent.OrderVersion, parentOrderWatermark);
                 }
                 else
                 {
