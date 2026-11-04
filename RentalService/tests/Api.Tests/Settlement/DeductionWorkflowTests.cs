@@ -1,11 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Security.Claims;
 using Dprental.RentalService.Api.Tests.Cart;
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Media;
 using Dprental.RentalService.Application.DTOs.Settlement;
+using Dprental.RentalService.Application.Kafka.Configuration;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Settlement;
 using Dprental.RentalService.Common;
@@ -20,6 +24,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Npgsql;
@@ -75,6 +80,14 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
         db, media, _clock);
 
+    private DeductionResponseService ResponseService(RentalServiceDbContext db) => new(
+        new RentalOrderRepository(db),
+        new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
+        db, Mock.Of<IRentalMediaClient>(), _clock, Configuration(),
+        NullLogger<DeductionResponseService>.Instance,
+        new RentalEventProducer(new KafkaOutboxWriter(new OutboxRepository(db)),
+            Options.Create(new KafkaOptions())));
+
     private static Mock<IRentalMediaClient> ReadyMedia(Guid mediaId, Guid uploader)
     {
         var media = new Mock<IRentalMediaClient>();
@@ -83,6 +96,54 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         media.Setup(m => m.GetMetadataAsync(mediaId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new MediaMetadataDto(mediaId, "Private", "Ready")));
         return media;
+    }
+
+    [Fact]
+    public async Task AdminResolution_PostgreSql_CommitsDecisionAndOutboxOnce()
+    {
+        var item = await SeedDamagedAsync();
+        Guid evidenceId = Guid.NewGuid();
+        var evidence = ReadyMedia(evidenceId, item.SupplierId);
+        await using (var db = NewDb())
+        {
+            var submitted = await Service(db, evidence.Object).SubmitAsync(item.Id, Caller(item.SupplierId),
+                new SubmitDeductionRequest(100_000m, "Repair", [evidenceId],
+                    [item.UnitAssignments.Single().AssetId]), "proposal-key");
+            Assert.True(submitted.IsSuccess, submitted.Error.Message);
+        }
+
+        await using (var db = NewDb())
+        {
+            var disputed = await ResponseService(db).RespondAsync(item.Id, Caller(item.RentalOrder!.RenterId),
+                new RespondDeductionRequest(RenterDeductionDecision.Dispute, "Disagree", null), "dispute-key");
+            Assert.True(disputed.IsSuccess, disputed.Error.Message);
+        }
+
+        var admin = RentalCallerContext.FromClaimsPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("sub", Guid.NewGuid().ToString()), new Claim("r", "adm")], "test")));
+        var request = new ResolveDisputeRequest(20_000m, "Partial damage confirmed", null);
+        await using (var db = NewDb())
+        {
+            var service = ResponseService(db);
+            var resolved = await service.ResolveDisputeAsync(item.Id, admin, request, "resolution-key");
+            Assert.True(resolved.IsSuccess, resolved.Error.Message);
+            var replay = await service.ResolveDisputeAsync(item.Id, admin, request, "resolution-key");
+            Assert.True(replay.IsSuccess, replay.Error.Message);
+        }
+
+        await using var check = NewDb();
+        var savedItem = await check.RentalItems.AsNoTracking().SingleAsync(i => i.Id == item.Id);
+        Assert.Equal(20_000m, savedItem.FinalDeductionAmount);
+        Assert.Equal(1, await check.RentalOperationReceipts.AsNoTracking()
+            .CountAsync(r => r.Action == "AdminResolveDispute"));
+        var message = Assert.Single(await check.RentalOutboxMessages.AsNoTracking()
+            .Where(m => m.MessageType == KafkaContractSpec.EventTypes.RentalDeductionDisputeResolved)
+            .ToListAsync());
+        Assert.Equal(KafkaContractSpec.Topics.RentalEvents, message.Topic);
+        using var json = JsonDocument.Parse(message.Payload);
+        var payload = json.RootElement.GetProperty("payload");
+        Assert.Equal("Partial", payload.GetProperty("decision").GetString());
+        Assert.Equal(20_000m, payload.GetProperty("finalDeductionAmount").GetDecimal());
     }
 
     [Fact]

@@ -31,6 +31,7 @@ public sealed partial class DeductionResponseService(
     TimeProvider timeProvider,
     IConfiguration configuration,
     ILogger<DeductionResponseService> logger,
+    Dprental.RentalService.Application.Kafka.Producers.IRentalEventProducer rentalEvents,
     IOrderHubNotifier? notifier = null) : IDeductionResponseService
 {
     private const string RespondAction = "RenterRespondDeduction";
