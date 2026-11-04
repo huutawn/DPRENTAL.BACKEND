@@ -21,4 +21,5 @@ public interface IDeliveryJobRepository
     Task<bool> RecordDispatchStartAsync(Guid jobId, string leaseToken, DateTimeOffset dispatchStartedAt, CancellationToken cancellationToken = default);
     Task<int> SuppressPendingAndUndispatchedJobsForResourceAsync(string resourceType, string resourceId, string reason, CancellationToken cancellationToken = default);
     Task<int> SuppressPendingAndUndispatchedJobsForOrderAsync(Guid orderId, string reason, CancellationToken cancellationToken = default);
+    Task<int> SuppressPendingAndUndispatchedJobsForRentalItemAsync(Guid rentalItemId, string reason, CancellationToken cancellationToken = default);
 }

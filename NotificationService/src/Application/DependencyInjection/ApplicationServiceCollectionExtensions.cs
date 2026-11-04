@@ -7,6 +7,7 @@ using Dprental.NotificationService.Application.Kafka.Quarantine;
 using Dprental.NotificationService.Application.Kafka.Services;
 using Dprental.NotificationService.Application.Recipients;
 using Dprental.NotificationService.Application.Services;
+using Dprental.NotificationService.Application.Reconciliation;
 using Dprental.NotificationService.Application.Templates;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -53,6 +54,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<INotificationReadService, NotificationReadService>();
         services.AddScoped<IPreferenceService, PreferenceService>();
         services.AddScoped<IEmailDeliveryService, EmailDeliveryService>();
+        services.AddScoped<IJobReconciliationService, JobReconciliationService>();
 
         return services;
     }

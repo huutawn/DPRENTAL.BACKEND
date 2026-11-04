@@ -157,4 +157,42 @@ public sealed class NotificationRepository : INotificationRepository
 
         return actionableNotifications;
     }
+
+    public async Task<IReadOnlyList<Notification>> GetByRentalItemIdAsync(Guid rentalItemId, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Notifications
+            .Where(n => n.RentalItemId == rentalItemId)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Notification>> DismissReturnOverdueActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default)
+    {
+        var actionableNotifications = await _dbContext.Notifications
+            .Where(n => n.RentalItemId == rentalItemId && n.NotificationType == "RETURN_CONFIRMATION_OVERDUE_SUPPLIER" && n.IsActionable)
+            .ToListAsync(cancellationToken);
+
+        foreach (var notification in actionableNotifications)
+        {
+            notification.IsActionable = false;
+            notification.ActionUrl = null;
+        }
+
+        return actionableNotifications;
+    }
+
+    public async Task<IReadOnlyList<Notification>> SuppressPendingActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default)
+    {
+        var itemIdStr = rentalItemId.ToString();
+        var actionableNotifications = await _dbContext.Notifications
+            .Where(n => (n.RentalItemId == rentalItemId || (n.ResourceType == "RentalItem" && n.ResourceId == itemIdStr)) && n.IsActionable)
+            .ToListAsync(cancellationToken);
+
+        foreach (var notification in actionableNotifications)
+        {
+            notification.IsActionable = false;
+            notification.ActionUrl = null;
+        }
+
+        return actionableNotifications;
+    }
 }

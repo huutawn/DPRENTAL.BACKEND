@@ -15,6 +15,7 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
         builder.Property(n => n.Id).HasColumnName("id");
         builder.Property(n => n.RecipientUserId).HasColumnName("recipient_user_id").IsRequired();
         builder.Property(n => n.OrderId).HasColumnName("order_id");
+        builder.Property(n => n.RentalItemId).HasColumnName("rental_item_id");
         builder.Property(n => n.NotificationType).HasColumnName("notification_type").HasMaxLength(64).IsRequired();
         builder.Property(n => n.Category).HasColumnName("category").HasMaxLength(32).IsRequired();
         builder.Property(n => n.Severity).HasColumnName("severity").HasMaxLength(16).IsRequired();
@@ -50,6 +51,9 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
 
         builder.HasIndex(n => n.OrderId)
             .HasDatabaseName("ix_notifications_order_id");
+
+        builder.HasIndex(n => n.RentalItemId)
+            .HasDatabaseName("ix_notifications_rental_item");
 
         builder.HasMany(n => n.DeliveryJobs)
             .WithOne(j => j.Notification)

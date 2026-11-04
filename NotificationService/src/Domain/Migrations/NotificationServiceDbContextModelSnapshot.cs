@@ -95,6 +95,10 @@ namespace NotificationService.Domain.Migrations
                         .HasColumnType("text")
                         .HasColumnName("render_data_json");
 
+                    b.Property<Guid?>("RentalItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("rental_item_id");
+
                     b.Property<string>("ResourceId")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -152,6 +156,9 @@ namespace NotificationService.Domain.Migrations
                     b.HasIndex("OrderId")
                         .HasDatabaseName("ix_notifications_order_id");
 
+                    b.HasIndex("RentalItemId")
+                        .HasDatabaseName("ix_notifications_rental_item");
+
                     b.HasIndex("RecipientUserId", "ReadAt")
                         .HasDatabaseName("ix_notifications_recipient_unread")
                         .HasFilter("read_at IS NULL");
@@ -207,6 +214,10 @@ namespace NotificationService.Domain.Migrations
                         .HasDefaultValue(0L)
                         .HasColumnName("last_order_version");
 
+                    b.Property<Guid?>("ParentItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parent_item_id");
+
                     b.Property<Guid?>("ParentOrderId")
                         .HasColumnType("uuid")
                         .HasColumnName("parent_order_id");
@@ -223,6 +234,9 @@ namespace NotificationService.Domain.Migrations
                         .HasDefaultValueSql("NOW()");
 
                     b.HasKey("Scope", "AggregateId", "RecipientUserId");
+
+                    b.HasIndex("ParentItemId")
+                        .HasDatabaseName("ix_aggregate_watermarks_parent_item");
 
                     b.HasIndex("ParentOrderId")
                         .HasDatabaseName("ix_aggregate_watermarks_parent_order");

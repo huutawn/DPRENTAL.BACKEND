@@ -15,7 +15,8 @@ public static class StaleActionSuppressionPolicy
         "EXPIRED",
         "CANCELLED",
         "COMPLETED",
-        "REJECTED"
+        "REJECTED",
+        "RETURNED"
     };
 
     private static readonly HashSet<string> ActionableNotificationTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -124,6 +125,55 @@ public static class StaleActionSuppressionPolicy
             Reason: null);
     }
 
+    /// <summary>
+    /// Đánh giá tính lỗi thời kết hợp giữa aggregate hiện tại (ReturnRequest / Item), parent Item và parent Order.
+    /// </summary>
+    public static StaleEvaluationResult EvaluateWithParentState(
+        string notificationType,
+        long incomingOrderVersion,
+        AggregateStateProjection? currentAggregateState,
+        AggregateStateProjection? parentItemAggregateState = null,
+        AggregateStateProjection? parentOrderAggregateState = null)
+    {
+        if (notificationType is "REFUND_COMPLETED" or "PAYOUT_COMPLETED" or "ORDER_PAID" or "ORDER_COMPLETED")
+        {
+            return Evaluate(notificationType, incomingOrderVersion, currentAggregateState);
+        }
+
+        if (parentOrderAggregateState != null)
+        {
+            var orderEval = Evaluate(notificationType, incomingOrderVersion, parentOrderAggregateState);
+            if (orderEval.SuppressAction || orderEval.SuppressEmail)
+            {
+                return orderEval;
+            }
+        }
+
+        if (parentItemAggregateState != null)
+        {
+            var isItemTerminal = parentItemAggregateState.IsTerminal ||
+                (!string.IsNullOrWhiteSpace(parentItemAggregateState.TerminalState) && TerminalStates.Contains(parentItemAggregateState.TerminalState));
+
+            if (isItemTerminal)
+            {
+                if (string.Equals(notificationType, "RETURN_CONFIRMATION_OVERDUE_SUPPLIER", StringComparison.OrdinalIgnoreCase) ||
+                    ActionableNotificationTypes.Contains(notificationType))
+                {
+                    var itemTerminalState = !string.IsNullOrWhiteSpace(parentItemAggregateState.TerminalState)
+                        ? parentItemAggregateState.TerminalState.ToUpperInvariant()
+                        : "TERMINAL";
+
+                    return new StaleEvaluationResult(
+                        IsStale: true,
+                        SuppressAction: true,
+                        SuppressEmail: true,
+                        Reason: $"Thiết bị thuê đã ở trạng thái kết thúc ({itemTerminalState}).");
+                }
+            }
+        }
+
+        return Evaluate(notificationType, incomingOrderVersion, currentAggregateState);
+    }
     /// <summary>
     /// Đánh giá xem sự kiện hoặc thông báo có bị coi là lỗi thời dựa trên watermark của aggregate không (backwards-compatible).
     /// </summary>

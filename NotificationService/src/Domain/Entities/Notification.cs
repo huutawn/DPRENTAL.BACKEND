@@ -8,6 +8,7 @@ public sealed class Notification
     public Guid Id { get; set; }
     public Guid RecipientUserId { get; set; }
     public Guid? OrderId { get; set; }
+    public Guid? RentalItemId { get; set; }
     public string NotificationType { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
     public string Severity { get; set; } = string.Empty;

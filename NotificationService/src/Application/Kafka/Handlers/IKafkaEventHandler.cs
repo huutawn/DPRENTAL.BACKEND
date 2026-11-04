@@ -18,7 +18,8 @@ public sealed record NotificationEventIntent(
     Guid? ReturnRequestId,
     Dictionary<string, object?> RenderData,
     bool IsPaid = false,
-    Guid? FinancialId = null);
+    Guid? FinancialId = null,
+    Guid? RentalItemId = null);
 
 public interface IKafkaEventHandler
 {

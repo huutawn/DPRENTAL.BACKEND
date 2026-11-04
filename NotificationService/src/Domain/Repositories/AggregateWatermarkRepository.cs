@@ -161,6 +161,10 @@ public sealed class AggregateWatermarkRepository : IAggregateWatermarkRepository
                 existing.ParentOrderId = watermark.ParentOrderId.Value;
             }
 
+            if (watermark.ParentItemId.HasValue)
+            {
+                existing.ParentItemId = watermark.ParentItemId.Value;
+            }
             existing.UpdatedAt = now;
         }
     }
@@ -175,6 +179,7 @@ public sealed class AggregateWatermarkRepository : IAggregateWatermarkRepository
         string? terminalState,
         bool isPaid = false,
         Guid? parentOrderId = null,
+        Guid? parentItemId = null,
         CancellationToken cancellationToken = default)
     {
         var recipientList = recipientUserIds.Distinct().ToList();
@@ -202,6 +207,7 @@ public sealed class AggregateWatermarkRepository : IAggregateWatermarkRepository
                     AggregateId = aggregateId,
                     RecipientUserId = recipientId,
                     ParentOrderId = parentOrderId,
+                    ParentItemId = parentItemId,
                     LastOrderVersion = orderVersion,
                     LastMessageId = messageId,
                     IsTerminal = isTerminal,
@@ -241,6 +247,10 @@ public sealed class AggregateWatermarkRepository : IAggregateWatermarkRepository
                     existing.ParentOrderId = parentOrderId.Value;
                 }
 
+                if (parentItemId.HasValue)
+                {
+                    existing.ParentItemId = parentItemId.Value;
+                }
                 existing.UpdatedAt = now;
             }
         }
