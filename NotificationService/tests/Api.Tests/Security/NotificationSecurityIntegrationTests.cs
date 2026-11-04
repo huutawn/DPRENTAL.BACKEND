@@ -337,6 +337,7 @@ public sealed class NotificationSecurityIntegrationTests : IClassFixture<Notific
             builder.UseSetting("Jwt:Audience", Audience);
             builder.UseSetting("Jwt:JwksUri", JwksUri);
 
+            builder.UseSetting("ConnectionStrings:Redis", "127.0.0.1:26379");
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<DbContextOptions<NotificationServiceDbContext>>();
