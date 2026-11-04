@@ -59,8 +59,7 @@ public sealed class OrganizationIntegrationTests
         using HttpClient owner = CreateAuthenticatedClient(factory, ownerId, "customer");
         using HttpClient other = CreateAuthenticatedClient(factory, otherId, "customer");
         string route = $"/api/v1/auth/organizations/{activeId}/supplier-contact";
-        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(route)).StatusCode);
-        foreach (HttpClient client in new[] { owner, other })
+        foreach (HttpClient client in new[] { anonymous, owner, other })
         {
             using HttpResponseMessage response = await client.GetAsync(route);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -68,17 +67,53 @@ public sealed class OrganizationIntegrationTests
             using JsonDocument doc = await response.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
             Assert.Equal("Supplier A", doc.RootElement.GetProperty("name").GetString());
             Assert.Equal("0281234567", doc.RootElement.GetProperty("contactPhone").GetString());
-            Assert.Equal(2, doc.RootElement.EnumerateObject().Count());
+            Assert.Equal(activeId, doc.RootElement.GetProperty("id").GetGuid());
+            Assert.Equal(PublicOrganizationFields,
+                doc.RootElement.EnumerateObject().Select(p => p.Name).OrderBy(x => x, StringComparer.Ordinal).ToArray());
         }
+        foreach (HttpClient client in new[] { anonymous, owner, other })
+        {
+            using var response = await client.GetAsync($"/api/v1/auth/organizations/by-owner/{ownerId}/supplier-contact");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var doc = await response.Content.ReadFromJsonAsync<JsonDocument>() ?? throw new InvalidOperationException();
+            Assert.Equal(activeId, doc.RootElement.GetProperty("id").GetGuid());
+            Assert.Equal("0281234567", doc.RootElement.GetProperty("contactPhone").GetString());
+            Assert.Equal(PublicOrganizationFields, doc.RootElement.EnumerateObject().Select(p => p.Name).OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        }
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync($"/api/v1/auth/organizations/by-owner/{Guid.NewGuid()}/supplier-contact")).StatusCode);
         foreach (Guid id in new[] { pendingId, suspendedId, renterId, Guid.NewGuid(), Guid.Empty })
         {
             Assert.Equal(HttpStatusCode.NotFound,
                 (await other.GetAsync($"/api/v1/auth/organizations/{id}/supplier-contact")).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound,
+                (await anonymous.GetAsync($"/api/v1/auth/organizations/{id}/supplier-contact")).StatusCode);
         }
         Assert.Equal(HttpStatusCode.OK,
             (await other.GetAsync($"/api/v1/auth/organizations/{activeId}")).StatusCode);
         Assert.Equal(HttpStatusCode.OK,
             (await owner.GetAsync($"/api/v1/auth/organizations/{activeId}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task PublicSupplierByOwnerRejectsAmbiguousOrInactiveMembership()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedDatabaseAsync(factory);
+        Guid ownerId = Guid.NewGuid();
+        await CreateUserAsync(factory, ownerId, "lookup-owner@example.com", "Owner", CustomerRoleId);
+        Guid firstId = await SeedOrganizationAsync(factory, ownerId, "lookup-active-one", OrganizationStatus.Active);
+        Guid secondId = await SeedOrganizationAsync(factory, ownerId, "lookup-active-two", OrganizationStatus.Active);
+        using var anonymous = factory.CreateClient();
+        string route = $"/api/v1/auth/organizations/by-owner/{ownerId}/supplier-contact";
+        Assert.Equal(HttpStatusCode.Conflict, (await anonymous.GetAsync(route)).StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            (await db.Organizations.SingleAsync(o => o.Id == firstId)).Status = OrganizationStatus.Pending;
+            (await db.Organizations.SingleAsync(o => o.Id == secondId)).Status = OrganizationStatus.Suspended;
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync(route)).StatusCode);
     }
 
     [Fact]
@@ -104,12 +139,9 @@ public sealed class OrganizationIntegrationTests
         using var owner = CreateAuthenticatedClient(factory, ownerId, "customer");
         using var other = CreateAuthenticatedClient(factory, otherId, "customer");
         string byId = $"/api/v1/auth/organizations/{orgId}";
-        string byOwner = $"/api/v1/auth/organizations/by-owner/{ownerId}";
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(byId)).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(byOwner)).StatusCode);
-        foreach (string route in new[] { byId, byOwner })
+        using (var response = await other.GetAsync(byId))
         {
-            using var response = await other.GetAsync(route);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             using var doc = await response.Content.ReadFromJsonAsync<JsonDocument>();
             Assert.NotNull(doc);
@@ -122,7 +154,7 @@ public sealed class OrganizationIntegrationTests
         using var ownerDoc = await ownerResponse.Content.ReadFromJsonAsync<JsonDocument>();
         Assert.Equal(HttpStatusCode.OK, ownerResponse.StatusCode);
         Assert.Equal("9876543210", ownerDoc!.RootElement.GetProperty("taxCode").GetString());
-        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/auth/organizations/by-owner/{Guid.NewGuid()}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync($"/api/v1/auth/organizations/by-owner/{ownerId}")).StatusCode);
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
@@ -130,10 +162,7 @@ public sealed class OrganizationIntegrationTests
             await db.SaveChangesAsync();
         }
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync(byId)).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync(byOwner)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await owner.GetAsync(byId)).StatusCode);
-        await SeedOrganizationAsync(factory, ownerId, "public-supplier-second", OrganizationStatus.Active, "Supplier B");
-        Assert.Equal(HttpStatusCode.Conflict, (await other.GetAsync(byOwner)).StatusCode);
     }
 
     [Fact]

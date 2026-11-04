@@ -87,18 +87,6 @@ public sealed class OrganizationsController(
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    /// <summary>Tra thông tin giới hạn của tổ chức theo chủ tin đăng.</summary>
-    [HttpGet("by-owner/{userId:guid}")]
-    [ProducesResponseType<OrganizationPublicResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> GetByOwner(Guid userId, CancellationToken cancellationToken)
-    {
-        if (!TryGetCurrentUserId(out Guid actorId)) return Unauthorized();
-        var result = await organizationLookupService.GetByOwnerAsync(actorId, userId, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
-    }
     /// <summary>
     /// Owner gửi lại toàn bộ hồ sơ. Pending: sửa tự do. Rejected: sửa và tự chuyển về Pending.
     /// Active: chỉ đổi liên hệ/hiển thị — đổi thông tin pháp lý trả 400.
