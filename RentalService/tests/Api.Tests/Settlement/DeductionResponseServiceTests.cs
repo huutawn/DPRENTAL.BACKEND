@@ -1,6 +1,11 @@
 using Dprental.RentalService.Api.Tests.TestHelpers;
+using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Settlement;
+using Dprental.RentalService.Application.Kafka.Configuration;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Producers;
+using Dprental.RentalService.Application.Hubs;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Settlement;
 using Dprental.RentalService.Common.Enums;
@@ -10,6 +15,7 @@ using Dprental.RentalService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Xunit;
@@ -62,6 +68,40 @@ public sealed class DeductionResponseServiceTests
         Assert.Equal(DisputeStatus.Resolved, item.DeductionProposal!.Dispute!.Status);
         Assert.True((await service.ResolveDisputeAsync(item.Id, admin, request, "resolve-key")).IsSuccess);
         Assert.Single(order.OperationReceipts, r => r.Action == "AdminResolveDispute");
+        var emitted = Assert.Single(db.RentalOutboxMessages);
+        Assert.Equal(KafkaContractSpec.EventTypes.RentalDeductionDisputeResolved, emitted.MessageType);
+        Assert.Equal("rental.events.v1", emitted.Topic);
+        using var eventJson = JsonDocument.Parse(emitted.Payload);
+        var eventPayload = eventJson.RootElement.GetProperty("payload");
+        Assert.Equal(item.DeductionProposal.Dispute.Id,
+            eventPayload.GetProperty("disputeId").GetGuid());
+        Assert.Equal(item.Id, eventPayload.GetProperty("rentalItemId").GetGuid());
+        Assert.Equal(order.Version, eventPayload.GetProperty("orderVersion").GetInt64());
+        Assert.Equal("Rejected", eventPayload.GetProperty("decision").GetString());
+        Assert.False(eventPayload.TryGetProperty("resolutionMediaIds", out _));
+        Assert.False(eventPayload.TryGetProperty("refundAccount", out _));
+    }
+
+    [Fact]
+    public async Task AdminResolution_SignalRFailure_DoesNotFailCommittedDecision()
+    {
+        await using var db = NewDb();
+        var order = SeedProposed(db);
+        var item = order.Items.Single();
+        var failingNotifier = new Mock<IOrderHubNotifier>();
+        failingNotifier.Setup(x => x.NotifyRenterOrderChangedAsync(
+                It.IsAny<Guid>(), It.IsAny<RenterOrderChangedNotification>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("SignalR unavailable"));
+        Assert.True((await NewService(db).RespondAsync(item.Id, Caller(order.RenterId),
+            new RespondDeductionRequest(RenterDeductionDecision.Dispute, "Disagree", null), "dispute-key")).IsSuccess);
+        var service = NewService(db, notifier: failingNotifier.Object);
+
+        var result = await service.ResolveDisputeAsync(item.Id, Caller(Guid.NewGuid(), admin: true),
+            new ResolveDisputeRequest(0m, "Evidence does not support deduction", null), "resolve-key");
+
+        Assert.True(result.IsSuccess, result.Error.Message);
+        Assert.Single(db.RentalOutboxMessages);
+        Assert.Equal(DisputeStatus.Resolved, item.DeductionProposal!.Dispute!.Status);
     }
 
     [Fact]
@@ -118,11 +158,14 @@ public sealed class DeductionResponseServiceTests
         return order;
     }
 
-    private static DeductionResponseService NewService(RentalServiceDbContext db, DateTimeOffset? now = null)
+    private static DeductionResponseService NewService(
+        RentalServiceDbContext db, DateTimeOffset? now = null, IOrderHubNotifier? notifier = null)
     {
         return new DeductionResponseService(new RentalOrderRepository(db), NewLocks(), db,
             Mock.Of<IRentalMediaClient>(), new FakeTimeProvider(now ?? Now.AddHours(1)),
-            new ConfigurationBuilder().Build(), NullLogger<DeductionResponseService>.Instance);
+            new ConfigurationBuilder().Build(), NullLogger<DeductionResponseService>.Instance,
+            new RentalEventProducer(new KafkaOutboxWriter(new OutboxRepository(db)), Options.Create(new KafkaOptions())),
+            notifier);
     }
 
     private static IOrderLockManager NewLocks()
