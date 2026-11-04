@@ -152,3 +152,18 @@ public sealed record AdminReturnRequestRecord(
     DateTimeOffset ConfirmationDeadlineAt,
     IReadOnlyList<AdminReturnRequestUnitRecord> Units,
     IReadOnlyList<Guid> DisputedAssignmentIds);
+
+public sealed record RentalItemReviewSnapshotRecord(
+    Guid OrderId,
+    Guid ItemId,
+    Guid RenterId,
+    Guid SupplierId,
+    Guid EquipmentListingId,
+    RentalItemStatus Status,
+    DateTimeOffset? CompletedAt,
+    long OrderVersion);
+
+public sealed record ReviewReconciliationBatchRecord(
+    IReadOnlyList<RentalItemReviewSnapshotRecord> Items,
+    string? NextCursor,
+    bool HasMore);

@@ -264,17 +264,16 @@ public sealed class InternalReviewIntegrationControllerTests
         {
             var db = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
 
-            var prop = typeof(RentalItem).GetProperty(nameof(RentalItem.FinancialClosureConfirmedAt))!;
             item1.SetStatus(RentalItemStatus.Completed);
-            prop.SetValue(item1, completedTime1);
-
             item2.SetStatus(RentalItemStatus.Completed);
-            prop.SetValue(item2, completedTime2);
-
             item3.SetStatus(RentalItemStatus.Completed);
-            prop.SetValue(item3, completedTime3);
 
             db.RentalOrders.AddRange(order1, order2, order3);
+            db.RentalStateTransitions.AddRange(
+                new RentalStateTransition(Guid.NewGuid(), order1.Id, item1.Id, "PendingSettlement", "Completed", "SettlementCompleted", null, ActorRole.System, "Completed", completedTime1, "op-1"),
+                new RentalStateTransition(Guid.NewGuid(), order2.Id, item2.Id, "PendingSettlement", "Completed", "SettlementCompleted", null, ActorRole.System, "Completed", completedTime2, "op-2"),
+                new RentalStateTransition(Guid.NewGuid(), order3.Id, item3.Id, "PendingSettlement", "Completed", "SettlementCompleted", null, ActorRole.System, "Completed", completedTime3, "op-3")
+            );
             await db.SaveChangesAsync();
         }
 
@@ -297,5 +296,116 @@ public sealed class InternalReviewIntegrationControllerTests
         Assert.NotNull(batch2);
         Assert.Single(batch2.Items);
         Assert.False(batch2.HasMore);
+    }
+
+    [Fact]
+    public async Task GetReviewSnapshot_MultipleTransitions_TakesFirstTransitionAsAuthoritativeCompletedAt()
+    {
+        var factory = CreateFactory(Guid.NewGuid().ToString("N"));
+        var (order, item) = CreateOrderWithItem();
+
+        DateTimeOffset t1 = FixedNow.AddDays(-5);
+        DateTimeOffset t2 = FixedNow.AddDays(-2); // Later replayed transition
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            item.SetStatus(RentalItemStatus.Completed);
+            db.RentalOrders.Add(order);
+            db.RentalStateTransitions.AddRange(
+                new RentalStateTransition(Guid.NewGuid(), order.Id, item.Id, "PendingSettlement", "Completed", "SettlementCompleted", null, ActorRole.System, "Completed", t1, "op-1"),
+                new RentalStateTransition(Guid.NewGuid(), order.Id, item.Id, "PendingSettlement", "Completed", "SettlementCompleted", null, ActorRole.System, "Completed", t2, "op-2")
+            );
+            await db.SaveChangesAsync();
+        }
+
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+
+        using var response = await client.GetAsync($"/internal/orders/{order.Id}/items/{item.Id}/review-snapshot");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var snapshot = await response.Content.ReadFromJsonAsync<RentalItemReviewSnapshotDto>();
+        Assert.NotNull(snapshot);
+        Assert.Equal(t1, snapshot.CompletedAt); // Must take earliest (T1), never extending the review window
+    }
+
+    [Fact]
+    public async Task GetReviewSnapshot_PaymentConfirmedWithoutCompletedTransition_ReturnsCompletedAtNull()
+    {
+        var factory = CreateFactory(Guid.NewGuid().ToString("N"));
+        var (order, item) = CreateOrderWithItem();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            item.SetStatus(RentalItemStatus.Completed);
+            // Set FinancialClosureConfirmedAt but NO RentalStateTransition to Completed
+            var prop = typeof(RentalItem).GetProperty(nameof(RentalItem.FinancialClosureConfirmedAt))!;
+            prop.SetValue(item, FixedNow.AddDays(-3));
+
+            db.RentalOrders.Add(order);
+            await db.SaveChangesAsync();
+        }
+
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+
+        using var response = await client.GetAsync($"/internal/orders/{order.Id}/items/{item.Id}/review-snapshot");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var snapshot = await response.Content.ReadFromJsonAsync<RentalItemReviewSnapshotDto>();
+        Assert.NotNull(snapshot);
+        Assert.Null(snapshot.CompletedAt); // Must not infer or backfill from payment
+    }
+
+    [Fact]
+    public async Task GetReviewSnapshot_MultiItemOrder_EachItemHasOwnCompletedAt()
+    {
+        var factory = CreateFactory(Guid.NewGuid().ToString("N"));
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var itemId1 = Guid.NewGuid();
+        var itemId2 = Guid.NewGuid();
+
+        var assignments1 = new[] { new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()) };
+        var itemDto1 = new InitialRentalItemDto(itemId1, Guid.NewGuid(), Guid.NewGuid(), 1, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 5), "Item 1", null, "Pickup", 100_000m, 500_000m, "grp1", assignments1, TestListingSnapshots.Default);
+        var assignments2 = new[] { new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()) };
+        var itemDto2 = new InitialRentalItemDto(itemId2, Guid.NewGuid(), Guid.NewGuid(), 1, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 5), "Item 2", null, "Pickup", 150_000m, 600_000m, "grp2", assignments2, TestListingSnapshots.Default);
+
+        var order = RentalOrder.Create(orderId, "ORD-MULTI-1", renterId, "VND", "Pickup", "Customer", "0909123456", "Address", null, "terms-1", "doc-1", "hash-1", "op-create", FixedNow, [itemDto1, itemDto2]).Value;
+        var item1 = order.Items.First(i => i.Id == itemId1);
+        var item2 = order.Items.First(i => i.Id == itemId2);
+
+        DateTimeOffset t1 = FixedNow.AddDays(-10);
+        DateTimeOffset t2 = FixedNow.AddDays(-3);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            item1.SetStatus(RentalItemStatus.Completed);
+            item2.SetStatus(RentalItemStatus.Completed);
+            db.RentalOrders.Add(order);
+            db.RentalStateTransitions.AddRange(
+                new RentalStateTransition(Guid.NewGuid(), orderId, item1.Id, "PendingSettlement", "Completed", "SettlementCompleted", null, ActorRole.System, "Completed", t1, "op-item1"),
+                new RentalStateTransition(Guid.NewGuid(), orderId, item2.Id, "PendingSettlement", "Completed", "SettlementCompleted", null, ActorRole.System, "Completed", t2, "op-item2")
+            );
+            await db.SaveChangesAsync();
+        }
+
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", ValidApiKey);
+
+        using var resp1 = await client.GetAsync($"/internal/orders/{orderId}/items/{item1.Id}/review-snapshot");
+        Assert.Equal(HttpStatusCode.OK, resp1.StatusCode);
+        var snap1 = await resp1.Content.ReadFromJsonAsync<RentalItemReviewSnapshotDto>();
+        Assert.NotNull(snap1);
+        Assert.Equal(t1, snap1.CompletedAt);
+
+        using var resp2 = await client.GetAsync($"/internal/orders/{orderId}/items/{item2.Id}/review-snapshot");
+        Assert.Equal(HttpStatusCode.OK, resp2.StatusCode);
+        var snap2 = await resp2.Content.ReadFromJsonAsync<RentalItemReviewSnapshotDto>();
+        Assert.NotNull(snap2);
+        Assert.Equal(t2, snap2.CompletedAt);
     }
 }

@@ -142,4 +142,17 @@ public interface IRentalOrderRepository
     /// tiền; không lọc theo người sở hữu, chỉ dùng cho Admin. Không theo dõi thay đổi.
     /// </summary>
     Task<RentalOrder?> GetOrderForAdminAsync(Guid orderId, CancellationToken cancellationToken = default);
+
+    Task<RentalItemReviewSnapshotRecord?> GetReviewSnapshotAsync(
+        Guid orderId,
+        Guid itemId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<RentalItemReviewSnapshotRecord?>(null);
+
+    Task<ReviewReconciliationBatchRecord> GetReviewReconciliationBatchAsync(
+        string? cursor,
+        int limit,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new ReviewReconciliationBatchRecord([], null, false));
 }

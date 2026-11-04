@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Integration;
 using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -22,18 +23,18 @@ namespace Dprental.RentalService.Api.Controllers;
 [ApiExplorerSettings(IgnoreApi = true)]
 public sealed class InternalReviewIntegrationController : ControllerBase
 {
-    private readonly RentalServiceDbContext _dbContext;
+    private readonly IRentalOrderRepository _orderRepository;
     private readonly IConfiguration _configuration;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<InternalReviewIntegrationController>? _logger;
 
     public InternalReviewIntegrationController(
-        RentalServiceDbContext dbContext,
+        IRentalOrderRepository orderRepository,
         IConfiguration configuration,
         TimeProvider? timeProvider = null,
         ILogger<InternalReviewIntegrationController>? logger = null)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
@@ -57,80 +58,42 @@ public sealed class InternalReviewIntegrationController : ControllerBase
         var authResult = ValidateInternalApiKey();
         if (authResult != null) return authResult;
 
-        var order = await _dbContext.RentalOrders
-            .AsNoTracking()
-            .Include(o => o.Items)
-            .FirstOrDefaultAsync(o => o.Id == orderId, cancellationToken);
-
-        if (order == null)
+        var snapshot = await _orderRepository.GetReviewSnapshotAsync(orderId, itemId, cancellationToken);
+        if (snapshot == null)
         {
             return NotFound(new ProblemDetails
             {
                 Status = StatusCodes.Status404NotFound,
                 Title = "Not Found",
-                Detail = $"Không tìm thấy đơn thuê với mã '{orderId}'.",
+                Detail = $"Không tìm thấy mục thuê '{itemId}' trong đơn hàng '{orderId}'.",
                 Instance = HttpContext.Request.Path
             });
         }
 
-        var item = order.Items.FirstOrDefault(i => i.Id == itemId);
-        if (item == null)
-        {
-            return NotFound(new ProblemDetails
-            {
-                Status = StatusCodes.Status404NotFound,
-                Title = "Not Found",
-                Detail = $"Mục thuê '{itemId}' không thuộc về đơn hàng '{orderId}'.",
-                Instance = HttpContext.Request.Path
-            });
-        }
-
-        if (item.Status != RentalItemStatus.Completed)
+        if (snapshot.Status != RentalItemStatus.Completed)
         {
             return BadRequest(new ProblemDetails
             {
                 Status = StatusCodes.Status400BadRequest,
                 Title = "Bad Request",
-                Detail = $"Mục thuê '{itemId}' chưa ở trạng thái hoàn tất (COMPLETED). Trạng thái hiện tại: '{item.Status}'.",
+                Detail = $"Mục thuê '{itemId}' chưa ở trạng thái hoàn tất (COMPLETED). Trạng thái hiện tại: '{snapshot.Status}'.",
                 Instance = HttpContext.Request.Path
             });
         }
 
-        // Mốc thời gian hoàn tất nghiệp vụ authoritative: lấy từ chuyển đổi trạng thái SettlementCompleted
-        // hoặc FinancialClosureConfirmedAt khi PaymentService xác nhận quyết toán thành công.
-        // Tuyệt đối KHÔNG suy diễn từ thời điểm trả máy (ReturnsCompletedAt).
-        var transition = await _dbContext.RentalStateTransitions
-            .AsNoTracking()
-            .Where(t => t.RentalItemId == item.Id && (t.ToState == "Completed" || t.Action == "SettlementCompleted"))
-            .OrderByDescending(t => t.OccurredAt)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        DateTimeOffset? completedAt = transition?.OccurredAt ?? item.FinancialClosureConfirmedAt;
-
-        if (completedAt == null)
+        var dto = new RentalItemReviewSnapshotDto
         {
-            var orderTransition = await _dbContext.RentalStateTransitions
-                .AsNoTracking()
-                .Where(t => t.RentalOrderId == order.Id && t.ToState == "Completed")
-                .OrderByDescending(t => t.OccurredAt)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            completedAt = orderTransition?.OccurredAt;
-        }
-
-        var snapshot = new RentalItemReviewSnapshotDto
-        {
-            OrderId = order.Id,
-            ItemId = item.Id,
-            RenterId = order.RenterId,
-            SupplierId = item.SupplierId,
-            EquipmentListingId = item.EquipmentListingId,
-            Status = item.Status.ToString(),
-            CompletedAt = completedAt,
-            OrderVersion = order.Version
+            OrderId = snapshot.OrderId,
+            ItemId = snapshot.ItemId,
+            RenterId = snapshot.RenterId,
+            SupplierId = snapshot.SupplierId,
+            EquipmentListingId = snapshot.EquipmentListingId,
+            Status = snapshot.Status.ToString(),
+            CompletedAt = snapshot.CompletedAt,
+            OrderVersion = snapshot.OrderVersion
         };
 
-        return Ok(snapshot);
+        return Ok(dto);
     }
 
     /// <summary>
@@ -138,8 +101,6 @@ public sealed class InternalReviewIntegrationController : ControllerBase
     /// </summary>
     [HttpGet("/internal/reconciliation/rental-items")]
     [HttpGet("internal/reconciliation/rental-items")]
-    [HttpGet("/internal/orders/review-reconciliation")]
-    [HttpGet("internal/orders/review-reconciliation")]
     [ProducesResponseType(typeof(ReconciliationBatchDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
@@ -151,110 +112,25 @@ public sealed class InternalReviewIntegrationController : ControllerBase
     {
         var authResult = ValidateInternalApiKey();
         if (authResult != null) return authResult;
+        var batchRecord = await _orderRepository.GetReviewReconciliationBatchAsync(
+            cursor,
+            limit,
+            _timeProvider.GetUtcNow(),
+            cancellationToken);
 
-        int pageSize = limit <= 0 ? 100 : Math.Min(limit, 100);
-
-        DateTimeOffset now = _timeProvider.GetUtcNow();
-        DateTimeOffset windowStart = now.AddDays(-30);
-        DateTimeOffset? lastCompletedAt = null;
-        Guid? lastItemId = null;
-
-        if (!string.IsNullOrWhiteSpace(cursor))
+        var dtos = batchRecord.Items.Select(item => new RentalItemReviewSnapshotDto
         {
-            try
-            {
-                string json = Encoding.UTF8.GetString(Convert.FromBase64String(cursor));
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
-                if (root.TryGetProperty("WindowStart", out var wsProp) || root.TryGetProperty("windowStart", out wsProp))
-                {
-                    if (wsProp.TryGetDateTimeOffset(out var ws)) windowStart = ws;
-                }
-                if (root.TryGetProperty("LastCompletedAt", out var lcaProp) || root.TryGetProperty("lastCompletedAt", out lcaProp))
-                {
-                    if (lcaProp.TryGetDateTimeOffset(out var lca)) lastCompletedAt = lca;
-                }
-                if (root.TryGetProperty("LastItemId", out var liProp) || root.TryGetProperty("lastItemId", out liProp))
-                {
-                    if (liProp.TryGetGuid(out var li)) lastItemId = li;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to decode reconciliation cursor {Cursor}", cursor);
-                return BadRequest(new ProblemDetails
-                {
-                    Status = StatusCodes.Status400BadRequest,
-                    Title = "Bad Request",
-                    Detail = "Cursor không đúng định dạng.",
-                    Instance = HttpContext.Request.Path
-                });
-            }
-        }
-
-        if (lastItemId.HasValue && !lastCompletedAt.HasValue)
-        {
-            var lastItem = await _dbContext.RentalItems
-                .AsNoTracking()
-                .FirstOrDefaultAsync(i => i.Id == lastItemId.Value, cancellationToken);
-            if (lastItem != null)
-            {
-                lastCompletedAt = lastItem.FinancialClosureConfirmedAt;
-            }
-        }
-
-        // Lọc theo trạng thái Completed và cửa sổ hoàn tất (completed_at)
-        var query = _dbContext.RentalItems
-            .AsNoTracking()
-            .Include(i => i.RentalOrder)
-            .Where(i => i.Status == RentalItemStatus.Completed &&
-                        i.FinancialClosureConfirmedAt != null &&
-                        i.FinancialClosureConfirmedAt >= windowStart &&
-                        i.FinancialClosureConfirmedAt <= now);
-
-        if (lastCompletedAt.HasValue && lastItemId.HasValue)
-        {
-            query = query.Where(i =>
-                i.FinancialClosureConfirmedAt > lastCompletedAt.Value ||
-                (i.FinancialClosureConfirmedAt == lastCompletedAt.Value && i.Id.CompareTo(lastItemId.Value) > 0));
-        }
-
-        var rawItems = await query
-            .OrderBy(i => i.FinancialClosureConfirmedAt)
-            .ThenBy(i => i.Id)
-            .Take(pageSize + 1)
-            .ToListAsync(cancellationToken);
-
-        bool hasMore = rawItems.Count > pageSize;
-        var pageItems = rawItems.Take(pageSize).ToList();
-
-        string? nextCursor = null;
-        if (hasMore && pageItems.Count > 0)
-        {
-            var last = pageItems[^1];
-            var payload = new
-            {
-                WindowStart = windowStart,
-                LastCompletedAt = last.FinancialClosureConfirmedAt,
-                LastItemId = last.Id
-            };
-            string nextCursorJson = JsonSerializer.Serialize(payload);
-            nextCursor = Convert.ToBase64String(Encoding.UTF8.GetBytes(nextCursorJson));
-        }
-
-        var dtos = pageItems.Select(item => new RentalItemReviewSnapshotDto
-        {
-            OrderId = item.RentalOrderId,
-            ItemId = item.Id,
-            RenterId = item.RentalOrder?.RenterId ?? Guid.Empty,
+            OrderId = item.OrderId,
+            ItemId = item.ItemId,
+            RenterId = item.RenterId,
             SupplierId = item.SupplierId,
             EquipmentListingId = item.EquipmentListingId,
             Status = item.Status.ToString(),
-            CompletedAt = item.FinancialClosureConfirmedAt,
-            OrderVersion = item.RentalOrder?.Version ?? 1
+            CompletedAt = item.CompletedAt,
+            OrderVersion = item.OrderVersion
         }).ToList();
 
-        return Ok(new ReconciliationBatchDto(dtos, nextCursor, hasMore));
+        return Ok(new ReconciliationBatchDto(dtos, batchRecord.NextCursor, batchRecord.HasMore));
     }
 
     private IActionResult? ValidateInternalApiKey()
