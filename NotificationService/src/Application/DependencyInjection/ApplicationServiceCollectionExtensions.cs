@@ -29,6 +29,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<IKafkaEventHandler, RentalHandoverOverdueHandler>();
         services.AddSingleton<IKafkaEventHandler, ReturnConfirmationOverdueHandler>();
         services.AddSingleton<IKafkaEventHandler, RentalOrderCompletedHandler>();
+        services.AddSingleton<IKafkaEventHandler, RentalDeductionDisputeResolvedHandler>();
         services.AddSingleton<IKafkaEventHandler, LatePaymentRefundRequestedHandler>();
 
         // Kafka Ingestion & DLQ

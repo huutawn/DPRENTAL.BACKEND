@@ -28,9 +28,9 @@ public sealed class NotificationIngestionTests
         return new NotificationServiceDbContext(options);
     }
 
-    private static (NotificationIngestionService Service, NotificationServiceDbContext Db, Mock<IKafkaDeadLetterPublisher> Dlq, Mock<INotificationRealtimeNotifier> Realtime) CreateTestIngestionService()
+    internal static (NotificationIngestionService Service, NotificationServiceDbContext Db, Mock<IKafkaDeadLetterPublisher> Dlq, Mock<INotificationRealtimeNotifier> Realtime) CreateTestIngestionService(NotificationServiceDbContext? database = null)
     {
-        var db = CreateInMemoryDbContext();
+        var db = database ?? CreateInMemoryDbContext();
         var uow = new UnitOfWork(db);
         var inboxRepo = new InboxReceiptRepository(db);
         var notifRepo = new NotificationRepository(db);
@@ -52,6 +52,7 @@ public sealed class NotificationIngestionTests
             new RentalHandoverOverdueHandler(),
             new ReturnConfirmationOverdueHandler(),
             new RentalOrderCompletedHandler(),
+            new RentalDeductionDisputeResolvedHandler(),
             new LatePaymentRefundRequestedHandler()
         };
 
@@ -73,6 +74,48 @@ public sealed class NotificationIngestionTests
             NullLogger<NotificationIngestionService>.Instance);
 
         return (service, db, dlqMock, realtimeMock);
+    }
+
+    [Fact]
+    public async Task Ingestion_RentalDisputeResolved_CreatesBothNotificationsOnce()
+    {
+        var (service, db, _, _) = CreateTestIngestionService();
+        var messageId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var raw = JsonSerializer.Serialize(new
+        {
+            messageId,
+            messageType = "RentalDeductionDisputeResolved",
+            version = 1,
+            producer = "RentalService",
+            aggregateId = orderId.ToString("D"),
+            occurredAt = DateTimeOffset.UtcNow,
+            payload = new
+            {
+                disputeId = Guid.NewGuid(),
+                deductionProposalId = Guid.NewGuid(),
+                rentalOrderId = orderId,
+                rentalItemId = Guid.NewGuid(),
+                renterId,
+                supplierId,
+                decision = "Partial",
+                finalDeductionAmount = 20_000m,
+                orderVersion = 5
+            }
+        });
+
+        Assert.Equal(IngestionOutcome.Processed,
+            await service.IngestMessageAsync(raw, "rental.events.v1", 0, 1));
+        Assert.Equal(IngestionOutcome.Duplicate,
+            await service.IngestMessageAsync(raw, "rental.events.v1", 0, 1));
+        var notifications = await db.Notifications.Where(n => n.SourceEventId == messageId).ToListAsync();
+        Assert.Equal(2, notifications.Count);
+        Assert.Contains(notifications, n => n.RecipientUserId == renterId &&
+            n.NotificationType == "DEDUCTION_DISPUTE_RESOLVED_RENTER");
+        Assert.Contains(notifications, n => n.RecipientUserId == supplierId &&
+            n.NotificationType == "DEDUCTION_DISPUTE_RESOLVED_SUPPLIER");
     }
 
     [Fact]

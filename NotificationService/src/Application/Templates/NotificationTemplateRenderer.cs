@@ -122,6 +122,16 @@ public sealed partial class NotificationTemplateRenderer : INotificationTemplate
                 emailBodyPattern = "<p>Kính gửi Quý khách,</p><p>Đơn thuê <strong>{displayOrderCode}</strong> đã hoàn tất thành công chu kỳ thuê vào lúc <strong>{completedAt:HH:mm dd/MM/yyyy}</strong>.</p><p>Tiền cọc và các chi phí phát sinh (nếu có) đã được quyết toán. Cảm ơn Quý khách đã tin tưởng sử dụng DPRental!</p>";
                 break;
 
+            case "DEDUCTION_DISPUTE_RESOLVED_RENTER":
+                titlePattern = "Khiếu nại khấu trừ cọc đã được giải quyết";
+                bodyPattern = "Quản trị viên đã chốt mức khấu trừ {finalDeductionAmount:N0} VND cho đơn thuê {displayOrderCode}. Xem chi tiết quyết định trong đơn. Việc hoàn tiền sẽ được xử lý riêng.";
+                break;
+
+            case "DEDUCTION_DISPUTE_RESOLVED_SUPPLIER":
+                titlePattern = "Khiếu nại khấu trừ cọc đã được giải quyết";
+                bodyPattern = "Quản trị viên đã chốt mức khấu trừ {finalDeductionAmount:N0} VND cho đơn thuê {displayOrderCode}. Xem chi tiết quyết định trong đơn.";
+                break;
+
             case "LATE_PAYMENT_REFUND_REQUESTED":
                 // BẤT BIẾN TÀI CHÍNH: Chỉ được khẳng định yêu cầu hoàn tiền đang được xử lý, TUYỆT ĐỐI không khẳng định đã hoàn tiền thành công!
                 titlePattern = "Yêu cầu hoàn tiền đơn thuê #{displayOrderCode}";

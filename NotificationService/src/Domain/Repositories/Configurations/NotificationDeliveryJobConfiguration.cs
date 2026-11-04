@@ -34,11 +34,11 @@ public sealed class NotificationDeliveryJobConfiguration : IEntityTypeConfigurat
             .HasDatabaseName("uq_delivery_jobs_notification_channel");
 
         builder.HasIndex(j => new { j.Status, j.NextAttemptAt })
-            .HasFilter("status IN ('Pending', 'RetryScheduled')")
+            .HasFilter("\"Status\" IN ('Pending', 'RetryScheduled')")
             .HasDatabaseName("ix_delivery_jobs_pending_claim");
 
         builder.HasIndex(j => new { j.Status, j.LeaseExpiresAt })
-            .HasFilter("status = 'Processing'")
+            .HasFilter("\"Status\" = 'Processing'")
             .HasDatabaseName("ix_delivery_jobs_lease_recovery");
     }
 }

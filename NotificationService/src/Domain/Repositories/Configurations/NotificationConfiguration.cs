@@ -43,7 +43,7 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
             .HasDatabaseName("ix_notifications_recipient_created");
 
         builder.HasIndex(n => new { n.RecipientUserId, n.ReadAt })
-            .HasFilter("read_at IS NULL")
+            .HasFilter("\"ReadAt\" IS NULL")
             .HasDatabaseName("ix_notifications_recipient_unread");
 
         builder.HasMany(n => n.DeliveryJobs)

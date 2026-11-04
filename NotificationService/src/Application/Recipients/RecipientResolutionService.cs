@@ -224,6 +224,19 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     ActionUrl: null));
                 break;
 
+            case "RentalDeductionDisputeResolved":
+                if (!renterId.HasValue || renterId.Value == Guid.Empty ||
+                    !supplierId.HasValue || supplierId.Value == Guid.Empty)
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "Dispute resolution requires renterId and supplierId."));
+                results.Add(new ResolvedRecipient(
+                    renterId.Value, "Renter", "DEDUCTION_DISPUTE_RESOLVED_RENTER",
+                    "SETTLEMENT", "INFO", false, $"/renter/orders/{orderId}", null));
+                results.Add(new ResolvedRecipient(
+                    supplierId.Value, "Supplier", "DEDUCTION_DISPUTE_RESOLVED_SUPPLIER",
+                    "SETTLEMENT", "INFO", false, $"/supplier/sub-orders/{orderId}", null));
+                break;
+
             case "LatePaymentRefundRequested":
                 if (!renterId.HasValue || renterId.Value == Guid.Empty)
                 {
