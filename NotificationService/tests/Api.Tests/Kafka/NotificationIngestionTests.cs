@@ -580,6 +580,10 @@ public sealed class NotificationIngestionTests
         Assert.Equal("Pending", deliveryJob.Status);
         Assert.Equal("EMAIL", deliveryJob.Channel);
         Assert.Equal(renterId, deliveryJob.RecipientUserId);
+
+        // Financial event is decoupled: does NOT create or update watermarks
+        var watermarks = await db.AggregateWatermarks.ToListAsync();
+        Assert.Empty(watermarks);
     }
 
     [Fact]
@@ -618,5 +622,143 @@ public sealed class NotificationIngestionTests
         Assert.Equal("Pending", deliveryJob.Status);
         Assert.Equal("EMAIL", deliveryJob.Channel);
         Assert.Equal(supplierId, deliveryJob.RecipientUserId);
+
+        // Financial event is decoupled: does NOT create or update watermarks
+        var watermarks = await db.AggregateWatermarks.ToListAsync();
+        Assert.Empty(watermarks);
+    }
+
+    [Fact]
+    public async Task Ingestion_AdvisoryLockAcquisition_CalledBeforeReadingWatermarks()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+
+        AggregateWatermarkRepository.ResetInMemoryLockCounts();
+
+        var raw = ProducerFixtures.RentalOrderCreated(messageId, orderId, renterId, orderVersion: 1);
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 10);
+
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+        Assert.True(AggregateWatermarkRepository.GetInMemoryLockCount(orderId) >= 1);
+    }
+
+    [Fact]
+    public async Task Ingestion_PaidMilestone_DoesNotMarkOrderTerminal_AndSupplierConfirmationIsActionable()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        // 1. Paid event arrives
+        var paidMessageId = Guid.NewGuid();
+        var paidRaw = ProducerFixtures.RentalOrderPaid(paidMessageId, orderId, renterId, orderVersion: 2, paidAmount: 1500000m);
+        var paidOutcome = await service.IngestMessageAsync(paidRaw, "rental.events.v1", 0, 20);
+        Assert.Equal(IngestionOutcome.Processed, paidOutcome);
+
+        // Verify watermark is PAID but NOT terminal
+        var watermark = await db.AggregateWatermarks.FirstOrDefaultAsync(w => w.AggregateId == orderId && w.RecipientUserId == renterId);
+        Assert.NotNull(watermark);
+        Assert.True(watermark.IsPaid);
+        Assert.False(watermark.IsTerminal);
+
+        // 2. Supplier confirmation requested arrives after PAID
+        var confirmMessageId = Guid.NewGuid();
+        var confirmRaw = ProducerFixtures.RentalSupplierConfirmationRequested(confirmMessageId, orderId, Guid.NewGuid(), supplierId, orderVersion: 2);
+        var confirmOutcome = await service.IngestMessageAsync(confirmRaw, "rental.events.v1", 0, 21);
+        Assert.Equal(IngestionOutcome.Processed, confirmOutcome);
+
+        // Supplier confirmation is NOT blocked by PAID milestone
+        var confirmNotif = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == confirmMessageId);
+        Assert.NotNull(confirmNotif);
+        Assert.Equal("SUPPLIER_CONFIRMATION_REQUIRED", confirmNotif.NotificationType);
+        Assert.True(confirmNotif.IsActionable);
+        Assert.NotNull(confirmNotif.ActionUrl);
+
+        // 3. Out-of-order ORDER_CREATED arrives after PAID: payment CTA suppressed
+        var createdMessageId = Guid.NewGuid();
+        var createdRaw = ProducerFixtures.RentalOrderCreated(createdMessageId, orderId, renterId, orderVersion: 1);
+        var createdOutcome = await service.IngestMessageAsync(createdRaw, "rental.events.v1", 0, 22);
+        Assert.Equal(IngestionOutcome.Processed, createdOutcome);
+
+        var createdNotif = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == createdMessageId);
+        Assert.NotNull(createdNotif);
+        Assert.False(createdNotif.IsActionable);
+        Assert.Null(createdNotif.ActionUrl);
+    }
+
+    [Fact]
+    public async Task Ingestion_SameVersionSiblings_ConflictingStates_ReturnsValidationError_Quarantined()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+
+        // Event 1: Cancelled at version 2 (Terminal: CANCELLED)
+        var cancelMessageId = Guid.NewGuid();
+        var cancelRaw = ProducerFixtures.RentalOrderCancelled(cancelMessageId, orderId, renterId, orderVersion: 2, reason: "Hủy bởi khách hàng");
+        var cancelOutcome = await service.IngestMessageAsync(cancelRaw, "rental.events.v1", 0, 30);
+        Assert.Equal(IngestionOutcome.Processed, cancelOutcome);
+
+        // Event 2: Completed at same version 2 (Terminal: COMPLETED) -> Conflicting terminal states!
+        var completeMessageId = Guid.NewGuid();
+        var completeRaw = ProducerFixtures.RentalOrderCompleted(completeMessageId, orderId, renterId, orderVersion: 2);
+        var completeOutcome = await service.IngestMessageAsync(completeRaw, "rental.events.v1", 0, 31);
+
+        // Conflicting states at same version return validation error and are quarantined
+        Assert.Equal(IngestionOutcome.Quarantined, completeOutcome);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(
+            completeRaw,
+            completeMessageId.ToString(),
+            It.Is<string>(s => s.Contains("Xung đột trạng thái")),
+            "CONFLICTING_STATE",
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ingestion_TerminalOrder_SuppressesPendingActionsOfItemsUnderIt()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        // 1. Supplier confirmation requested -> IsActionable: true
+        var confirmMessageId = Guid.NewGuid();
+        var confirmRaw = ProducerFixtures.RentalSupplierConfirmationRequested(confirmMessageId, orderId, itemId, supplierId, orderVersion: 1);
+        var outcome1 = await service.IngestMessageAsync(confirmRaw, "rental.events.v1", 0, 40);
+        Assert.Equal(IngestionOutcome.Processed, outcome1);
+
+        var pendingNotif = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == confirmMessageId);
+        Assert.NotNull(pendingNotif);
+        Assert.True(pendingNotif.IsActionable);
+        Assert.NotNull(pendingNotif.ActionUrl);
+
+        // 2. Order becomes terminal (RentalOrderExpired)
+        var expiredMessageId = Guid.NewGuid();
+        var expiredRaw = ProducerFixtures.RentalOrderExpired(expiredMessageId, orderId, renterId, orderVersion: 2);
+        var outcome2 = await service.IngestMessageAsync(expiredRaw, "rental.events.v1", 0, 41);
+        Assert.Equal(IngestionOutcome.Processed, outcome2);
+
+        // The previous pending item/supplier notification is suppressed by the terminal order
+        var updatedNotif = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == confirmMessageId);
+        Assert.NotNull(updatedNotif);
+        Assert.False(updatedNotif.IsActionable);
+        Assert.Null(updatedNotif.ActionUrl);
+
+        // 3. New item notification arriving under the terminal order also has action suppressed
+        var overdueMessageId = Guid.NewGuid();
+        var overdueRaw = ProducerFixtures.RentalHandoverOverdue(overdueMessageId, orderId, itemId, supplierId, renterId, orderVersion: 3);
+        var outcome3 = await service.IngestMessageAsync(overdueRaw, "rental.events.v1", 0, 42);
+        Assert.Equal(IngestionOutcome.Processed, outcome3);
+
+        var overdueNotif = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == overdueMessageId && n.RecipientUserId == supplierId);
+        Assert.NotNull(overdueNotif);
+        Assert.False(overdueNotif.IsActionable);
+        Assert.Null(overdueNotif.ActionUrl);
     }
 }

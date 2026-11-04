@@ -12,7 +12,6 @@ public static class StaleActionSuppressionPolicy
 {
     private static readonly HashSet<string> TerminalStates = new(StringComparer.OrdinalIgnoreCase)
     {
-        "PAID",
         "EXPIRED",
         "CANCELLED",
         "COMPLETED"
@@ -35,23 +34,13 @@ public static class StaleActionSuppressionPolicy
                 Reason: null);
         }
 
-        // Trường hợp 1: Order đã ở trạng thái terminal
-        if (watermark.IsTerminal && !string.IsNullOrWhiteSpace(watermark.TerminalState))
+        // Trường hợp 1: Order đã ở trạng thái terminal (EXPIRED, CANCELLED, COMPLETED)
+        if (watermark.IsTerminal && !string.IsNullOrWhiteSpace(watermark.TerminalState) && TerminalStates.Contains(watermark.TerminalState))
         {
             var terminal = watermark.TerminalState.ToUpperInvariant();
 
-            // Nếu đơn đã thanh toán, hủy, hoặc hết hạn thì các hành động thanh toán/xác nhận phải bị chặn
-            if (notificationType is "ORDER_CREATED" or "SUPPLIER_CONFIRMATION_REQUIRED")
-            {
-                return new StaleEvaluationResult(
-                    IsStale: true,
-                    SuppressAction: true,
-                    SuppressEmail: true,
-                    Reason: $"Đơn thuê đã ở trạng thái kết thúc ({terminal}).");
-            }
-
-            // Nếu đơn đã hoàn tất hoặc hủy thì cảnh báo quá hạn bàn giao/hoàn trả không còn hành động
-            if (notificationType is "HANDOVER_OVERDUE_SUPPLIER" or "RETURN_CONFIRMATION_OVERDUE_SUPPLIER")
+            // Đơn terminal chặn toàn bộ hành động của các thông báo thuộc đơn hàng hoặc thiết bị dưới đơn hàng
+            if (notificationType is "ORDER_CREATED" or "SUPPLIER_CONFIRMATION_REQUIRED" or "HANDOVER_OVERDUE_SUPPLIER" or "RETURN_CONFIRMATION_OVERDUE_SUPPLIER")
             {
                 return new StaleEvaluationResult(
                     IsStale: true,
@@ -61,10 +50,24 @@ public static class StaleActionSuppressionPolicy
             }
         }
 
-        // Trường hợp 2: incomingOrderVersion nhỏ hơn phiên bản watermark hiện tại
+        // Trường hợp 2: Milestone PAID (đã thanh toán)
+        // Ghi nhận mốc thanh toán; chặn CTA thanh toán của ORDER_CREATED nhưng KHÔNG chặn xác nhận của nhà cung cấp và KHÔNG coi là terminal
+        if (watermark.IsPaid || string.Equals(watermark.TerminalState, "PAID", StringComparison.OrdinalIgnoreCase))
+        {
+            if (notificationType is "ORDER_CREATED")
+            {
+                return new StaleEvaluationResult(
+                    IsStale: true,
+                    SuppressAction: true,
+                    SuppressEmail: true,
+                    Reason: "Đơn thuê đã hoàn tất thanh toán (mốc PAID).");
+            }
+        }
+
+        // Trường hợp 3: incomingOrderVersion nhỏ hơn phiên bản watermark hiện tại
         if (incomingOrderVersion > 0 && incomingOrderVersion < watermark.LastOrderVersion)
         {
-            var suppressAction = notificationType is "ORDER_CREATED" or "SUPPLIER_CONFIRMATION_REQUIRED";
+            var suppressAction = notificationType is "ORDER_CREATED" or "SUPPLIER_CONFIRMATION_REQUIRED" or "HANDOVER_OVERDUE_SUPPLIER" or "RETURN_CONFIRMATION_OVERDUE_SUPPLIER";
             return new StaleEvaluationResult(
                 IsStale: true,
                 SuppressAction: suppressAction,
