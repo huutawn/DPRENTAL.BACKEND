@@ -54,7 +54,11 @@ public sealed class NotificationIngestionTests
             new RentalHandoverOverdueHandler(),
             new ReturnConfirmationOverdueHandler(),
             new RentalOrderCompletedHandler(),
-            new LatePaymentRefundRequestedHandler()
+            new LatePaymentRefundRequestedHandler(),
+            new RentalItemConfirmedHandler(),
+            new RentalItemRejectedHandler(),
+            new RefundCompletedFinancialHandler(),
+            new SupplierPayoutCompletedHandler()
         };
 
         var dlqMock = new Mock<IKafkaDeadLetterPublisher>();
@@ -359,6 +363,46 @@ public sealed class NotificationIngestionTests
     }
 
     [Fact]
+    public async Task Ingestion_All14Events_IncludingNewLifecycleAndPaymentEvents_Succeeds()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var returnRequestId = Guid.NewGuid();
+        var refundId = Guid.NewGuid();
+        var payoutId = Guid.NewGuid();
+        var settlementId = Guid.NewGuid();
+
+        var fixtures = new[]
+        {
+            ProducerFixtures.RentalOrderCreated(Guid.NewGuid(), orderId, renterId),
+            ProducerFixtures.RentalOrderPaid(Guid.NewGuid(), orderId, renterId),
+            ProducerFixtures.RentalSupplierConfirmationRequested(Guid.NewGuid(), orderId, itemId, supplierId),
+            ProducerFixtures.RentalItemConfirmed(Guid.NewGuid(), orderId, itemId, supplierId, renterId),
+            ProducerFixtures.RentalItemRejected(Guid.NewGuid(), orderId, itemId, supplierId, renterId),
+            ProducerFixtures.RentalItemHandoverCompleted(Guid.NewGuid(), orderId, itemId, renterId, supplierId),
+            ProducerFixtures.RentalHandoverOverdue(Guid.NewGuid(), orderId, itemId, renterId, supplierId),
+            ProducerFixtures.ReturnConfirmationOverdue(Guid.NewGuid(), orderId, itemId, returnRequestId, renterId, supplierId),
+            ProducerFixtures.LatePaymentRefundRequested(Guid.NewGuid(), orderId, renterId),
+            ProducerFixtures.RefundCompletedFinancial(Guid.NewGuid(), refundId, orderId, renterId),
+            ProducerFixtures.SupplierPayoutCompleted(Guid.NewGuid(), payoutId, settlementId, itemId, supplierId),
+            ProducerFixtures.RentalOrderCompleted(Guid.NewGuid(), orderId, renterId)
+        };
+
+        for (var i = 0; i < fixtures.Length; i++)
+        {
+            var outcome = await service.IngestMessageAsync(fixtures[i], "rental.events.v1", 0, i + 1);
+            Assert.Equal(IngestionOutcome.Processed, outcome);
+        }
+
+        var receiptCount = await db.InboxReceipts.CountAsync();
+        Assert.Equal(fixtures.Length, receiptCount);
+    }
+
+    [Fact]
     public async Task Ingestion_TemplateRenderFailure_QuarantinesAndDoesNotCommitReceipt()
     {
         var db = CreateInMemoryDbContext();
@@ -413,5 +457,165 @@ public sealed class NotificationIngestionTests
         // Must NOT save any notification
         var count = await db.Notifications.CountAsync(n => n.SourceEventId == messageId);
         Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public async Task Ingestion_ValidRentalItemConfirmed_FromProducerFixtures_ShouldSucceed()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var messageId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+
+        var raw = ProducerFixtures.RentalItemConfirmed(messageId, orderId, itemId, supplierId, renterId, "INV-CONF-12345");
+
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 10);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var receipt = await db.InboxReceipts.FirstOrDefaultAsync(r => r.MessageId == messageId);
+        Assert.NotNull(receipt);
+        Assert.Equal("Processed", receipt.Status);
+
+        var notification = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == messageId);
+        Assert.NotNull(notification);
+        Assert.Equal(renterId, notification.RecipientUserId);
+        Assert.Equal("ORDER_CONFIRMED", notification.NotificationType);
+        Assert.Equal("ORDER", notification.Category);
+        Assert.Equal("INFO", notification.Severity);
+        Assert.False(notification.IsActionable);
+        Assert.Contains("INV-CONF-12345", notification.Body);
+        Assert.Equal($"/renter/orders/{orderId}", notification.DeepLinkUrl);
+
+        // RentalItemConfirmed does not send email
+        var deliveryJob = await db.DeliveryJobs.FirstOrDefaultAsync(j => j.NotificationId == notification.Id);
+        Assert.Null(deliveryJob);
+
+        realtime.Verify(r => r.NotifyInboxChangedAsync(
+            renterId,
+            notification.Id,
+            "CREATED",
+            "ORDER",
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ingestion_ValidRentalItemRejected_FromProducerFixtures_ShouldSucceed()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var messageId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+
+        var raw = ProducerFixtures.RentalItemRejected(
+            messageId,
+            orderId,
+            itemId,
+            supplierId,
+            renterId,
+            reason: "Thiết bị hỏng đột xuất",
+            optionalNote: "Đang chờ linh kiện");
+
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 11);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var receipt = await db.InboxReceipts.FirstOrDefaultAsync(r => r.MessageId == messageId);
+        Assert.NotNull(receipt);
+        Assert.Equal("Processed", receipt.Status);
+
+        var notification = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == messageId);
+        Assert.NotNull(notification);
+        Assert.Equal(renterId, notification.RecipientUserId);
+        Assert.Equal("ORDER_REJECTED", notification.NotificationType);
+        Assert.Equal("ORDER", notification.Category);
+        Assert.Equal("WARNING", notification.Severity);
+        Assert.False(notification.IsActionable);
+        Assert.Contains("Thiết bị hỏng đột xuất", notification.Body);
+        Assert.Equal($"/renter/orders/{orderId}", notification.DeepLinkUrl);
+
+        // RentalItemRejected does not send email
+        var deliveryJob = await db.DeliveryJobs.FirstOrDefaultAsync(j => j.NotificationId == notification.Id);
+        Assert.Null(deliveryJob);
+    }
+
+    [Fact]
+    public async Task Ingestion_ValidRefundCompletedFinancial_FromProducerFixtures_ShouldSucceedAndEnqueueEmail()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var messageId = Guid.NewGuid();
+        var refundId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+
+        var raw = ProducerFixtures.RefundCompletedFinancial(messageId, refundId, orderId, renterId, amount: 2500000m);
+
+        var outcome = await service.IngestMessageAsync(raw, "payment.events.v1", 0, 12);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var receipt = await db.InboxReceipts.FirstOrDefaultAsync(r => r.MessageId == messageId);
+        Assert.NotNull(receipt);
+        Assert.Equal("Processed", receipt.Status);
+
+        var notification = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == messageId);
+        Assert.NotNull(notification);
+        Assert.Equal(renterId, notification.RecipientUserId);
+        Assert.Equal("REFUND_COMPLETED", notification.NotificationType);
+        Assert.Equal("PAYMENT", notification.Category);
+        Assert.Equal("SUCCESS", notification.Severity);
+        Assert.False(notification.IsActionable);
+        Assert.Contains("2.500.000", notification.Body);
+        Assert.Equal($"/renter/orders/{orderId}", notification.DeepLinkUrl);
+
+        // RefundCompletedFinancial sends email (per user preference default true)
+        var deliveryJob = await db.DeliveryJobs.FirstOrDefaultAsync(j => j.NotificationId == notification.Id);
+        Assert.NotNull(deliveryJob);
+        Assert.Equal("Pending", deliveryJob.Status);
+        Assert.Equal("EMAIL", deliveryJob.Channel);
+        Assert.Equal(renterId, deliveryJob.RecipientUserId);
+    }
+
+    [Fact]
+    public async Task Ingestion_ValidSupplierPayoutCompleted_FromProducerFixtures_ShouldSucceedAndEnqueueEmail()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var messageId = Guid.NewGuid();
+        var payoutId = Guid.NewGuid();
+        var settlementId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        var raw = ProducerFixtures.SupplierPayoutCompleted(messageId, payoutId, settlementId, itemId, supplierId, amount: 850000m);
+
+        var outcome = await service.IngestMessageAsync(raw, "payment.events.v1", 0, 13);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var receipt = await db.InboxReceipts.FirstOrDefaultAsync(r => r.MessageId == messageId);
+        Assert.NotNull(receipt);
+        Assert.Equal("Processed", receipt.Status);
+
+        var notification = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == messageId);
+        Assert.NotNull(notification);
+        Assert.Equal(supplierId, notification.RecipientUserId);
+        Assert.Equal("PAYOUT_COMPLETED", notification.NotificationType);
+        Assert.Equal("PAYMENT", notification.Category);
+        Assert.Equal("SUCCESS", notification.Severity);
+        Assert.False(notification.IsActionable);
+        Assert.Contains("850.000", notification.Body);
+        Assert.Equal($"/supplier/settlements/{settlementId}", notification.DeepLinkUrl);
+
+        // SupplierPayoutCompleted sends email
+        var deliveryJob = await db.DeliveryJobs.FirstOrDefaultAsync(j => j.NotificationId == notification.Id);
+        Assert.NotNull(deliveryJob);
+        Assert.Equal("Pending", deliveryJob.Status);
+        Assert.Equal("EMAIL", deliveryJob.Channel);
+        Assert.Equal(supplierId, deliveryJob.RecipientUserId);
     }
 }

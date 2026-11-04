@@ -350,4 +350,68 @@ public static class ProducerFixtures
       }
     }
     """;
+
+    public static string RentalItemConfirmed(
+        Guid messageId,
+        Guid orderId,
+        Guid itemId,
+        Guid supplierId,
+        Guid renterId,
+        string inventoryConfirmationRef = "INV-CONF-001",
+        string orderCode = "RNT-20261102-0001",
+        long orderVersion = 3) => $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RentalItemConfirmed",
+      "version": 1,
+      "producer": "RentalService",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-04T08:30:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "rentalOrderId": "{{orderId}}",
+        "rentalItemId": "{{itemId}}",
+        "supplierId": "{{supplierId}}",
+        "renterId": "{{renterId}}",
+        "orderCode": "{{orderCode}}",
+        "decisionAt": "2026-11-04T08:30:00.0000000+00:00",
+        "inventoryConfirmationRef": "{{inventoryConfirmationRef}}",
+        "orderVersion": {{orderVersion}}
+      }
+    }
+    """;
+
+    public static string RentalItemRejected(
+        Guid messageId,
+        Guid orderId,
+        Guid itemId,
+        Guid supplierId,
+        Guid renterId,
+        string reason = "Thiết bị đang bảo trì",
+        string? optionalNote = "Không thể đáp ứng lịch thuê",
+        string orderCode = "RNT-20261102-0001",
+        long orderVersion = 3) => $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RentalItemRejected",
+      "version": 1,
+      "producer": "RentalService",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-04T08:30:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "rentalOrderId": "{{orderId}}",
+        "rentalItemId": "{{itemId}}",
+        "supplierId": "{{supplierId}}",
+        "renterId": "{{renterId}}",
+        "orderCode": "{{orderCode}}",
+        "decisionAt": "2026-11-04T08:30:00.0000000+00:00",
+        "reason": "{{reason}}",
+        "optionalNote": {{(optionalNote != null ? $"\"{optionalNote}\"" : "null")}},
+        "orderVersion": {{orderVersion}}
+      }
+    }
+    """;
 }
