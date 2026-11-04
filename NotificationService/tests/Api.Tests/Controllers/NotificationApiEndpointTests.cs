@@ -66,6 +66,58 @@ public sealed class NotificationApiEndpointTests
     }
 
     [Fact]
+    public async Task NotificationsController_MissingSub_ShouldBeUnauthorized()
+    {
+        using var db = CreateInMemoryDbContext();
+        var notifRepo = new NotificationRepository(db);
+        var queryService = new NotificationQueryService(notifRepo);
+        var readService = new NotificationReadService(notifRepo);
+
+        var controller = new NotificationsController(queryService, readService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("u", "usr") }, "TestAuth"))
+                }
+            }
+        };
+
+        var response = await controller.GetNotifications();
+        var objectResult = Assert.IsType<ObjectResult>(response);
+        Assert.Equal(StatusCodes.Status401Unauthorized, objectResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task NotificationsController_NonGuidSub_ShouldBeUnauthorized()
+    {
+        using var db = CreateInMemoryDbContext();
+        var notifRepo = new NotificationRepository(db);
+        var queryService = new NotificationQueryService(notifRepo);
+        var readService = new NotificationReadService(notifRepo);
+
+        var controller = new NotificationsController(queryService, readService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+                    {
+                        new Claim("sub", "not-a-valid-guid"),
+                        new Claim("u", "usr")
+                    }, "TestAuth"))
+                }
+            }
+        };
+
+        var response = await controller.GetNotifications();
+        var objectResult = Assert.IsType<ObjectResult>(response);
+        Assert.Equal(StatusCodes.Status401Unauthorized, objectResult.StatusCode);
+    }
+
+    [Fact]
     public async Task NotificationsController_GetNotifications_ShouldReturnPagedResults()
     {
         using var db = CreateInMemoryDbContext();
@@ -286,5 +338,53 @@ public sealed class NotificationApiEndpointTests
 
         var orderPref = updatedDto.Preferences.First(p => p.Category == "ORDER");
         Assert.False(orderPref.EmailEnabled);
+    }
+
+    [Fact]
+    public async Task PreferencesController_ServiceToken_ShouldBeForbidden()
+    {
+        using var db = CreateInMemoryDbContext();
+        var prefRepo = new PreferenceRepository(db);
+        var uow = new UnitOfWork(db);
+        var prefService = new PreferenceService(prefRepo, uow);
+
+        var controller = new PreferencesController(prefService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = CreateUserPrincipal(Guid.NewGuid(), tokenUse: "svc")
+                }
+            }
+        };
+
+        var response = await controller.GetPreferences();
+        var objectResult = Assert.IsType<ObjectResult>(response);
+        Assert.Equal(StatusCodes.Status403Forbidden, objectResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task PreferencesController_MissingSub_ShouldBeUnauthorized()
+    {
+        using var db = CreateInMemoryDbContext();
+        var prefRepo = new PreferenceRepository(db);
+        var uow = new UnitOfWork(db);
+        var prefService = new PreferenceService(prefRepo, uow);
+
+        var controller = new PreferencesController(prefService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("u", "usr") }, "TestAuth"))
+                }
+            }
+        };
+
+        var response = await controller.GetPreferences();
+        var objectResult = Assert.IsType<ObjectResult>(response);
+        Assert.Equal(StatusCodes.Status401Unauthorized, objectResult.StatusCode);
     }
 }

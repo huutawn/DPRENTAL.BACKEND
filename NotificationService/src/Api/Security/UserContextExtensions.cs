@@ -14,8 +14,10 @@ public static class UserContextExtensions
         }
 
         // Kiểm tra xem có phải service token không: u: "svc"
-        var tokenUse = principal.FindFirst("u")?.Value;
-        if (string.Equals(tokenUse, "svc", StringComparison.OrdinalIgnoreCase))
+        var isServiceToken = string.Equals(principal.FindFirst("u")?.Value, "svc", StringComparison.OrdinalIgnoreCase) ||
+                             principal.Claims.Any(c => string.Equals(c.Type, "u", StringComparison.OrdinalIgnoreCase) &&
+                                                       string.Equals(c.Value, "svc", StringComparison.OrdinalIgnoreCase));
+        if (isServiceToken)
         {
             return Result.Failure<Guid>(
                 Error.Forbidden("SERVICE_TOKEN_FORBIDDEN", "Service principal (u: svc) không được phép truy cập hộp thư thông báo người dùng."));
