@@ -31,8 +31,9 @@ public sealed class SignalRNotificationRealtimeNotifier : INotificationRealtimeN
         try
         {
             await _hubContext.Clients.Group(groupName).SendAsync("NotificationInboxChanged", changeEvent, cancellationToken);
+            await _hubContext.Clients.Group(groupName).SendAsync("InboxChanged", changeEvent, cancellationToken);
             _logger.LogInformation(
-                "Đã phát sự kiện NotificationInboxChanged tới {Group} cho ChangeType={ChangeType}, NotificationId={NotificationId}",
+                "Đã phát sự kiện NotificationInboxChanged/InboxChanged tới {Group} cho ChangeType={ChangeType}, NotificationId={NotificationId}",
                 groupName, changeEvent.ChangeType, changeEvent.NotificationId);
         }
         catch (Exception ex)

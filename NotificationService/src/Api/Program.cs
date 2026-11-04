@@ -43,13 +43,25 @@ var signalRBuilder = builder.Services.AddSignalR();
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis")
     ?? builder.Configuration["Redis:ConnectionString"];
 
-if (!string.IsNullOrWhiteSpace(redisConnectionString))
+if (string.IsNullOrWhiteSpace(redisConnectionString))
 {
-    var environmentName = builder.Environment.EnvironmentName;
-    var channelPrefix = $"dprental:{environmentName.ToLowerInvariant()}:notifications";
+    if (builder.Environment.IsProduction())
+    {
+        throw new InvalidOperationException("Redis backplane connection string is mandatory in production profile.");
+    }
+}
+else
+{
+    var environmentName = builder.Environment.EnvironmentName.ToLowerInvariant();
+    var channelPrefix = $"dprental:notification:{environmentName}";
     signalRBuilder.AddStackExchangeRedis(redisConnectionString, options =>
     {
         options.Configuration.ChannelPrefix = StackExchange.Redis.RedisChannel.Literal(channelPrefix);
+        options.Configuration.AbortOnConnectFail = false;
+        options.Configuration.ConnectRetry = 5;
+        options.Configuration.ConnectTimeout = 5000;
+        options.Configuration.AsyncTimeout = 5000;
+        options.Configuration.SyncTimeout = 5000;
     });
 }
 

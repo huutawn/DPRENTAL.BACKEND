@@ -13,7 +13,8 @@ public sealed class StartupConfigurationValidatorTests
             ["Kafka:BootstrapServers"] = "localhost:9092",
             ["Kafka:Topics"] = "rental.events.v1,payment.analytics.v1",
             ["Services:AuthService:BaseUrl"] = "http://auth-service:8080",
-            ["InternalAuthentication:ApiKey"] = "valid-internal-api-key-2026"
+            ["InternalAuthentication:ApiKey"] = "valid-internal-api-key-2026",
+            ["ConnectionStrings:Redis"] = "127.0.0.1:6379"
         };
 
     [Fact]
@@ -109,5 +110,41 @@ public sealed class StartupConfigurationValidatorTests
 
         var ex = Assert.Throws<InvalidOperationException>(() => StartupConfigurationValidator.Validate(config));
         Assert.Contains("InternalAuthentication:ApiKey", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_MissingRedisConnectionString_ThrowsInvalidOperationException()
+    {
+        var dict = CreateValidConfigDict();
+        dict.Remove("ConnectionStrings:Redis");
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => StartupConfigurationValidator.Validate(config));
+        Assert.Contains("Redis", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_RedisConnectionStringAlternativeKey_Succeeds()
+    {
+        var dict = CreateValidConfigDict();
+        dict.Remove("ConnectionStrings:Redis");
+        dict["Redis:ConnectionString"] = "127.0.0.1:6379";
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
+
+        StartupConfigurationValidator.Validate(config);
+    }
+
+    [Fact]
+    public void Validate_InvalidRedisConnectionString_ThrowsInvalidOperationException()
+    {
+        var dict = CreateValidConfigDict();
+        dict["ConnectionStrings:Redis"] = "localhost:999999";
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => StartupConfigurationValidator.Validate(config));
+        Assert.Contains("Redis", ex.Message);
     }
 }

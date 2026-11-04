@@ -56,6 +56,24 @@ public sealed class HealthEndpointTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "");
+                builder.UseSetting("ConnectionStrings:Redis", "127.0.0.1:26379");
+                builder.UseSetting("Kafka:BootstrapServers", "localhost:9092");
+                builder.UseSetting("Kafka:Topics", "rental.events.v1,payment.analytics.v1");
+                builder.UseSetting("Services:AuthService:BaseUrl", "http://auth-service:8080");
+                builder.UseSetting("InternalAuthentication:ApiKey", "test-internal-api-key");
+            });
+
+        Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
+    }
+
+    [Fact]
+    public void MissingRedisConnection_FailsAtStartup()
+    {
+        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("ConnectionStrings:Redis", "");
                 builder.UseSetting("Kafka:BootstrapServers", "localhost:9092");
                 builder.UseSetting("Kafka:Topics", "rental.events.v1,payment.analytics.v1");
                 builder.UseSetting("Services:AuthService:BaseUrl", "http://auth-service:8080");
@@ -70,6 +88,7 @@ public sealed class HealthEndpointTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("ConnectionStrings:Redis", "127.0.0.1:26379");
                 builder.UseSetting("Kafka:BootstrapServers", "localhost:9092");
                 builder.UseSetting("Kafka:Topics", "rental.events.v1,payment.analytics.v1");
                 builder.UseSetting("Services:AuthService:BaseUrl", "http://auth-service:8080");
