@@ -65,4 +65,3 @@ public sealed class NotificationReadService : INotificationReadService
             ReadAt: readAt));
     }
 }
-

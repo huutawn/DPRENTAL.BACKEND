@@ -33,6 +33,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<IKafkaEventHandler, RentalHandoverOverdueHandler>();
         services.AddSingleton<IKafkaEventHandler, ReturnConfirmationOverdueHandler>();
         services.AddSingleton<IKafkaEventHandler, RentalOrderCompletedHandler>();
+        services.AddSingleton<IKafkaEventHandler, RentalDeductionDisputeResolvedHandler>();
         services.AddSingleton<IKafkaEventHandler, LatePaymentRefundRequestedHandler>();
         services.AddSingleton<IKafkaEventHandler, RentalItemConfirmedHandler>();
         services.AddSingleton<IKafkaEventHandler, RentalItemRejectedHandler>();

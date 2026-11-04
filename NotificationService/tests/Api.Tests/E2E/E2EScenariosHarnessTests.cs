@@ -69,6 +69,7 @@ public sealed class E2EScenariosHarnessTests
                 new RentalHandoverOverdueHandler(),
                 new ReturnConfirmationOverdueHandler(),
                 new RentalOrderCompletedHandler(),
+                new RentalDeductionDisputeResolvedHandler(),
                 new LatePaymentRefundRequestedHandler(),
                 new RentalItemConfirmedHandler(),
                 new RentalItemRejectedHandler(),
