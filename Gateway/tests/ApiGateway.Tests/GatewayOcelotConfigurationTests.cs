@@ -51,6 +51,7 @@ public sealed class GatewayOcelotConfigurationTests
         "notification-hub-negotiate",
         "notification-hub-ws",
         "notification-service-internal",
+        "notification-service-openapi",
         "payment-hub-negotiate",
         "payment-hub-ws",
         "payment-service-openapi",
