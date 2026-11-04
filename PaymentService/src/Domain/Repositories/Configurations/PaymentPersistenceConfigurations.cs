@@ -218,6 +218,9 @@ public sealed class ManualRefundRequirementConfiguration : IEntityTypeConfigurat
         builder.HasIndex(x => x.RequirementRef).IsUnique();
         builder.Property(x => x.TransferCode).IsRequired().HasMaxLength(14);
         builder.HasIndex(x => x.TransferCode).IsUnique().HasDatabaseName("UX_manual_refund_requirements_TransferCode");
+        builder.Property(x => x.RecipientBankCode).HasMaxLength(32);
+        builder.Property(x => x.RecipientAccountNumber).HasMaxLength(512);
+        builder.Property(x => x.RecipientAccountHolderName).HasMaxLength(128);
     }
 }
 

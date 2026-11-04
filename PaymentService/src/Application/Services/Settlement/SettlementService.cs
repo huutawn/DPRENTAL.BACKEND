@@ -26,7 +26,10 @@ public sealed class SettlementService(
             PaymentRef = request.PaymentRef.Trim(),
             DecisionRef = request.DecisionRef.Trim(),
             OperationKey = request.OperationKey.Trim(),
-            Currency = "VND"
+            Currency = "VND",
+            // Tài khoản chỉ để ghép QR: bỏ khỏi dấu vân tay để receipt cũ vẫn replay và Rental gửi lại với tài khoản mới không bị 409.
+            SupplierAccount = null,
+            RenterRefundAccount = null
         }));
         var replay = await invoices.GetOperationReceiptAsync(request.OperationKey.Trim(), ct);
         if (replay is not null) return Replay(replay, fingerprint);
@@ -63,7 +66,8 @@ public sealed class SettlementService(
         var amounts = calculated.Value;
         var now = clock.GetUtcNow();
         var record = RentalItemSettlementRecord.From(amounts, invoice,
-            amounts.DepositRefundDue > 0 ? SettlementState.PendingManualRefund : SettlementState.Completed, now);
+            amounts.DepositRefundDue > 0 ? SettlementState.PendingManualRefund : SettlementState.Completed, now,
+            TransferRecipientDto.Parse(request.SupplierAccount).Value);
         record.Entries.Add(SettlementLedgerEntry.Create(record.Id, SettlementEntryType.SupplierPayable, amounts.SupplierPayable, now));
         record.Entries.Add(SettlementLedgerEntry.Create(record.Id, SettlementEntryType.PlatformFee, amounts.PlatformFeeAmount, now));
         record.Entries.Add(SettlementLedgerEntry.Create(record.Id, SettlementEntryType.DepositRefundDue, amounts.DepositRefundDue, now));
@@ -85,7 +89,7 @@ public sealed class SettlementService(
             var refund = ManualRefundRequirement.Create(invoice.Id, invoice.RenterId, invoice.PaymentRef!, amounts.OperationKey,
                 "RENTAL_DEPOSIT_REFUND", ManualRefundKind.SettlementDeposit, record.Id,
                 [ManualRefundItem.Create(item.RentalItemId, 0, amounts.DepositRefundDue)], now,
-                FinancialRefundKinds.SettlementDepositRefund);
+                FinancialRefundKinds.SettlementDepositRefund, TransferRecipientDto.Parse(request.RenterRefundAccount).Value);
             record.AssignRefundRequirement(refund);
             claims.Add(OperationalSnapshotEngine.CreateManualRefundClaim(refund));
             var refundRequested = PaymentOutboxFactory.CreateRefundRequestedFinancial(refund, invoice);

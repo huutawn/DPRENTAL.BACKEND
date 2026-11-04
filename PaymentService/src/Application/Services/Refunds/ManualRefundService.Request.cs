@@ -24,7 +24,8 @@ public sealed partial class ManualRefundService
             RefundKind = request.RefundKind.Trim(),
             Items = request.Items.OrderBy(x => x.RentalItemId).ToArray()
         };
-        string fingerprint = CanonicalJournalHasher.ComputeOutboxDigest(JsonSerializer.Serialize(request));
+        // Tài khoản chỉ để ghép QR nên không tham gia dấu vân tay, giống SettleAsync.
+        string fingerprint = CanonicalJournalHasher.ComputeOutboxDigest(JsonSerializer.Serialize(request with { RefundAccount = null }));
         var stored = await invoices.GetOperationReceiptAsync(request.OperationKey, ct);
         if (stored is not null) return ReadReplay<RequestRefundResponse>(stored, "RequestRefund", fingerprint, x => x with { IsReplay = true });
         var verified = await integrityChecker.VerifyAsync(new TransactionVerificationRequest(request.PaymentRef,
@@ -67,7 +68,8 @@ public sealed partial class ManualRefundService
         if (guard.IsFailure) return guard.Error;
         var now = clock.GetUtcNow();
         var refund = ManualRefundRequirement.Create(invoice.Id, invoice.RenterId, request.PaymentRef, request.OperationKey,
-            request.Reason, ManualRefundKind.RentalRefund, null, lines, now, request.RefundKind);
+            request.Reason, ManualRefundKind.RentalRefund, null, lines, now, request.RefundKind,
+            TransferRecipientDto.Parse(request.RefundAccount).Value);
         await refunds.AddAsync(refund, ct);
         var response = new RequestRefundResponse(refund.RequirementRef, request.OperationKey, "Accepted", refund.Amount, invoice.Currency, false);
         var receipt = OperationReceipt.Create(request.OperationKey, "RequestRefund", fingerprint,

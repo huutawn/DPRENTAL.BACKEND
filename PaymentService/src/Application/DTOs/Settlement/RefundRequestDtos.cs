@@ -36,13 +36,16 @@ public sealed record RequestRefundRequest(
     [Required] IReadOnlyList<RefundItemRequest> Items,
     [Required][MaxLength(500)] string Reason,
     [Required][MaxLength(64)] string OperationKey,
-    [Required] string RefundKind)
+    [Required] string RefundKind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TransferRecipientDto? RefundAccount = null)
 {
     [JsonIgnore]
     public decimal TotalRefundAmount => Items.Sum(i => i.TotalRefundAmount);
 
     public Result Validate()
     {
+        if (TransferRecipientDto.Parse(RefundAccount) is { IsFailure: true } badAccount) return badAccount.Error;
+
         if (!Dprental.PaymentService.Domain.Entities.FinancialRefundKinds.IsRentalRefundKind(RefundKind))
             return Error.Validation("Payment.InvalidRefundKind", "RefundKind must be CancellationRefund or LatePaymentRefund.");
         if (RentalOrderId == Guid.Empty)

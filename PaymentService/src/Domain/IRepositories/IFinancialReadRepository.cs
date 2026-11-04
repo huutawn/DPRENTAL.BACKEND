@@ -53,12 +53,14 @@ public sealed record AdminPayoutRow(
     decimal Amount, string Currency, string Status, string TransferCode, string? ExternalTransferReference,
     Guid? CompletedBy, DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt,
     Guid RentalOrderId, string OrderCode,
-    decimal RentalAmount, decimal PlatformFeeAmount, decimal FinalDeductionAmount);
+    decimal RentalAmount, decimal PlatformFeeAmount, decimal FinalDeductionAmount,
+    string? RecipientBankCode, string? RecipientAccountNumber, string? RecipientAccountHolderName);
 
 public sealed record ManualRefundRow(
     Guid RequirementId, string RequirementRef, string? SettlementRef, Guid? RentalItemId, Guid RenterId,
     decimal Amount, ManualRefundStatus Status, string TransferCode, string? ExternalTransferReference,
-    Guid? CompletedBy, DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt);
+    Guid? CompletedBy, DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt,
+    string? RecipientBankCode, string? RecipientAccountNumber, string? RecipientAccountHolderName);
 
 public sealed record ReviewRow(
     Guid Id, string Reference, string Status, string? ReasonCode, decimal? Amount,

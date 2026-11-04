@@ -152,8 +152,15 @@ public sealed partial class ManualRefundService(
         return new ManualRefundPage(selected, page.Count > limit ? selected[^1].Id : null);
     }
 
-    private static ManualRefundDetails ToDetails(ManualRefundRequirement x) => new(x.Id, x.RequirementRef, x.OperationKey,
-        x.Kind.ToString(), x.Status.ToString(), x.InvoiceId, x.PaymentRef, x.Amount, x.Reason,
-        x.Items.Select(i => new ManualRefundItemDto(i.RentalItemId, i.RentalAmount, i.DepositAmount)).ToArray(),
-        x.CreatedAt, x.CompletedAt, x.ExternalTransferReference, x.TransferCode);
+    private ManualRefundDetails ToDetails(ManualRefundRequirement x)
+    {
+        var (account, qrUrl) = TransferQrBuilder.Build(encryptor, nameof(ManualRefundRequirement), x.Id,
+            x.RecipientBankCode, x.RecipientAccountNumber, x.Amount, x.TransferCode,
+            x.Status == ManualRefundStatus.PendingManualRefund);
+        return new(x.Id, x.RequirementRef, x.OperationKey,
+            x.Kind.ToString(), x.Status.ToString(), x.InvoiceId, x.PaymentRef, x.Amount, x.Reason,
+            x.Items.Select(i => new ManualRefundItemDto(i.RentalItemId, i.RentalAmount, i.DepositAmount)).ToArray(),
+            x.CreatedAt, x.CompletedAt, x.ExternalTransferReference, x.TransferCode,
+            x.RecipientBankCode, account, x.RecipientAccountHolderName, qrUrl);
+    }
 }

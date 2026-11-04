@@ -31,7 +31,8 @@ public sealed class RentalItemSettlementRecord
 
     private RentalItemSettlementRecord() { }
 
-    public static RentalItemSettlementRecord From(RentalItemSettlement s, Invoice invoice, SettlementState status, DateTimeOffset now)
+    public static RentalItemSettlementRecord From(RentalItemSettlement s, Invoice invoice, SettlementState status, DateTimeOffset now,
+        TransferRecipient? supplierRecipient = null)
     {
         ArgumentNullException.ThrowIfNull(invoice);
         if (string.IsNullOrWhiteSpace(invoice.PaymentRef))
@@ -62,7 +63,7 @@ public sealed class RentalItemSettlementRecord
         record.CompletedAt = status == SettlementState.Completed ? now.ToUniversalTime() : null;
         if (s.SupplierPayable > 0)
             record.Payout = SupplierPayout.CreatePending(id, s.RentalItemId, s.SupplierId,
-                s.SupplierPayable, invoice.Currency, now);
+                s.SupplierPayable, invoice.Currency, now, supplierRecipient);
         return record;
     }
 
