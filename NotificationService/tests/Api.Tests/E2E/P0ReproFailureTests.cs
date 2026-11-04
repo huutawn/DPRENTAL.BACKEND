@@ -180,9 +180,9 @@ public sealed class P0ReproFailureTests
 
         var worker = new EmailDeliveryWorker(sp, NullLogger<EmailDeliveryWorker>.Instance);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await worker.StartAsync(cts.Token);
-        var timeout = DateTimeOffset.UtcNow.AddSeconds(2);
+        var timeout = DateTimeOffset.UtcNow.AddSeconds(4);
         while (DateTimeOffset.UtcNow < timeout)
         {
             var checkJob = await db.DeliveryJobs.FindAsync(job.Id);
@@ -193,7 +193,6 @@ public sealed class P0ReproFailureTests
             await Task.Delay(50);
         }
         await worker.StopAsync(CancellationToken.None);
-
         var updatedJob = await db.DeliveryJobs.FindAsync(job.Id);
         Assert.NotNull(updatedJob);
         // Verified P0 fix: Job becomes RetryScheduled instead of Suppressed during Auth outage

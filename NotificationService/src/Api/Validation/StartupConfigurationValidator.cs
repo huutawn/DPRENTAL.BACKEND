@@ -65,16 +65,22 @@ public static class StartupConfigurationValidator
         }
 
         var redis = configuration.GetConnectionString("Redis") ?? configuration["Redis:ConnectionString"];
-        if (!string.IsNullOrWhiteSpace(redis))
+        if (string.IsNullOrWhiteSpace(redis))
         {
-            try
+            throw new InvalidOperationException("Thiếu cấu hình ConnectionStrings:Redis hoặc Redis:ConnectionString.");
+        }
+
+        try
+        {
+            var options = StackExchange.Redis.ConfigurationOptions.Parse(redis);
+            if (options.EndPoints.Count == 0)
             {
-                StackExchange.Redis.ConfigurationOptions.Parse(redis);
+                throw new InvalidOperationException("Cấu hình ConnectionStrings:Redis không chứa endpoint hợp lệ.");
             }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Cấu hình ConnectionStrings:Redis không hợp lệ: {ex.Message}");
-            }
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            throw new InvalidOperationException($"Cấu hình ConnectionStrings:Redis không hợp lệ: {ex.Message}", ex);
         }
     }
 }

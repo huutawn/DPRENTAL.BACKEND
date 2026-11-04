@@ -58,6 +58,7 @@ public sealed class CommonBoundaryTests
                 builder.UseSetting("environment", "Production");
                 builder.UseSetting("ConnectionStrings:Postgres",
                     "Host=localhost;Database=test;Username=test;Password=test");
+                builder.UseSetting("ConnectionStrings:Redis", "127.0.0.1:26379");
                 builder.UseSetting("Kafka:BootstrapServers", "localhost:9092");
                 builder.UseSetting("Kafka:Topics", "rental.events.v1,payment.analytics.v1");
                 builder.UseSetting("Services:AuthService:BaseUrl", "http://auth-service:8080");
