@@ -22,4 +22,15 @@ public interface IDeliveryJobRepository
     Task<int> SuppressPendingAndUndispatchedJobsForResourceAsync(string resourceType, string resourceId, string reason, CancellationToken cancellationToken = default);
     Task<int> SuppressPendingAndUndispatchedJobsForOrderAsync(Guid orderId, string reason, CancellationToken cancellationToken = default);
     Task<int> SuppressPendingAndUndispatchedJobsForRentalItemAsync(Guid rentalItemId, string reason, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Guid>> GetReconciliationCandidateJobIdsAsync(
+        IReadOnlyCollection<string> eligibleNotificationTypes,
+        IReadOnlyCollection<string> eligibleErrorCodes,
+        int limit = 100,
+        CancellationToken cancellationToken = default);
+    Task<int> RequeueReconciliationJobsAsync(
+        IReadOnlyList<Guid> jobIds,
+        IReadOnlyCollection<string> eligibleNotificationTypes,
+        IReadOnlyCollection<string> eligibleErrorCodes,
+        string operatorId,
+        CancellationToken cancellationToken = default);
 }

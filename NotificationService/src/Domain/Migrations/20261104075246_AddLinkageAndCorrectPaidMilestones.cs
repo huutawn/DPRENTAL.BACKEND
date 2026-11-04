@@ -57,37 +57,71 @@ WHERE EXISTS (
 );
 ");
 
-            // 3. Backfill rental_item_id on notifications from render_data_json ->> 'rentalItemId' if valid UUID:
+            // 3. Backfill rental_item_id on notifications safely using pg_input_is_valid on PostgreSQL 17:
             migrationBuilder.Sql(@"
 UPDATE notification.notifications
-SET rental_item_id = (render_data_json::jsonb ->> 'rentalItemId')::uuid
+SET rental_item_id = (
+    CASE
+        WHEN render_data_json IS NOT NULL
+             AND pg_input_is_valid(render_data_json, 'jsonb')
+             AND (render_data_json::jsonb ? 'rentalItemId')
+             AND jsonb_typeof(render_data_json::jsonb -> 'rentalItemId') = 'string'
+             AND (render_data_json::jsonb ->> 'rentalItemId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+             AND (render_data_json::jsonb ->> 'rentalItemId') <> '00000000-0000-0000-0000-000000000000'
+        THEN (render_data_json::jsonb ->> 'rentalItemId')::uuid
+        ELSE NULL
+    END
+)
 WHERE rental_item_id IS NULL
   AND render_data_json IS NOT NULL
-  AND render_data_json LIKE '%rentalItemId%'
-  AND (render_data_json::jsonb ->> 'rentalItemId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  AND pg_input_is_valid(render_data_json, 'jsonb')
+  AND (render_data_json::jsonb ? 'rentalItemId')
+  AND jsonb_typeof(render_data_json::jsonb -> 'rentalItemId') = 'string'
+  AND (render_data_json::jsonb ->> 'rentalItemId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  AND (render_data_json::jsonb ->> 'rentalItemId') <> '00000000-0000-0000-0000-000000000000';
 ");
 
-            // Also backfill rental_item_id for RentalItem resource type if resource_id is a valid UUID
+            // Also backfill rental_item_id for RentalItem resource type if resource_id is a valid, non-empty UUID
             migrationBuilder.Sql(@"
 UPDATE notification.notifications
 SET rental_item_id = resource_id::uuid
 WHERE rental_item_id IS NULL
   AND resource_type = 'RentalItem'
-  AND resource_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  AND resource_id IS NOT NULL
+  AND resource_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  AND resource_id <> '00000000-0000-0000-0000-000000000000';
 ");
 
-            // 4. Backfill parent_item_id on ReturnRequest watermarks from notifications if available:
+            // 4. Backfill parent_item_id on ReturnRequest watermarks safely with conflict detection:
+            // If multiple notifications for the same ReturnRequest have conflicting rental_item_id, do NOT choose randomly.
             migrationBuilder.Sql(@"
+WITH single_item_links AS (
+    SELECT
+        w.aggregate_id AS return_request_id,
+        MIN(n.rental_item_id::text)::uuid AS resolved_item_id
+    FROM notification.aggregate_watermarks w
+    JOIN notification.notifications n
+      ON n.rental_item_id IS NOT NULL
+     AND (
+         (n.resource_type = 'ReturnRequest' AND n.resource_id = w.aggregate_id::text)
+         OR (
+             n.render_data_json IS NOT NULL
+             AND pg_input_is_valid(n.render_data_json, 'jsonb')
+             AND (n.render_data_json::jsonb ? 'returnRequestId')
+             AND (n.render_data_json::jsonb ->> 'returnRequestId') = w.aggregate_id::text
+         )
+     )
+    WHERE w.scope = 'ReturnRequest'
+      AND w.parent_item_id IS NULL
+    GROUP BY w.aggregate_id
+    HAVING COUNT(DISTINCT n.rental_item_id) = 1
+)
 UPDATE notification.aggregate_watermarks w
-SET parent_item_id = n.rental_item_id
-FROM notification.notifications n
+SET parent_item_id = s.resolved_item_id
+FROM single_item_links s
 WHERE w.scope = 'ReturnRequest'
   AND w.parent_item_id IS NULL
-  AND n.rental_item_id IS NOT NULL
-  AND (
-      (n.resource_type = 'ReturnRequest' AND n.resource_id = w.aggregate_id::text)
-      OR (n.render_data_json IS NOT NULL AND n.render_data_json LIKE '%returnRequestId%' AND (n.render_data_json::jsonb ->> 'returnRequestId') = w.aggregate_id::text)
-  );
+  AND w.aggregate_id = s.return_request_id;
 ");
         }
 

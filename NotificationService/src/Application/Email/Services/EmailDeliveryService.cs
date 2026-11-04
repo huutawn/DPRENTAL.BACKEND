@@ -248,54 +248,38 @@ public sealed class EmailDeliveryService : IEmailDeliveryService
 
                 if (!isFinancialNotification)
                 {
-                    // Advisory lock theo order ID (cùng cơ chế với ingestion để loại trừ race condition)
+                    AggregateStateProjection? orderAggregateState = null;
                     if (notification.OrderId.HasValue && notification.OrderId.Value != Guid.Empty)
                     {
                         await _watermarkRepo.AcquireAdvisoryLockAsync(notification.OrderId.Value, cancellationToken);
 
-                        var orderAggregateState = await _watermarkRepo.GetAggregateStateAsync(
+                        orderAggregateState = await _watermarkRepo.GetAggregateStateAsync(
                             NotificationWatermarkScope.RentalOrder,
                             notification.OrderId.Value,
                             cancellationToken);
-
-                        var orderEval = StaleActionSuppressionPolicy.Evaluate(
-                            notification.NotificationType,
-                            notification.EventVersion,
-                            orderAggregateState);
-
-                        if (orderEval.SuppressEmail)
-                        {
-                            isStale = true;
-                            staleReason = orderEval.Reason;
-                        }
                     }
 
-                    if (!isStale && string.Equals(notification.ResourceType, "RentalItem", StringComparison.OrdinalIgnoreCase))
+                    AggregateStateProjection? currentAggregateState = null;
+                    AggregateStateProjection? parentItemAggregateState = null;
+
+                    if (string.Equals(notification.ResourceType, "RentalItem", StringComparison.OrdinalIgnoreCase) &&
+                        Guid.TryParse(notification.ResourceId, out var itemId))
                     {
-                        if (Guid.TryParse(notification.ResourceId, out var itemId))
-                        {
-                            var itemAggregateState = await _watermarkRepo.GetAggregateStateAsync(
-                                NotificationWatermarkScope.RentalItem,
-                                itemId,
-                                cancellationToken);
-
-                            var itemEval = StaleActionSuppressionPolicy.Evaluate(
-                                notification.NotificationType,
-                                notification.EventVersion,
-                                itemAggregateState);
-
-                            if (itemEval.SuppressEmail)
-                            {
-                                isStale = true;
-                                staleReason = itemEval.Reason;
-                            }
-                        }
+                        currentAggregateState = await _watermarkRepo.GetAggregateStateAsync(
+                            NotificationWatermarkScope.RentalItem,
+                            itemId,
+                            cancellationToken);
                     }
-
-                    if (!isStale && (string.Equals(notification.ResourceType, "ReturnRequest", StringComparison.OrdinalIgnoreCase) || notification.NotificationType == "RETURN_CONFIRMATION_OVERDUE_SUPPLIER"))
+                    else if (string.Equals(notification.ResourceType, "ReturnRequest", StringComparison.OrdinalIgnoreCase) &&
+                             Guid.TryParse(notification.ResourceId, out var returnReqId))
                     {
+                        currentAggregateState = await _watermarkRepo.GetAggregateStateAsync(
+                            NotificationWatermarkScope.ReturnRequest,
+                            returnReqId,
+                            cancellationToken);
+
                         var parentItemId = notification.RentalItemId;
-                        if (!parentItemId.HasValue && Guid.TryParse(notification.ResourceId, out var returnReqId))
+                        if (!parentItemId.HasValue)
                         {
                             var wmList = await _watermarkRepo.GetWatermarksForAggregateAsync(NotificationWatermarkScope.ReturnRequest, returnReqId, cancellationToken);
                             parentItemId = wmList.FirstOrDefault(w => w.ParentItemId.HasValue)?.ParentItemId;
@@ -303,22 +287,39 @@ public sealed class EmailDeliveryService : IEmailDeliveryService
 
                         if (parentItemId.HasValue && parentItemId.Value != Guid.Empty)
                         {
-                            var itemAggregateState = await _watermarkRepo.GetAggregateStateAsync(
+                            parentItemAggregateState = await _watermarkRepo.GetAggregateStateAsync(
                                 NotificationWatermarkScope.RentalItem,
                                 parentItemId.Value,
                                 cancellationToken);
-
-                            var itemEval = StaleActionSuppressionPolicy.Evaluate(
-                                notification.NotificationType,
-                                notification.EventVersion,
-                                itemAggregateState);
-
-                            if (itemEval.SuppressEmail)
-                            {
-                                isStale = true;
-                                staleReason = itemEval.Reason;
-                            }
                         }
+                    }
+                    else if (notification.NotificationType == "RETURN_CONFIRMATION_OVERDUE_SUPPLIER")
+                    {
+                        var parentItemId = notification.RentalItemId;
+                        if (parentItemId.HasValue && parentItemId.Value != Guid.Empty)
+                        {
+                            parentItemAggregateState = await _watermarkRepo.GetAggregateStateAsync(
+                                NotificationWatermarkScope.RentalItem,
+                                parentItemId.Value,
+                                cancellationToken);
+                        }
+                    }
+                    else
+                    {
+                        currentAggregateState = orderAggregateState;
+                    }
+
+                    var staleEval = StaleActionSuppressionPolicy.EvaluateWithParentState(
+                        notification.NotificationType,
+                        notification.EventVersion,
+                        currentAggregateState,
+                        parentItemAggregateState,
+                        orderAggregateState);
+
+                    if (staleEval.SuppressEmail)
+                    {
+                        isStale = true;
+                        staleReason = staleEval.Reason;
                     }
                 }
                 if (isStale)

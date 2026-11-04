@@ -638,4 +638,143 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
             await TestEnvironment.DropDatabaseAsync(dbName);
         }
     }
+
+    [Fact]
+    public async Task Migration_WithMalformedRenderJsonAndEmptyGuids_ShouldSucceedWithoutCrashing()
+    {
+        var dbName = "notif_migr_malformed_" + Guid.NewGuid().ToString("N")[..8];
+        await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            // 1. Migrate to f224363 schema (AddNotificationSchemaUpgrades)
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                var migrator = context.GetService<IMigrator>();
+                await migrator.MigrateAsync("20261104042342_AddNotificationSchemaUpgrades");
+            }
+
+            var notifMalformed = Guid.NewGuid();
+            var notifEmptyGuid = Guid.NewGuid();
+            var notifValid = Guid.NewGuid();
+            var validItemId = Guid.NewGuid();
+            var userId = Guid.NewGuid();
+            var retReqConflict = Guid.NewGuid();
+            var retReqSingle = Guid.NewGuid();
+            var itemConflictA = Guid.NewGuid();
+            var itemConflictB = Guid.NewGuid();
+            var itemSingle = Guid.NewGuid();
+
+            await using (var conn = new NpgsqlConnection(connString))
+            {
+                await conn.OpenAsync();
+
+                var insertSql = @"
+                    INSERT INTO notification.notifications
+                    (id, recipient_user_id, notification_type, category, severity, title, body,
+                     resource_type, resource_id, source_event_id, source_producer, source_event_type, event_version,
+                     template_code, template_version, occurred_at, created_at, render_data_json)
+                    VALUES
+                    (@id1, @userId, 'RENTAL_OVERDUE', 'Order', 'Warning', 'Overdue', 'Body',
+                     'RentalItem', 'res-1', @src1, 'RentalService', 'HandoverOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{malformed json containing rentalItemId: broken'),
+                    (@id2, @userId, 'RENTAL_OVERDUE', 'Order', 'Warning', 'Overdue', 'Body',
+                     'RentalItem', 'res-2', @src2, 'RentalService', 'HandoverOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""00000000-0000-0000-0000-000000000000""}'),
+                    (@id3, @userId, 'RENTAL_OVERDUE', 'Order', 'Warning', 'Overdue', 'Body',
+                     'RentalItem', 'res-3', @src3, 'RentalService', 'HandoverOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @validItemId || '""}');";
+                var insertWmSql = @"
+                    INSERT INTO notification.aggregate_watermarks
+                    (scope, aggregate_id, recipient_user_id, last_order_version, is_terminal, is_paid, updated_at)
+                    VALUES
+                    ('ReturnRequest', @retReqConflict, @userId, 1, false, false, NOW()),
+                    ('ReturnRequest', @retReqSingle, @userId, 1, false, false, NOW());";
+                await using var wmCmd = new NpgsqlCommand(insertWmSql, conn);
+                wmCmd.Parameters.AddWithValue("retReqConflict", retReqConflict);
+                wmCmd.Parameters.AddWithValue("retReqSingle", retReqSingle);
+                wmCmd.Parameters.AddWithValue("userId", userId);
+                await wmCmd.ExecuteNonQueryAsync();
+
+                var insertRetNotifSql = @"
+                    INSERT INTO notification.notifications
+                    (id, recipient_user_id, notification_type, category, severity, title, body,
+                     resource_type, resource_id, source_event_id, source_producer, source_event_type, event_version,
+                     template_code, template_version, occurred_at, created_at, render_data_json)
+                    VALUES
+                    (@idConflict1, @userId, 'RETURN_CONFIRMATION_OVERDUE_SUPPLIER', 'Order', 'Action', 'Overdue', 'Body',
+                     'ReturnRequest', @retReqConflictStr, @src4, 'RentalService', 'ReturnOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @itemConflictA || '""}'),
+                    (@idConflict2, @userId, 'RETURN_CONFIRMATION_OVERDUE_SUPPLIER', 'Order', 'Action', 'Overdue', 'Body',
+                     'ReturnRequest', @retReqConflictStr, @src5, 'RentalService', 'ReturnOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @itemConflictB || '""}'),
+                    (@idSingle, @userId, 'RETURN_CONFIRMATION_OVERDUE_SUPPLIER', 'Order', 'Action', 'Overdue', 'Body',
+                     'ReturnRequest', @retReqSingleStr, @src6, 'RentalService', 'ReturnOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @itemSingle || '""}');";
+                await using var retCmd = new NpgsqlCommand(insertRetNotifSql, conn);
+                retCmd.Parameters.AddWithValue("idConflict1", Guid.NewGuid());
+                retCmd.Parameters.AddWithValue("idConflict2", Guid.NewGuid());
+                retCmd.Parameters.AddWithValue("idSingle", Guid.NewGuid());
+                retCmd.Parameters.AddWithValue("userId", userId);
+                retCmd.Parameters.AddWithValue("retReqConflictStr", retReqConflict.ToString());
+                retCmd.Parameters.AddWithValue("retReqSingleStr", retReqSingle.ToString());
+                retCmd.Parameters.AddWithValue("itemConflictA", itemConflictA);
+                retCmd.Parameters.AddWithValue("itemConflictB", itemConflictB);
+                retCmd.Parameters.AddWithValue("itemSingle", itemSingle);
+                retCmd.Parameters.AddWithValue("src4", Guid.NewGuid());
+                retCmd.Parameters.AddWithValue("src5", Guid.NewGuid());
+                retCmd.Parameters.AddWithValue("src6", Guid.NewGuid());
+                await retCmd.ExecuteNonQueryAsync();
+                await using var cmd = new NpgsqlCommand(insertSql, conn);
+
+                cmd.Parameters.AddWithValue("id1", notifMalformed);
+                cmd.Parameters.AddWithValue("id2", notifEmptyGuid);
+                cmd.Parameters.AddWithValue("id3", notifValid);
+                cmd.Parameters.AddWithValue("validItemId", validItemId.ToString());
+                cmd.Parameters.AddWithValue("userId", userId);
+                cmd.Parameters.AddWithValue("src1", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("src2", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("src3", Guid.NewGuid());
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            // 3. Migrate to latest (AddLinkageAndCorrectPaidMilestones)
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                await context.Database.MigrateAsync();
+            }
+
+            // 4. Verify results
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                var n1 = await context.Notifications.FindAsync(notifMalformed);
+                Assert.NotNull(n1);
+                Assert.Null(n1.RentalItemId); // Kept original raw json, did not crash or set invalid ID
+
+                var n2 = await context.Notifications.FindAsync(notifEmptyGuid);
+                Assert.NotNull(n2);
+                Assert.Null(n2.RentalItemId); // Guid.Empty ignored
+
+                var n3 = await context.Notifications.FindAsync(notifValid);
+                Assert.NotNull(n3);
+                Assert.Equal(validItemId, n3.RentalItemId);
+
+                // Verify conflicting ReturnRequest has NULL parent_item_id (not assigned randomly)
+                var wmConflict = await context.AggregateWatermarks.FirstAsync(w => w.Scope == "ReturnRequest" && w.AggregateId == retReqConflict);
+                Assert.Null(wmConflict.ParentItemId);
+
+                // Verify single ReturnRequest has resolved parent_item_id
+                var wmSingle = await context.AggregateWatermarks.FirstAsync(w => w.Scope == "ReturnRequest" && w.AggregateId == retReqSingle);
+                Assert.Equal(itemSingle, wmSingle.ParentItemId);
+            }
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
+    }
 }

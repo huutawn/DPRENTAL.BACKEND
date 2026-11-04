@@ -1,6 +1,4 @@
 using Dprental.NotificationService.Domain.IRepositories;
-using Dprental.NotificationService.Domain.Repositories;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -8,86 +6,78 @@ namespace Dprental.NotificationService.Application.Reconciliation;
 
 public sealed class JobReconciliationService : IJobReconciliationService
 {
-    private static readonly HashSet<string> ResultNotificationTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly string[] EligibleNotificationTypes =
+    [
         "ORDER_PAID",
         "ORDER_COMPLETED",
         "REFUND_COMPLETED",
         "PAYOUT_COMPLETED"
-    };
+    ];
 
-    private readonly NotificationServiceDbContext _dbContext;
-    private readonly IUnitOfWork _unitOfWork;
+    private static readonly string[] EligibleErrorCodes =
+    [
+        "STALE_ACTION_SUPPRESSED",
+        "STALE_EVENT_TERMINATED"
+    ];
+
+    private readonly IDeliveryJobRepository _deliveryJobRepo;
     private readonly ILogger<JobReconciliationService> _logger;
 
     public JobReconciliationService(
-        NotificationServiceDbContext dbContext,
-        IUnitOfWork unitOfWork,
+        IDeliveryJobRepository deliveryJobRepo,
         ILogger<JobReconciliationService>? logger = null)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _deliveryJobRepo = deliveryJobRepo ?? throw new ArgumentNullException(nameof(deliveryJobRepo));
         _logger = logger ?? NullLogger<JobReconciliationService>.Instance;
     }
 
-    public async Task<ReconciliationReport> ReconcileSuppressedJobsAsync(bool dryRun, CancellationToken cancellationToken = default)
+    public async Task<ReconciliationCandidateReport> GetCandidatesAsync(int limit = 100, CancellationToken cancellationToken = default)
     {
-        var candidateJobsQuery = _dbContext.DeliveryJobs
-            .Include(j => j.Notification)
-            .Where(j => j.Status == "Suppressed"
-                     && j.LastErrorCode == "STALE_ACTION_SUPPRESSED"
-                     && j.DispatchStartedAt == null
-                     && j.Notification != null
-                     && ResultNotificationTypes.Contains(j.Notification.NotificationType));
+        var boundedLimit = Math.Min(Math.Max(1, limit), 100);
+        var candidateIds = await _deliveryJobRepo.GetReconciliationCandidateJobIdsAsync(
+            EligibleNotificationTypes,
+            EligibleErrorCodes,
+            boundedLimit,
+            cancellationToken);
 
-        if (dryRun)
+        _logger.LogInformation("JobReconciliationService: identified {Count} candidate jobs for reconciliation (limit={Limit}).",
+            candidateIds.Count, boundedLimit);
+
+        return new ReconciliationCandidateReport(candidateIds.Count, candidateIds);
+    }
+
+    public async Task<ReconciliationExecutionReport> RequeueJobsAsync(
+        IReadOnlyList<Guid> jobIds,
+        string operatorId,
+        CancellationToken cancellationToken = default)
+    {
+        if (jobIds == null || jobIds.Count == 0)
         {
-            var candidateJobIds = await candidateJobsQuery
-                .Select(j => j.Id)
-                .ToListAsync(cancellationToken);
-
-            _logger.LogInformation("JobReconciliationService dry-run: tìm thấy {Count} candidate jobs.", candidateJobIds.Count);
-
-            return new ReconciliationReport(
-                DryRun: true,
-                CandidateCount: candidateJobIds.Count,
-                ReconciledCount: 0,
-                JobIds: candidateJobIds,
-                Message: $"Dry run: {candidateJobIds.Count} candidate jobs identified for reconciliation.");
+            return new ReconciliationExecutionReport(operatorId ?? "unknown", 0, 0, Array.Empty<Guid>(), "No job IDs provided.");
         }
 
-        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
-
-        var jobsToReconcile = await candidateJobsQuery.ToListAsync(cancellationToken);
-        var now = DateTimeOffset.UtcNow;
-        var reconciledIds = new List<Guid>(jobsToReconcile.Count);
-
-        foreach (var job in jobsToReconcile)
+        if (string.IsNullOrWhiteSpace(operatorId))
         {
-            job.Status = "Pending";
-            job.LastErrorCode = null;
-            job.LastErrorDetail = $"Reconciled from STALE_ACTION_SUPPRESSED at {now:O} (audit: false suppression fix)";
-            job.NextAttemptAt = now;
-            job.LeaseToken = null;
-            job.LeaseExpiresAt = null;
-            job.UpdatedAt = now;
-            reconciledIds.Add(job.Id);
+            throw new ArgumentException("Operator ID or run ID is mandatory for job reconciliation execution.", nameof(operatorId));
         }
 
-        if (reconciledIds.Count > 0)
-        {
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-        }
+        var boundedJobIds = jobIds.Take(100).Distinct().ToList();
 
-        await tx.CommitAsync(cancellationToken);
+        var affected = await _deliveryJobRepo.RequeueReconciliationJobsAsync(
+            boundedJobIds,
+            EligibleNotificationTypes,
+            EligibleErrorCodes,
+            operatorId,
+            cancellationToken);
 
-        _logger.LogInformation("JobReconciliationService đã khôi phục {Count} jobs về trạng thái Pending.", reconciledIds.Count);
+        _logger.LogInformation("JobReconciliationService: operator '{OperatorId}' requeued {Affected}/{Requested} jobs.",
+            operatorId, affected, boundedJobIds.Count);
 
-        return new ReconciliationReport(
-            DryRun: false,
-            CandidateCount: reconciledIds.Count,
-            ReconciledCount: reconciledIds.Count,
-            JobIds: reconciledIds,
-            Message: $"Successfully reconciled {reconciledIds.Count} jobs to Pending.");
+        return new ReconciliationExecutionReport(
+            OperatorId: operatorId,
+            RequestedCount: boundedJobIds.Count,
+            ReconciledCount: affected,
+            ReconciledJobIds: boundedJobIds,
+            Message: $"Successfully requeued {affected} jobs to Pending.");
     }
 }

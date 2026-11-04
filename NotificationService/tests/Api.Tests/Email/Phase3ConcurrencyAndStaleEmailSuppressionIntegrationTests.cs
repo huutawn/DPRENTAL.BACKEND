@@ -1285,53 +1285,93 @@ public sealed class Phase3ConcurrencyAndStaleEmailSuppressionIntegrationTests
                 return (nId, jId);
             }
 
-            // 4 eligible result notifications:
+            // 5 eligible result notifications (including both error codes):
             var (_, jobPaidId) = await CreateSuppressedJobAsync("ORDER_PAID");
             var (_, jobCompletedId) = await CreateSuppressedJobAsync("ORDER_COMPLETED");
             var (_, jobRefundId) = await CreateSuppressedJobAsync("REFUND_COMPLETED");
             var (_, jobPayoutId) = await CreateSuppressedJobAsync("PAYOUT_COMPLETED");
 
-            // 2 ineligible jobs:
+            // Also test STALE_EVENT_TERMINATED error code:
+            var nTermId = Guid.NewGuid();
+            var jobTerminatedId = Guid.NewGuid();
+            var notifTerm = new Notification
+            {
+                Id = nTermId,
+                OrderId = orderId,
+                RecipientUserId = userId,
+                NotificationType = "ORDER_COMPLETED",
+                Category = "ORDER",
+                Severity = "SUCCESS",
+                Title = "Order Completed Terminated",
+                Body = "Body",
+                ResourceType = "RentalOrder",
+                ResourceId = orderId.ToString(),
+                SourceEventId = Guid.NewGuid(),
+                SourceProducer = "RentalService",
+                SourceEventType = "RentalOrderCompleted",
+                EventVersion = 1,
+                TemplateCode = "ORDER_COMPLETED",
+                TemplateVersion = "1.0",
+                OccurredAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            var jobTerm = new NotificationDeliveryJob
+            {
+                Id = jobTerminatedId,
+                NotificationId = nTermId,
+                Channel = "EMAIL",
+                RecipientUserId = userId,
+                Status = "Suppressed",
+                LastErrorCode = "STALE_EVENT_TERMINATED",
+                LastErrorDetail = "Terminated suppression",
+                MaxAttempts = 5,
+                AttemptCount = 0,
+                NextAttemptAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            await context.Notifications.AddAsync(notifTerm);
+            await context.DeliveryJobs.AddAsync(jobTerm);
+
+            // Ineligible jobs:
             var (_, jobCreatedId) = await CreateSuppressedJobAsync("ORDER_CREATED"); // not a result notification
             var (_, jobDispatchedId) = await CreateSuppressedJobAsync("ORDER_PAID", dispatchStartedAt: DateTimeOffset.UtcNow); // dispatch started
 
             await context.SaveChangesAsync();
 
-            var uow = new UnitOfWork(context);
-            var reconciler = new JobReconciliationService(context, uow);
+            var deliveryRepo = new DeliveryJobRepository(context);
+            var reconciler = new JobReconciliationService(deliveryRepo);
 
-            // 1. Dry run
-            var dryRunReport = await reconciler.ReconcileSuppressedJobsAsync(dryRun: true);
-            Assert.True(dryRunReport.DryRun);
-            Assert.Equal(4, dryRunReport.CandidateCount);
-            Assert.Equal(0, dryRunReport.ReconciledCount);
-            Assert.Contains(jobPaidId, dryRunReport.JobIds);
-            Assert.Contains(jobCompletedId, dryRunReport.JobIds);
-            Assert.Contains(jobRefundId, dryRunReport.JobIds);
-            Assert.Contains(jobPayoutId, dryRunReport.JobIds);
-            Assert.DoesNotContain(jobCreatedId, dryRunReport.JobIds);
-            Assert.DoesNotContain(jobDispatchedId, dryRunReport.JobIds);
+            // 1. Candidate lookup (Dry-run projection)
+            var candidateReport = await reconciler.GetCandidatesAsync(100);
+            Assert.Equal(5, candidateReport.TotalCandidates);
+            Assert.Contains(jobPaidId, candidateReport.CandidateJobIds);
+            Assert.Contains(jobCompletedId, candidateReport.CandidateJobIds);
+            Assert.Contains(jobRefundId, candidateReport.CandidateJobIds);
+            Assert.Contains(jobPayoutId, candidateReport.CandidateJobIds);
+            Assert.Contains(jobTerminatedId, candidateReport.CandidateJobIds);
+            Assert.DoesNotContain(jobCreatedId, candidateReport.CandidateJobIds);
+            Assert.DoesNotContain(jobDispatchedId, candidateReport.CandidateJobIds);
 
-            // Verify DB unchanged after dry run
+            // Verify DB unchanged after candidate check
             var dbJobPaid = await context.DeliveryJobs.AsNoTracking().FirstAsync(j => j.Id == jobPaidId);
             Assert.Equal("Suppressed", dbJobPaid.Status);
 
-            // 2. Requeue execution
-            var requeueReport = await reconciler.ReconcileSuppressedJobsAsync(dryRun: false);
-            Assert.False(requeueReport.DryRun);
-            Assert.Equal(4, requeueReport.CandidateCount);
-            Assert.Equal(4, requeueReport.ReconciledCount);
+            // 2. Requeue execution with operator ID
+            var requeueReport = await reconciler.RequeueJobsAsync(candidateReport.CandidateJobIds, "operator-maint-01");
+            Assert.Equal(5, requeueReport.RequestedCount);
+            Assert.Equal(5, requeueReport.ReconciledCount);
 
             // Verify eligible jobs reset to Pending with audit message
-            var eligibleIds = new[] { jobPaidId, jobCompletedId, jobRefundId, jobPayoutId };
+            var eligibleIds = new[] { jobPaidId, jobCompletedId, jobRefundId, jobPayoutId, jobTerminatedId };
             var reconciledJobs = await context.DeliveryJobs.AsNoTracking().Where(j => eligibleIds.Contains(j.Id)).ToListAsync();
-            Assert.Equal(4, reconciledJobs.Count);
+            Assert.Equal(5, reconciledJobs.Count);
             foreach (var rJob in reconciledJobs)
             {
                 Assert.Equal("Pending", rJob.Status);
                 Assert.Null(rJob.LastErrorCode);
                 Assert.NotNull(rJob.LastErrorDetail);
-                Assert.Contains("Reconciled from STALE_ACTION_SUPPRESSED", rJob.LastErrorDetail);
+                Assert.Contains("Requeued by op:operator-maint-01", rJob.LastErrorDetail);
                 Assert.Null(rJob.LeaseToken);
                 Assert.Null(rJob.LeaseExpiresAt);
             }
@@ -1344,9 +1384,190 @@ public sealed class Phase3ConcurrencyAndStaleEmailSuppressionIntegrationTests
             Assert.Equal("Suppressed", dbJobDispatched.Status);
 
             // 3. Idempotency: second run finds 0 candidates
-            var secondRunReport = await reconciler.ReconcileSuppressedJobsAsync(dryRun: false);
-            Assert.Equal(0, secondRunReport.CandidateCount);
-            Assert.Equal(0, secondRunReport.ReconciledCount);
+            var secondRunReport = await reconciler.GetCandidatesAsync(100);
+            Assert.Equal(0, secondRunReport.TotalCandidates);
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
+    }
+
+    [Fact]
+    public async Task Reconciliation_WhenWorkerClaimsJobBetweenCandidateAndExecute_DoesNotOverwriteWorkerLease()
+    {
+        var dbName = "notif_p3_reconcile_race_" + Guid.NewGuid().ToString("N")[..8];
+        await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            await using var context = new NotificationServiceDbContext(options);
+            await context.Database.MigrateAsync();
+
+            var orderId = Guid.NewGuid();
+            var notifId = Guid.NewGuid();
+            var jobId = Guid.NewGuid();
+            var userId = Guid.NewGuid();
+
+            var notif = new Notification
+            {
+                Id = notifId,
+                OrderId = orderId,
+                RecipientUserId = userId,
+                NotificationType = "ORDER_COMPLETED",
+                Category = "ORDER",
+                Severity = "SUCCESS",
+                Title = "Order Completed",
+                Body = "Body",
+                ResourceType = "RentalOrder",
+                ResourceId = orderId.ToString(),
+                SourceEventId = Guid.NewGuid(),
+                SourceProducer = "RentalService",
+                SourceEventType = "RentalOrderCompleted",
+                EventVersion = 1,
+                TemplateCode = "ORDER_COMPLETED",
+                TemplateVersion = "1.0",
+                OccurredAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            var job = new NotificationDeliveryJob
+            {
+                Id = jobId,
+                NotificationId = notifId,
+                Channel = "EMAIL",
+                RecipientUserId = userId,
+                Status = "Suppressed",
+                LastErrorCode = "STALE_ACTION_SUPPRESSED",
+                LastErrorDetail = "Legacy false suppression",
+                MaxAttempts = 5,
+                AttemptCount = 0,
+                NextAttemptAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+
+            await context.Notifications.AddAsync(notif);
+            await context.DeliveryJobs.AddAsync(job);
+            await context.SaveChangesAsync();
+
+            var deliveryRepo = new DeliveryJobRepository(context);
+            var reconciler = new JobReconciliationService(deliveryRepo);
+
+            // 1. Reconciler fetches candidates
+            var candidates = await reconciler.GetCandidatesAsync(100);
+            Assert.Contains(jobId, candidates.CandidateJobIds);
+
+            // 2. Worker claims job in background before reconciler executes requeue
+            var workerLeaseToken = "worker-lease-" + Guid.NewGuid().ToString("N");
+            var leaseExpiry = DateTimeOffset.UtcNow.AddMinutes(5);
+            await using (var workerContext = new NotificationServiceDbContext(options))
+            {
+                var workerJob = await workerContext.DeliveryJobs.FirstAsync(j => j.Id == jobId);
+                workerJob.Status = "Processing";
+                workerJob.LeaseToken = workerLeaseToken;
+                workerJob.LeaseExpiresAt = leaseExpiry;
+                await workerContext.SaveChangesAsync();
+            }
+
+            // 3. Reconciler executes requeue on the candidate list
+            var report = await reconciler.RequeueJobsAsync(candidates.CandidateJobIds, "operator-race-test");
+            // The job is in Processing with active lease -> conditional update affects 0 rows!
+            Assert.Equal(0, report.ReconciledCount);
+
+            // The worker lease MUST NOT have been overwritten back to Pending!
+            await using (var checkContext = new NotificationServiceDbContext(options))
+            {
+                var checkJob = await checkContext.DeliveryJobs.AsNoTracking().FirstAsync(j => j.Id == jobId);
+                Assert.Equal("Processing", checkJob.Status);
+                Assert.Equal(workerLeaseToken, checkJob.LeaseToken);
+                Assert.NotNull(checkJob.LeaseExpiresAt);
+            }
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
+    }
+
+    [Fact]
+    public async Task Reconciliation_TwoConcurrentReconcilers_OnlyOneSucceeds()
+    {
+        var dbName = "notif_p3_two_reconcilers_" + Guid.NewGuid().ToString("N")[..8];
+        await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            await using var context = new NotificationServiceDbContext(options);
+            await context.Database.MigrateAsync();
+
+            var orderId = Guid.NewGuid();
+            var notifId = Guid.NewGuid();
+            var jobId = Guid.NewGuid();
+            var userId = Guid.NewGuid();
+
+            var notif = new Notification
+            {
+                Id = notifId,
+                OrderId = orderId,
+                RecipientUserId = userId,
+                NotificationType = "REFUND_COMPLETED",
+                Category = "FINANCIAL",
+                Severity = "INFO",
+                Title = "Refund",
+                Body = "Body",
+                ResourceType = "RentalOrder",
+                ResourceId = orderId.ToString(),
+                SourceEventId = Guid.NewGuid(),
+                SourceProducer = "PaymentService",
+                SourceEventType = "RefundCompleted",
+                EventVersion = 1,
+                TemplateCode = "REFUND_COMPLETED",
+                TemplateVersion = "1.0",
+                OccurredAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            var job = new NotificationDeliveryJob
+            {
+                Id = jobId,
+                NotificationId = notifId,
+                Channel = "EMAIL",
+                RecipientUserId = userId,
+                Status = "Suppressed",
+                LastErrorCode = "STALE_ACTION_SUPPRESSED",
+                LastErrorDetail = "False suppression",
+                MaxAttempts = 5,
+                AttemptCount = 0,
+                NextAttemptAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+
+            await context.Notifications.AddAsync(notif);
+            await context.DeliveryJobs.AddAsync(job);
+            await context.SaveChangesAsync();
+
+            await using var ctx1 = new NotificationServiceDbContext(options);
+            await using var ctx2 = new NotificationServiceDbContext(options);
+            var rec1 = new JobReconciliationService(new DeliveryJobRepository(ctx1));
+            var rec2 = new JobReconciliationService(new DeliveryJobRepository(ctx2));
+
+            var targetIds = new[] { jobId };
+            var task1 = rec1.RequeueJobsAsync(targetIds, "op-1");
+            var task2 = rec2.RequeueJobsAsync(targetIds, "op-2");
+
+            var results = await Task.WhenAll(task1, task2);
+            var totalReconciled = results[0].ReconciledCount + results[1].ReconciledCount;
+            Assert.Equal(1, totalReconciled);
         }
         finally
         {

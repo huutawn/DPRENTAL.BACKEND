@@ -64,17 +64,22 @@ public static class StaleActionSuppressionPolicy
                 Reason: null);
         }
 
-        // Trường hợp 1: Order/Aggregate đã ở trạng thái terminal (CANCELLED, COMPLETED, EXPIRED, REJECTED)
-        // PAID milestone KHÔNG coi là terminal
-        var isPaidMilestone = aggregateState.IsPaid || string.Equals(aggregateState.TerminalState, "PAID", StringComparison.OrdinalIgnoreCase);
-        var isTerminal = !isPaidMilestone && (
-            (!string.IsNullOrWhiteSpace(aggregateState.TerminalState) && TerminalStates.Contains(aggregateState.TerminalState)) ||
-            (aggregateState.IsTerminal && (string.IsNullOrWhiteSpace(aggregateState.TerminalState) || TerminalStates.Contains(aggregateState.TerminalState)))
-        );
+        // 1. Terminal state thật: EXPIRED, CANCELLED, COMPLETED, REJECTED, RETURNED
+        // PAID chỉ là milestone thanh toán, KHÔNG được coi là terminal và KHÔNG được phủ định terminal state thật
+        var actualTerminalState = !string.IsNullOrWhiteSpace(aggregateState.TerminalState) &&
+                                  !string.Equals(aggregateState.TerminalState, "PAID", StringComparison.OrdinalIgnoreCase)
+            ? aggregateState.TerminalState
+            : null;
+
+        var isTerminal = (actualTerminalState != null && TerminalStates.Contains(actualTerminalState)) ||
+                         (aggregateState.IsTerminal && actualTerminalState != null);
 
         if (isTerminal)
         {
-            var terminal = !string.IsNullOrWhiteSpace(aggregateState.TerminalState) ? aggregateState.TerminalState.ToUpperInvariant() : "TERMINAL";
+            var terminal = actualTerminalState!.ToUpperInvariant();
+            var scopeName = string.Equals(aggregateState.Scope, NotificationWatermarkScope.RentalItem, StringComparison.OrdinalIgnoreCase)
+                ? "Thiết bị thuê"
+                : "Đơn thuê";
 
             // Khi ở trạng thái terminal, CHỈ chặn các thông báo có tính hành động (actionable)
             if (ActionableNotificationTypes.Contains(notificationType))
@@ -83,7 +88,7 @@ public static class StaleActionSuppressionPolicy
                     IsStale: true,
                     SuppressAction: true,
                     SuppressEmail: true,
-                    Reason: $"Đơn thuê đã ở trạng thái kết thúc ({terminal}).");
+                    Reason: $"{scopeName} đã ở trạng thái kết thúc ({terminal}).");
             }
 
             return new StaleEvaluationResult(
@@ -93,8 +98,9 @@ public static class StaleActionSuppressionPolicy
                 Reason: null);
         }
 
-        // Trường hợp 2: Milestone PAID (đã thanh toán)
+        // 2. Milestone PAID (đã thanh toán)
         // Ghi nhận mốc thanh toán; chặn CTA thanh toán của ORDER_CREATED nhưng KHÔNG chặn xác nhận của nhà cung cấp và KHÔNG coi là terminal
+        var isPaidMilestone = aggregateState.IsPaid || string.Equals(aggregateState.TerminalState, "PAID", StringComparison.OrdinalIgnoreCase);
         if (isPaidMilestone)
         {
             if (notificationType is "ORDER_CREATED")
@@ -107,7 +113,7 @@ public static class StaleActionSuppressionPolicy
             }
         }
 
-        // Trường hợp 3: incomingOrderVersion nhỏ hơn phiên bản watermark hiện tại
+        // 3. incomingOrderVersion nhỏ hơn phiên bản watermark hiện tại trong cùng scope
         if (incomingOrderVersion > 0 && incomingOrderVersion < aggregateState.MaxVersion)
         {
             var suppressAction = ActionableNotificationTypes.Contains(notificationType);
@@ -140,38 +146,63 @@ public static class StaleActionSuppressionPolicy
             return Evaluate(notificationType, incomingOrderVersion, currentAggregateState);
         }
 
+        // 1. Đánh giá trạng thái parent order (terminal & paid) - TUYỆT ĐỐI không dùng version parent order để so sánh với version con
         if (parentOrderAggregateState != null)
         {
-            var orderEval = Evaluate(notificationType, incomingOrderVersion, parentOrderAggregateState);
-            if (orderEval.SuppressAction || orderEval.SuppressEmail)
+            var orderTerminalState = !string.IsNullOrWhiteSpace(parentOrderAggregateState.TerminalState) &&
+                                     !string.Equals(parentOrderAggregateState.TerminalState, "PAID", StringComparison.OrdinalIgnoreCase)
+                ? parentOrderAggregateState.TerminalState
+                : null;
+
+            var isOrderTerminal = (orderTerminalState != null && TerminalStates.Contains(orderTerminalState)) ||
+                                  (parentOrderAggregateState.IsTerminal && orderTerminalState != null);
+
+            if (isOrderTerminal && ActionableNotificationTypes.Contains(notificationType))
             {
-                return orderEval;
+                return new StaleEvaluationResult(
+                    IsStale: true,
+                    SuppressAction: true,
+                    SuppressEmail: true,
+                    Reason: $"Đơn thuê đã ở trạng thái kết thúc ({orderTerminalState!.ToUpperInvariant()}).");
+            }
+
+            var isOrderPaid = parentOrderAggregateState.IsPaid || string.Equals(parentOrderAggregateState.TerminalState, "PAID", StringComparison.OrdinalIgnoreCase);
+            if (isOrderPaid && notificationType is "ORDER_CREATED")
+            {
+                return new StaleEvaluationResult(
+                    IsStale: true,
+                    SuppressAction: true,
+                    SuppressEmail: true,
+                    Reason: "Đơn thuê đã hoàn tất thanh toán (mốc PAID).");
             }
         }
 
+        // 2. Đánh giá trạng thái parent item (returned / completed / terminal) - TUYỆT ĐỐI không dùng version item so sánh với ReturnRequest
         if (parentItemAggregateState != null)
         {
-            var isItemTerminal = parentItemAggregateState.IsTerminal ||
-                (!string.IsNullOrWhiteSpace(parentItemAggregateState.TerminalState) && TerminalStates.Contains(parentItemAggregateState.TerminalState));
+            var itemTerminalState = !string.IsNullOrWhiteSpace(parentItemAggregateState.TerminalState) &&
+                                    !string.Equals(parentItemAggregateState.TerminalState, "PAID", StringComparison.OrdinalIgnoreCase)
+                ? parentItemAggregateState.TerminalState
+                : null;
+
+            var isItemTerminal = (itemTerminalState != null && TerminalStates.Contains(itemTerminalState)) ||
+                                 (parentItemAggregateState.IsTerminal && itemTerminalState != null);
 
             if (isItemTerminal)
             {
                 if (string.Equals(notificationType, "RETURN_CONFIRMATION_OVERDUE_SUPPLIER", StringComparison.OrdinalIgnoreCase) ||
                     ActionableNotificationTypes.Contains(notificationType))
                 {
-                    var itemTerminalState = !string.IsNullOrWhiteSpace(parentItemAggregateState.TerminalState)
-                        ? parentItemAggregateState.TerminalState.ToUpperInvariant()
-                        : "TERMINAL";
-
                     return new StaleEvaluationResult(
                         IsStale: true,
                         SuppressAction: true,
                         SuppressEmail: true,
-                        Reason: $"Thiết bị thuê đã ở trạng thái kết thúc ({itemTerminalState}).");
+                        Reason: $"Thiết bị thuê đã ở trạng thái kết thúc ({itemTerminalState!.ToUpperInvariant()}).");
                 }
             }
         }
 
+        // 3. Đánh giá trạng thái và version của chính aggregate hiện tại
         return Evaluate(notificationType, incomingOrderVersion, currentAggregateState);
     }
     /// <summary>

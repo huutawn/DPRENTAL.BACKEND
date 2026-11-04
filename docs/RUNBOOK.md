@@ -150,27 +150,31 @@ Do NOT run `database update 0` as that would drop all tables and destroy audit h
 
 Due to previous blanket suppression on terminal states, informational result notifications (`ORDER_PAID`, `ORDER_COMPLETED`, `REFUND_COMPLETED`, `PAYOUT_COMPLETED`) may have had their email delivery jobs suppressed with `errorCode = 'STALE_ACTION_SUPPRESSED'`.
 
-### 6.1. Dry-Run Audit
-Inject `IJobReconciliationService` or run via operational CLI/endpoint with `dryRun = true`:
+### 6.1. Candidate Audit (Dry-Run Projection)
+Inject `IJobReconciliationService` or run via operational CLI/endpoint:
 ```csharp
-var report = await reconciliationService.ReconcileSuppressedJobsAsync(dryRun: true);
+var candidateReport = await reconciliationService.GetCandidatesAsync(limit: 100);
 logger.LogInformation("Dry-run audit: Found {Count} candidate suppressed jobs to requeue: {@JobIds}",
-    report.CandidateJobIds.Count, report.CandidateJobIds);
+    candidateReport.TotalCandidates, candidateReport.CandidateJobIds);
 ```
-- Verifies exact counts and job IDs before taking any mutation action.
-- Disregards jobs that have already started dispatch (`DispatchStartedAt != null`) or had uncertain SMTP outcomes.
+- Evaluates both legacy error codes: `STALE_ACTION_SUPPRESSED` and `STALE_EVENT_TERMINATED`.
+- Verifies exact counts and job IDs before taking any mutation action (capped at 100 per request).
+- Strictly excludes jobs with `DispatchStartedAt != null`, `SentAt != null`, `ProviderMessageId != null`, active leases (`LeaseExpiresAt > now`), or exhausted retry budgets (`AttemptCount >= MaxAttempts`).
 
 ### 6.2. Controlled Requeue Execution
-When approved during a maintenance window:
+When approved during a maintenance window with a mandatory operator/run ID:
 ```csharp
-var report = await reconciliationService.ReconcileSuppressedJobsAsync(dryRun: false);
-logger.LogInformation("Reconciliation executed: Requeued {Count} jobs: {@JobIds}",
-    report.CandidateJobIds.Count, report.CandidateJobIds);
-```
-- Resets eligible jobs to `status = 'Pending'`, `lease_token = NULL`, `lease_expires_at = NULL`.
-- Records audit trail in `last_error_detail` (`"Requeued by JobReconciliationService: previously suppressed by legacy terminal check"`).
-- Completely idempotent: running a second time finds 0 candidates.
+var execReport = await reconciliationService.RequeueJobsAsync(
+    candidateReport.CandidateJobIds,
+    operatorId: "operator-maint-20261104-01");
 
+logger.LogInformation("Reconciliation executed: Operator '{Op}' requeued {Reconciled}/{Requested} jobs.",
+    execReport.OperatorId, execReport.ReconciledCount, execReport.RequestedCount);
+```
+- Atomic conditional update via `DeliveryJobRepository`: if a background worker or another reconciler changed the job state in the interim, the update affects 0 rows and worker leases are preserved.
+- Resets eligible jobs to `status = 'Pending'`, `lease_token = NULL`, `lease_expires_at = NULL`.
+- Records non-PII audit trail in `last_error_detail` (`"Requeued by op:{operatorId} at {timestamp}; prev_code:{prevCode}"`).
+- Completely idempotent: running a second time finds 0 candidates.
 ---
 
 ## 7. Realtime & Redis Backplane Configuration

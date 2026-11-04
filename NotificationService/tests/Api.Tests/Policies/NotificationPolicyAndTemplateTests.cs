@@ -706,4 +706,57 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.NotNull(completedResult.Value.EmailSubject);
         Assert.NotNull(completedResult.Value.EmailBody);
     }
+
+    [Fact]
+    public void StaleActionSuppressionPolicy_WhenPaidAndCancelled_ActionableNotificationsAreSuppressed()
+    {
+        var aggregateState = new AggregateStateProjection(
+            Scope: NotificationWatermarkScope.RentalOrder,
+            AggregateId: Guid.NewGuid(),
+            MaxVersion: 3,
+            IsPaid: true,
+            IsTerminal: true,
+            TerminalState: "CANCELLED",
+            TerminalVersion: 3);
+
+        var result = StaleActionSuppressionPolicy.Evaluate("SUPPLIER_CONFIRMATION_REQUIRED", incomingOrderVersion: 2, aggregateState);
+
+        Assert.True(result.IsStale);
+        Assert.True(result.SuppressAction);
+        Assert.True(result.SuppressEmail);
+        Assert.Contains("CANCELLED", result.Reason);
+    }
+
+    [Fact]
+    public void StaleActionSuppressionPolicy_WhenParentOrderHasHigherVersionDueToAnotherItem_DoesNotSuppressCurrentItemAction()
+    {
+        var parentOrder = new AggregateStateProjection(
+            Scope: NotificationWatermarkScope.RentalOrder,
+            AggregateId: Guid.NewGuid(),
+            MaxVersion: 5,
+            IsPaid: true,
+            IsTerminal: false,
+            TerminalState: null,
+            TerminalVersion: null);
+
+        var currentItem = new AggregateStateProjection(
+            Scope: NotificationWatermarkScope.RentalItem,
+            AggregateId: Guid.NewGuid(),
+            MaxVersion: 1,
+            IsPaid: false,
+            IsTerminal: false,
+            TerminalState: null,
+            TerminalVersion: null);
+
+        var result = StaleActionSuppressionPolicy.EvaluateWithParentState(
+            "HANDOVER_OVERDUE_SUPPLIER",
+            incomingOrderVersion: 1,
+            currentAggregateState: currentItem,
+            parentItemAggregateState: null,
+            parentOrderAggregateState: parentOrder);
+
+        Assert.False(result.IsStale);
+        Assert.False(result.SuppressAction);
+        Assert.False(result.SuppressEmail);
+    }
 }

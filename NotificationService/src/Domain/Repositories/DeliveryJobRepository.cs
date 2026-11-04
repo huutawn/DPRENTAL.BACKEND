@@ -425,4 +425,107 @@ WHERE id IN (
             return jobs.Count;
         }
     }
+
+    public async Task<IReadOnlyList<Guid>> GetReconciliationCandidateJobIdsAsync(
+        IReadOnlyCollection<string> eligibleNotificationTypes,
+        IReadOnlyCollection<string> eligibleErrorCodes,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        var effectiveLimit = Math.Min(Math.Max(1, limit), 100);
+        var now = DateTimeOffset.UtcNow;
+
+        return await _dbContext.DeliveryJobs
+            .AsNoTracking()
+            .Where(j => j.Channel == "EMAIL"
+                     && j.Status == "Suppressed"
+                     && j.LastErrorCode != null
+                     && eligibleErrorCodes.Contains(j.LastErrorCode)
+                     && j.DispatchStartedAt == null
+                     && j.SentAt == null
+                     && j.ProviderMessageId == null
+                     && (j.LeaseExpiresAt == null || j.LeaseExpiresAt <= now)
+                     && j.AttemptCount < j.MaxAttempts
+                     && j.Notification != null
+                     && eligibleNotificationTypes.Contains(j.Notification.NotificationType))
+            .OrderBy(j => j.CreatedAt)
+            .Select(j => j.Id)
+            .Take(effectiveLimit)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<int> RequeueReconciliationJobsAsync(
+        IReadOnlyList<Guid> jobIds,
+        IReadOnlyCollection<string> eligibleNotificationTypes,
+        IReadOnlyCollection<string> eligibleErrorCodes,
+        string operatorId,
+        CancellationToken cancellationToken = default)
+    {
+        if (jobIds == null || jobIds.Count == 0) return 0;
+        var targetIds = jobIds.Take(100).Distinct().ToList();
+        var now = DateTimeOffset.UtcNow;
+        var sanitizedOp = string.IsNullOrWhiteSpace(operatorId) ? "unknown" : operatorId.Trim();
+
+        if (_dbContext.Database.IsNpgsql())
+        {
+            var auditDetail = $"Requeued by op:{sanitizedOp} at {now:O} (audit: false suppression fix)";
+            return await _dbContext.DeliveryJobs
+                .Where(j => targetIds.Contains(j.Id)
+                         && j.Channel == "EMAIL"
+                         && j.Status == "Suppressed"
+                         && j.LastErrorCode != null
+                         && eligibleErrorCodes.Contains(j.LastErrorCode)
+                         && j.DispatchStartedAt == null
+                         && j.SentAt == null
+                         && j.ProviderMessageId == null
+                         && (j.LeaseExpiresAt == null || j.LeaseExpiresAt <= now)
+                         && j.AttemptCount < j.MaxAttempts
+                         && j.Notification != null
+                         && eligibleNotificationTypes.Contains(j.Notification.NotificationType))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.Status, "Pending")
+                    .SetProperty(j => j.NextAttemptAt, now)
+                    .SetProperty(j => j.LeaseToken, (string?)null)
+                    .SetProperty(j => j.LeaseExpiresAt, (DateTimeOffset?)null)
+                    .SetProperty(j => j.LastErrorDetail, auditDetail)
+                    .SetProperty(j => j.LastErrorCode, (string?)null)
+                    .SetProperty(j => j.UpdatedAt, now),
+                    cancellationToken);
+        }
+        else
+        {
+            var jobs = await _dbContext.DeliveryJobs
+                .Where(j => targetIds.Contains(j.Id)
+                         && j.Channel == "EMAIL"
+                         && j.Status == "Suppressed"
+                         && j.LastErrorCode != null
+                         && eligibleErrorCodes.Contains(j.LastErrorCode)
+                         && j.DispatchStartedAt == null
+                         && j.SentAt == null
+                         && j.ProviderMessageId == null
+                         && (j.LeaseExpiresAt == null || j.LeaseExpiresAt <= now)
+                         && j.AttemptCount < j.MaxAttempts
+                         && j.Notification != null
+                         && eligibleNotificationTypes.Contains(j.Notification.NotificationType))
+                .ToListAsync(cancellationToken);
+
+            foreach (var job in jobs)
+            {
+                job.Status = "Pending";
+                job.NextAttemptAt = now;
+                job.LastErrorDetail = $"Requeued by op:{sanitizedOp} at {now:O}; prev_code:{job.LastErrorCode}";
+                job.LastErrorCode = null;
+                job.LeaseToken = null;
+                job.LeaseExpiresAt = null;
+                job.UpdatedAt = now;
+            }
+
+            if (jobs.Count > 0)
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+
+            return jobs.Count;
+        }
+    }
 }
