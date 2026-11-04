@@ -10,9 +10,7 @@ public static class KafkaEnvelopeValidator
         "RentalService",
         "rental-service",
         "PaymentService",
-        "payment-service",
-        "ReviewService",
-        "review-service"
+        "payment-service"
     };
 
     public const int ExpectedVersion = 1;
@@ -39,14 +37,14 @@ public static class KafkaEnvelopeValidator
             return Result.Failure(Error.Validation("INVALID_PRODUCER", $"Producer không hợp lệ: '{envelope.Producer}'. Phải thuộc danh sách producer được ủy quyền."));
         }
 
-        if (envelope.Version <= 0)
+        if (envelope.Version != ExpectedVersion)
         {
-            return Result.Failure(Error.Validation("UNSUPPORTED_VERSION", $"Version '{envelope.Version}' không được hỗ trợ. Version phải > 0."));
+            return Result.Failure(Error.Validation("UNSUPPORTED_VERSION", $"Version '{envelope.Version}' không được hỗ trợ. Version phải = {ExpectedVersion}."));
         }
 
-        if (envelope.OccurredAt == default)
+        if (envelope.OccurredAt == default || envelope.OccurredAt.Offset != TimeSpan.Zero)
         {
-            return Result.Failure(Error.Validation("INVALID_OCCURRED_AT", "OccurredAt không hợp lệ."));
+            return Result.Failure(Error.Validation("INVALID_OCCURRED_AT", "OccurredAt phải là thời gian UTC hợp lệ và khác default."));
         }
 
         return Result.Success();

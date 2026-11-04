@@ -394,7 +394,8 @@ public sealed class NotificationIngestionTests
 
         for (var i = 0; i < fixtures.Length; i++)
         {
-            var outcome = await service.IngestMessageAsync(fixtures[i], "rental.events.v1", 0, i + 1);
+            var topic = (i == 9 || i == 10) ? "payment.analytics.v1" : "rental.events.v1";
+            var outcome = await service.IngestMessageAsync(fixtures[i], topic, 0, i + 1);
             Assert.Equal(IngestionOutcome.Processed, outcome);
         }
 
@@ -556,7 +557,7 @@ public sealed class NotificationIngestionTests
 
         var raw = ProducerFixtures.RefundCompletedFinancial(messageId, refundId, orderId, renterId, amount: 2500000m);
 
-        var outcome = await service.IngestMessageAsync(raw, "payment.events.v1", 0, 12);
+        var outcome = await service.IngestMessageAsync(raw, "payment.analytics.v1", 0, 12);
         Assert.Equal(IngestionOutcome.Processed, outcome);
 
         var receipt = await db.InboxReceipts.FirstOrDefaultAsync(r => r.MessageId == messageId);
@@ -594,7 +595,7 @@ public sealed class NotificationIngestionTests
 
         var raw = ProducerFixtures.SupplierPayoutCompleted(messageId, payoutId, settlementId, itemId, supplierId, amount: 850000m);
 
-        var outcome = await service.IngestMessageAsync(raw, "payment.events.v1", 0, 13);
+        var outcome = await service.IngestMessageAsync(raw, "payment.analytics.v1", 0, 13);
         Assert.Equal(IngestionOutcome.Processed, outcome);
 
         var receipt = await db.InboxReceipts.FirstOrDefaultAsync(r => r.MessageId == messageId);

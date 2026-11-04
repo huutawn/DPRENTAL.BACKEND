@@ -24,7 +24,6 @@ public interface IAuthContactClient
 public sealed class AuthContactClient : IAuthContactClient
 {
     public const string ApiKeyHeaderName = "X-Api-Key";
-    public const string DefaultApiKey = "dev-internal-api-key-dprental-2026";
     public const string BatchEndpoint = "/api/v1/auth/internal/users/notification-contacts:batch";
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
 
@@ -36,7 +35,12 @@ public sealed class AuthContactClient : IAuthContactClient
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _apiKey = configuration["InternalAuthentication:ApiKey"] ?? DefaultApiKey;
+        var apiKey = configuration["InternalAuthentication:ApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new InvalidOperationException("Thiếu cấu hình InternalAuthentication:ApiKey.");
+        }
+        _apiKey = apiKey;
 
         try
         {

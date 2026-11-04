@@ -3,6 +3,7 @@ using Dprental.NotificationService.Api.Exceptions;
 using Dprental.NotificationService.Api.Hubs;
 using Dprental.NotificationService.Api.Security;
 using Dprental.NotificationService.Api.Services;
+using Dprental.NotificationService.Api.Validation;
 using Dprental.NotificationService.Application.Clients;
 using Dprental.NotificationService.Application.DependencyInjection;
 using Dprental.NotificationService.Application.Email;
@@ -15,6 +16,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
+StartupConfigurationValidator.Validate(builder.Configuration);
 builder.Services.AddNotificationSecurityAndAuthentication(builder.Configuration);
 builder.Services.AddNotificationServiceDomainRepositories(builder.Configuration.GetConnectionString("Postgres"));
 builder.Services.AddNotificationServiceApplication();
@@ -28,8 +30,8 @@ builder.Services.AddHostedService<EmailLeaseReconciliationWorker>();
 // Cấu hình AuthService HttpClient
 builder.Services.AddHttpClient<IAuthContactClient, AuthContactClient>(client =>
 {
-    var authBaseUrl = builder.Configuration["Services:AuthService:BaseUrl"] ?? "http://auth-service:8080";
-    client.BaseAddress = new Uri(authBaseUrl);
+    var authBaseUrl = builder.Configuration["Services:AuthService:BaseUrl"] ?? builder.Configuration["AuthService:BaseUrl"];
+    client.BaseAddress = new Uri(authBaseUrl!);
     client.Timeout = TimeSpan.FromSeconds(10);
 });
 

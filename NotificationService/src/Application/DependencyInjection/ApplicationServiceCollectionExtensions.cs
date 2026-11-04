@@ -1,5 +1,6 @@
 using Dprental.NotificationService.Application.IServices;
 using Dprental.NotificationService.Application.Kafka.Consumers;
+using Dprental.NotificationService.Application.Kafka.Contracts;
 using Dprental.NotificationService.Application.Kafka.Handlers;
 using Dprental.NotificationService.Application.Kafka.Quarantine;
 using Dprental.NotificationService.Application.Kafka.Services;
@@ -36,8 +37,9 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<IKafkaEventHandler, RentalItemRejectedHandler>();
         services.AddSingleton<IKafkaEventHandler, RefundCompletedFinancialHandler>();
         services.AddSingleton<IKafkaEventHandler, SupplierPayoutCompletedHandler>();
-        // Kafka Ingestion & DLQ
+        // Kafka Ingestion, Registry & DLQ
         services.AddSingleton<IKafkaDeadLetterPublisher, KafkaDeadLetterPublisher>();
+        services.AddSingleton<IKafkaContractRegistry, KafkaContractRegistry>();
         services.AddScoped<INotificationIngestionService, NotificationIngestionService>();
         services.AddHostedService<KafkaConsumerHostedService>();
 
