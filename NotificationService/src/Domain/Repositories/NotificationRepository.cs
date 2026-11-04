@@ -126,4 +126,17 @@ public sealed class NotificationRepository : INotificationRepository
         ArgumentNullException.ThrowIfNull(notifications);
         await _dbContext.Notifications.AddRangeAsync(notifications, cancellationToken);
     }
+
+    public async Task SuppressPendingActionsForResourceAsync(string resourceType, string resourceId, CancellationToken cancellationToken = default)
+    {
+        var actionableNotifications = await _dbContext.Notifications
+            .Where(n => n.ResourceType == resourceType && n.ResourceId == resourceId && n.IsActionable)
+            .ToListAsync(cancellationToken);
+
+        foreach (var notification in actionableNotifications)
+        {
+            notification.IsActionable = false;
+            notification.ActionUrl = null;
+        }
+    }
 }

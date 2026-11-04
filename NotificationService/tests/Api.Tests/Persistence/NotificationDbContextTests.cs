@@ -46,6 +46,13 @@ public sealed class NotificationDbContextTests
         Assert.NotNull(watermarkEntity);
         Assert.Equal("aggregate_watermarks", watermarkEntity.GetTableName());
         Assert.Equal("notification", watermarkEntity.GetSchema());
+        var key = watermarkEntity.FindPrimaryKey();
+        Assert.NotNull(key);
+        var keyPropertyNames = key.Properties.Select(p => p.Name).ToList();
+        Assert.Equal(3, keyPropertyNames.Count);
+        Assert.Equal("Scope", keyPropertyNames[0]);
+        Assert.Equal("AggregateId", keyPropertyNames[1]);
+        Assert.Equal("RecipientUserId", keyPropertyNames[2]);
     }
 
     [Fact]
@@ -167,6 +174,104 @@ public sealed class NotificationDbContextTests
         Assert.Equal(3, watermark.LastOrderVersion);
         Assert.True(watermark.IsTerminal);
         Assert.Equal("COMPLETED", watermark.TerminalState);
+    }
+
+    [Fact]
+    public async Task AggregateWatermarkRepository_OlderTerminalEvent_CannotOverwriteNewerTerminalState()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new AggregateWatermarkRepository(context);
+        var aggregateId = Guid.NewGuid();
+        var recipientId = Guid.NewGuid();
+
+        // Terminal state at version 3: COMPLETED
+        await repo.UpsertWatermarkAsync(new NotificationAggregateWatermark
+        {
+            AggregateId = aggregateId,
+            RecipientUserId = recipientId,
+            LastOrderVersion = 3,
+            LastMessageId = "msg-completed-3",
+            IsTerminal = true,
+            TerminalState = "COMPLETED"
+        });
+        await context.SaveChangesAsync();
+
+        // Older event at version 1 with terminal state CANCELLED arrives late
+        await repo.UpsertWatermarkAsync(new NotificationAggregateWatermark
+        {
+            AggregateId = aggregateId,
+            RecipientUserId = recipientId,
+            LastOrderVersion = 1,
+            LastMessageId = "msg-cancelled-1",
+            IsTerminal = true,
+            TerminalState = "CANCELLED"
+        });
+        await context.SaveChangesAsync();
+
+        var watermark = await repo.GetWatermarkAsync(aggregateId, recipientId);
+        Assert.NotNull(watermark);
+        Assert.Equal(3, watermark.LastOrderVersion);
+        Assert.Equal("msg-completed-3", watermark.LastMessageId);
+        Assert.True(watermark.IsTerminal);
+        Assert.Equal("COMPLETED", watermark.TerminalState);
+    }
+
+    [Fact]
+    public async Task AggregateWatermarkRepository_ScopedWatermarks_ShouldIsolateDifferentScopes()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new AggregateWatermarkRepository(context);
+        var aggregateId = Guid.NewGuid();
+        var recipientId = Guid.NewGuid();
+
+        // RentalOrder watermark
+        await repo.UpsertWatermarksForRecipientsAsync(
+            aggregateId,
+            new[] { recipientId },
+            orderVersion: 5,
+            messageId: "order-msg-5",
+            isTerminal: true,
+            terminalState: "COMPLETED",
+            scope: NotificationWatermarkScope.RentalOrder);
+
+        // RentalItem watermark for the same aggregateId and recipient
+        await repo.UpsertWatermarksForRecipientsAsync(
+            aggregateId,
+            new[] { recipientId },
+            orderVersion: 2,
+            messageId: "item-msg-2",
+            isTerminal: false,
+            terminalState: null,
+            scope: NotificationWatermarkScope.RentalItem);
+
+        await context.SaveChangesAsync();
+
+        var orderWatermark = await repo.GetWatermarkAsync(aggregateId, recipientId, NotificationWatermarkScope.RentalOrder);
+        var itemWatermark = await repo.GetWatermarkAsync(aggregateId, recipientId, NotificationWatermarkScope.RentalItem);
+
+        Assert.NotNull(orderWatermark);
+        Assert.Equal(NotificationWatermarkScope.RentalOrder, orderWatermark.Scope);
+        Assert.Equal(5, orderWatermark.LastOrderVersion);
+        Assert.True(orderWatermark.IsTerminal);
+
+        Assert.NotNull(itemWatermark);
+        Assert.Equal(NotificationWatermarkScope.RentalItem, itemWatermark.Scope);
+        Assert.Equal(2, itemWatermark.LastOrderVersion);
+        Assert.False(itemWatermark.IsTerminal);
+    }
+
+    [Fact]
+    public async Task AggregateWatermarkRepository_AcquireAdvisoryLock_InMemoryFallback_ShouldSucceed()
+    {
+        using var context = CreateInMemoryDbContext();
+        var repo = new AggregateWatermarkRepository(context);
+        var aggregateId = Guid.NewGuid();
+
+        AggregateWatermarkRepository.ResetInMemoryLockCounts();
+        await repo.AcquireAdvisoryLockAsync(aggregateId);
+
+        var count = AggregateWatermarkRepository.GetInMemoryLockCount(aggregateId);
+        Assert.Equal(1, count);
     }
 
     [Fact]

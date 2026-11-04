@@ -90,6 +90,52 @@ public sealed class NotificationPolicyAndTemplateTests
     }
 
     [Fact]
+    public void StaleActionSuppressionPolicy_PaidMilestone_SuppressesPaymentCTA_ButDoesNotBlockSupplierConfirmation()
+    {
+        var watermark = new NotificationAggregateWatermark
+        {
+            AggregateId = Guid.NewGuid(),
+            RecipientUserId = Guid.NewGuid(),
+            LastOrderVersion = 2,
+            IsTerminal = false,
+            IsPaid = true
+        };
+
+        // ORDER_CREATED (payment CTA) is suppressed because order is already paid
+        var orderCreatedEval = StaleActionSuppressionPolicy.Evaluate("ORDER_CREATED", incomingOrderVersion: 1, watermark);
+        Assert.True(orderCreatedEval.IsStale);
+        Assert.True(orderCreatedEval.SuppressAction);
+
+        // SUPPLIER_CONFIRMATION_REQUIRED is NOT blocked by PAID milestone
+        var supplierEval = StaleActionSuppressionPolicy.Evaluate("SUPPLIER_CONFIRMATION_REQUIRED", incomingOrderVersion: 2, watermark);
+        Assert.False(supplierEval.SuppressAction);
+        Assert.False(supplierEval.IsStale);
+    }
+
+    [Fact]
+    public void StaleActionSuppressionPolicy_TerminalOrder_SuppressesSupplierConfirmationAndHandover()
+    {
+        var watermark = new NotificationAggregateWatermark
+        {
+            AggregateId = Guid.NewGuid(),
+            RecipientUserId = Guid.NewGuid(),
+            LastOrderVersion = 2,
+            IsTerminal = true,
+            TerminalState = "EXPIRED"
+        };
+
+        var supplierEval = StaleActionSuppressionPolicy.Evaluate("SUPPLIER_CONFIRMATION_REQUIRED", incomingOrderVersion: 2, watermark);
+        Assert.True(supplierEval.IsStale);
+        Assert.True(supplierEval.SuppressAction);
+        Assert.True(supplierEval.SuppressEmail);
+
+        var handoverEval = StaleActionSuppressionPolicy.Evaluate("HANDOVER_OVERDUE_SUPPLIER", incomingOrderVersion: 2, watermark);
+        Assert.True(handoverEval.IsStale);
+        Assert.True(handoverEval.SuppressAction);
+        Assert.True(handoverEval.SuppressEmail);
+    }
+
+    [Fact]
     public void TemplateRenderer_MissingOrderCode_ShouldFallbackToResourceId()
     {
         var orderId = Guid.NewGuid();

@@ -140,11 +140,22 @@ namespace NotificationService.Domain.Migrations
 
             modelBuilder.Entity("Dprental.NotificationService.Domain.Entities.NotificationAggregateWatermark", b =>
                 {
+                    b.Property<string>("Scope")
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasDefaultValue("RentalOrder");
+
                     b.Property<Guid>("AggregateId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("RecipientUserId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("IsPaid")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsTerminal")
                         .ValueGeneratedOnAdd()
@@ -169,7 +180,11 @@ namespace NotificationService.Domain.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("NOW()");
 
-                    b.HasKey("AggregateId", "RecipientUserId");
+                    b.HasKey("Scope", "AggregateId", "RecipientUserId");
+
+                    b.HasIndex("Scope", "AggregateId");
+
+                    b.HasIndex("Scope", "AggregateId", "RecipientUserId");
 
                     b.ToTable("aggregate_watermarks", "notification");
                 });
