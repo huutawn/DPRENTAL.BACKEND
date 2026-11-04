@@ -493,6 +493,67 @@ public sealed class SettlementsApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Settlement_with_recipient_accounts_returns_transfer_qr_and_encrypts_account()
+    {
+        await using var h = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);
+        var invoice = await h.SeedAsync();
+        var item = invoice.Items[0];
+        var request = new SettleRentalRequest(invoice.RentalOrderId, item.RentalItemId,
+            invoice.InvoiceRef, invoice.PaymentRef!, item.SupplierId,
+            item.DepositAmount, 20_000m, item.DepositAmount - 20_000m, "VND", "DEC-QR", "settle-qr-001",
+            new TransferRecipientDto("MB", "0123456789", "CONG TY MAY XAY DUNG MINH TAM"),
+            new TransferRecipientDto("VCB", "9988776655", "NGUYEN VAN TUAN"));
+
+        using var service = _factory.CreateClient();
+        service.DefaultRequestHeaders.Add("X-Api-Key", PaymentWebApplicationFactory.DefaultInternalApiKey);
+        Assert.Equal(HttpStatusCode.BadRequest, (await service.PostAsJsonAsync("/api/v1/payment/settlements",
+            request with { OperationKey = "settle-qr-bad", SupplierAccount = new TransferRecipientDto("MB", "12", "X") })).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await service.PostAsJsonAsync("/api/v1/payment/settlements", request)).StatusCode);
+        // Tài khoản không nằm trong dấu vân tay: gửi lại không kèm tài khoản vẫn là replay.
+        var replay = await service.PostAsJsonAsync("/api/v1/payment/settlements",
+            request with { SupplierAccount = null, RenterRefundAccount = null });
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        Assert.True((await replay.Content.ReadFromJsonAsync<SettleRentalResponse>())!.IsReplay);
+
+        using var admin = _factory.CreateClient();
+        admin.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", UserToken("adm"));
+        Guid payoutId;
+        using (var payouts = await admin.GetFromJsonAsync<JsonDocument>("/api/v1/payment/admin/payouts"))
+        {
+            var row = payouts!.RootElement.GetProperty("items")[0];
+            payoutId = row.GetProperty("payoutId").GetGuid();
+            Assert.Equal("0123456789", row.GetProperty("recipientAccountNumber").GetString());
+            Assert.Equal(VietQrUrlGenerator.Generate("MB", "0123456789", row.GetProperty("amount").GetDecimal(),
+                row.GetProperty("transferCode").GetString()!), row.GetProperty("qrUrl").GetString());
+        }
+        using (var refunds = await admin.GetFromJsonAsync<JsonDocument>("/api/v1/payment/admin/manual-refunds"))
+        {
+            var row = refunds!.RootElement.GetProperty("items")[0];
+            Assert.Equal("NGUYEN VAN TUAN", row.GetProperty("recipientAccountHolderName").GetString());
+            Assert.Equal(VietQrUrlGenerator.Generate("VCB", "9988776655", row.GetProperty("amount").GetDecimal(),
+                row.GetProperty("transferCode").GetString()!), row.GetProperty("qrUrl").GetString());
+        }
+
+        await using (var db = new PaymentServiceDbContext(PostgresTestDatabaseHelper.CreateOptions(_connectionString)))
+        {
+            Assert.True(Dprental.PaymentService.Common.Cryptography.SensitiveFieldEncryptor.IsEncrypted(
+                await db.SupplierPayouts.Select(x => x.RecipientAccountNumber).SingleAsync()));
+            Assert.True(Dprental.PaymentService.Common.Cryptography.SensitiveFieldEncryptor.IsEncrypted(
+                await db.ManualRefundRequirements.Select(x => x.RecipientAccountNumber).SingleAsync()));
+        }
+
+        // Khoản đã xong thì không còn QR, tránh Admin quét lại và chuyển hai lần.
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/api/v1/payment/admin/payouts/{payoutId}/complete",
+            new CompleteSupplierPayoutRequest("qr-complete-001", "FT-QR-001", "Đã đối chiếu sao kê."))).StatusCode);
+        using (var completed = await admin.GetFromJsonAsync<JsonDocument>("/api/v1/payment/admin/payouts?status=COMPLETED"))
+        {
+            var row = completed!.RootElement.GetProperty("items")[0];
+            Assert.Equal(JsonValueKind.Null, row.GetProperty("qrUrl").ValueKind);
+            Assert.Equal("0123456789", row.GetProperty("recipientAccountNumber").GetString());
+        }
+    }
+
+    [Fact]
     public async Task SePay_outgoing_transfer_with_payout_code_completes_payout_once()
     {
         await using var harness = FinancialWorkflowHarness.Attach(_connectionString, _integrityConn, _ecdsa);

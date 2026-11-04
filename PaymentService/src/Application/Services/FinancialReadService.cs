@@ -1,5 +1,6 @@
 ﻿using Dprental.PaymentService.Application.DTOs.Operations;
 using Dprental.PaymentService.Common;
+using Dprental.PaymentService.Common.Cryptography;
 using Dprental.PaymentService.Domain.Entities;
 using Dprental.PaymentService.Domain.IRepositories;
 using Dprental.PaymentService.Application.DTOs.Invoice;
@@ -12,7 +13,7 @@ using System.Text;
 
 namespace Dprental.PaymentService.Application.Services
 {
-    public sealed class FinancialReadService(IFinancialReadRepository repository) : IFinancialReadService
+    public sealed class FinancialReadService(IFinancialReadRepository repository, IPaymentDataEncryptor encryptor) : IFinancialReadService
     {
         public async Task<Result<InvoiceStatusResponse>> GetInvoiceStatusAsync(
             string invoiceRef, Guid renterId, CancellationToken ct)
@@ -99,11 +100,18 @@ namespace Dprental.PaymentService.Application.Services
             var page = await repository.ListAdminPayoutsAsync(
                 supplierId, new PayoutFilter(status, q.From, q.To), new PageRequest(q.Page, q.PageSize), ct);
 
-            return ToPage(page, q, x => new AdminPayoutListItem(
-                x.PayoutId, x.PayoutRef, x.SettlementId, x.SettlementRef, x.RentalItemId, x.SupplierId,
-                x.Amount, x.Currency, x.Status, x.TransferCode, x.ExternalTransferReference,
-                x.CompletedBy, x.CreatedAt, x.CompletedAt,
-                x.RentalOrderId, x.OrderCode, x.RentalAmount, x.PlatformFeeAmount, x.FinalDeductionAmount));
+            return ToPage(page, q, x =>
+            {
+                var (account, qrUrl) = TransferQrBuilder.Build(encryptor, nameof(SupplierPayout), x.PayoutId,
+                    x.RecipientBankCode, x.RecipientAccountNumber, x.Amount, x.TransferCode,
+                    x.Status == SupplierPayout.StatusPendingPayout);
+                return new AdminPayoutListItem(
+                    x.PayoutId, x.PayoutRef, x.SettlementId, x.SettlementRef, x.RentalItemId, x.SupplierId,
+                    x.Amount, x.Currency, x.Status, x.TransferCode, x.ExternalTransferReference,
+                    x.CompletedBy, x.CreatedAt, x.CompletedAt,
+                    x.RentalOrderId, x.OrderCode, x.RentalAmount, x.PlatformFeeAmount, x.FinalDeductionAmount,
+                    x.RecipientBankCode, account, x.RecipientAccountHolderName, qrUrl);
+            });
         }
 
         public async Task<Result<FinancialPage<ManualRefundListItem>>> ListManualRefundsAsync(
@@ -115,10 +123,17 @@ namespace Dprental.PaymentService.Application.Services
             var page = await repository.ListManualRefundsAsync(
                 new ManualRefundFilter(status, q.From, q.To), new PageRequest(q.Page, q.PageSize), ct);
 
-            return ToPage(page, q, x => new ManualRefundListItem(
-                x.RequirementId, x.RequirementRef, x.SettlementRef, x.RentalItemId, x.RenterId,
-                x.Amount, x.Status.ToString(), x.TransferCode, x.ExternalTransferReference,
-                x.CompletedBy, x.CreatedAt, x.CompletedAt));
+            return ToPage(page, q, x =>
+            {
+                var (account, qrUrl) = TransferQrBuilder.Build(encryptor, nameof(ManualRefundRequirement), x.RequirementId,
+                    x.RecipientBankCode, x.RecipientAccountNumber, x.Amount, x.TransferCode,
+                    x.Status == ManualRefundStatus.PendingManualRefund);
+                return new ManualRefundListItem(
+                    x.RequirementId, x.RequirementRef, x.SettlementRef, x.RentalItemId, x.RenterId,
+                    x.Amount, x.Status.ToString(), x.TransferCode, x.ExternalTransferReference,
+                    x.CompletedBy, x.CreatedAt, x.CompletedAt,
+                    x.RecipientBankCode, account, x.RecipientAccountHolderName, qrUrl);
+            });
         }
 
         public async Task<Result<FinancialPage<FinancialReviewItem>>> ListReviewAsync(

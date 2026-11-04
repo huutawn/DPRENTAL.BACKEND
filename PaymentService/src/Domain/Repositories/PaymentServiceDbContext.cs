@@ -72,5 +72,22 @@ public sealed class PaymentServiceDbContext : DbContext
                 }
             }
         }
+
+        foreach (var entry in ChangeTracker.Entries<SupplierPayout>())
+            EncryptRecipientAccount(entry, nameof(SupplierPayout), entry.Entity.Id);
+        foreach (var entry in ChangeTracker.Entries<ManualRefundRequirement>())
+            EncryptRecipientAccount(entry, nameof(ManualRefundRequirement), entry.Entity.Id);
+    }
+
+    // Đọc lại qua TransferQrBuilder, dùng cùng entityType/recordId/fieldName làm AAD.
+    private void EncryptRecipientAccount<T>(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<T> entry, string entityType, Guid id)
+        where T : class
+    {
+        if (entry.State is not (EntityState.Added or EntityState.Modified)) return;
+        var property = entry.Property<string?>("RecipientAccountNumber");
+        string? plain = property.CurrentValue;
+        if (string.IsNullOrEmpty(plain) || Dprental.PaymentService.Common.Cryptography.SensitiveFieldEncryptor.IsEncrypted(plain)) return;
+        property.CurrentValue = Dprental.PaymentService.Common.Cryptography.SensitiveFieldEncryptor.Encrypt(
+            _encryptor!, entityType, id.ToString("D"), "RecipientAccountNumber", plain);
     }
 }

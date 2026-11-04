@@ -11,6 +11,10 @@ public sealed class ManualRefundRequirement
     public string RequirementRef { get; private set; } = string.Empty;
     // Nội dung chuyển khoản admin dùng khi hoàn tiền (QR); webhook SePay tiền ra đọc mã này để tự xác nhận.
     public string TransferCode { get; private set; } = string.Empty;
+    // Tài khoản nhận hoàn tiền của khách chốt lúc tạo yêu cầu; số tài khoản được mã hóa khi lưu (PaymentServiceDbContext).
+    public string? RecipientBankCode { get; private set; }
+    public string? RecipientAccountNumber { get; private set; }
+    public string? RecipientAccountHolderName { get; private set; }
     public Guid? SettlementId { get; private set; }
     public Guid InvoiceId { get; private set; }
     public Guid? RentalItemId { get; private set; }
@@ -34,7 +38,8 @@ public sealed class ManualRefundRequirement
 
     public static ManualRefundRequirement Create(Guid invoiceId, Guid renterId, string paymentRef,
         string operationKey, string reason, ManualRefundKind kind, Guid? settlementId,
-        IReadOnlyList<ManualRefundItem> items, DateTimeOffset now, string financialRefundKind)
+        IReadOnlyList<ManualRefundItem> items, DateTimeOffset now, string financialRefundKind,
+        TransferRecipient? recipient = null)
     {
         Guid id = Guid.NewGuid();
         foreach (var item in items) item.AssignRequirement(id);
@@ -43,6 +48,9 @@ public sealed class ManualRefundRequirement
             Id = id,
             RequirementRef = $"MRF-{id:N}",
             TransferCode = PaymentCodeGenerator.Generate(PaymentCodeGenerator.RefundPrefix),
+            RecipientBankCode = recipient?.BankCode,
+            RecipientAccountNumber = recipient?.AccountNumber,
+            RecipientAccountHolderName = recipient?.AccountHolderName,
             InvoiceId = invoiceId,
             RenterId = renterId,
             PaymentRef = paymentRef,
