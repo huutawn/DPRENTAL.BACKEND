@@ -23,6 +23,25 @@ public sealed class EfUserRepository(AuthDbContext dbContext) : IUserRepository
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
+    public async Task<IReadOnlyList<User>> GetUsersByIdsAsync(IReadOnlyList<Guid> ids, CancellationToken cancellationToken = default)
+    {
+        if (ids == null || ids.Count == 0)
+        {
+            return Array.Empty<User>();
+        }
+
+        var distinctIds = ids.Where(id => id != Guid.Empty).Distinct().Take(100).ToList();
+        if (distinctIds.Count == 0)
+        {
+            return Array.Empty<User>();
+        }
+
+        return await dbContext.Users
+            .AsNoTracking()
+            .Where(u => distinctIds.Contains(u.Id))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<User> CreateAsync(User entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
