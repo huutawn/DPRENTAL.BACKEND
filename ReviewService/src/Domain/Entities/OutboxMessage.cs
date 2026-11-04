@@ -18,6 +18,7 @@ public sealed class OutboxMessage
     public string? ClaimOwner { get; private set; }
     public string? LastErrorCode { get; private set; }
     public string DeliveryState { get; private set; } = "Pending";
+    public Guid? ClaimToken { get; private set; }
     private OutboxMessage() { }
 
     public OutboxMessage(
@@ -36,18 +37,24 @@ public sealed class OutboxMessage
         CreatedAt = createdAt.ToUniversalTime();
     }
 
-    public void Claim(string owner, DateTimeOffset leaseExpiry)
+    public void Claim(string owner, DateTimeOffset leaseExpiry, Guid claimToken)
     {
         ClaimOwner = owner;
         LeaseExpiresAt = leaseExpiry.ToUniversalTime();
+        ClaimToken = claimToken;
     }
 
+    public void Claim(string owner, DateTimeOffset leaseExpiry)
+    {
+        Claim(owner, leaseExpiry, Guid.NewGuid());
+    }
     public void FailAttempt(string errorCode, DateTimeOffset nextAttempt, bool park = false)
     {
         Attempts++;
         LastErrorCode = errorCode;
         ClaimOwner = null;
         LeaseExpiresAt = null;
+        ClaimToken = null;
         NextAttemptAt = nextAttempt.ToUniversalTime();
         if (park || Attempts >= 5)
         {
@@ -61,5 +68,6 @@ public sealed class OutboxMessage
         DeliveryState = "Published";
         ClaimOwner = null;
         LeaseExpiresAt = null;
+        ClaimToken = null;
     }
 }

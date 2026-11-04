@@ -81,20 +81,20 @@ public sealed class OutboxPublisherWorker : BackgroundService
                 bool published = await _producer.ProduceAsync(msg.Topic, msg.PartitionKey, msg.Payload, cancellationToken);
                 if (published)
                 {
-                    await outboxRepo.MarkProcessedAsync(msg.Id, _timeProvider.GetUtcNow(), cancellationToken);
+                    await outboxRepo.MarkProcessedAsync(msg.Id, msg.ClaimToken ?? Guid.Empty, _timeProvider.GetUtcNow(), cancellationToken);
                     successCount++;
                 }
                 else
                 {
                     var nextAttempt = _timeProvider.GetUtcNow().AddSeconds(Math.Min(60, Math.Pow(2, msg.Attempts + 1)));
-                    await outboxRepo.FailAttemptAsync(msg.Id, "BROKER_NACK", nextAttempt, false, cancellationToken);
+                    await outboxRepo.FailAttemptAsync(msg.Id, msg.ClaimToken ?? Guid.Empty, "BROKER_NACK", nextAttempt, false, cancellationToken);
                 }
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "Lỗi khi publish message {MessageId} lên topic {Topic}", msg.Id, msg.Topic);
                 var nextAttempt = _timeProvider.GetUtcNow().AddSeconds(Math.Min(60, Math.Pow(2, msg.Attempts + 1)));
-                await outboxRepo.FailAttemptAsync(msg.Id, ex.GetType().Name, nextAttempt, msg.Attempts >= 4, cancellationToken);
+                await outboxRepo.FailAttemptAsync(msg.Id, msg.ClaimToken ?? Guid.Empty, ex.GetType().Name, nextAttempt, msg.Attempts >= 4, cancellationToken);
             }
         }
 

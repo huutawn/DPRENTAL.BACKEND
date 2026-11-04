@@ -1,3 +1,4 @@
+using Dprental.ReviewService.Common;
 using Dprental.ReviewService.Domain.Entities;
 
 namespace Dprental.ReviewService.Domain.IRepositories;
@@ -13,7 +14,7 @@ public interface IIdempotencyRepository
     Task<IdempotencyRecord?> GetAsync(Guid actorId, string idempotencyKey, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Lưu bản ghi chống trùng lặp bất biến vào cơ sở dữ liệu.
+    /// Lưu hoặc cập nhật bản ghi chống trùng lặp an toàn đa luồng bằng PostgreSQL advisory lock.
     /// </summary>
-    Task SaveAsync(IdempotencyRecord record, CancellationToken cancellationToken = default);
+    Task<Result<IdempotencyRecord>> SaveAsync(IdempotencyRecord record, CancellationToken cancellationToken = default);
 }

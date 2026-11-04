@@ -161,4 +161,27 @@ public sealed class DbContextConfigurationTests
         Assert.Equal(DeleteBehavior.Cascade, mediaFk.DeleteBehavior);
         Assert.Equal("fk_review_media_review", mediaFk.GetConstraintName());
     }
+
+    [Fact]
+    public void DbContext_ConfiguresOutboxMessagesCorrectly()
+    {
+        using var context = CreateDbContext();
+        var model = context.Model;
+        var outboxEntity = model.FindEntityType(typeof(OutboxMessage));
+        Assert.NotNull(outboxEntity);
+        Assert.Equal("outbox_messages", outboxEntity.GetTableName());
+
+        Assert.Equal("claim_token", outboxEntity.FindProperty(nameof(OutboxMessage.ClaimToken))?.GetColumnName());
+        Assert.Equal("lease_expires_at", outboxEntity.FindProperty(nameof(OutboxMessage.LeaseExpiresAt))?.GetColumnName());
+        Assert.Equal("claim_owner", outboxEntity.FindProperty(nameof(OutboxMessage.ClaimOwner))?.GetColumnName());
+        Assert.Equal("attempts", outboxEntity.FindProperty(nameof(OutboxMessage.Attempts))?.GetColumnName());
+        Assert.Equal("next_attempt_at", outboxEntity.FindProperty(nameof(OutboxMessage.NextAttemptAt))?.GetColumnName());
+        Assert.Equal("last_error_code", outboxEntity.FindProperty(nameof(OutboxMessage.LastErrorCode))?.GetColumnName());
+        Assert.Equal("delivery_state", outboxEntity.FindProperty(nameof(OutboxMessage.DeliveryState))?.GetColumnName());
+
+        var claimIndex = outboxEntity.GetIndexes().FirstOrDefault(i => i.GetDatabaseName() == "idx_outbox_claim");
+        Assert.NotNull(claimIndex);
+        var indexPropNames = claimIndex.Properties.Select(p => p.Name).ToList();
+        Assert.Equal(new[] { nameof(OutboxMessage.DeliveryState), nameof(OutboxMessage.NextAttemptAt), nameof(OutboxMessage.LeaseExpiresAt) }, indexPropNames);
+    }
 }

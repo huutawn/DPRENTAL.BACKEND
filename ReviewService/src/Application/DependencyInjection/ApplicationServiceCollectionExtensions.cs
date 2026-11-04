@@ -1,6 +1,7 @@
 using Dprental.ReviewService.Application.Clients;
 using Dprental.ReviewService.Application.Options;
 using Dprental.ReviewService.Application.Services;
+using Dprental.ReviewService.Application.Kafka.Producers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -38,7 +39,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IReviewQueryService, ReviewQueryService>();
         services.AddScoped<IReviewModerationService, ReviewModerationService>();
         services.AddScoped<IReviewMediaService, ReviewMediaService>();
-        services.AddSingleton<Dprental.ReviewService.Application.Kafka.Producers.IKafkaProducer, Dprental.ReviewService.Application.Kafka.Producers.NullKafkaProducer>();
+        services.AddSingleton<IKafkaProducer, KafkaProducer>();
         services.AddHostedService<Dprental.ReviewService.Application.Kafka.Workers.OutboxPublisherWorker>();
         services.AddSingleton(TimeProvider.System);
 
