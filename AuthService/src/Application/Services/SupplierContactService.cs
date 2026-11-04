@@ -8,6 +8,8 @@ namespace Dprental.AuthService.Application.Services;
 
 public sealed class SupplierContactService(IOrganizationLookupRepository repository, IMediaUrlResolver mediaUrlResolver)
 {
+    public Task<IReadOnlyList<Guid>> FindActiveSupplierIdsByOwnerAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
+        repository.FindActiveSupplierIdsByOwnerAsync(ownerUserId, cancellationToken);
     public async Task<Result<OrganizationPublicResponse>> GetAsync(Guid organizationId, CancellationToken cancellationToken = default)
     {
         if (organizationId == Guid.Empty)
