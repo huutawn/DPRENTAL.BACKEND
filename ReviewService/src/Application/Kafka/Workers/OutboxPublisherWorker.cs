@@ -17,7 +17,7 @@ public sealed class OutboxPublisherWorker : BackgroundService
     private readonly ILogger<OutboxPublisherWorker>? _logger;
     private readonly string _workerId = Guid.NewGuid().ToString("N");
 
-    public int BatchSize { get; set; } = 20;
+    public int BatchSize { get; set; } = 1;
     public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromSeconds(30);
     public TimeSpan IdleDelay { get; set; } = TimeSpan.FromMilliseconds(500);
 
@@ -78,23 +78,71 @@ public sealed class OutboxPublisherWorker : BackgroundService
         {
             try
             {
-                bool published = await _producer.ProduceAsync(msg.Topic, msg.PartitionKey, msg.Payload, cancellationToken);
+                using var publishCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                publishCts.CancelAfter(TimeSpan.FromSeconds(10));
+
+                bool published = await _producer.ProduceAsync(msg.Topic, msg.PartitionKey, msg.Payload, publishCts.Token);
                 if (published)
                 {
-                    await outboxRepo.MarkProcessedAsync(msg.Id, msg.ClaimToken ?? Guid.Empty, _timeProvider.GetUtcNow(), cancellationToken);
-                    successCount++;
+                    bool updated = await outboxRepo.MarkProcessedAsync(
+                        msg.Id,
+                        msg.ClaimToken ?? Guid.Empty,
+                        _workerId,
+                        _timeProvider.GetUtcNow(),
+                        cancellationToken);
+
+                    if (updated)
+                    {
+                        successCount++;
+                    }
+                    else
+                    {
+                        _logger?.LogWarning(
+                            "Mất quyền sở hữu hoặc hết hạn lease khi đánh dấu Published cho message {MessageId} với token {ClaimToken}.",
+                            msg.Id, msg.ClaimToken);
+                    }
                 }
                 else
                 {
                     var nextAttempt = _timeProvider.GetUtcNow().AddSeconds(Math.Min(60, Math.Pow(2, msg.Attempts + 1)));
-                    await outboxRepo.FailAttemptAsync(msg.Id, msg.ClaimToken ?? Guid.Empty, "BROKER_NACK", nextAttempt, false, cancellationToken);
+                    bool updated = await outboxRepo.FailAttemptAsync(
+                        msg.Id,
+                        msg.ClaimToken ?? Guid.Empty,
+                        _workerId,
+                        "BROKER_NACK",
+                        nextAttempt,
+                        false,
+                        _timeProvider.GetUtcNow(),
+                        cancellationToken);
+
+                    if (!updated)
+                    {
+                        _logger?.LogWarning(
+                            "Mất quyền sở hữu khi cập nhật FailAttempt (NACK) cho message {MessageId} với token {ClaimToken}.",
+                            msg.Id, msg.ClaimToken);
+                    }
                 }
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "Lỗi khi publish message {MessageId} lên topic {Topic}", msg.Id, msg.Topic);
                 var nextAttempt = _timeProvider.GetUtcNow().AddSeconds(Math.Min(60, Math.Pow(2, msg.Attempts + 1)));
-                await outboxRepo.FailAttemptAsync(msg.Id, msg.ClaimToken ?? Guid.Empty, ex.GetType().Name, nextAttempt, msg.Attempts >= 4, cancellationToken);
+                bool updated = await outboxRepo.FailAttemptAsync(
+                    msg.Id,
+                    msg.ClaimToken ?? Guid.Empty,
+                    _workerId,
+                    ex.GetType().Name,
+                    nextAttempt,
+                    msg.Attempts >= 4,
+                    _timeProvider.GetUtcNow(),
+                    cancellationToken);
+
+                if (!updated)
+                {
+                    _logger?.LogWarning(
+                        "Mất quyền sở hữu khi cập nhật FailAttempt (Exception) cho message {MessageId} với token {ClaimToken}.",
+                        msg.Id, msg.ClaimToken);
+                }
             }
         }
 

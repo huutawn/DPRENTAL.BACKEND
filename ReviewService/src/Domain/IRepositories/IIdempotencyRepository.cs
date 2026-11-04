@@ -12,6 +12,10 @@ public interface IIdempotencyRepository
     /// Lấy bản ghi chống trùng lặp theo ActorId và IdempotencyKey.
     /// </summary>
     Task<IdempotencyRecord?> GetAsync(Guid actorId, string idempotencyKey, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Lấy khóa PostgreSQL transaction advisory lock theo cặp ActorId và IdempotencyKey. Bắt buộc có transaction đang mở.
+    /// </summary>
+    Task AcquireLockAsync(Guid actorId, string idempotencyKey, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Lưu hoặc cập nhật bản ghi chống trùng lặp an toàn đa luồng bằng PostgreSQL advisory lock.

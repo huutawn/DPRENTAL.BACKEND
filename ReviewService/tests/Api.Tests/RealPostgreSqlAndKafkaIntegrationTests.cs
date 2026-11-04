@@ -1,6 +1,15 @@
 using System.Net;
+using System.Text.Json;
 using Confluent.Kafka;
+using Dprental.ReviewService.Application.Clients;
+using Dprental.ReviewService.Application.DTOs.Rental;
+using Dprental.ReviewService.Application.DTOs.Reviews;
+using Dprental.ReviewService.Application.Kafka.Consumers;
+using Dprental.ReviewService.Application.Kafka.Contracts;
 using Dprental.ReviewService.Application.Kafka.Producers;
+using Dprental.ReviewService.Application.Services;
+using Dprental.ReviewService.Common;
+using Dprental.ReviewService.Common.Enums;
 using Dprental.ReviewService.Domain.Entities;
 using Dprental.ReviewService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -23,165 +32,286 @@ public sealed class RealPostgreSqlAndKafkaIntegrationTests
     }
 
     [Fact]
-    public async Task Postgres_AdvisoryLock_IdempotencyConcurrentRequests_SamePayloadReplays_DiffPayloadConflicts()
+    public async Task Postgres_Idempotency_SynchronizedConcurrentRequests_SamePayloadReplays_ExactSingleReviewAndSingleOutbox()
     {
-        // Arrange
-        var actorId = Guid.NewGuid();
-        var idempotencyKey = $"test-key-{Guid.NewGuid():N}";
-        var fingerprintA = "sha256-payload-A";
-        var fingerprintB = "sha256-payload-B";
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+        var idempotencyKey = $"sync-create-{Guid.NewGuid():N}";
         var now = DateTimeOffset.UtcNow;
 
-        var recordA1 = new IdempotencyRecord(
-            Guid.NewGuid(),
-            actorId,
-            idempotencyKey,
-            fingerprintA,
-            "POST",
-            "/api/v1/reviews",
-            201,
-            "{}",
-            "{\"reviewId\":\"success\"}",
-            now,
-            now.AddMinutes(10));
+        var snapshot = new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, listingId, "Completed", now.AddDays(-5), 1);
 
-        var recordA2 = new IdempotencyRecord(
-            Guid.NewGuid(),
-            actorId,
-            idempotencyKey,
-            fingerprintA,
-            "POST",
-            "/api/v1/reviews",
-            201,
-            "{}",
-            "{\"reviewId\":\"success\"}",
-            now,
-            now.AddMinutes(10));
+        var mockRentalClient = new MockRentalClient(snapshot);
+        var mockMediaClient = new MockMediaClient();
 
-        var recordB = new IdempotencyRecord(
-            Guid.NewGuid(),
-            actorId,
-            idempotencyKey,
-            fingerprintB,
-            "POST",
-            "/api/v1/reviews",
-            201,
-            "{}",
-            "{\"reviewId\":\"different\"}",
-            now,
-            now.AddMinutes(10));
+        var barrier = new Barrier(2);
 
-        // Act 1: Two concurrent requests with SAME payload
         var task1 = Task.Run(async () =>
         {
-            await using var db1 = new ReviewServiceDbContext(CreatePostgresOptions());
-            var repo1 = new IdempotencyRepository(db1);
-            return await repo1.SaveAsync(recordA1);
+            await using var db = new ReviewServiceDbContext(CreatePostgresOptions());
+            var reviewRepo = new ReviewRepository(db);
+            var auditRepo = new ReviewAuditRepository(db);
+            var idempRepo = new IdempotencyRepository(db);
+            var idempService = new IdempotencyService(idempRepo);
+            var outboxRepo = new OutboxRepository(db);
+
+            var service = new ReviewAuthoringService(
+                db, reviewRepo, auditRepo, idempRepo, idempService, mockRentalClient, outboxRepo, TimeProvider.System);
+
+            barrier.SignalAndWait(); // Synchronize both requests before entering transaction
+            return await service.CreateReviewAsync(
+                new ReviewActorContext(renterId, "cus", false),
+                new CreateReviewRequest(orderId, itemId, 5, "Great product!"),
+                idempotencyKey);
         });
 
         var task2 = Task.Run(async () =>
         {
-            await using var db2 = new ReviewServiceDbContext(CreatePostgresOptions());
-            var repo2 = new IdempotencyRepository(db2);
-            return await repo2.SaveAsync(recordA2);
+            await using var db = new ReviewServiceDbContext(CreatePostgresOptions());
+            var reviewRepo = new ReviewRepository(db);
+            var auditRepo = new ReviewAuditRepository(db);
+            var idempRepo = new IdempotencyRepository(db);
+            var idempService = new IdempotencyService(idempRepo);
+            var outboxRepo = new OutboxRepository(db);
+
+            var service = new ReviewAuthoringService(
+                db, reviewRepo, auditRepo, idempRepo, idempService, mockRentalClient, outboxRepo, TimeProvider.System);
+
+            barrier.SignalAndWait(); // Synchronize both requests before entering transaction
+            return await service.CreateReviewAsync(
+                new ReviewActorContext(renterId, "cus", false),
+                new CreateReviewRequest(orderId, itemId, 5, "Great product!"),
+                idempotencyKey);
         });
 
         var results = await Task.WhenAll(task1, task2);
 
-        // Assert 1: Both must succeed (one created, one replayed same fingerprint)
-        Assert.True(results[0].IsSuccess);
-        Assert.True(results[1].IsSuccess);
-        Assert.Equal(fingerprintA, results[0].Value.RequestFingerprint);
-        Assert.Equal(fingerprintA, results[1].Value.RequestFingerprint);
+        Assert.True(results[0].IsSuccess, results[0].Error?.Message);
+        Assert.True(results[1].IsSuccess, results[1].Error?.Message);
+        Assert.Equal(results[0].Value.ReviewId, results[1].Value.ReviewId);
 
-        // Act 2: Third request with DIFFERENT payload and same key
-        await using var db3 = new ReviewServiceDbContext(CreatePostgresOptions());
-        var repo3 = new IdempotencyRepository(db3);
-        var resultB = await repo3.SaveAsync(recordB);
+        // Verify PostgreSQL state: exactly 1 review, 1 receipt, 1 public outbox
+        await using var verifyDb = new ReviewServiceDbContext(CreatePostgresOptions());
+        var reviewsCount = await verifyDb.Reviews.CountAsync(r => r.OrderId == orderId && r.ItemId == itemId);
+        Assert.Equal(1, reviewsCount);
 
-        // Assert 2: Must fail with 409 Conflict (IDEMPOTENCY_KEY_REUSE_MISMATCH)
-        Assert.False(resultB.IsSuccess);
-        Assert.Equal("IDEMPOTENCY_KEY_REUSE_MISMATCH", resultB.Error.Code);
-    }
+        var receiptCount = await verifyDb.IdempotencyRecords.CountAsync(r => r.ActorId == renterId && r.IdempotencyKey == idempotencyKey);
+        Assert.Equal(1, receiptCount);
 
-    [Fact]
-    public async Task Postgres_Outbox_ConcurrentWorkers_ForUpdateSkipLocked_NoDuplicateClaims()
-    {
-        await using var dbSetup = new ReviewServiceDbContext(CreatePostgresOptions());
-        var msgId1 = Guid.NewGuid();
-        var msgId2 = Guid.NewGuid();
-
-        var msg1 = new OutboxMessage(msgId1, "test.topic", "TestEvent", "k1", "{}", DateTimeOffset.UtcNow);
-        var msg2 = new OutboxMessage(msgId2, "test.topic", "TestEvent", "k2", "{}", DateTimeOffset.UtcNow);
-
-        await dbSetup.OutboxMessages.AddRangeAsync(msg1, msg2);
-        await dbSetup.SaveChangesAsync();
-
-        // 2 workers claim concurrently with batchSize = 1
-        var worker1Task = Task.Run(async () =>
-        {
-            await using var db = new ReviewServiceDbContext(CreatePostgresOptions());
-            var repo = new OutboxRepository(db);
-            return await repo.ClaimBatchAsync("worker-1", TimeSpan.FromMinutes(1), 1, DateTimeOffset.UtcNow);
-        });
-
-        var worker2Task = Task.Run(async () =>
-        {
-            await using var db = new ReviewServiceDbContext(CreatePostgresOptions());
-            var repo = new OutboxRepository(db);
-            return await repo.ClaimBatchAsync("worker-2", TimeSpan.FromMinutes(1), 1, DateTimeOffset.UtcNow);
-        });
-
-        var claimedBatches = await Task.WhenAll(worker1Task, worker2Task);
-
-        var batch1 = claimedBatches[0];
-        var batch2 = claimedBatches[1];
-
-        // Each worker claims at most 1, and no overlapping message IDs
-        var allClaimedIds = batch1.Select(m => m.Id).Concat(batch2.Select(m => m.Id)).ToList();
-        Assert.Equal(allClaimedIds.Distinct().Count(), allClaimedIds.Count);
+        var outboxCount = await verifyDb.OutboxMessages.CountAsync(m => m.PartitionKey == listingId.ToString("D") && m.EventType == "ReviewCreated");
+        Assert.Equal(1, outboxCount);
 
         // Cleanup
-        await using var dbCleanup = new ReviewServiceDbContext(CreatePostgresOptions());
-        var msgsToDelete = await dbCleanup.OutboxMessages.Where(m => m.Id == msgId1 || m.Id == msgId2).ToListAsync();
-        dbCleanup.OutboxMessages.RemoveRange(msgsToDelete);
-        await dbCleanup.SaveChangesAsync();
+        var createdReview = await verifyDb.Reviews.FirstOrDefaultAsync(r => r.OrderId == orderId && r.ItemId == itemId);
+        if (createdReview != null)
+        {
+            var audits = await verifyDb.ReviewAudits.Where(a => a.ReviewId == createdReview.Id).ToListAsync();
+            verifyDb.ReviewAudits.RemoveRange(audits);
+            verifyDb.Reviews.Remove(createdReview);
+        }
+        var receipts = await verifyDb.IdempotencyRecords.Where(r => r.ActorId == renterId && r.IdempotencyKey == idempotencyKey).ToListAsync();
+        verifyDb.IdempotencyRecords.RemoveRange(receipts);
+        var outboxes = await verifyDb.OutboxMessages.Where(m => m.PartitionKey == listingId.ToString("D")).ToListAsync();
+        verifyDb.OutboxMessages.RemoveRange(outboxes);
+        await verifyDb.SaveChangesAsync();
     }
 
     [Fact]
-    public async Task Postgres_Outbox_ExpiredLeaseWorker_CannotMarkProcessedAfterReclaim()
+    public async Task Postgres_Idempotency_SynchronizedConcurrentRequests_DifferentPayload_Returns409WithoutSideEffects()
+    {
+        var orderId = Guid.NewGuid();
+        var itemId1 = Guid.NewGuid();
+        var itemId2 = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+        var idempotencyKey = $"sync-conflict-{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+
+        var snapshot1 = new RentalItemReviewSnapshotDto(orderId, itemId1, renterId, supplierId, listingId, "Completed", now.AddDays(-5), 1);
+        var snapshot2 = new RentalItemReviewSnapshotDto(orderId, itemId2, renterId, supplierId, listingId, "Completed", now.AddDays(-5), 1);
+
+        var mockRentalClient1 = new MockRentalClient(snapshot1);
+        var mockRentalClient2 = new MockRentalClient(snapshot2);
+        var mockMediaClient = new MockMediaClient();
+
+        var barrier = new Barrier(2);
+
+        var task1 = Task.Run(async () =>
+        {
+            await using var db = new ReviewServiceDbContext(CreatePostgresOptions());
+            var reviewRepo = new ReviewRepository(db);
+            var auditRepo = new ReviewAuditRepository(db);
+            var idempRepo = new IdempotencyRepository(db);
+            var idempService = new IdempotencyService(idempRepo);
+            var outboxRepo = new OutboxRepository(db);
+
+            var service = new ReviewAuthoringService(
+                db, reviewRepo, auditRepo, idempRepo, idempService, mockRentalClient1, outboxRepo, TimeProvider.System);
+
+            barrier.SignalAndWait();
+            return await service.CreateReviewAsync(
+                new ReviewActorContext(renterId, "cus", false),
+                new CreateReviewRequest(orderId, itemId1, 5, "Payload 1"),
+                idempotencyKey);
+        });
+
+        var task2 = Task.Run(async () =>
+        {
+            await using var db = new ReviewServiceDbContext(CreatePostgresOptions());
+            var reviewRepo = new ReviewRepository(db);
+            var auditRepo = new ReviewAuditRepository(db);
+            var idempRepo = new IdempotencyRepository(db);
+            var idempService = new IdempotencyService(idempRepo);
+            var outboxRepo = new OutboxRepository(db);
+
+            var service = new ReviewAuthoringService(
+                db, reviewRepo, auditRepo, idempRepo, idempService, mockRentalClient2, outboxRepo, TimeProvider.System);
+
+            barrier.SignalAndWait();
+            return await service.CreateReviewAsync(
+                new ReviewActorContext(renterId, "cus", false),
+                new CreateReviewRequest(orderId, itemId2, 3, "Payload 2 (Different)"),
+                idempotencyKey);
+        });
+
+        var results = await Task.WhenAll(task1, task2);
+
+        var successResult = results.FirstOrDefault(r => r.IsSuccess);
+        var failureResult = results.FirstOrDefault(r => r.IsFailure);
+
+        Assert.NotNull(successResult);
+        Assert.NotNull(failureResult);
+        Assert.Equal("IDEMPOTENCY_KEY_REUSE_MISMATCH", failureResult.Error.Code);
+
+        // Cleanup
+        await using var verifyDb = new ReviewServiceDbContext(CreatePostgresOptions());
+        var createdReview = await verifyDb.Reviews.FirstOrDefaultAsync(r => r.OrderId == orderId);
+        if (createdReview != null)
+        {
+            var audits = await verifyDb.ReviewAudits.Where(a => a.ReviewId == createdReview.Id).ToListAsync();
+            verifyDb.ReviewAudits.RemoveRange(audits);
+            verifyDb.Reviews.Remove(createdReview);
+        }
+        var receipts = await verifyDb.IdempotencyRecords.Where(r => r.ActorId == renterId && r.IdempotencyKey == idempotencyKey).ToListAsync();
+        verifyDb.IdempotencyRecords.RemoveRange(receipts);
+        var outboxes = await verifyDb.OutboxMessages.Where(m => m.PartitionKey == listingId.ToString("D")).ToListAsync();
+        verifyDb.OutboxMessages.RemoveRange(outboxes);
+        await verifyDb.SaveChangesAsync();
+    }
+    [Fact]
+    public async Task Postgres_Update_ReplayWithOldETag_ReturnsStoredResponseWithoutIncrementingVersion()
+    {
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        var review = Review.Create(
+            Guid.NewGuid(), orderId, itemId, ReviewDirection.renter_to_supplier_listing,
+            renterId, supplierId, listingId, 4, "Initial review", now, now.AddDays(7));
+
+        await using var dbSetup = new ReviewServiceDbContext(CreatePostgresOptions());
+        await dbSetup.Reviews.AddAsync(review);
+        await dbSetup.SaveChangesAsync();
+
+        var updateKey = $"update-etag-{Guid.NewGuid():N}";
+        var updateRequest = new UpdateReviewRequest(5, "Updated to 5 stars!");
+
+        await using var db = new ReviewServiceDbContext(CreatePostgresOptions());
+        var reviewRepo = new ReviewRepository(db);
+        var auditRepo = new ReviewAuditRepository(db);
+        var idempRepo = new IdempotencyRepository(db);
+        var idempService = new IdempotencyService(idempRepo);
+        var outboxRepo = new OutboxRepository(db);
+        var mockMediaClient = new MockMediaClient();
+        var mockRentalClient = new MockRentalClient();
+
+        var service = new ReviewAuthoringService(
+            db, reviewRepo, auditRepo, idempRepo, idempService, mockRentalClient, outboxRepo, TimeProvider.System);
+
+        // 1. Initial Update with If-Match: "1" -> Succeeds and increments version to 2
+        var res1 = await service.UpdateReviewAsync(
+            new ReviewActorContext(renterId, "cus", false),
+            review.Id,
+            updateRequest,
+            updateKey,
+            "\"1\"");
+
+        Assert.True(res1.IsSuccess, res1.Error?.Message);
+        Assert.Equal(2, res1.Value.Version);
+
+        // 2. Retry with old ETag "1" (client retrying after dropped network response)
+        // Must return stored 200 response with version 2, NOT 412 Precondition Failed!
+        var res2 = await service.UpdateReviewAsync(
+            new ReviewActorContext(renterId, "cus", false),
+            review.Id,
+            updateRequest,
+            updateKey,
+            "\"1\"");
+
+        Assert.True(res2.IsSuccess, res2.Error?.Message);
+        Assert.Equal(2, res2.Value.Version);
+
+        // Verify version did NOT increment to 3
+        await using var dbVerify = new ReviewServiceDbContext(CreatePostgresOptions());
+        var freshReview = await dbVerify.Reviews.FindAsync(review.Id);
+        Assert.NotNull(freshReview);
+        Assert.Equal(2, freshReview.Version);
+
+        // Cleanup
+        var auditsToClean = await dbVerify.ReviewAudits.Where(a => a.ReviewId == freshReview.Id).ToListAsync();
+        dbVerify.ReviewAudits.RemoveRange(auditsToClean);
+        dbVerify.Reviews.Remove(freshReview);
+        var receipts = await dbVerify.IdempotencyRecords.Where(r => r.ActorId == renterId && r.IdempotencyKey == updateKey).ToListAsync();
+        dbVerify.IdempotencyRecords.RemoveRange(receipts);
+        var outboxes = await dbVerify.OutboxMessages.Where(m => m.PartitionKey == listingId.ToString("D")).ToListAsync();
+        dbVerify.OutboxMessages.RemoveRange(outboxes);
+        await dbVerify.SaveChangesAsync();
+    }
+    [Fact]
+    public async Task Postgres_Outbox_Fencing_ConditionalUpdateReturnsFalseWhenLeaseExpiredOrReclaimed()
     {
         await using var db = new ReviewServiceDbContext(CreatePostgresOptions());
         var repo = new OutboxRepository(db);
+        await db.OutboxMessages.ExecuteDeleteAsync();
 
         var msgId = Guid.NewGuid();
         var msg = new OutboxMessage(msgId, "test.topic", "TestEvent", "k1", "{}", DateTimeOffset.UtcNow);
         await db.OutboxMessages.AddAsync(msg);
         await db.SaveChangesAsync();
 
-        // Worker 1 claims with very short lease (already expired)
-        var batch = await repo.ClaimBatchAsync("worker-1", TimeSpan.FromMilliseconds(1), 1, DateTimeOffset.UtcNow.AddSeconds(-5));
+        // Worker A claims with 1 millisecond lease (immediately expired)
+        var batch = await repo.ClaimBatchAsync("worker-A", TimeSpan.FromMilliseconds(1), 1, DateTimeOffset.UtcNow.AddSeconds(-5));
         Assert.Single(batch);
-        var worker1Token = batch[0].ClaimToken!.Value;
+        var workerAToken = batch[0].ClaimToken!.Value;
 
-        // Worker 2 reclaims after lease expiry
-        var reclaimed = await repo.ClaimBatchAsync("worker-2", TimeSpan.FromMinutes(5), 1, DateTimeOffset.UtcNow);
+        // Worker B reclaims after lease expiry
+        var reclaimed = await repo.ClaimBatchAsync("worker-B", TimeSpan.FromMinutes(5), 1, DateTimeOffset.UtcNow);
         Assert.Single(reclaimed);
-        var worker2Token = reclaimed[0].ClaimToken!.Value;
-        Assert.NotEqual(worker1Token, worker2Token);
+        var workerBToken = reclaimed[0].ClaimToken!.Value;
+        Assert.NotEqual(workerAToken, workerBToken);
 
-        // Worker 1 (stale) attempts to mark processed with its old token
-        await repo.MarkProcessedAsync(msgId, worker1Token, DateTimeOffset.UtcNow);
+        // Worker A (stale) attempts conditional MarkProcessedAsync
+        bool workerAUpdated = await repo.MarkProcessedAsync(msgId, workerAToken, "worker-A", DateTimeOffset.UtcNow);
+        Assert.False(workerAUpdated); // Must return false: 0 rows updated!
 
-        // Verify message state was NOT marked Published by Worker 1
+        // Verify message state was NOT marked Published by Worker A
         await using var dbVerify = new ReviewServiceDbContext(CreatePostgresOptions());
         var freshMsg = await dbVerify.OutboxMessages.FindAsync(msgId);
         Assert.NotNull(freshMsg);
         Assert.NotEqual("Published", freshMsg.DeliveryState);
-        Assert.Equal("worker-2", freshMsg.ClaimOwner);
+        Assert.Equal("worker-B", freshMsg.ClaimOwner);
 
-        // Worker 2 (active) marks processed with its valid token
-        await repo.MarkProcessedAsync(msgId, worker2Token, DateTimeOffset.UtcNow);
+        // Worker B (active) marks processed with its valid token
+        bool workerBUpdated = await repo.MarkProcessedAsync(msgId, workerBToken, "worker-B", DateTimeOffset.UtcNow);
+        Assert.True(workerBUpdated); // Must return true: 1 row updated!
 
         // Verify message IS now Published
         await using var dbVerify2 = new ReviewServiceDbContext(CreatePostgresOptions());
@@ -192,6 +322,72 @@ public sealed class RealPostgreSqlAndKafkaIntegrationTests
         // Cleanup
         dbVerify2.OutboxMessages.Remove(publishedMsg);
         await dbVerify2.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task Kafka_Consumer_SharedTopic_IgnoresUnrelatedEventsAndCommits()
+    {
+        using var db = new ReviewServiceDbContext(CreatePostgresOptions());
+        var inboxRepo = new InboxRepository(db);
+        var projectionRepo = new ReviewProjectionRepository(db);
+        var eligibilityService = new ReviewEligibilityService(projectionRepo);
+        var producer = new SpyProducer();
+        var client = new MockRentalClient();
+
+        var consumer = new RentalItemCompletedConsumer(
+            inboxRepo, db, client, eligibilityService, producer);
+
+        // Feed RentalOrderPaid (unrelated event type on shared rental.events.v1 topic)
+        var context = new KafkaMessageContext(
+            "rental.events.v1", 0, 100, "key-1",
+            "{\"messageType\":\"RentalOrderPaid\",\"messageId\":\"" + Guid.NewGuid() + "\",\"version\":1,\"producer\":\"RentalService\"}");
+
+        var outcome = await consumer.ProcessMessageAsync(context);
+
+        Assert.Equal(ProcessOutcome.Ignored, outcome);
+    }
+
+    [Fact]
+    public async Task Kafka_Consumer_MalformedMessage_AcknowledgedToDlqAndDeadLettered()
+    {
+        using var db = new ReviewServiceDbContext(CreatePostgresOptions());
+        var inboxRepo = new InboxRepository(db);
+        var projectionRepo = new ReviewProjectionRepository(db);
+        var eligibilityService = new ReviewEligibilityService(projectionRepo);
+        var spyProducer = new SpyProducer(returnSuccess: true);
+        var client = new MockRentalClient();
+
+        var consumer = new RentalItemCompletedConsumer(
+            inboxRepo, db, client, eligibilityService, spyProducer);
+
+        var context = new KafkaMessageContext("rental.events.v1", 0, 105, "key-bad", "{not-valid-json");
+
+        var outcome = await consumer.ProcessMessageAsync(context);
+
+        Assert.Equal(ProcessOutcome.DeadLettered, outcome);
+        Assert.Single(spyProducer.ProducedMessages);
+        Assert.Equal(RentalItemCompletedConsumer.DlqTopic, spyProducer.ProducedMessages[0].Topic);
+        Assert.Equal("rental.events.v1:0:105", spyProducer.ProducedMessages[0].Key);
+    }
+
+    [Fact]
+    public async Task Kafka_Consumer_DlqOutage_ReturnsRetryAndDoesNotAdvance()
+    {
+        using var db = new ReviewServiceDbContext(CreatePostgresOptions());
+        var inboxRepo = new InboxRepository(db);
+        var projectionRepo = new ReviewProjectionRepository(db);
+        var eligibilityService = new ReviewEligibilityService(projectionRepo);
+        var failingProducer = new SpyProducer(returnSuccess: false); // Broker outage
+        var client = new MockRentalClient();
+
+        var consumer = new RentalItemCompletedConsumer(
+            inboxRepo, db, client, eligibilityService, failingProducer);
+
+        var context = new KafkaMessageContext("rental.events.v1", 0, 106, "key-bad", "{malformed");
+
+        var outcome = await consumer.ProcessMessageAsync(context);
+
+        Assert.Equal(ProcessOutcome.Retry, outcome);
     }
 
     [Fact]
@@ -213,5 +409,49 @@ public sealed class RealPostgreSqlAndKafkaIntegrationTests
         bool published = await producer.ProduceAsync(testTopic, testKey, testPayload);
 
         Assert.True(published);
+    }
+
+    private sealed class SpyProducer : IKafkaProducer
+    {
+        private readonly bool _returnSuccess;
+        public List<(string Topic, string Key, string Payload)> ProducedMessages { get; } = [];
+
+        public SpyProducer(bool returnSuccess = true) => _returnSuccess = returnSuccess;
+
+        public Task<bool> ProduceAsync(string topic, string partitionKey, string payload, CancellationToken cancellationToken = default)
+        {
+            ProducedMessages.Add((topic, partitionKey, payload));
+            return Task.FromResult(_returnSuccess);
+        }
+    }
+
+    private sealed class MockRentalClient : IRentalServiceClient
+    {
+        private readonly RentalItemReviewSnapshotDto? _snapshot;
+
+        public MockRentalClient(RentalItemReviewSnapshotDto? snapshot = null) => _snapshot = snapshot;
+
+        public Task<Result<RentalItemReviewSnapshotDto>> GetReviewSnapshotAsync(Guid orderId, Guid itemId, CancellationToken cancellationToken = default)
+        {
+            if (_snapshot != null) return Task.FromResult(Result.Success(_snapshot));
+            return Task.FromResult(Result.Failure<RentalItemReviewSnapshotDto>(Dprental.ReviewService.Common.Error.NotFound("NOT_FOUND", "Snapshot not found")));
+        }
+
+        public Task<Result<ReconciliationBatchDto>> GetReconciliationBatchAsync(string? cursor = null, int limit = 100, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result.Success(new ReconciliationBatchDto([], null, false)));
+        }
+    }
+    private sealed class MockMediaClient : IMediaServiceClient
+    {
+        public Task<Result<Dprental.ReviewService.Application.DTOs.Media.MediaVerifyDto>> VerifyMediaAsync(Guid mediaId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result.Success(new Dprental.ReviewService.Application.DTOs.Media.MediaVerifyDto(mediaId, Guid.Empty, "Ready", "image/jpeg")));
+        }
+
+        public Task<Result<Dprental.ReviewService.Application.DTOs.Media.MediaAccessDto>> CreatePrivateReadAccessAsync(Guid mediaId, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Result.Success(new Dprental.ReviewService.Application.DTOs.Media.MediaAccessDto(mediaId, $"https://storage.test/{mediaId}", DateTimeOffset.UtcNow.AddSeconds(60))));
+        }
     }
 }

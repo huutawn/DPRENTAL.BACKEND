@@ -7,12 +7,30 @@ public sealed class ReconciliationCheckpoint
 {
     public string SweepId { get; private set; } = string.Empty;
     public DateTimeOffset WindowStart { get; private set; }
+    public string? Cursor { get; private set; }
     public Guid? LastItemId { get; private set; }
     public bool IsCompleted { get; private set; }
     public DateTimeOffset StartedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
-
     private ReconciliationCheckpoint() { }
+
+    public ReconciliationCheckpoint(
+        string sweepId,
+        DateTimeOffset windowStart,
+        string? cursor,
+        Guid? lastItemId,
+        bool isCompleted,
+        DateTimeOffset startedAt,
+        DateTimeOffset updatedAt)
+    {
+        SweepId = sweepId;
+        WindowStart = windowStart.ToUniversalTime();
+        Cursor = cursor;
+        LastItemId = lastItemId;
+        IsCompleted = isCompleted;
+        StartedAt = startedAt.ToUniversalTime();
+        UpdatedAt = updatedAt.ToUniversalTime();
+    }
 
     public ReconciliationCheckpoint(
         string sweepId,
@@ -21,19 +39,20 @@ public sealed class ReconciliationCheckpoint
         bool isCompleted,
         DateTimeOffset startedAt,
         DateTimeOffset updatedAt)
+        : this(sweepId, windowStart, null, lastItemId, isCompleted, startedAt, updatedAt)
     {
-        SweepId = sweepId;
-        WindowStart = windowStart.ToUniversalTime();
+    }
+
+    public void Advance(string? cursor, Guid? lastItemId, bool isCompleted, DateTimeOffset updatedAt)
+    {
+        Cursor = cursor;
         LastItemId = lastItemId;
         IsCompleted = isCompleted;
-        StartedAt = startedAt.ToUniversalTime();
         UpdatedAt = updatedAt.ToUniversalTime();
     }
 
     public void Advance(Guid? lastItemId, bool isCompleted, DateTimeOffset updatedAt)
     {
-        LastItemId = lastItemId;
-        IsCompleted = isCompleted;
-        UpdatedAt = updatedAt.ToUniversalTime();
+        Advance(Cursor, lastItemId, isCompleted, updatedAt);
     }
 }

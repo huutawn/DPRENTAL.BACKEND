@@ -427,6 +427,7 @@ public sealed class ReviewServiceDbContext : DbContext, IUnitOfWork
             entity.HasKey(c => c.SweepId);
             entity.Property(c => c.SweepId).HasColumnName("sweep_id").HasMaxLength(64);
             entity.Property(c => c.WindowStart).HasColumnName("window_start").IsRequired();
+            entity.Property(c => c.Cursor).HasColumnName("cursor");
             entity.Property(c => c.LastItemId).HasColumnName("last_item_id");
             entity.Property(c => c.IsCompleted).HasColumnName("is_completed").IsRequired();
             entity.Property(c => c.StartedAt).HasColumnName("started_at").IsRequired();

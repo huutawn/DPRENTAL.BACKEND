@@ -391,14 +391,16 @@ public sealed class RepositoriesTests
         var token = claimed[0].ClaimToken!.Value;
 
         // Attempt mark processed with wrong token
-        await repository.MarkProcessedAsync(msg.Id, Guid.NewGuid(), now);
+        bool wrongTokenUpdated = await repository.MarkProcessedAsync(msg.Id, Guid.NewGuid(), "worker-1", now);
+        Assert.False(wrongTokenUpdated);
         var unupdated = await context.OutboxMessages.FindAsync(msg.Id);
         Assert.NotNull(unupdated);
         Assert.Equal("Pending", unupdated.DeliveryState);
         Assert.Null(unupdated.ProcessedAt);
 
         // Mark processed with correct token
-        await repository.MarkProcessedAsync(msg.Id, token, now);
+        bool correctTokenUpdated = await repository.MarkProcessedAsync(msg.Id, token, "worker-1", now);
+        Assert.True(correctTokenUpdated);
         var updated = await context.OutboxMessages.FindAsync(msg.Id);
         Assert.NotNull(updated);
         Assert.Equal("Published", updated.DeliveryState);
@@ -420,14 +422,16 @@ public sealed class RepositoriesTests
         var token = claimed[0].ClaimToken!.Value;
 
         // Attempt fail with wrong token
-        await repository.FailAttemptAsync(msg.Id, Guid.NewGuid(), "WRONG_TOKEN_ERR", now.AddMinutes(5));
+        bool wrongTokenFailed = await repository.FailAttemptAsync(msg.Id, Guid.NewGuid(), "worker-1", "WRONG_TOKEN_ERR", now.AddMinutes(5), false, now);
+        Assert.False(wrongTokenFailed);
         var unupdated = await context.OutboxMessages.FindAsync(msg.Id);
         Assert.NotNull(unupdated);
         Assert.Equal(0, unupdated.Attempts);
         Assert.Null(unupdated.LastErrorCode);
 
         // Fail with correct token
-        await repository.FailAttemptAsync(msg.Id, token, "REAL_ERR", now.AddMinutes(5));
+        bool correctTokenFailed = await repository.FailAttemptAsync(msg.Id, token, "worker-1", "REAL_ERR", now.AddMinutes(5), false, now);
+        Assert.True(correctTokenFailed);
         var updated = await context.OutboxMessages.FindAsync(msg.Id);
         Assert.NotNull(updated);
         Assert.Equal(1, updated.Attempts);

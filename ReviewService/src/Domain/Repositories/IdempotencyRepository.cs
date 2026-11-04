@@ -35,58 +35,41 @@ public sealed class IdempotencyRepository : IIdempotencyRepository
                 cancellationToken);
     }
 
+    public async Task AcquireLockAsync(
+        Guid actorId,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            throw new ArgumentException("Idempotency key must not be empty.", nameof(idempotencyKey));
+        }
+
+        if (!_dbContext.Database.IsRelational())
+        {
+            return;
+        }
+
+        if (_dbContext.Database.CurrentTransaction == null)
+        {
+            throw new InvalidOperationException("AcquireLockAsync requires an active transaction.");
+        }
+
+        var lockKey = $"{actorId:N}:{idempotencyKey}";
+        var param = new NpgsqlParameter("lockKey", lockKey);
+        await _dbContext.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock(hashtext(@lockKey))",
+            [param],
+            cancellationToken);
+    }
+
     public async Task<Result<IdempotencyRecord>> SaveAsync(
         IdempotencyRecord record,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
-
-        var lockKey = $"{record.ActorId:N}:{record.IdempotencyKey}";
-
-        if (!_dbContext.Database.IsRelational())
-        {
-            return await ExecuteSaveLogicAsync(record, cancellationToken);
-        }
-
-        if (_dbContext.Database.CurrentTransaction != null)
-        {
-            var param = new NpgsqlParameter("lockKey", lockKey);
-            await _dbContext.Database.ExecuteSqlRawAsync(
-                "SELECT pg_advisory_xact_lock(hashtext(@lockKey))",
-                [param],
-                cancellationToken);
-
-            return await ExecuteSaveLogicAsync(record, cancellationToken);
-        }
-
-        await using var tx = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-        try
-        {
-            var param = new NpgsqlParameter("lockKey", lockKey);
-            await _dbContext.Database.ExecuteSqlRawAsync(
-                "SELECT pg_advisory_xact_lock(hashtext(@lockKey))",
-                [param],
-                cancellationToken);
-
-            var result = await ExecuteSaveLogicAsync(record, cancellationToken);
-            if (result.IsSuccess)
-            {
-                await tx.CommitAsync(cancellationToken);
-            }
-            else
-            {
-                await tx.RollbackAsync(cancellationToken);
-            }
-
-            return result;
-        }
-        catch
-        {
-            await tx.RollbackAsync(cancellationToken);
-            throw;
-        }
+        return await ExecuteSaveLogicAsync(record, cancellationToken);
     }
-
     private async Task<Result<IdempotencyRecord>> ExecuteSaveLogicAsync(
         IdempotencyRecord record,
         CancellationToken cancellationToken)

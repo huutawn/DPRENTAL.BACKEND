@@ -44,6 +44,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<IKafkaProducer, KafkaProducer>();
         services.AddHostedService<Dprental.ReviewService.Application.Kafka.Workers.OutboxPublisherWorker>();
         services.AddHostedService<Dprental.ReviewService.Application.Kafka.Workers.RentalReconciliationSweepWorker>();
+        services.AddHostedService<Dprental.ReviewService.Application.Kafka.Workers.RentalItemCompletedKafkaWorker>();
         services.AddSingleton(TimeProvider.System);
 
         services.AddHttpClient<IRentalServiceClient, RentalServiceClient>((serviceProvider, client) =>

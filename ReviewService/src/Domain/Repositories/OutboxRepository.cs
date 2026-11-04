@@ -108,37 +108,105 @@ public sealed class OutboxRepository : IOutboxRepository
         }
     }
 
-    public async Task MarkProcessedAsync(
+    public async Task<bool> MarkProcessedAsync(
         Guid messageId,
         Guid claimToken,
-        DateTimeOffset processedAt,
+        string claimOwner,
+        DateTimeOffset nowUtc,
         CancellationToken cancellationToken = default)
     {
+        var utc = nowUtc.ToUniversalTime();
+
+        if (_dbContext.Database.IsRelational())
+        {
+            int rows = await _dbContext.OutboxMessages
+                .Where(m => m.Id == messageId &&
+                            m.ClaimToken == claimToken &&
+                            m.ClaimOwner == claimOwner &&
+                            m.LeaseExpiresAt != null && m.LeaseExpiresAt > utc &&
+                            m.DeliveryState != "Published" &&
+                            m.DeliveryState != "Parked")
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(m => m.DeliveryState, "Published")
+                    .SetProperty(m => m.ProcessedAt, utc)
+                    .SetProperty(m => m.ClaimToken, (Guid?)null)
+                    .SetProperty(m => m.ClaimOwner, (string?)null)
+                    .SetProperty(m => m.LeaseExpiresAt, (DateTimeOffset?)null),
+                    cancellationToken);
+
+            return rows > 0;
+        }
+
         var message = await _dbContext.OutboxMessages
-            .FirstOrDefaultAsync(m => m.Id == messageId && m.ClaimToken == claimToken, cancellationToken);
+            .FirstOrDefaultAsync(m => m.Id == messageId &&
+                                      m.ClaimToken == claimToken &&
+                                      m.ClaimOwner == claimOwner &&
+                                      m.LeaseExpiresAt != null && m.LeaseExpiresAt > utc &&
+                                      m.DeliveryState != "Published" &&
+                                      m.DeliveryState != "Parked",
+                                      cancellationToken);
 
         if (message != null)
         {
-            message.MarkProcessed(processedAt);
+            message.MarkProcessed(utc);
             await _dbContext.SaveChangesAsync(cancellationToken);
+            return true;
         }
+
+        return false;
     }
 
-    public async Task FailAttemptAsync(
+    public async Task<bool> FailAttemptAsync(
         Guid messageId,
         Guid claimToken,
+        string claimOwner,
         string errorCode,
         DateTimeOffset nextAttempt,
-        bool park = false,
+        bool park,
+        DateTimeOffset nowUtc,
         CancellationToken cancellationToken = default)
     {
+        var utc = nowUtc.ToUniversalTime();
+        var next = nextAttempt.ToUniversalTime();
+
+        if (_dbContext.Database.IsRelational())
+        {
+            int rows = await _dbContext.OutboxMessages
+                .Where(m => m.Id == messageId &&
+                            m.ClaimToken == claimToken &&
+                            m.ClaimOwner == claimOwner &&
+                            m.LeaseExpiresAt != null && m.LeaseExpiresAt > utc &&
+                            m.DeliveryState != "Published" &&
+                            m.DeliveryState != "Parked")
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(m => m.Attempts, m => m.Attempts + 1)
+                    .SetProperty(m => m.DeliveryState, m => (park || m.Attempts + 1 >= 5) ? "Parked" : "Pending")
+                    .SetProperty(m => m.LastErrorCode, errorCode)
+                    .SetProperty(m => m.NextAttemptAt, next)
+                    .SetProperty(m => m.ClaimToken, (Guid?)null)
+                    .SetProperty(m => m.ClaimOwner, (string?)null)
+                    .SetProperty(m => m.LeaseExpiresAt, (DateTimeOffset?)null),
+                    cancellationToken);
+
+            return rows > 0;
+        }
+
         var message = await _dbContext.OutboxMessages
-            .FirstOrDefaultAsync(m => m.Id == messageId && m.ClaimToken == claimToken, cancellationToken);
+            .FirstOrDefaultAsync(m => m.Id == messageId &&
+                                      m.ClaimToken == claimToken &&
+                                      m.ClaimOwner == claimOwner &&
+                                      m.LeaseExpiresAt != null && m.LeaseExpiresAt > utc &&
+                                      m.DeliveryState != "Published" &&
+                                      m.DeliveryState != "Parked",
+                                      cancellationToken);
 
         if (message != null)
         {
-            message.FailAttempt(errorCode, nextAttempt, park);
+            message.FailAttempt(errorCode, next, park);
             await _dbContext.SaveChangesAsync(cancellationToken);
+            return true;
         }
+
+        return false;
     }
 }

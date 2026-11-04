@@ -161,7 +161,7 @@ public sealed class RentalServiceClient : IRentalServiceClient
         int limit = 100,
         CancellationToken cancellationToken = default)
     {
-        string relativePath = $"internal/orders/review-reconciliation?limit={limit}";
+        string relativePath = $"internal/reconciliation/rental-items?limit={limit}";
         if (!string.IsNullOrWhiteSpace(cursor))
         {
             relativePath += $"&cursor={Uri.EscapeDataString(cursor)}";

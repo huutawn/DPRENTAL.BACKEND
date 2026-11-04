@@ -212,6 +212,10 @@ namespace ReviewService.Domain.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("sweep_id");
 
+                    b.Property<string>("Cursor")
+                        .HasColumnType("text")
+                        .HasColumnName("cursor");
+
                     b.Property<bool>("IsCompleted")
                         .HasColumnType("boolean")
                         .HasColumnName("is_completed");

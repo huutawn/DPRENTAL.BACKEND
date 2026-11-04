@@ -94,12 +94,10 @@ public sealed class RentalReconciliationSweepWorker : BackgroundService
             sweepId = lastCheckpoint.SweepId;
             windowStart = lastCheckpoint.WindowStart;
             checkpoint = lastCheckpoint;
-            if (checkpoint.LastItemId.HasValue)
-            {
-                cursor = EncodeCursor(windowStart, checkpoint.LastItemId.Value);
-            }
-            _logger?.LogInformation("Khôi phục tiến trình sweep chưa hoàn tất {SweepId} từ ItemId {LastItemId}.",
-                sweepId, checkpoint.LastItemId);
+            // Lưu nguyên NextCursor do Rental trả về vào checkpoint. Nếu checkpoint cũ chưa có cursor thì bắt đầu lại từ đầu cửa sổ (cursor = null).
+            cursor = lastCheckpoint.Cursor;
+            _logger?.LogInformation("Khôi phục tiến trình sweep chưa hoàn tất {SweepId} với cursor '{Cursor}' từ ItemId {LastItemId}.",
+                sweepId, cursor, checkpoint.LastItemId);
         }
         else
         {
@@ -107,7 +105,7 @@ public sealed class RentalReconciliationSweepWorker : BackgroundService
             DateTimeOffset now = _timeProvider.GetUtcNow();
             windowStart = now.AddDays(-30);
             sweepId = $"sweep-{now:yyyyMMddHHmmss}-{Guid.NewGuid():N}";
-            checkpoint = new ReconciliationCheckpoint(sweepId, windowStart, null, false, now, now);
+            checkpoint = new ReconciliationCheckpoint(sweepId, windowStart, null, null, false, now, now);
             await reconciliationRepo.AddAsync(checkpoint, cancellationToken);
             _logger?.LogInformation("Bắt đầu chu kỳ sweep mới {SweepId} với windowStart = {WindowStart}.",
                 sweepId, windowStart);
@@ -148,7 +146,7 @@ public sealed class RentalReconciliationSweepWorker : BackgroundService
             }
 
             Guid? lastItemId = batch.Items.Count > 0 ? batch.Items[^1].ItemId : checkpoint.LastItemId;
-            checkpoint.Advance(lastItemId, !hasMore, _timeProvider.GetUtcNow());
+            checkpoint.Advance(batch.NextCursor, lastItemId, !hasMore, _timeProvider.GetUtcNow());
             await reconciliationRepo.UpdateAsync(checkpoint, cancellationToken);
 
             await tx.CommitAsync(cancellationToken);
@@ -160,16 +158,5 @@ public sealed class RentalReconciliationSweepWorker : BackgroundService
             sweepId, totalProcessed);
 
         return totalProcessed;
-    }
-
-    private static string EncodeCursor(DateTimeOffset windowStart, Guid lastItemId)
-    {
-        var payload = new
-        {
-            WindowStart = windowStart,
-            LastItemId = lastItemId
-        };
-        string json = JsonSerializer.Serialize(payload);
-        return Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
     }
 }

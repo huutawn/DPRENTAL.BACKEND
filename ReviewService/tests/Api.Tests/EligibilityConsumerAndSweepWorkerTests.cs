@@ -321,8 +321,9 @@ public sealed class EligibilityConsumerAndSweepWorkerTests
         using (var seedScope = scopeFactory.CreateScope())
         {
             var reconRepo = seedScope.ServiceProvider.GetRequiredService<IReconciliationRepository>();
+            var initialCursor = "eyJDdXJzb3IiOiJhdXRob3JpdGF0aXZlIn0=";
             await reconRepo.AddAsync(new ReconciliationCheckpoint(
-                crashedSweepId, windowStart, crashedLastItemId, false, FixedNow.AddMinutes(-10), FixedNow.AddMinutes(-5)));
+                crashedSweepId, windowStart, initialCursor, crashedLastItemId, false, FixedNow.AddMinutes(-10), FixedNow.AddMinutes(-5)));
         }
 
         string? receivedCursor = null;
@@ -339,9 +340,7 @@ public sealed class EligibilityConsumerAndSweepWorkerTests
         int processed = await worker.RunSweepCycleAsync();
 
         Assert.Equal(1, processed);
-        Assert.NotNull(receivedCursor);
-        string decodedCursor = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(receivedCursor));
-        Assert.Contains(crashedLastItemId.ToString(), decodedCursor);
+        Assert.Equal("eyJDdXJzb3IiOiJhdXRob3JpdGF0aXZlIn0=", receivedCursor);
         // Verify checkpoint is now marked completed
         using (var checkScope = scopeFactory.CreateScope())
         {

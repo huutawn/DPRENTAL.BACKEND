@@ -175,19 +175,7 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
                 Error.Forbidden("ACTOR_NOT_PARTICIPANT", "Bạn không có quyền đánh giá mục thuê này do không phải là Người thuê hoặc Nhà cung cấp trong đơn hàng."));
         }
 
-        // 5. Kiểm tra duplicate theo đúng direction đã xác định
-        bool exists = await _reviewRepository.ExistsByItemAndDirectionAsync(
-            request.ItemId,
-            direction,
-            cancellationToken);
-
-        if (exists)
-        {
-            return Result.Failure<ReviewDetailResponse>(
-                Error.Conflict("REVIEW_ALREADY_EXISTS", "Mục thuê này đã được bạn đánh giá trước đó. Mỗi bên chỉ được phép gửi đánh giá một lần cho mỗi mục thuê."));
-        }
-
-        // 6. Xác thực cửa sổ 30 ngày (exclusive UTC)
+        // 5. Xác thực cửa sổ 30 ngày (exclusive UTC)
         var now = _timeProvider.GetUtcNow();
         var completedAt = snapshot.CompletedAt.Value;
         var creationDeadline = completedAt.AddDays(30);
@@ -201,118 +189,174 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
                     $"Thời hạn tạo đánh giá cho mục thuê này đã kết thúc vào lúc {formattedDeadline} (quy tắc completedAt + 30 ngày)."));
         }
 
-        // 7. Tính canEditUntil = min(now + 7 days, completedAt + 30 days)
+        // 6. Tính canEditUntil = min(now + 7 days, completedAt + 30 days)
         var sevenDaysLater = now.AddDays(7);
         var canEditUntil = sevenDaysLater < creationDeadline ? sevenDaysLater : creationDeadline;
 
-        // 8. Khởi tạo thực thể Review
-        var review = Review.Create(
-            id: Guid.NewGuid(),
-            orderId: request.OrderId,
-            itemId: request.ItemId,
-            direction: direction,
-            authorId: actor.ActorId,
-            subjectId: subjectId,
-            equipmentListingId: snapshot.EquipmentListingId,
-            rating: request.Rating,
-            comment: request.Comment,
-            createdAt: now,
-            canEditUntil: canEditUntil);
-
-        // 9. Khởi tạo bản ghi ReviewAudit (action Created)
-        var audit = new ReviewAudit(
-            id: Guid.NewGuid(),
-            reviewId: review.Id,
-            actorId: actor.ActorId,
-            actorRole: actorRole,
-            action: ReviewAuditAction.Created,
-            reason: "Initial review submission",
-            oldValues: null,
-            newValues: JsonSerializer.Serialize(new
-            {
-                rating = review.Rating,
-                comment = review.Comment,
-                authorState = review.AuthorState.ToString(),
-                moderationState = review.ModerationState.ToString(),
-                version = review.Version
-            }, JsonOptions),
-            createdAt: now);
-
-        // 10. Khởi tạo IdempotencyRecord
-        var responseDto = ReviewDetailResponse.FromEntity(review);
-        string responseBody = JsonSerializer.Serialize(responseDto, JsonOptions);
-        string fingerprint = _idempotencyService.ComputeFingerprint(actor.ActorId, "POST", requestPath, requestBody, null);
-
-        var idempotencyRecord = _idempotencyService.CreateRecord(
-            actorId: actor.ActorId,
-            idempotencyKey: idempotencyKey,
-            requestFingerprint: fingerprint,
-            httpMethod: "POST",
-            requestPath: requestPath,
-            responseStatusCode: 201,
-            responseHeaders: JsonSerializer.Serialize(new
-            {
-                ETag = $"\"{review.Version}\"",
-                Location = $"/api/v1/reviews/{review.Id}"
-            }),
-            responseBody: responseBody,
-            createdAt: now);
-
-        // 11. Chuẩn bị Outbox events
-        var publicOutbox = new OutboxMessage(
-            Guid.NewGuid(),
-            ReviewEventFactory.PublicEventsTopic,
-            "ReviewCreated",
-            review.ListingId.ToString("D"),
-            JsonSerializer.Serialize(ReviewEventFactory.CreateContributionEvent(review), JsonOptions),
-            now);
-
-        var privateOutbox = new OutboxMessage(
-            Guid.NewGuid(),
-            "review.private.events.v1",
-            "ReviewCreated",
-            review.Id.ToString("D"),
-            JsonSerializer.Serialize(new
-            {
-                reviewId = review.Id,
-                reviewVersion = review.Version,
-                direction = review.Direction.ToString(),
-                authorId = review.AuthorId,
-                recipientId = review.SubjectId,
-                orderId = review.OrderId,
-                itemId = review.ItemId,
-                eventType = "ReviewCreated"
-            }, JsonOptions),
-            now);
-
-        // 12. Cam kết giao dịch nguyên tử qua IUnitOfWork
+        // 7. Mở transaction và lấy PostgreSQL transaction advisory lock theo cặp (actorId, idempotencyKey)
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
+            await _idempotencyRepository.AcquireLockAsync(actor.ActorId, idempotencyKey, cancellationToken);
+
+            // 8. Đọc lại receipt sau khi lấy khóa
+            string fingerprint = _idempotencyService.ComputeFingerprint(actor.ActorId, "POST", requestPath, requestBody, null);
+            var lockCheck = await _idempotencyService.CheckAsync(
+                actor.ActorId,
+                idempotencyKey,
+                fingerprint,
+                cancellationToken);
+
+            if (lockCheck.IsFailure)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(lockCheck.Error);
+            }
+
+            if (lockCheck.Value != null)
+            {
+                var cachedDto = JsonSerializer.Deserialize<ReviewDetailResponse>(lockCheck.Value.ResponseBody, JsonOptions);
+                if (cachedDto != null)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    _logger?.LogInformation("Trả về kết quả tạo review đã lưu (Replay under lock) cho key {Key}", idempotencyKey);
+                    return Result.Success(cachedDto);
+                }
+            }
+
+            // 9. Đọc trạng thái cần sửa (ExistsByItemAndDirectionAsync) dưới khóa
+            bool exists = await _reviewRepository.ExistsByItemAndDirectionAsync(
+                request.ItemId,
+                direction,
+                cancellationToken);
+
+            if (exists)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(
+                    Error.Conflict("REVIEW_ALREADY_EXISTS", "Mục thuê này đã được bạn đánh giá trước đó. Mỗi bên chỉ được phép gửi đánh giá một lần cho mỗi mục thuê."));
+            }
+
+            // 10. Khởi tạo thực thể Review
+            var review = Review.Create(
+                id: Guid.NewGuid(),
+                orderId: request.OrderId,
+                itemId: request.ItemId,
+                direction: direction,
+                authorId: actor.ActorId,
+                subjectId: subjectId,
+                equipmentListingId: snapshot.EquipmentListingId,
+                rating: request.Rating,
+                comment: request.Comment,
+                createdAt: now,
+                canEditUntil: canEditUntil);
+
+            // 11. Khởi tạo bản ghi ReviewAudit (action Created)
+            var audit = new ReviewAudit(
+                id: Guid.NewGuid(),
+                reviewId: review.Id,
+                actorId: actor.ActorId,
+                actorRole: actorRole,
+                action: ReviewAuditAction.Created,
+                reason: "Initial review submission",
+                oldValues: null,
+                newValues: JsonSerializer.Serialize(new
+                {
+                    rating = review.Rating,
+                    comment = review.Comment,
+                    authorState = review.AuthorState.ToString(),
+                    moderationState = review.ModerationState.ToString(),
+                    version = review.Version
+                }, JsonOptions),
+                createdAt: now);
+
+            // 12. Khởi tạo IdempotencyRecord
+            var responseDto = ReviewDetailResponse.FromEntity(review);
+            string responseBody = JsonSerializer.Serialize(responseDto, JsonOptions);
+
+            var idempotencyRecord = _idempotencyService.CreateRecord(
+                actorId: actor.ActorId,
+                idempotencyKey: idempotencyKey,
+                requestFingerprint: fingerprint,
+                httpMethod: "POST",
+                requestPath: requestPath,
+                responseStatusCode: 201,
+                responseHeaders: JsonSerializer.Serialize(new
+                {
+                    ETag = $"\"{review.Version}\"",
+                    Location = $"/api/v1/reviews/{review.Id}"
+                }),
+                responseBody: responseBody,
+                createdAt: now);
+
+            // 13. Chuẩn bị Outbox events
+            var publicOutbox = new OutboxMessage(
+                Guid.NewGuid(),
+                ReviewEventFactory.PublicEventsTopic,
+                "ReviewCreated",
+                review.ListingId.ToString("D"),
+                JsonSerializer.Serialize(ReviewEventFactory.CreateContributionEvent(review), JsonOptions),
+                now);
+
+            var privateOutbox = new OutboxMessage(
+                Guid.NewGuid(),
+                "review.private.events.v1",
+                "ReviewCreated",
+                review.Id.ToString("D"),
+                JsonSerializer.Serialize(new
+                {
+                    reviewId = review.Id,
+                    reviewVersion = review.Version,
+                    direction = review.Direction.ToString(),
+                    authorId = review.AuthorId,
+                    recipientId = review.SubjectId,
+                    orderId = review.OrderId,
+                    itemId = review.ItemId,
+                    eventType = "ReviewCreated"
+                }, JsonOptions),
+                now);
+
             await _reviewRepository.AddAsync(review, cancellationToken);
             await _reviewAuditRepository.AddAsync(audit, cancellationToken);
             await _outboxRepository.AddAsync(publicOutbox, cancellationToken);
             await _outboxRepository.AddAsync(privateOutbox, cancellationToken);
-            var idempResult = await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
-            if (idempResult.IsFailure)
-            {
-                await tx.RollbackAsync(cancellationToken);
-                _unitOfWork.DiscardChanges();
-                return Result.Failure<ReviewDetailResponse>(idempResult.Error);
-            }
+            await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
+
             await _unitOfWork.CommitAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
+
+            return Result.Success(responseDto);
         }
         catch (DbUpdateException ex)
         {
             await tx.RollbackAsync(cancellationToken);
             _unitOfWork.DiscardChanges();
-            _logger?.LogWarning(ex, "Xung đột ghi cơ sở dữ liệu khi tạo review cho mục thuê {ItemId}", request.ItemId);
-            return Result.Failure<ReviewDetailResponse>(
-                Error.Conflict("REVIEW_ALREADY_EXISTS", "Mục thuê này đã được bạn đánh giá trước đó. Mỗi bên chỉ được phép gửi đánh giá một lần cho mỗi mục thuê."));
-        }
 
-        return Result.Success(responseDto);
+            if (IsReviewUniqueConstraintViolation(ex))
+            {
+                _logger?.LogWarning(ex, "Xung đột ghi cơ sở dữ liệu khi tạo review cho mục thuê {ItemId}", request.ItemId);
+                return Result.Failure<ReviewDetailResponse>(
+                    Error.Conflict("REVIEW_ALREADY_EXISTS", "Mục thuê này đã được bạn đánh giá trước đó. Mỗi bên chỉ được phép gửi đánh giá một lần cho mỗi mục thuê."));
+            }
+
+            string fingerprint = _idempotencyService.ComputeFingerprint(actor.ActorId, "POST", requestPath, requestBody, null);
+            if (IsIdempotencyUniqueConstraintViolation(ex))
+            {
+                var recheck = await _idempotencyService.CheckAsync(actor.ActorId, idempotencyKey, fingerprint, cancellationToken);
+                if (recheck.IsSuccess && recheck.Value != null)
+                {
+                    var cached = JsonSerializer.Deserialize<ReviewDetailResponse>(recheck.Value.ResponseBody, JsonOptions);
+                    if (cached != null) return Result.Success(cached);
+                }
+                return Result.Failure<ReviewDetailResponse>(recheck.Error ?? Error.Conflict("IDEMPOTENCY_KEY_REUSE_MISMATCH", "Khóa Idempotency-Key đã được sử dụng trước đó cho một yêu cầu có nội dung khác."));
+            }
+
+            _logger?.LogError(ex, "Lỗi cơ sở dữ liệu khi tạo review cho mục thuê {ItemId}", request.ItemId);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -359,15 +403,12 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
         // 1. Kiểm tra Idempotency
         string requestPath = $"/api/v1/reviews/{reviewId}";
         string requestBody = JsonSerializer.Serialize(request, JsonOptions);
+        string fingerprint = _idempotencyService.ComputeFingerprint(actor.ActorId, "PUT", requestPath, requestBody, ifMatch);
         var checkResult = await _idempotencyService.CheckAsync(
             actor.ActorId,
             idempotencyKey,
-            "PUT",
-            requestPath,
-            requestBody,
-            ifMatch,
+            fingerprint,
             cancellationToken);
-
         if (checkResult.IsFailure)
         {
             return Result.Failure<ReviewDetailResponse>(checkResult.Error);
@@ -383,115 +424,149 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
             }
         }
 
-        // 2. Tìm review hiện tại
-        var review = await _reviewRepository.GetByIdAsync(reviewId, cancellationToken);
-        if (review == null)
-        {
-            return Result.Failure<ReviewDetailResponse>(
-                Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá đã chỉ định."));
-        }
-
-        // 3. Kiểm tra If-Match so với review.Version
-        if (!ParseIfMatch(ifMatch, review.Version, out var ifMatchError))
-        {
-            return Result.Failure<ReviewDetailResponse>(ifMatchError!);
-        }
-
-        // 4. Kiểm tra quyền sở hữu tác giả
-        if (actor.ActorId != review.AuthorId)
-        {
-            return Result.Failure<ReviewDetailResponse>(
-                Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá hoặc bạn không có quyền chỉnh sửa."));
-        }
-
-        // 5. Kiểm tra trạng thái AuthorState (chỉ Active mới được sửa)
-        if (review.AuthorState != AuthorState.Active)
-        {
-            return Result.Failure<ReviewDetailResponse>(
-                Error.Unprocessable("REVIEW_ALREADY_WITHDRAWN", "Không thể chỉnh sửa đánh giá đã được rút lại."));
-        }
-
-        // 6. Kiểm tra thời hạn canEditUntil
-        var now = _timeProvider.GetUtcNow();
-        if (now >= review.CanEditUntil)
-        {
-            string formattedCanEditUntil = review.CanEditUntil.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
-            return Result.Failure<ReviewDetailResponse>(
-                Error.Unprocessable(
-                    "REVIEW_EDIT_WINDOW_EXPIRED",
-                    $"Thời hạn chỉnh sửa đánh giá này đã kết thúc vào lúc {formattedCanEditUntil}."));
-        }
-
-        // 7. Lưu giá trị cũ trước khi sửa
-        string oldValuesJson = JsonSerializer.Serialize(new
-        {
-            rating = review.Rating,
-            comment = review.Comment,
-            version = review.Version
-        }, JsonOptions);
-
-        // 8. Cập nhật thực thể
-        review.Update(request.Rating, request.Comment, now);
-
-        // 9. Ghi audit
-        string newValuesJson = JsonSerializer.Serialize(new
-        {
-            rating = review.Rating,
-            comment = review.Comment,
-            version = review.Version
-        }, JsonOptions);
-
-        var audit = new ReviewAudit(
-            id: Guid.NewGuid(),
-            reviewId: review.Id,
-            actorId: actor.ActorId,
-            actorRole: review.Direction == ReviewDirection.renter_to_supplier_listing ? "Renter" : "Supplier",
-            action: ReviewAuditAction.Updated,
-            reason: "Author updated rating or comment",
-            oldValues: oldValuesJson,
-            newValues: newValuesJson,
-            createdAt: now);
-
-        // 10. Tạo IdempotencyRecord
-        var responseDto = ReviewDetailResponse.FromEntity(review);
-        string responseBody = JsonSerializer.Serialize(responseDto, JsonOptions);
-        string fingerprint = _idempotencyService.ComputeFingerprint(actor.ActorId, "PUT", requestPath, requestBody, ifMatch);
-
-        var idempotencyRecord = _idempotencyService.CreateRecord(
-            actorId: actor.ActorId,
-            idempotencyKey: idempotencyKey,
-            requestFingerprint: fingerprint,
-            httpMethod: "PUT",
-            requestPath: requestPath,
-            responseStatusCode: 200,
-            responseHeaders: JsonSerializer.Serialize(new { ETag = $"\"{review.Version}\"" }),
-            responseBody: responseBody,
-            createdAt: now);
-
-        var updateOutbox = new OutboxMessage(
-            Guid.NewGuid(),
-            ReviewEventFactory.PublicEventsTopic,
-            "ReviewUpdated",
-            review.ListingId.ToString("D"),
-            JsonSerializer.Serialize(ReviewEventFactory.CreateContributionEvent(review), JsonOptions),
-            now);
-
-        // 11. Lưu nguyên tử qua IUnitOfWork
+        // 2. Mở transaction và lấy PostgreSQL transaction advisory lock theo cặp (actorId, idempotencyKey)
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
-            await _reviewRepository.UpdateAsync(review, cancellationToken);
-            await _reviewAuditRepository.AddAsync(audit, cancellationToken);
-            await _outboxRepository.AddAsync(updateOutbox, cancellationToken);
-            var idempResult = await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
-            if (idempResult.IsFailure)
+            await _idempotencyRepository.AcquireLockAsync(actor.ActorId, idempotencyKey, cancellationToken);
+
+            // 3. Đọc lại receipt sau khi lấy khóa (Replay check TRƯỚC ETag check)
+            var lockCheck = await _idempotencyService.CheckAsync(
+                actor.ActorId,
+                idempotencyKey,
+                fingerprint,
+                cancellationToken);
+
+            if (lockCheck.IsFailure)
             {
                 await tx.RollbackAsync(cancellationToken);
                 _unitOfWork.DiscardChanges();
-                return Result.Failure<ReviewDetailResponse>(idempResult.Error);
+                return Result.Failure<ReviewDetailResponse>(lockCheck.Error);
             }
+
+            if (lockCheck.Value != null)
+            {
+                var cachedDto = JsonSerializer.Deserialize<ReviewDetailResponse>(lockCheck.Value.ResponseBody, JsonOptions);
+                if (cachedDto != null)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    _logger?.LogInformation("Trả về kết quả chỉnh sửa review đã lưu (Replay under lock) cho key {Key}", idempotencyKey);
+                    return Result.Success(cachedDto);
+                }
+            }
+
+            // 4. Tìm review hiện tại
+            var review = await _reviewRepository.GetByIdAsync(reviewId, cancellationToken);
+            if (review == null)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(
+                    Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá đã chỉ định."));
+            }
+
+            // 5. Kiểm tra If-Match so với review.Version
+            if (!ParseIfMatch(ifMatch, review.Version, out var ifMatchError))
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(ifMatchError!);
+            }
+
+            // 6. Kiểm tra quyền sở hữu tác giả
+            if (actor.ActorId != review.AuthorId)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(
+                    Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá hoặc bạn không có quyền chỉnh sửa."));
+            }
+
+            // 7. Kiểm tra trạng thái AuthorState (chỉ Active mới được sửa)
+            if (review.AuthorState != AuthorState.Active)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(
+                    Error.Unprocessable("REVIEW_ALREADY_WITHDRAWN", "Không thể chỉnh sửa đánh giá đã được rút lại."));
+            }
+
+            // 8. Kiểm tra thời hạn canEditUntil
+            var now = _timeProvider.GetUtcNow();
+            if (now >= review.CanEditUntil)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                string formattedCanEditUntil = review.CanEditUntil.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+                return Result.Failure<ReviewDetailResponse>(
+                    Error.Unprocessable(
+                        "REVIEW_EDIT_WINDOW_EXPIRED",
+                        $"Thời hạn chỉnh sửa đánh giá này đã kết thúc vào lúc {formattedCanEditUntil}."));
+            }
+
+            // 9. Lưu giá trị cũ trước khi sửa
+            string oldValuesJson = JsonSerializer.Serialize(new
+            {
+                rating = review.Rating,
+                comment = review.Comment,
+                version = review.Version
+            }, JsonOptions);
+
+            // 10. Cập nhật thực thể
+            review.Update(request.Rating, request.Comment, now);
+
+            // 11. Ghi audit
+            string newValuesJson = JsonSerializer.Serialize(new
+            {
+                rating = review.Rating,
+                comment = review.Comment,
+                version = review.Version
+            }, JsonOptions);
+
+            var audit = new ReviewAudit(
+                id: Guid.NewGuid(),
+                reviewId: review.Id,
+                actorId: actor.ActorId,
+                actorRole: review.Direction == ReviewDirection.renter_to_supplier_listing ? "Renter" : "Supplier",
+                action: ReviewAuditAction.Updated,
+                reason: "Author updated rating or comment",
+                oldValues: oldValuesJson,
+                newValues: newValuesJson,
+                createdAt: now);
+
+            // 12. Tạo IdempotencyRecord
+            var responseDto = ReviewDetailResponse.FromEntity(review);
+            string responseBody = JsonSerializer.Serialize(responseDto, JsonOptions);
+
+            var idempotencyRecord = _idempotencyService.CreateRecord(
+                actorId: actor.ActorId,
+                idempotencyKey: idempotencyKey,
+                requestFingerprint: fingerprint,
+                httpMethod: "PUT",
+                requestPath: requestPath,
+                responseStatusCode: 200,
+                responseHeaders: JsonSerializer.Serialize(new { ETag = $"\"{review.Version}\"" }),
+                responseBody: responseBody,
+                createdAt: now);
+
+            var updateOutbox = new OutboxMessage(
+                Guid.NewGuid(),
+                ReviewEventFactory.PublicEventsTopic,
+                "ReviewUpdated",
+                review.ListingId.ToString("D"),
+                JsonSerializer.Serialize(ReviewEventFactory.CreateContributionEvent(review), JsonOptions),
+                now);
+
+            await _reviewRepository.UpdateAsync(review, cancellationToken);
+            await _reviewAuditRepository.AddAsync(audit, cancellationToken);
+            await _outboxRepository.AddAsync(updateOutbox, cancellationToken);
+            await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
+
             await _unitOfWork.CommitAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
+
+            return Result.Success(responseDto);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -500,8 +575,24 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
             return Result.Failure<ReviewDetailResponse>(
                 Error.PreconditionFailed("ETAG_PRECONDITION_FAILED", "Phiên bản của đánh giá đã bị thay đổi bởi thao tác khác."));
         }
+        catch (DbUpdateException ex)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
 
-        return Result.Success(responseDto);
+            if (IsIdempotencyUniqueConstraintViolation(ex))
+            {
+                var recheck = await _idempotencyService.CheckAsync(actor.ActorId, idempotencyKey, fingerprint, cancellationToken);
+                if (recheck.IsSuccess && recheck.Value != null)
+                {
+                    var cached = JsonSerializer.Deserialize<ReviewDetailResponse>(recheck.Value.ResponseBody, JsonOptions);
+                    if (cached != null) return Result.Success(cached);
+                }
+                return Result.Failure<ReviewDetailResponse>(recheck.Error ?? Error.Conflict("IDEMPOTENCY_KEY_REUSE_MISMATCH", "Khóa Idempotency-Key đã được sử dụng trước đó cho một yêu cầu có nội dung khác."));
+            }
+
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -527,16 +618,14 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
                 Error.Validation("IDEMPOTENCY_KEY_REQUIRED", "Khóa Idempotency-Key là bắt buộc đối với yêu cầu này."));
         }
 
-        // 1. Kiểm tra Idempotency
+        // 1. Kiểm tra Idempotency nhanh (pre-check) ngoài transaction
         string requestPath = $"/api/v1/reviews/{reviewId}/withdraw";
         string requestBody = request != null ? JsonSerializer.Serialize(request, JsonOptions) : string.Empty;
+        string fingerprint = _idempotencyService.ComputeFingerprint(actor.ActorId, "POST", requestPath, requestBody, ifMatch);
         var checkResult = await _idempotencyService.CheckAsync(
             actor.ActorId,
             idempotencyKey,
-            "POST",
-            requestPath,
-            requestBody,
-            ifMatch,
+            fingerprint,
             cancellationToken);
 
         if (checkResult.IsFailure)
@@ -554,105 +643,138 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
             }
         }
 
-        // 2. Tìm review hiện tại
-        var review = await _reviewRepository.GetByIdAsync(reviewId, cancellationToken);
-        if (review == null)
-        {
-            return Result.Failure<ReviewDetailResponse>(
-                Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá đã chỉ định."));
-        }
-
-        // 3. Kiểm tra If-Match so với review.Version
-        if (!ParseIfMatch(ifMatch, review.Version, out var ifMatchError))
-        {
-            return Result.Failure<ReviewDetailResponse>(ifMatchError!);
-        }
-
-        // 4. Kiểm tra quyền sở hữu tác giả
-        if (actor.ActorId != review.AuthorId)
-        {
-            return Result.Failure<ReviewDetailResponse>(
-                Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá hoặc bạn không có quyền rút đánh giá này."));
-        }
-
-        // 5. Kiểm tra nếu đã Withdrawn
-        if (review.AuthorState == AuthorState.Withdrawn)
-        {
-            return Result.Failure<ReviewDetailResponse>(
-                Error.Conflict("REVIEW_ALREADY_WITHDRAWN", "Đánh giá này đã được rút lại trước đó."));
-        }
-
-        var now = _timeProvider.GetUtcNow();
-
-        // 6. Ghi lại giá trị cũ
-        string oldValuesJson = JsonSerializer.Serialize(new
-        {
-            authorState = review.AuthorState.ToString(),
-            version = review.Version
-        }, JsonOptions);
-
-        // 7. Thực hiện rút đánh giá
-        review.Withdraw(now);
-
-        // 8. Tạo bản ghi kiểm toán ReviewAudit
-        string newValuesJson = JsonSerializer.Serialize(new
-        {
-            authorState = review.AuthorState.ToString(),
-            version = review.Version,
-            withdrawnAt = review.WithdrawnAt
-        }, JsonOptions);
-
-        var audit = new ReviewAudit(
-            id: Guid.NewGuid(),
-            reviewId: review.Id,
-            actorId: actor.ActorId,
-            actorRole: review.Direction == ReviewDirection.renter_to_supplier_listing ? "Renter" : "Supplier",
-            action: ReviewAuditAction.Withdrawn,
-            reason: request?.Reason ?? "Author withdrew review",
-            oldValues: oldValuesJson,
-            newValues: newValuesJson,
-            createdAt: now);
-
-        // 9. Khởi tạo IdempotencyRecord
-        var responseDto = ReviewDetailResponse.FromEntity(review);
-        string responseBody = JsonSerializer.Serialize(responseDto, JsonOptions);
-        string fingerprint = _idempotencyService.ComputeFingerprint(actor.ActorId, "POST", requestPath, requestBody, ifMatch);
-
-        var idempotencyRecord = _idempotencyService.CreateRecord(
-            actorId: actor.ActorId,
-            idempotencyKey: idempotencyKey,
-            requestFingerprint: fingerprint,
-            httpMethod: "POST",
-            requestPath: requestPath,
-            responseStatusCode: 200,
-            responseHeaders: JsonSerializer.Serialize(new { ETag = $"\"{review.Version}\"" }),
-            responseBody: responseBody,
-            createdAt: now);
-
-        var withdrawOutbox = new OutboxMessage(
-            Guid.NewGuid(),
-            ReviewEventFactory.PublicEventsTopic,
-            "ReviewWithdrawn",
-            review.ListingId.ToString("D"),
-            JsonSerializer.Serialize(ReviewEventFactory.CreateContributionEvent(review), JsonOptions),
-            now);
-
-        // 10. Lưu nguyên tử qua IUnitOfWork
+        // 2. Mở transaction và lấy PostgreSQL transaction advisory lock theo cặp (actorId, idempotencyKey)
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
-            await _reviewRepository.UpdateAsync(review, cancellationToken);
-            await _reviewAuditRepository.AddAsync(audit, cancellationToken);
-            await _outboxRepository.AddAsync(withdrawOutbox, cancellationToken);
-            var idempResult = await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
-            if (idempResult.IsFailure)
+            await _idempotencyRepository.AcquireLockAsync(actor.ActorId, idempotencyKey, cancellationToken);
+
+            // 3. Đọc lại receipt sau khi lấy khóa (Replay check TRƯỚC ETag check)
+            var lockCheck = await _idempotencyService.CheckAsync(
+                actor.ActorId,
+                idempotencyKey,
+                fingerprint,
+                cancellationToken);
+
+            if (lockCheck.IsFailure)
             {
                 await tx.RollbackAsync(cancellationToken);
                 _unitOfWork.DiscardChanges();
-                return Result.Failure<ReviewDetailResponse>(idempResult.Error);
+                return Result.Failure<ReviewDetailResponse>(lockCheck.Error);
             }
+
+            if (lockCheck.Value != null)
+            {
+                var cachedDto = JsonSerializer.Deserialize<ReviewDetailResponse>(lockCheck.Value.ResponseBody, JsonOptions);
+                if (cachedDto != null)
+                {
+                    await tx.RollbackAsync(cancellationToken);
+                    _unitOfWork.DiscardChanges();
+                    _logger?.LogInformation("Trả về kết quả rút review đã lưu (Replay under lock) cho key {Key}", idempotencyKey);
+                    return Result.Success(cachedDto);
+                }
+            }
+
+            // 4. Tìm review hiện tại
+            var review = await _reviewRepository.GetByIdAsync(reviewId, cancellationToken);
+            if (review == null)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(
+                    Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá đã chỉ định."));
+            }
+
+            // 5. Kiểm tra If-Match so với review.Version
+            if (!ParseIfMatch(ifMatch, review.Version, out var ifMatchError))
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(ifMatchError!);
+            }
+
+            // 6. Kiểm tra quyền sở hữu tác giả
+            if (actor.ActorId != review.AuthorId)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(
+                    Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá hoặc bạn không có quyền rút đánh giá này."));
+            }
+
+            // 7. Kiểm tra nếu đã Withdrawn
+            if (review.AuthorState == AuthorState.Withdrawn)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<ReviewDetailResponse>(
+                    Error.Conflict("REVIEW_ALREADY_WITHDRAWN", "Đánh giá này đã được rút lại trước đó."));
+            }
+
+            var now = _timeProvider.GetUtcNow();
+
+            // 8. Ghi lại giá trị cũ
+            string oldValuesJson = JsonSerializer.Serialize(new
+            {
+                authorState = review.AuthorState.ToString(),
+                version = review.Version
+            }, JsonOptions);
+
+            // 9. Thực hiện rút đánh giá
+            review.Withdraw(now);
+
+            // 10. Tạo bản ghi kiểm toán ReviewAudit
+            string newValuesJson = JsonSerializer.Serialize(new
+            {
+                authorState = review.AuthorState.ToString(),
+                version = review.Version,
+                withdrawnAt = review.WithdrawnAt
+            }, JsonOptions);
+
+            var audit = new ReviewAudit(
+                id: Guid.NewGuid(),
+                reviewId: review.Id,
+                actorId: actor.ActorId,
+                actorRole: review.Direction == ReviewDirection.renter_to_supplier_listing ? "Renter" : "Supplier",
+                action: ReviewAuditAction.Withdrawn,
+                reason: request?.Reason ?? "Author withdrew review",
+                oldValues: oldValuesJson,
+                newValues: newValuesJson,
+                createdAt: now);
+
+            // 11. Khởi tạo IdempotencyRecord
+            var responseDto = ReviewDetailResponse.FromEntity(review);
+            string responseBody = JsonSerializer.Serialize(responseDto, JsonOptions);
+
+            var idempotencyRecord = _idempotencyService.CreateRecord(
+                actorId: actor.ActorId,
+                idempotencyKey: idempotencyKey,
+                requestFingerprint: fingerprint,
+                httpMethod: "POST",
+                requestPath: requestPath,
+                responseStatusCode: 200,
+                responseHeaders: JsonSerializer.Serialize(new { ETag = $"\"{review.Version}\"" }),
+                responseBody: responseBody,
+                createdAt: now);
+
+            var withdrawOutbox = new OutboxMessage(
+                Guid.NewGuid(),
+                ReviewEventFactory.PublicEventsTopic,
+                "ReviewWithdrawn",
+                review.ListingId.ToString("D"),
+                JsonSerializer.Serialize(ReviewEventFactory.CreateContributionEvent(review), JsonOptions),
+                now);
+
+            // 12. Lưu nguyên tử qua IUnitOfWork
+            await _reviewRepository.UpdateAsync(review, cancellationToken);
+            await _reviewAuditRepository.AddAsync(audit, cancellationToken);
+            await _outboxRepository.AddAsync(withdrawOutbox, cancellationToken);
+            await _idempotencyRepository.SaveAsync(idempotencyRecord, cancellationToken);
+
             await _unitOfWork.CommitAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
+
+            return Result.Success(responseDto);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -661,8 +783,24 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
             return Result.Failure<ReviewDetailResponse>(
                 Error.PreconditionFailed("ETAG_PRECONDITION_FAILED", "Phiên bản của đánh giá đã bị thay đổi bởi thao tác khác."));
         }
+        catch (DbUpdateException ex)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
 
-        return Result.Success(responseDto);
+            if (IsIdempotencyUniqueConstraintViolation(ex))
+            {
+                var recheck = await _idempotencyService.CheckAsync(actor.ActorId, idempotencyKey, fingerprint, cancellationToken);
+                if (recheck.IsSuccess && recheck.Value != null)
+                {
+                    var cached = JsonSerializer.Deserialize<ReviewDetailResponse>(recheck.Value.ResponseBody, JsonOptions);
+                    if (cached != null) return Result.Success(cached);
+                }
+                return Result.Failure<ReviewDetailResponse>(recheck.Error ?? Error.Conflict("IDEMPOTENCY_KEY_REUSE_MISMATCH", "Khóa Idempotency-Key đã được sử dụng trước đó cho một yêu cầu có nội dung khác."));
+            }
+
+            throw;
+        }
     }
 
     private static Error? ValidateActor(Guid actorId, string? userType)
@@ -720,5 +858,29 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
 
         error = null;
         return true;
+    }
+
+    private static bool IsReviewUniqueConstraintViolation(DbUpdateException ex)
+    {
+        if (ex.InnerException is Npgsql.PostgresException pgEx)
+        {
+            return pgEx.SqlState == "23505" &&
+                   (pgEx.ConstraintName?.Contains("uq_reviews", StringComparison.OrdinalIgnoreCase) == true ||
+                    pgEx.ConstraintName?.Contains("direction", StringComparison.OrdinalIgnoreCase) == true);
+        }
+        var msg = ex.Message + (ex.InnerException?.Message ?? string.Empty);
+        return msg.Contains("uq_reviews", StringComparison.OrdinalIgnoreCase) ||
+               msg.Contains("order_id", StringComparison.OrdinalIgnoreCase) && msg.Contains("item_id", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsIdempotencyUniqueConstraintViolation(DbUpdateException ex)
+    {
+        if (ex.InnerException is Npgsql.PostgresException pgEx)
+        {
+            return pgEx.SqlState == "23505" &&
+                   (pgEx.ConstraintName?.Contains("idempotency", StringComparison.OrdinalIgnoreCase) == true);
+        }
+        var msg = ex.Message + (ex.InnerException?.Message ?? string.Empty);
+        return msg.Contains("uq_idempotency", StringComparison.OrdinalIgnoreCase);
     }
 }
