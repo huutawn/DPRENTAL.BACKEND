@@ -27,7 +27,7 @@ public interface IDeliveryJobRepository
         IReadOnlyCollection<string> eligibleErrorCodes,
         int limit = 100,
         CancellationToken cancellationToken = default);
-    Task<int> RequeueReconciliationJobsAsync(
+    Task<IReadOnlyList<Guid>> RequeueReconciliationJobsAsync(
         IReadOnlyList<Guid> jobIds,
         IReadOnlyCollection<string> eligibleNotificationTypes,
         IReadOnlyCollection<string> eligibleErrorCodes,

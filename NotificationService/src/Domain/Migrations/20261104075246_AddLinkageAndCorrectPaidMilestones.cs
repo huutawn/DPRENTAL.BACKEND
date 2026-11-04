@@ -57,28 +57,36 @@ WHERE EXISTS (
 );
 ");
 
-            // 3. Backfill rental_item_id on notifications safely using pg_input_is_valid on PostgreSQL 17:
+            // 3. Backfill rental_item_id on notifications safely using CASE pg_input_is_valid on PostgreSQL 17:
             migrationBuilder.Sql(@"
-UPDATE notification.notifications
-SET rental_item_id = (
-    CASE
-        WHEN render_data_json IS NOT NULL
-             AND pg_input_is_valid(render_data_json, 'jsonb')
-             AND (render_data_json::jsonb ? 'rentalItemId')
-             AND jsonb_typeof(render_data_json::jsonb -> 'rentalItemId') = 'string'
-             AND (render_data_json::jsonb ->> 'rentalItemId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-             AND (render_data_json::jsonb ->> 'rentalItemId') <> '00000000-0000-0000-0000-000000000000'
-        THEN (render_data_json::jsonb ->> 'rentalItemId')::uuid
-        ELSE NULL
-    END
+WITH safe_parsed AS (
+    SELECT
+        id,
+        CASE
+            WHEN render_data_json IS NOT NULL AND pg_input_is_valid(render_data_json, 'jsonb')
+            THEN render_data_json::jsonb
+            ELSE NULL
+        END AS parsed_json
+    FROM notification.notifications
+    WHERE rental_item_id IS NULL
+      AND render_data_json IS NOT NULL
+),
+extracted_items AS (
+    SELECT
+        id,
+        (parsed_json ->> 'rentalItemId')::uuid AS extracted_id
+    FROM safe_parsed
+    WHERE parsed_json IS NOT NULL
+      AND (parsed_json ? 'rentalItemId')
+      AND jsonb_typeof(parsed_json -> 'rentalItemId') = 'string'
+      AND (parsed_json ->> 'rentalItemId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      AND (parsed_json ->> 'rentalItemId') <> '00000000-0000-0000-0000-000000000000'
 )
-WHERE rental_item_id IS NULL
-  AND render_data_json IS NOT NULL
-  AND pg_input_is_valid(render_data_json, 'jsonb')
-  AND (render_data_json::jsonb ? 'rentalItemId')
-  AND jsonb_typeof(render_data_json::jsonb -> 'rentalItemId') = 'string'
-  AND (render_data_json::jsonb ->> 'rentalItemId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-  AND (render_data_json::jsonb ->> 'rentalItemId') <> '00000000-0000-0000-0000-000000000000';
+UPDATE notification.notifications n
+SET rental_item_id = e.extracted_id
+FROM extracted_items e
+WHERE n.id = e.id
+  AND n.rental_item_id IS NULL;
 ");
 
             // Also backfill rental_item_id for RentalItem resource type if resource_id is a valid, non-empty UUID
@@ -95,26 +103,49 @@ WHERE rental_item_id IS NULL
             // 4. Backfill parent_item_id on ReturnRequest watermarks safely with conflict detection:
             // If multiple notifications for the same ReturnRequest have conflicting rental_item_id, do NOT choose randomly.
             migrationBuilder.Sql(@"
-WITH single_item_links AS (
+WITH safe_notifs AS (
     SELECT
-        w.aggregate_id AS return_request_id,
-        MIN(n.rental_item_id::text)::uuid AS resolved_item_id
-    FROM notification.aggregate_watermarks w
-    JOIN notification.notifications n
-      ON n.rental_item_id IS NOT NULL
-     AND (
-         (n.resource_type = 'ReturnRequest' AND n.resource_id = w.aggregate_id::text)
-         OR (
-             n.render_data_json IS NOT NULL
-             AND pg_input_is_valid(n.render_data_json, 'jsonb')
-             AND (n.render_data_json::jsonb ? 'returnRequestId')
-             AND (n.render_data_json::jsonb ->> 'returnRequestId') = w.aggregate_id::text
-         )
-     )
-    WHERE w.scope = 'ReturnRequest'
-      AND w.parent_item_id IS NULL
-    GROUP BY w.aggregate_id
-    HAVING COUNT(DISTINCT n.rental_item_id) = 1
+        n.id,
+        n.rental_item_id,
+        n.resource_type,
+        n.resource_id,
+        CASE
+            WHEN n.render_data_json IS NOT NULL AND pg_input_is_valid(n.render_data_json, 'jsonb')
+            THEN n.render_data_json::jsonb
+            ELSE NULL
+        END AS parsed_json
+    FROM notification.notifications n
+    WHERE n.rental_item_id IS NOT NULL
+),
+linked_pairs AS (
+    SELECT
+        n.rental_item_id,
+        n.resource_id::uuid AS return_request_id
+    FROM safe_notifs n
+    WHERE n.resource_type = 'ReturnRequest'
+      AND n.resource_id IS NOT NULL
+      AND n.resource_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      AND n.resource_id <> '00000000-0000-0000-0000-000000000000'
+
+    UNION ALL
+
+    SELECT
+        n.rental_item_id,
+        (n.parsed_json ->> 'returnRequestId')::uuid AS return_request_id
+    FROM safe_notifs n
+    WHERE n.parsed_json IS NOT NULL
+      AND (n.parsed_json ? 'returnRequestId')
+      AND jsonb_typeof(n.parsed_json -> 'returnRequestId') = 'string'
+      AND (n.parsed_json ->> 'returnRequestId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      AND (n.parsed_json ->> 'returnRequestId') <> '00000000-0000-0000-0000-000000000000'
+),
+single_item_links AS (
+    SELECT
+        return_request_id,
+        MIN(rental_item_id::text)::uuid AS resolved_item_id
+    FROM linked_pairs
+    GROUP BY return_request_id
+    HAVING COUNT(DISTINCT rental_item_id) = 1
 )
 UPDATE notification.aggregate_watermarks w
 SET parent_item_id = s.resolved_item_id

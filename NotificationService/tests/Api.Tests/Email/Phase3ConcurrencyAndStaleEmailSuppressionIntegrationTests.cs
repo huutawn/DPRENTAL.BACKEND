@@ -8,6 +8,7 @@ using Dprental.NotificationService.Application.Templates;
 using Dprental.NotificationService.Domain.Entities;
 using Dprental.NotificationService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Dprental.NotificationService.Domain.IRepositories;
 using Dprental.NotificationService.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -1573,5 +1574,148 @@ public sealed class Phase3ConcurrencyAndStaleEmailSuppressionIntegrationTests
         {
             await TestEnvironment.DropDatabaseAsync(dbName);
         }
+    }
+    [Fact]
+    public async Task Reconciliation_ThreeRequestedIds_OnlyOneEligible_ReturnsOneReconciledAndTwoSkipped()
+    {
+        var dbName = "notif_p3_rec_skipped_" + Guid.NewGuid().ToString("N")[..8];
+        await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            await using var context = new NotificationServiceDbContext(options);
+            await context.Database.MigrateAsync();
+
+            var userId = Guid.NewGuid();
+            var orderId = Guid.NewGuid();
+
+            // 1. Eligible job
+            var n1 = Guid.NewGuid();
+            var j1Eligible = Guid.NewGuid();
+            await context.Notifications.AddAsync(new Notification
+            {
+                Id = n1,
+                OrderId = orderId,
+                RecipientUserId = userId,
+                NotificationType = "ORDER_PAID",
+                Category = "ORDER",
+                Severity = "INFO",
+                Title = "Paid",
+                Body = "Body",
+                ResourceType = "RentalOrder",
+                ResourceId = orderId.ToString(),
+                SourceEventId = Guid.NewGuid(),
+                SourceProducer = "RentalService",
+                SourceEventType = "OrderPaid",
+                EventVersion = 1,
+                TemplateCode = "PAID",
+                TemplateVersion = "1.0",
+                OccurredAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+            await context.DeliveryJobs.AddAsync(new NotificationDeliveryJob
+            {
+                Id = j1Eligible,
+                NotificationId = n1,
+                Channel = "EMAIL",
+                RecipientUserId = userId,
+                Status = "Suppressed",
+                LastErrorCode = "STALE_ACTION_SUPPRESSED",
+                AttemptCount = 0,
+                MaxAttempts = 5,
+                NextAttemptAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
+
+            // 2. Ineligible job: not a result notification
+            var n2 = Guid.NewGuid();
+            var j2Created = Guid.NewGuid();
+            await context.Notifications.AddAsync(new Notification
+            {
+                Id = n2,
+                OrderId = orderId,
+                RecipientUserId = userId,
+                NotificationType = "ORDER_CREATED",
+                Category = "ORDER",
+                Severity = "ACTION_REQUIRED",
+                Title = "Created",
+                Body = "Body",
+                ResourceType = "RentalOrder",
+                ResourceId = orderId.ToString(),
+                SourceEventId = Guid.NewGuid(),
+                SourceProducer = "RentalService",
+                SourceEventType = "OrderCreated",
+                EventVersion = 1,
+                TemplateCode = "CREATED",
+                TemplateVersion = "1.0",
+                OccurredAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+            await context.DeliveryJobs.AddAsync(new NotificationDeliveryJob
+            {
+                Id = j2Created,
+                NotificationId = n2,
+                Channel = "EMAIL",
+                RecipientUserId = userId,
+                Status = "Suppressed",
+                LastErrorCode = "STALE_ACTION_SUPPRESSED",
+                AttemptCount = 0,
+                MaxAttempts = 5,
+                NextAttemptAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
+
+            // 3. Ineligible job: non-existent ID
+            var j3NonExistent = Guid.NewGuid();
+
+            await context.SaveChangesAsync();
+
+            var reconciler = new JobReconciliationService(new DeliveryJobRepository(context));
+            var report = await reconciler.RequeueJobsAsync(new[] { j1Eligible, j2Created, j3NonExistent }, "op-skip-test");
+
+            Assert.Equal(3, report.RequestedCount);
+            Assert.Equal(1, report.ReconciledCount);
+            Assert.Single(report.ReconciledJobIds, j1Eligible);
+            Assert.Equal(2, report.SkippedJobIds.Count);
+            Assert.Contains(j2Created, report.SkippedJobIds);
+            Assert.Contains(j3NonExistent, report.SkippedJobIds);
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
+    }
+
+    [Fact]
+    public async Task Reconciliation_MoreThan100DistinctIds_ThrowsArgumentOutOfRangeException()
+    {
+        var deliveryRepoMock = new Moq.Mock<IDeliveryJobRepository>();
+        var reconciler = new JobReconciliationService(deliveryRepoMock.Object);
+
+        // 101 distinct IDs -> throws
+        var distinct101 = Enumerable.Range(0, 101).Select(_ => Guid.NewGuid()).ToList();
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => reconciler.RequeueJobsAsync(distinct101, "op-test"));
+
+        // 105 IDs with duplicates such that distinct is 100 -> succeeds
+        var distinct100 = Enumerable.Range(0, 100).Select(_ => Guid.NewGuid()).ToList();
+        var duplicates105 = distinct100.Concat(distinct100.Take(5)).ToList();
+
+        deliveryRepoMock.Setup(r => r.RequeueReconciliationJobsAsync(
+            Moq.It.IsAny<IReadOnlyList<Guid>>(),
+            Moq.It.IsAny<IReadOnlyCollection<string>>(),
+            Moq.It.IsAny<IReadOnlyCollection<string>>(),
+            Moq.It.IsAny<string>(),
+            Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync(distinct100);
+
+        var report = await reconciler.RequeueJobsAsync(duplicates105, "op-test");
+        Assert.Equal(100, report.RequestedCount);
+        Assert.Equal(100, report.ReconciledCount);
     }
 }

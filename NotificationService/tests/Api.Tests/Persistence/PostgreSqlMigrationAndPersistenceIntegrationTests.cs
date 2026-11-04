@@ -661,6 +661,9 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
             var notifMalformed = Guid.NewGuid();
             var notifEmptyGuid = Guid.NewGuid();
             var notifValid = Guid.NewGuid();
+            var notifJsonNull = Guid.NewGuid();
+            var notifJsonArray = Guid.NewGuid();
+            var notifJsonNumeric = Guid.NewGuid();
             var validItemId = Guid.NewGuid();
             var userId = Guid.NewGuid();
             var retReqConflict = Guid.NewGuid();
@@ -687,7 +690,16 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
                      'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""00000000-0000-0000-0000-000000000000""}'),
                     (@id3, @userId, 'RENTAL_OVERDUE', 'Order', 'Warning', 'Overdue', 'Body',
                      'RentalItem', 'res-3', @src3, 'RentalService', 'HandoverOverdue', 1,
-                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @validItemId || '""}');";
+                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @validItemId || '""}'),
+                    (@idNull, @userId, 'RENTAL_OVERDUE', 'Order', 'Warning', 'Overdue', 'Body',
+                     'RentalItem', 'res-4', @srcNull, 'RentalService', 'HandoverOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), 'null'),
+                    (@idArr, @userId, 'RENTAL_OVERDUE', 'Order', 'Warning', 'Overdue', 'Body',
+                     'RentalItem', 'res-5', @srcArr, 'RentalService', 'HandoverOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '[1, 2, 3]'),
+                    (@idNum, @userId, 'RENTAL_OVERDUE', 'Order', 'Warning', 'Overdue', 'Body',
+                     'RentalItem', 'res-6', @srcNum, 'RentalService', 'HandoverOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": 99999}');";
                 var insertWmSql = @"
                     INSERT INTO notification.aggregate_watermarks
                     (scope, aggregate_id, recipient_user_id, last_order_version, is_terminal, is_paid, updated_at)
@@ -714,11 +726,15 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
                      'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @itemConflictB || '""}'),
                     (@idSingle, @userId, 'RETURN_CONFIRMATION_OVERDUE_SUPPLIER', 'Order', 'Action', 'Overdue', 'Body',
                      'ReturnRequest', @retReqSingleStr, @src6, 'RentalService', 'ReturnOverdue', 1,
-                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @itemSingle || '""}');";
+                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @itemSingle || '""}'),
+                    (@idRetMalformed, @userId, 'RETURN_CONFIRMATION_OVERDUE_SUPPLIER', 'Order', 'Action', 'Overdue', 'Body',
+                     'ReturnRequest', 'res-malformed', @src7, 'RentalService', 'ReturnOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{malformed returnRequestId json: broken');";
                 await using var retCmd = new NpgsqlCommand(insertRetNotifSql, conn);
                 retCmd.Parameters.AddWithValue("idConflict1", Guid.NewGuid());
                 retCmd.Parameters.AddWithValue("idConflict2", Guid.NewGuid());
                 retCmd.Parameters.AddWithValue("idSingle", Guid.NewGuid());
+                retCmd.Parameters.AddWithValue("idRetMalformed", Guid.NewGuid());
                 retCmd.Parameters.AddWithValue("userId", userId);
                 retCmd.Parameters.AddWithValue("retReqConflictStr", retReqConflict.ToString());
                 retCmd.Parameters.AddWithValue("retReqSingleStr", retReqSingle.ToString());
@@ -728,17 +744,24 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
                 retCmd.Parameters.AddWithValue("src4", Guid.NewGuid());
                 retCmd.Parameters.AddWithValue("src5", Guid.NewGuid());
                 retCmd.Parameters.AddWithValue("src6", Guid.NewGuid());
+                retCmd.Parameters.AddWithValue("src7", Guid.NewGuid());
                 await retCmd.ExecuteNonQueryAsync();
                 await using var cmd = new NpgsqlCommand(insertSql, conn);
 
                 cmd.Parameters.AddWithValue("id1", notifMalformed);
                 cmd.Parameters.AddWithValue("id2", notifEmptyGuid);
                 cmd.Parameters.AddWithValue("id3", notifValid);
+                cmd.Parameters.AddWithValue("idNull", notifJsonNull);
+                cmd.Parameters.AddWithValue("idArr", notifJsonArray);
+                cmd.Parameters.AddWithValue("idNum", notifJsonNumeric);
                 cmd.Parameters.AddWithValue("validItemId", validItemId.ToString());
                 cmd.Parameters.AddWithValue("userId", userId);
                 cmd.Parameters.AddWithValue("src1", Guid.NewGuid());
                 cmd.Parameters.AddWithValue("src2", Guid.NewGuid());
                 cmd.Parameters.AddWithValue("src3", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("srcNull", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("srcArr", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("srcNum", Guid.NewGuid());
                 await cmd.ExecuteNonQueryAsync();
             }
 
@@ -763,6 +786,18 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
                 Assert.NotNull(n3);
                 Assert.Equal(validItemId, n3.RentalItemId);
 
+                var nNull = await context.Notifications.FindAsync(notifJsonNull);
+                Assert.NotNull(nNull);
+                Assert.Null(nNull.RentalItemId); // json null ignored
+
+                var nArr = await context.Notifications.FindAsync(notifJsonArray);
+                Assert.NotNull(nArr);
+                Assert.Null(nArr.RentalItemId); // json array ignored
+
+                var nNum = await context.Notifications.FindAsync(notifJsonNumeric);
+                Assert.NotNull(nNum);
+                Assert.Null(nNum.RentalItemId); // json numeric ignored
+
                 // Verify conflicting ReturnRequest has NULL parent_item_id (not assigned randomly)
                 var wmConflict = await context.AggregateWatermarks.FirstAsync(w => w.Scope == "ReturnRequest" && w.AggregateId == retReqConflict);
                 Assert.Null(wmConflict.ParentItemId);
@@ -770,6 +805,136 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
                 // Verify single ReturnRequest has resolved parent_item_id
                 var wmSingle = await context.AggregateWatermarks.FirstAsync(w => w.Scope == "ReturnRequest" && w.AggregateId == retReqSingle);
                 Assert.Equal(itemSingle, wmSingle.ParentItemId);
+            }
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
+    }
+
+    [Fact]
+    public async Task DatabaseAt20261104075246_UpgradeCorrectionMigration_BackfillsMissingLinkageAndIsIdempotent()
+    {
+        var dbName = "notif_migr_correction_" + Guid.NewGuid().ToString("N")[..8];
+        await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            // 1. Migrate up to 20261104075246_AddLinkageAndCorrectPaidMilestones
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                var migrator = context.GetService<IMigrator>();
+                await migrator.MigrateAsync("20261104075246_AddLinkageAndCorrectPaidMilestones");
+            }
+
+            var notifMissingLinkage = Guid.NewGuid();
+            var notifMalformed = Guid.NewGuid();
+            var validItemId = Guid.NewGuid();
+            var userId = Guid.NewGuid();
+            var retReqSingle = Guid.NewGuid();
+            var retReqConflict = Guid.NewGuid();
+            var itemSingle = Guid.NewGuid();
+            var itemConflictA = Guid.NewGuid();
+            var itemConflictB = Guid.NewGuid();
+
+            // 2. Insert records created after migration but missing linkage (e.g. from legacy clients or raw inserts)
+            await using (var conn = new NpgsqlConnection(connString))
+            {
+                await conn.OpenAsync();
+
+                var insertWmSql = @"
+                    INSERT INTO notification.aggregate_watermarks
+                    (scope, aggregate_id, recipient_user_id, last_order_version, is_terminal, is_paid, updated_at)
+                    VALUES
+                    ('ReturnRequest', @retReqSingle, @userId, 1, false, false, NOW()),
+                    ('ReturnRequest', @retReqConflict, @userId, 1, false, false, NOW());";
+                await using var wmCmd = new NpgsqlCommand(insertWmSql, conn);
+                wmCmd.Parameters.AddWithValue("retReqSingle", retReqSingle);
+                wmCmd.Parameters.AddWithValue("retReqConflict", retReqConflict);
+                wmCmd.Parameters.AddWithValue("userId", userId);
+                await wmCmd.ExecuteNonQueryAsync();
+
+                var insertNotifSql = @"
+                    INSERT INTO notification.notifications
+                    (id, recipient_user_id, notification_type, category, severity, title, body,
+                     resource_type, resource_id, source_event_id, source_producer, source_event_type, event_version,
+                     template_code, template_version, occurred_at, created_at, render_data_json)
+                    VALUES
+                    (@idValid, @userId, 'RENTAL_OVERDUE', 'Order', 'Warning', 'Overdue', 'Body',
+                     'RentalItem', 'res-v', @src1, 'RentalService', 'HandoverOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @validItemId || '""}'),
+                    (@idMal, @userId, 'RENTAL_OVERDUE', 'Order', 'Warning', 'Overdue', 'Body',
+                     'RentalItem', 'res-m', @src2, 'RentalService', 'HandoverOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{broken json with rentalItemId'),
+                    (@idSingleNotif, @userId, 'RETURN_CONFIRMATION_OVERDUE_SUPPLIER', 'Order', 'Action', 'Overdue', 'Body',
+                     'ReturnRequest', @retReqSingleStr, @src3, 'RentalService', 'ReturnOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @itemSingle || '""}'),
+                    (@idConflict1, @userId, 'RETURN_CONFIRMATION_OVERDUE_SUPPLIER', 'Order', 'Action', 'Overdue', 'Body',
+                     'ReturnRequest', @retReqConflictStr, @src4, 'RentalService', 'ReturnOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @itemConflictA || '""}'),
+                    (@idConflict2, @userId, 'RETURN_CONFIRMATION_OVERDUE_SUPPLIER', 'Order', 'Action', 'Overdue', 'Body',
+                     'ReturnRequest', @retReqConflictStr, @src5, 'RentalService', 'ReturnOverdue', 1,
+                     'TMPL', 'v1', NOW(), NOW(), '{""rentalItemId"": ""' || @itemConflictB || '""}');";
+                await using var notifCmd = new NpgsqlCommand(insertNotifSql, conn);
+                notifCmd.Parameters.AddWithValue("idValid", notifMissingLinkage);
+                notifCmd.Parameters.AddWithValue("idMal", notifMalformed);
+                notifCmd.Parameters.AddWithValue("idSingleNotif", Guid.NewGuid());
+                notifCmd.Parameters.AddWithValue("idConflict1", Guid.NewGuid());
+                notifCmd.Parameters.AddWithValue("idConflict2", Guid.NewGuid());
+                notifCmd.Parameters.AddWithValue("validItemId", validItemId.ToString());
+                notifCmd.Parameters.AddWithValue("retReqSingleStr", retReqSingle.ToString());
+                notifCmd.Parameters.AddWithValue("retReqConflictStr", retReqConflict.ToString());
+                notifCmd.Parameters.AddWithValue("itemSingle", itemSingle.ToString());
+                notifCmd.Parameters.AddWithValue("itemConflictA", itemConflictA.ToString());
+                notifCmd.Parameters.AddWithValue("itemConflictB", itemConflictB.ToString());
+                notifCmd.Parameters.AddWithValue("userId", userId);
+                notifCmd.Parameters.AddWithValue("src1", Guid.NewGuid());
+                notifCmd.Parameters.AddWithValue("src2", Guid.NewGuid());
+                notifCmd.Parameters.AddWithValue("src3", Guid.NewGuid());
+                notifCmd.Parameters.AddWithValue("src4", Guid.NewGuid());
+                notifCmd.Parameters.AddWithValue("src5", Guid.NewGuid());
+                await notifCmd.ExecuteNonQueryAsync();
+            }
+
+            // 3. Migrate to latest (CorrectNotificationLinkageBackfill)
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                await context.Database.MigrateAsync();
+            }
+
+            // 4. Verify correction backfill
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                var nValid = await context.Notifications.FindAsync(notifMissingLinkage);
+                Assert.NotNull(nValid);
+                Assert.Equal(validItemId, nValid.RentalItemId); // Backfilled safely!
+
+                var nMal = await context.Notifications.FindAsync(notifMalformed);
+                Assert.NotNull(nMal);
+                Assert.Null(nMal.RentalItemId); // Malformed JSON kept safe!
+
+                var wmSingle = await context.AggregateWatermarks.FirstAsync(w => w.Scope == "ReturnRequest" && w.AggregateId == retReqSingle);
+                Assert.Equal(itemSingle, wmSingle.ParentItemId); // Single item resolved!
+
+                var wmConflict = await context.AggregateWatermarks.FirstAsync(w => w.Scope == "ReturnRequest" && w.AggregateId == retReqConflict);
+                Assert.Null(wmConflict.ParentItemId); // Conflicting item IDs left unresolved!
+            }
+
+            // 5. Idempotency check: run MigrateAsync() a second time
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                await context.Database.MigrateAsync();
+
+                var count = await context.Notifications.CountAsync();
+                Assert.Equal(5, count);
+
+                var wmCount = await context.AggregateWatermarks.CountAsync();
+                Assert.Equal(2, wmCount);
             }
         }
         finally

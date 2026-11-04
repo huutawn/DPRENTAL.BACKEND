@@ -53,7 +53,7 @@ public sealed class JobReconciliationService : IJobReconciliationService
     {
         if (jobIds == null || jobIds.Count == 0)
         {
-            return new ReconciliationExecutionReport(operatorId ?? "unknown", 0, 0, Array.Empty<Guid>(), "No job IDs provided.");
+            return new ReconciliationExecutionReport(operatorId ?? "unknown", 0, 0, Array.Empty<Guid>(), Array.Empty<Guid>(), "No job IDs provided.");
         }
 
         if (string.IsNullOrWhiteSpace(operatorId))
@@ -61,23 +61,31 @@ public sealed class JobReconciliationService : IJobReconciliationService
             throw new ArgumentException("Operator ID or run ID is mandatory for job reconciliation execution.", nameof(operatorId));
         }
 
-        var boundedJobIds = jobIds.Take(100).Distinct().ToList();
+        var distinctJobIds = jobIds.Distinct().ToList();
+        if (distinctJobIds.Count > 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(jobIds), "Cannot reconcile more than 100 distinct jobs in a single request.");
+        }
 
-        var affected = await _deliveryJobRepo.RequeueReconciliationJobsAsync(
-            boundedJobIds,
+        var reconciledIds = await _deliveryJobRepo.RequeueReconciliationJobsAsync(
+            distinctJobIds,
             EligibleNotificationTypes,
             EligibleErrorCodes,
             operatorId,
             cancellationToken);
 
-        _logger.LogInformation("JobReconciliationService: operator '{OperatorId}' requeued {Affected}/{Requested} jobs.",
-            operatorId, affected, boundedJobIds.Count);
+        var reconciledSet = new HashSet<Guid>(reconciledIds);
+        var skippedIds = distinctJobIds.Where(id => !reconciledSet.Contains(id)).ToList();
+
+        _logger.LogInformation("JobReconciliationService: operator '{OperatorId}' requeued {Reconciled}/{Requested} jobs (skipped {Skipped}).",
+            operatorId, reconciledIds.Count, distinctJobIds.Count, skippedIds.Count);
 
         return new ReconciliationExecutionReport(
             OperatorId: operatorId,
-            RequestedCount: boundedJobIds.Count,
-            ReconciledCount: affected,
-            ReconciledJobIds: boundedJobIds,
-            Message: $"Successfully requeued {affected} jobs to Pending.");
+            RequestedCount: distinctJobIds.Count,
+            ReconciledCount: reconciledIds.Count,
+            ReconciledJobIds: reconciledIds,
+            SkippedJobIds: skippedIds,
+            Message: $"Successfully requeued {reconciledIds.Count} jobs to Pending ({skippedIds.Count} skipped).");
     }
 }

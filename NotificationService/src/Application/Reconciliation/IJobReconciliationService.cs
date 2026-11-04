@@ -9,6 +9,7 @@ public sealed record ReconciliationExecutionReport(
     int RequestedCount,
     int ReconciledCount,
     IReadOnlyList<Guid> ReconciledJobIds,
+    IReadOnlyList<Guid> SkippedJobIds,
     string? Message = null);
 
 public interface IJobReconciliationService
