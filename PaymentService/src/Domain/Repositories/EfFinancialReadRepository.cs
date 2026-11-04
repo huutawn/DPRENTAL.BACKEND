@@ -76,7 +76,7 @@ public sealed class EfFinancialReadRepository(PaymentServiceDbContext db) : IFin
             .Select(x => new SupplierPayoutRow(
                 x.Id, x.PayoutRef, x.RentalItemId, x.Settlement!.SettlementRef,
                 x.Amount, x.Currency, x.Status, x.ExternalTransferReference,
-                x.CreatedAt, x.CompletedAt))                       // không có DestinationRef
+                x.CreatedAt, x.CompletedAt))
             .ToListAsync(ct);
 
         return new ReadPage<SupplierPayoutRow>(items, total);
@@ -93,9 +93,8 @@ public sealed class EfFinancialReadRepository(PaymentServiceDbContext db) : IFin
             .Skip(p.Skip).Take(p.PageSize)
             .Select(x => new AdminPayoutRow(
                 x.Id, x.PayoutRef, x.SettlementId, x.Settlement!.SettlementRef, x.RentalItemId, x.SupplierId,
-                x.Amount, x.Currency, x.Status, x.DestinationRef, x.ExternalTransferReference,
+                x.Amount, x.Currency, x.Status, x.ExternalTransferReference,
                 x.CompletedBy, x.CreatedAt, x.CompletedAt,
-                x.DestinationId, x.Destination == null ? (int?)null : x.Destination.Version,
                 db.Invoices.Where(i => i.Id == x.Settlement!.InvoiceId).Select(i => i.RentalOrderId).First(),
                 db.Invoices.Where(i => i.Id == x.Settlement!.InvoiceId).Select(i => i.OrderCode).First(),
                 x.Settlement!.RentalAmount, x.Settlement!.PlatformFeeAmount, x.Settlement!.FinalDeductionAmount))

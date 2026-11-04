@@ -24,7 +24,6 @@ public sealed class PaymentServiceDbContext : DbContext
     public DbSet<ManualRefundRequirement> ManualRefundRequirements => Set<ManualRefundRequirement>();
     public DbSet<ManualRefundOperationAudit> ManualRefundOperationAudits => Set<ManualRefundOperationAudit>();
     public DbSet<SupplierPayout> SupplierPayouts => Set<SupplierPayout>();
-    public DbSet<SupplierPayoutDestination> SupplierPayoutDestinations => Set<SupplierPayoutDestination>();
     public DbSet<FinancialOperationAudit> FinancialOperationAudits => Set<FinancialOperationAudit>();
     public DbSet<TransactionJournalEntry> TransactionJournals => Set<TransactionJournalEntry>();
     public DbSet<OperationHeader> OperationHeaders => Set<OperationHeader>();

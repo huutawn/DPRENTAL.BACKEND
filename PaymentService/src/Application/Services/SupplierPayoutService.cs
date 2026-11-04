@@ -12,7 +12,6 @@ public sealed class SupplierPayoutService : ISupplierPayoutService
 {
     private const int MaxOperationKey = 64;
     private const int MaxTransferReference = 256;
-    private const int MaxDestinationRef = 256;
     private const int MaxReason = 500;
 
     private readonly ISupplierPayoutRepository _repository;
@@ -71,29 +70,6 @@ public sealed class SupplierPayoutService : ISupplierPayoutService
         return Result.Success(new CompleteSupplierPayoutResponse(
             w.PayoutId, w.PayoutRef, w.Status, request.OperationKey.Trim(), w.ExternalTransferReference!,
             w.CompletedAt!.Value, w.CompletedBy!.Value, w.IsReplay));
-    }
-
-    public async Task<Result<AttachPayoutDestinationResponse>> AttachDestinationAsync(
-        Guid payoutId, Guid adminId, AttachPayoutDestinationRequest request, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        if (Validate(payoutId, adminId, request.OperationKey,
-                request.DestinationRef, "DestinationRef", MaxDestinationRef,
-                request.AuditReason) is { } invalid)
-            return invalid;
-        if (request.Version < 1)
-            return Error.Validation("Payment.PayoutDestinationVersionInvalid", "Version phải từ 1 trở lên.");
-
-        var result = await _repository.AttachDestinationAsync(new AttachPayoutDestinationCommand(
-            payoutId, adminId, request.OperationKey.Trim(),
-            request.DestinationRef.Trim(), request.AuditReason.Trim(), request.Version), ct);
-
-        if (!result.IsSuccess) return result.Error;
-
-        var w = result.Value;
-        return Result.Success(new AttachPayoutDestinationResponse(
-            w.PayoutId, w.PayoutRef, w.Status, w.DestinationRef!, w.IsReplay));
     }
 
     private static Error? Validate(
