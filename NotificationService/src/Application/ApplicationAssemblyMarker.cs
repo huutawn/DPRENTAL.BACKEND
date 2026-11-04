@@ -1,3 +1,7 @@
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("NotificationService.Api.Tests")]
+
 namespace Dprental.NotificationService.Application;
 
 /// <summary>

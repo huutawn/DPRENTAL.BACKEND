@@ -16,13 +16,11 @@ public sealed class DeliveryJobRepository : IDeliveryJobRepository
 
     public async Task AddAsync(NotificationDeliveryJob job, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(job);
         await _dbContext.DeliveryJobs.AddAsync(job, cancellationToken);
     }
 
     public async Task AddRangeAsync(IEnumerable<NotificationDeliveryJob> jobs, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(jobs);
         await _dbContext.DeliveryJobs.AddRangeAsync(jobs, cancellationToken);
     }
 
@@ -111,8 +109,30 @@ WHERE id IN (
         var now = DateTimeOffset.UtcNow;
         if (_dbContext.Database.IsNpgsql())
         {
+            var uncertainCount = await _dbContext.DeliveryJobs
+                .Where(j => j.Status == "Processing" && j.LeaseExpiresAt != null && j.LeaseExpiresAt <= now && j.DispatchStartedAt != null)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.Status, "Uncertain")
+                    .SetProperty(j => j.LastErrorCode, "LEASE_EXPIRED_DURING_DISPATCH")
+                    .SetProperty(j => j.LastErrorDetail, "Worker lease expired while dispatch was already started")
+                    .SetProperty(j => j.LeaseToken, (string?)null)
+                    .SetProperty(j => j.LeaseExpiresAt, (DateTimeOffset?)null)
+                    .SetProperty(j => j.UpdatedAt, now),
+                    cancellationToken);
+
+            var failedCount = await _dbContext.DeliveryJobs
+                .Where(j => j.Status == "Processing" && j.LeaseExpiresAt != null && j.LeaseExpiresAt <= now && j.DispatchStartedAt == null && j.AttemptCount >= j.MaxAttempts)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.Status, "Failed")
+                    .SetProperty(j => j.LastErrorCode, "MAX_ATTEMPTS_EXCEEDED")
+                    .SetProperty(j => j.LastErrorDetail, "Exceeded max processing attempts")
+                    .SetProperty(j => j.LeaseToken, (string?)null)
+                    .SetProperty(j => j.LeaseExpiresAt, (DateTimeOffset?)null)
+                    .SetProperty(j => j.UpdatedAt, now),
+                    cancellationToken);
+
             var pendingCount = await _dbContext.DeliveryJobs
-                .Where(j => j.Status == "Processing" && j.LeaseExpiresAt != null && j.LeaseExpiresAt <= now && j.DispatchStartedAt == null)
+                .Where(j => j.Status == "Processing" && j.LeaseExpiresAt != null && j.LeaseExpiresAt <= now && j.DispatchStartedAt == null && j.AttemptCount < j.MaxAttempts)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(j => j.Status, "Pending")
                     .SetProperty(j => j.LeaseToken, (string?)null)
@@ -120,16 +140,7 @@ WHERE id IN (
                     .SetProperty(j => j.UpdatedAt, now),
                     cancellationToken);
 
-            var uncertainCount = await _dbContext.DeliveryJobs
-                .Where(j => j.Status == "Processing" && j.LeaseExpiresAt != null && j.LeaseExpiresAt <= now && j.DispatchStartedAt != null)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(j => j.Status, "Uncertain")
-                    .SetProperty(j => j.LeaseToken, (string?)null)
-                    .SetProperty(j => j.LeaseExpiresAt, (DateTimeOffset?)null)
-                    .SetProperty(j => j.UpdatedAt, now),
-                    cancellationToken);
-
-            return pendingCount + uncertainCount;
+            return pendingCount + failedCount + uncertainCount;
         }
         else
         {
@@ -139,7 +150,22 @@ WHERE id IN (
 
             foreach (var job in jobs)
             {
-                job.Status = job.DispatchStartedAt == null ? "Pending" : "Uncertain";
+                if (job.DispatchStartedAt != null)
+                {
+                    job.Status = "Uncertain";
+                    job.LastErrorCode = "LEASE_EXPIRED_DURING_DISPATCH";
+                    job.LastErrorDetail = "Worker lease expired while dispatch was already started";
+                }
+                else if (job.AttemptCount >= job.MaxAttempts)
+                {
+                    job.Status = "Failed";
+                    job.LastErrorCode = "MAX_ATTEMPTS_EXCEEDED";
+                    job.LastErrorDetail = $"Exceeded max processing attempts ({job.MaxAttempts})";
+                }
+                else
+                {
+                    job.Status = "Pending";
+                }
                 job.LeaseToken = null;
                 job.LeaseExpiresAt = null;
                 job.UpdatedAt = now;
@@ -162,9 +188,12 @@ WHERE id IN (
         string? errorCode = null,
         string? errorDetail = null,
         DateTimeOffset? nextAttemptAt = null,
+        bool resetDispatchStartedAt = false,
         CancellationToken cancellationToken = default)
     {
         var now = DateTimeOffset.UtcNow;
+        var shouldResetDispatch = resetDispatchStartedAt || newStatus == "RetryScheduled";
+
         if (_dbContext.Database.IsNpgsql())
         {
             var rows = await _dbContext.DeliveryJobs
@@ -175,6 +204,7 @@ WHERE id IN (
                     .SetProperty(j => j.LastErrorCode, j => errorCode ?? j.LastErrorCode)
                     .SetProperty(j => j.LastErrorDetail, j => errorDetail ?? j.LastErrorDetail)
                     .SetProperty(j => j.NextAttemptAt, j => nextAttemptAt ?? j.NextAttemptAt)
+                    .SetProperty(j => j.DispatchStartedAt, j => shouldResetDispatch ? (DateTimeOffset?)null : j.DispatchStartedAt)
                     .SetProperty(j => j.SentAt, j => newStatus == "Succeeded" ? now : j.SentAt)
                     .SetProperty(j => j.LeaseToken, (string?)null)
                     .SetProperty(j => j.LeaseExpiresAt, (DateTimeOffset?)null)
@@ -198,6 +228,7 @@ WHERE id IN (
             if (errorCode != null) job.LastErrorCode = errorCode;
             if (errorDetail != null) job.LastErrorDetail = errorDetail;
             if (nextAttemptAt != null) job.NextAttemptAt = nextAttemptAt.Value;
+            if (shouldResetDispatch) job.DispatchStartedAt = null;
             if (newStatus == "Succeeded") job.SentAt = now;
             job.LeaseToken = null;
             job.LeaseExpiresAt = null;
@@ -213,7 +244,7 @@ WHERE id IN (
         if (_dbContext.Database.IsNpgsql())
         {
             var rows = await _dbContext.DeliveryJobs
-                .Where(j => j.Id == jobId && j.LeaseToken == leaseToken && j.Status == "Processing" && (j.LeaseExpiresAt == null || j.LeaseExpiresAt > dispatchStartedAt))
+                .Where(j => j.Id == jobId && j.LeaseToken == leaseToken && j.Status == "Processing" && j.LeaseExpiresAt != null && j.LeaseExpiresAt > dispatchStartedAt)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(j => j.DispatchStartedAt, dispatchStartedAt)
                     .SetProperty(j => j.UpdatedAt, DateTimeOffset.UtcNow),
@@ -224,7 +255,7 @@ WHERE id IN (
         else
         {
             var job = await _dbContext.DeliveryJobs
-                .FirstOrDefaultAsync(j => j.Id == jobId && j.LeaseToken == leaseToken && j.Status == "Processing" && (j.LeaseExpiresAt == null || j.LeaseExpiresAt > dispatchStartedAt), cancellationToken);
+                .FirstOrDefaultAsync(j => j.Id == jobId && j.LeaseToken == leaseToken && j.Status == "Processing" && j.LeaseExpiresAt != null && j.LeaseExpiresAt > dispatchStartedAt, cancellationToken);
 
             if (job == null)
             {

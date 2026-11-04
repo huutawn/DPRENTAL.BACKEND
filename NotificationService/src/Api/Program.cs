@@ -8,6 +8,7 @@ using Dprental.NotificationService.Application.DependencyInjection;
 using Dprental.NotificationService.Application.Email;
 using Dprental.NotificationService.Application.Email.Options;
 using Dprental.NotificationService.Application.Email.Workers;
+using Dprental.NotificationService.Application.Email.Services;
 using Dprental.NotificationService.Application.IServices;
 using Dprental.NotificationService.Domain.Repositories;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -22,6 +23,7 @@ builder.Services.AddNotificationServiceApplication();
 // Cấu hình SMTP & Email Delivery
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
 builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+builder.Services.AddScoped<IEmailDeliveryService, EmailDeliveryService>();
 builder.Services.AddHostedService<EmailDeliveryWorker>();
 builder.Services.AddHostedService<EmailLeaseReconciliationWorker>();
 

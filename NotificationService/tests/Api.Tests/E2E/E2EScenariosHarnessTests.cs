@@ -170,7 +170,7 @@ public sealed class E2EScenariosHarnessTests
                 new AuthContactDto(renterId, "renter@example.com", IsActive: true, IsEmailVerified: true)
             }));
 
-        ctx.EmailSenderMock.Setup(s => s.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        ctx.EmailSenderMock.Setup(s => s.SendEmailAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EmailSendResult(EmailSendOutcome.Success, "smtp_msg_1", null, null));
 
         var worker = new EmailDeliveryWorker(ctx.ServiceProvider, NullLogger<EmailDeliveryWorker>.Instance);
@@ -420,7 +420,7 @@ public sealed class E2EScenariosHarnessTests
             }));
 
         // Simulate PostDataError
-        ctx.EmailSenderMock.Setup(s => s.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        ctx.EmailSenderMock.Setup(s => s.SendEmailAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EmailSendResult(EmailSendOutcome.PostDataError, null, "SMTP_DROPPED_AFTER_DATA", "Timeout after DATA"));
 
         var worker = new EmailDeliveryWorker(ctx.ServiceProvider, NullLogger<EmailDeliveryWorker>.Instance);
