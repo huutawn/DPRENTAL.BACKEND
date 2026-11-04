@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Policies;
 
+[Trait("Category", "Unit")]
 public sealed class NotificationPolicyAndTemplateTests
 {
     private readonly RecipientResolutionService _recipientResolver = new();

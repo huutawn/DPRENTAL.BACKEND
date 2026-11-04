@@ -14,6 +14,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Kafka;
 
+[Trait("Category", "Unit")]
 public sealed class StrictJsonValidationTests
 {
     private static NotificationServiceDbContext CreateInMemoryDbContext()

@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Kafka;
 
+[Trait("Category", "Unit")]
 public sealed class KafkaContractRegistryTests
 {
     private static readonly IKafkaEventHandler[] AllHandlers =

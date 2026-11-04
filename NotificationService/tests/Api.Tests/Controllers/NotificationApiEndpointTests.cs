@@ -14,6 +14,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Controllers;
 
+[Trait("Category", "Unit")]
 public sealed class NotificationApiEndpointTests
 {
     private static NotificationServiceDbContext CreateInMemoryDbContext()

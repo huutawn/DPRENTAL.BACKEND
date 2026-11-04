@@ -19,6 +19,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.E2E;
 
+[Trait("Category", "Unit")]
 public sealed class P0ReproFailureTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };

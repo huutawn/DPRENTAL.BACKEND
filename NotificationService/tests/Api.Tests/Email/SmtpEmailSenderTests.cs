@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Email;
 
+[Trait("Category", "Unit")]
 public sealed class SmtpEmailSenderTests
 {
     private static SmtpEmailSender CreateSender(int port = 2525)

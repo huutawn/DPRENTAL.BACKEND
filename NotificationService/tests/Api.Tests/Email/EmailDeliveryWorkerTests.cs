@@ -15,6 +15,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Email;
 
+[Trait("Category", "Unit")]
 public sealed class EmailDeliveryWorkerTests
 {
     private static NotificationServiceDbContext CreateInMemoryDbContext()

@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Kafka;
 
+[Trait("Category", "Unit")]
 public sealed class KafkaConsumerHostedServiceTests
 {
     [Fact]

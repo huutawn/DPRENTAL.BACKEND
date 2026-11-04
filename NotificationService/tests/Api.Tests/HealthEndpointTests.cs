@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests;
 
+[Trait("Category", "Unit")]
 public sealed class HealthEndpointTests
 {
     [Fact]

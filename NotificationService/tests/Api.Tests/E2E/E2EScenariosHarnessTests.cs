@@ -24,6 +24,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.E2E;
 
+[Trait("Category", "Unit")]
 public sealed class E2EScenariosHarnessTests
 {
     private sealed class HarnessContext : IAsyncDisposable
