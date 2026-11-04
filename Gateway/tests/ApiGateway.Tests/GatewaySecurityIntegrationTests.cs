@@ -514,6 +514,22 @@ public sealed class GatewaySecurityIntegrationTests
     }
 
     [Fact]
+    public async Task NotificationHubWebSocketServiceTokenReturns403()
+    {
+        using RSA signingKey = RSA.Create(2048);
+        await using LoopbackSecurityService upstream = new(CreateJwks(signingKey, "key-1"));
+        string serviceToken = DownstreamGatewayTestHost.CreateServiceToken(signingKey, "key-1", Issuer, Audience, "service-account");
+        using WebApplicationFactory<Program> factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/notifications/hubs/inbox");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
     public async Task NonInternalRouteStripsClientApiKeyAndInjectsGatewayKey()
     {
         using RSA signingKey = RSA.Create(2048);

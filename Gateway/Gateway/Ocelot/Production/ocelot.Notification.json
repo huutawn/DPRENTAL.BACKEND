@@ -9,7 +9,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "notification-service",
-          "Port": 5005
+          "Port": 8080
         }
       ],
       "AuthenticationOptions": {
@@ -17,15 +17,37 @@
       }
     },
     {
-      "Key": "notification-hub",
-      "UpstreamPathTemplate": "/api/v1/notifications/hubs/inbox/{everything}",
-      "DownstreamPathTemplate": "/api/v1/notifications/hubs/inbox/{everything}",
+      "Key": "notification-hub-negotiate",
+      "UpstreamPathTemplate": "/api/v1/notifications/hubs/inbox/negotiate",
+      "DownstreamPathTemplate": "/api/v1/notifications/hubs/inbox/negotiate",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
       "Priority": 10,
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
           "Host": "notification-service",
-          "Port": 5005
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
+    },
+    {
+      "Key": "notification-hub-ws",
+      "UpstreamPathTemplate": "/api/v1/notifications/hubs/inbox",
+      "DownstreamPathTemplate": "/api/v1/notifications/hubs/inbox",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "Priority": 10,
+      "DownstreamScheme": "ws",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "notification-service",
+          "Port": 8080
         }
       ],
       "AuthenticationOptions": {
@@ -41,7 +63,7 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "notification-service",
-          "Port": 5005
+          "Port": 8080
         }
       ],
       "AuthenticationOptions": {
