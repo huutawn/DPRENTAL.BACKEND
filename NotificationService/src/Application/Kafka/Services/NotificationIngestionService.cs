@@ -9,6 +9,7 @@ using Dprental.NotificationService.Application.Recipients;
 using Dprental.NotificationService.Application.Templates;
 using Dprental.NotificationService.Domain.Entities;
 using Dprental.NotificationService.Domain.IRepositories;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.NotificationService.Application.Kafka.Services;
@@ -104,22 +105,25 @@ public sealed class NotificationIngestionService : INotificationIngestionService
         var validationResult = KafkaEnvelopeValidator.Validate(envelope);
         if (validationResult.IsFailure)
         {
-            var qId = !string.IsNullOrWhiteSpace(envelope?.EventId) ? envelope.EventId : fallbackQuarantineId;
+            var qId = (envelope?.MessageId != Guid.Empty && envelope?.MessageId != null)
+                ? envelope.MessageId.ToString()
+                : fallbackQuarantineId;
+
             _logger.LogWarning("Envelope không hợp lệ ({Code}): {Message}. Đẩy vào DLQ: {QuarantineId}", validationResult.Error.Code, validationResult.Error.Message, qId);
             await _dlqPublisher.PublishToDeadLetterQueueAsync(rawMessage, qId, validationResult.Error.Message, validationResult.Error.Code, cancellationToken);
             return IngestionOutcome.Quarantined;
         }
 
-        var messageId = Guid.Parse(envelope!.EventId);
+        var messageId = envelope!.MessageId;
 
         // 3. Check Unknown Event Type from allowed Producer
-        var handler = _handlers.FirstOrDefault(h => string.Equals(h.EventType, envelope.EventType, StringComparison.OrdinalIgnoreCase));
+        var handler = _handlers.FirstOrDefault(h => string.Equals(h.EventType, envelope.MessageType, StringComparison.OrdinalIgnoreCase));
         if (handler == null)
         {
             _logger.LogInformation(
-                "Bỏ qua sự kiện không thuộc danh sách quan tâm: EventType={EventType}, EventId={EventId}, Producer={Producer}",
-                envelope.EventType,
-                envelope.EventId,
+                "Bỏ qua sự kiện không thuộc danh sách quan tâm: MessageType={MessageType}, MessageId={MessageId}, Producer={Producer}",
+                envelope.MessageType,
+                envelope.MessageId,
                 envelope.Producer);
 
             return IngestionOutcome.Ignored;
@@ -129,7 +133,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
         var exists = await _inboxRepo.ExistsAsync(ConsumerGroupName, messageId, cancellationToken);
         if (exists)
         {
-            _logger.LogInformation("Bỏ qua tin nhắn trùng lặp (idempotent): MessageId={MessageId}", messageId);
+            _logger.LogInformation("Bỏ qua tin nhắn trùng lặp (idempotent pre-check): MessageId={MessageId}", messageId);
             return IngestionOutcome.Duplicate;
         }
 
@@ -137,8 +141,8 @@ public sealed class NotificationIngestionService : INotificationIngestionService
         var intentResult = handler.ParseIntent(envelope);
         if (intentResult.IsFailure)
         {
-            _logger.LogWarning("Không thể parse intent sự kiện ({Code}): {Message}. Đẩy vào DLQ: {EventId}", intentResult.Error.Code, intentResult.Error.Message, envelope.EventId);
-            await _dlqPublisher.PublishToDeadLetterQueueAsync(rawMessage, envelope.EventId, intentResult.Error.Message, intentResult.Error.Code, cancellationToken);
+            _logger.LogWarning("Không thể parse intent sự kiện ({Code}): {Message}. Đẩy vào DLQ: {MessageId}", intentResult.Error.Code, intentResult.Error.Message, envelope.MessageId);
+            await _dlqPublisher.PublishToDeadLetterQueueAsync(rawMessage, envelope.MessageId.ToString(), intentResult.Error.Message, intentResult.Error.Code, cancellationToken);
             return IngestionOutcome.Quarantined;
         }
 
@@ -154,8 +158,8 @@ public sealed class NotificationIngestionService : INotificationIngestionService
 
         if (recipientsResult.IsFailure)
         {
-            _logger.LogWarning("Không xác định được người nhận hợp lệ ({Code}): {Message}. Đẩy vào DLQ: {EventId}", recipientsResult.Error.Code, recipientsResult.Error.Message, envelope.EventId);
-            await _dlqPublisher.PublishToDeadLetterQueueAsync(rawMessage, envelope.EventId, recipientsResult.Error.Message, recipientsResult.Error.Code, cancellationToken);
+            _logger.LogWarning("Không xác định được người nhận hợp lệ ({Code}): {Message}. Đẩy vào DLQ: {MessageId}", recipientsResult.Error.Code, recipientsResult.Error.Message, envelope.MessageId);
+            await _dlqPublisher.PublishToDeadLetterQueueAsync(rawMessage, envelope.MessageId.ToString(), recipientsResult.Error.Message, recipientsResult.Error.Code, cancellationToken);
             return IngestionOutcome.Quarantined;
         }
 
@@ -165,102 +169,114 @@ public sealed class NotificationIngestionService : INotificationIngestionService
         var notificationsToCreate = new List<Notification>();
         var deliveryJobsToCreate = new List<NotificationDeliveryJob>();
 
-        // 7. Render Notifications and Evaluate Suppression
-        foreach (var recipient in recipients)
+        // 7. Atomic Transaction: Read Watermarks, Evaluate Suppression, Render & Persist
+        try
         {
-            var watermark = await _watermarkRepo.GetWatermarkAsync(intent.AggregateId, recipient.RecipientUserId, cancellationToken);
+            await using var transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-            // Nếu recipient mới xuất hiện nhưng aggregate đã có watermark từ trước, dùng trạng thái terminal của aggregate
-            if (watermark == null)
+            // Double check idempotency inside transaction
+            var alreadyProcessed = await _inboxRepo.ExistsAsync(ConsumerGroupName, messageId, cancellationToken);
+            if (alreadyProcessed)
             {
-                var knownWatermarks = await _watermarkRepo.GetWatermarksForAggregateAsync(intent.AggregateId, cancellationToken);
-                var terminalWatermark = knownWatermarks.FirstOrDefault(w => w.IsTerminal);
-                if (terminalWatermark != null)
+                _logger.LogInformation("Bỏ qua tin nhắn trùng lặp (inside transaction): MessageId={MessageId}", messageId);
+                return IngestionOutcome.Duplicate;
+            }
+
+            foreach (var recipient in recipients)
+            {
+                var watermark = await _watermarkRepo.GetWatermarkAsync(intent.AggregateId, recipient.RecipientUserId, cancellationToken);
+
+                // Nếu recipient mới xuất hiện nhưng aggregate đã có watermark từ trước, dùng trạng thái terminal của aggregate
+                if (watermark == null)
                 {
-                    watermark = new NotificationAggregateWatermark
+                    var knownWatermarks = await _watermarkRepo.GetWatermarksForAggregateAsync(intent.AggregateId, cancellationToken);
+                    var terminalWatermark = knownWatermarks.FirstOrDefault(w => w.IsTerminal);
+                    if (terminalWatermark != null)
                     {
-                        AggregateId = intent.AggregateId,
+                        watermark = new NotificationAggregateWatermark
+                        {
+                            AggregateId = intent.AggregateId,
+                            RecipientUserId = recipient.RecipientUserId,
+                            LastOrderVersion = terminalWatermark.LastOrderVersion,
+                            IsTerminal = true,
+                            TerminalState = terminalWatermark.TerminalState
+                        };
+                    }
+                }
+
+                var staleEval = StaleActionSuppressionPolicy.Evaluate(recipient.NotificationType, intent.OrderVersion, watermark);
+
+                var renderResult = _templateRenderer.Render(
+                    recipient.NotificationType,
+                    intent.RenderData,
+                    isStale: staleEval.IsStale);
+
+                if (renderResult.IsFailure)
+                {
+                    _logger.LogError("Lỗi render template ({Code}): {Message}. Đẩy vào DLQ: {MessageId}",
+                        renderResult.Error.Code, renderResult.Error.Message, envelope.MessageId);
+                    await transaction.RollbackAsync(cancellationToken);
+                    await _dlqPublisher.PublishToDeadLetterQueueAsync(rawMessage, envelope.MessageId.ToString(), renderResult.Error.Message, renderResult.Error.Code, cancellationToken);
+                    return IngestionOutcome.Quarantined;
+                }
+
+                var rendered = renderResult.Value;
+                var isActionable = recipient.IsActionable && !staleEval.SuppressAction;
+                var actionUrl = isActionable ? recipient.ActionUrl : null;
+
+                var notification = new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    RecipientUserId = recipient.RecipientUserId,
+                    NotificationType = recipient.NotificationType,
+                    Category = recipient.Category,
+                    Severity = recipient.Severity,
+                    Title = rendered.Title,
+                    Body = rendered.Body,
+                    ResourceType = "RentalOrder",
+                    ResourceId = intent.AggregateId.ToString(),
+                    SourceEventId = messageId,
+                    SourceProducer = envelope.Producer,
+                    SourceEventType = envelope.MessageType,
+                    EventVersion = intent.OrderVersion,
+                    TemplateCode = rendered.TemplateCode,
+                    TemplateVersion = rendered.TemplateVersion,
+                    RenderDataJson = rendered.RenderDataJson,
+                    DeepLinkUrl = recipient.DeepLinkUrl,
+                    IsActionable = isActionable,
+                    ActionUrl = actionUrl,
+                    OccurredAt = envelope.OccurredAt,
+                    CreatedAt = now
+                };
+
+                notificationsToCreate.Add(notification);
+
+                // Channel policy and preference check for Email
+                var shouldSendEmail = NotificationChannelPolicy.ShouldSendEmail(recipient.NotificationType, recipient.RecipientRole);
+                if (shouldSendEmail && !staleEval.SuppressEmail)
+                {
+                    var emailAllowed = await _preferenceRepo.IsEmailEnabledAsync(recipient.RecipientUserId, recipient.Category, cancellationToken);
+                    var jobStatus = emailAllowed ? "Pending" : "Suppressed";
+                    var errorDetail = emailAllowed ? null : "Người dùng đã tắt nhận email cho category này trong preferences.";
+
+                    deliveryJobsToCreate.Add(new NotificationDeliveryJob
+                    {
+                        Id = Guid.NewGuid(),
+                        NotificationId = notification.Id,
+                        Channel = "EMAIL",
                         RecipientUserId = recipient.RecipientUserId,
-                        LastOrderVersion = terminalWatermark.LastOrderVersion,
-                        IsTerminal = true,
-                        TerminalState = terminalWatermark.TerminalState
-                    };
+                        Status = jobStatus,
+                        MaxAttempts = 5,
+                        AttemptCount = 0,
+                        NextAttemptAt = now,
+                        LastErrorCode = emailAllowed ? null : "PREFERENCE_DISABLED",
+                        LastErrorDetail = errorDetail,
+                        CreatedAt = now,
+                        UpdatedAt = now
+                    });
                 }
             }
 
-            var staleEval = StaleActionSuppressionPolicy.Evaluate(recipient.NotificationType, intent.OrderVersion, watermark);
-
-            var renderResult = _templateRenderer.Render(
-                recipient.NotificationType,
-                intent.RenderData,
-                isStale: staleEval.IsStale);
-
-            if (renderResult.IsFailure)
-            {
-                _logger.LogWarning("Lỗi render template: {Code} - {Message}", renderResult.Error.Code, renderResult.Error.Message);
-                continue;
-            }
-
-            var rendered = renderResult.Value;
-            var isActionable = recipient.IsActionable && !staleEval.SuppressAction;
-            var actionUrl = isActionable ? recipient.ActionUrl : null;
-
-            var notification = new Notification
-            {
-                Id = Guid.NewGuid(),
-                RecipientUserId = recipient.RecipientUserId,
-                NotificationType = recipient.NotificationType,
-                Category = recipient.Category,
-                Severity = recipient.Severity,
-                Title = rendered.Title,
-                Body = rendered.Body,
-                ResourceType = "RentalOrder",
-                ResourceId = intent.AggregateId.ToString(),
-                SourceEventId = messageId,
-                SourceProducer = envelope.Producer,
-                SourceEventType = envelope.EventType,
-                EventVersion = intent.OrderVersion,
-                TemplateCode = rendered.TemplateCode,
-                TemplateVersion = rendered.TemplateVersion,
-                RenderDataJson = rendered.RenderDataJson,
-                DeepLinkUrl = recipient.DeepLinkUrl,
-                IsActionable = isActionable,
-                ActionUrl = actionUrl,
-                OccurredAt = envelope.OccurredAt,
-                CreatedAt = now
-            };
-
-            notificationsToCreate.Add(notification);
-
-            // Channel policy and preference check for Email
-            var shouldSendEmail = NotificationChannelPolicy.ShouldSendEmail(recipient.NotificationType, recipient.RecipientRole);
-            if (shouldSendEmail && !staleEval.SuppressEmail)
-            {
-                var emailAllowed = await _preferenceRepo.IsEmailEnabledAsync(recipient.RecipientUserId, recipient.Category, cancellationToken);
-                var jobStatus = emailAllowed ? "Pending" : "Suppressed";
-                var errorDetail = emailAllowed ? null : "Người dùng đã tắt nhận email cho category này trong preferences.";
-
-                deliveryJobsToCreate.Add(new NotificationDeliveryJob
-                {
-                    Id = Guid.NewGuid(),
-                    NotificationId = notification.Id,
-                    Channel = "EMAIL",
-                    RecipientUserId = recipient.RecipientUserId,
-                    Status = jobStatus,
-                    MaxAttempts = 5,
-                    AttemptCount = 0,
-                    NextAttemptAt = now,
-                    LastErrorCode = emailAllowed ? null : "PREFERENCE_DISABLED",
-                    LastErrorDetail = errorDetail,
-                    CreatedAt = now,
-                    UpdatedAt = now
-                });
-            }
-        }
-
-        // 8. Atomic PostgreSQL Transaction
-        await using (var transaction = await _unitOfWork.BeginTransactionAsync(cancellationToken))
-        {
             // Inbox receipt
             await _inboxRepo.AddAsync(new NotificationInboxReceipt
             {
@@ -268,7 +284,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                 ConsumerName = ConsumerGroupName,
                 MessageId = messageId,
                 Producer = envelope.Producer,
-                MessageType = envelope.EventType,
+                MessageType = envelope.MessageType,
                 Status = "Processed",
                 ProcessedAt = now
             }, cancellationToken);
@@ -291,7 +307,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                 intent.AggregateId,
                 recipientIds,
                 intent.OrderVersion,
-                envelope.EventId,
+                envelope.MessageId.ToString(),
                 intent.IsTerminal,
                 intent.TerminalState,
                 cancellationToken);
@@ -307,7 +323,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                         intent.AggregateId,
                         otherRecipients,
                         intent.OrderVersion,
-                        envelope.EventId,
+                        envelope.MessageId.ToString(),
                         isTerminal: true,
                         intent.TerminalState,
                         cancellationToken);
@@ -317,8 +333,19 @@ public sealed class NotificationIngestionService : INotificationIngestionService
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogWarning(ex, "Lỗi vi phạm constraint database (có thể là duplicate concurrent): MessageId={MessageId}", messageId);
+            // Verify if inbox receipt already exists
+            var isDuplicate = await _inboxRepo.ExistsAsync(ConsumerGroupName, messageId, cancellationToken);
+            if (isDuplicate)
+            {
+                return IngestionOutcome.Duplicate;
+            }
+            throw; // Re-throw if unexpected constraint violation
+        }
 
-        // 9. Post-commit Realtime Dispatch
+        // 8. Post-commit Realtime Dispatch
         foreach (var notification in notificationsToCreate)
         {
             try

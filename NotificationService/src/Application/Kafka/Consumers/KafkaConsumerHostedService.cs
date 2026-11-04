@@ -9,6 +9,7 @@ namespace Dprental.NotificationService.Application.Kafka.Consumers;
 
 public sealed class KafkaConsumerHostedService : BackgroundService
 {
+    private const int MaxTransientRetries = 3;
     private readonly IServiceProvider _serviceProvider;
     private readonly IConfiguration _configuration;
     private readonly ILogger<KafkaConsumerHostedService> _logger;
@@ -51,27 +52,61 @@ public sealed class KafkaConsumerHostedService : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            ConsumeResult<string, string>? consumeResult = null;
             try
             {
-                var consumeResult = consumer.Consume(TimeSpan.FromSeconds(1));
+                consumeResult = consumer.Consume(TimeSpan.FromSeconds(1));
                 if (consumeResult == null || consumeResult.IsPartitionEOF)
                 {
                     continue;
                 }
 
-                using var scope = _serviceProvider.CreateScope();
-                var ingestionService = scope.ServiceProvider.GetRequiredService<INotificationIngestionService>();
+                var success = false;
+                for (var attempt = 1; attempt <= MaxTransientRetries && !stoppingToken.IsCancellationRequested; attempt++)
+                {
+                    try
+                    {
+                        using var scope = _serviceProvider.CreateScope();
+                        var ingestionService = scope.ServiceProvider.GetRequiredService<INotificationIngestionService>();
 
-                var outcome = await ingestionService.IngestMessageAsync(
-                    consumeResult.Message.Value,
-                    consumeResult.Topic,
-                    consumeResult.Partition.Value,
-                    consumeResult.Offset.Value,
-                    consumeResult.Message.Key,
-                    stoppingToken);
+                        var outcome = await ingestionService.IngestMessageAsync(
+                            consumeResult.Message.Value,
+                            consumeResult.Topic,
+                            consumeResult.Partition.Value,
+                            consumeResult.Offset.Value,
+                            consumeResult.Message.Key,
+                            stoppingToken);
 
-                // Commit offset sau khi xử lý thành công hoặc đã đẩy DLQ
-                consumer.Commit(consumeResult);
+                        // Commit offset sau khi xử lý thành công, duplicate, bỏ qua hoặc đã đưa vào DLQ thành công
+                        consumer.Commit(consumeResult);
+                        success = true;
+                        break;
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Lỗi xử lý Kafka message [Topic={Topic}, Partition={Partition}, Offset={Offset}]. Lần thử {Attempt}/{Max}",
+                            consumeResult.Topic, consumeResult.Partition.Value, consumeResult.Offset.Value, attempt, MaxTransientRetries);
+
+                        if (attempt < MaxTransientRetries)
+                        {
+                            await Task.Delay(TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt - 1)), stoppingToken);
+                        }
+                    }
+                }
+
+                if (!success && !stoppingToken.IsCancellationRequested)
+                {
+                    // Lỗi kéo dài: KHÔNG commit offset, seek lại offset hiện tại để không bỏ sót bản tin sau đó
+                    _logger.LogError("Message tại [Topic={Topic}, Partition={Partition}, Offset={Offset}] thất bại sau {Max} lần thử. Giữ nguyên offset và seek lại.",
+                        consumeResult.Topic, consumeResult.Partition.Value, consumeResult.Offset.Value, MaxTransientRetries);
+
+                    consumer.Seek(new TopicPartitionOffset(consumeResult.TopicPartition, consumeResult.Offset));
+                    await Task.Delay(3000, stoppingToken);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -79,7 +114,18 @@ public sealed class KafkaConsumerHostedService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Lỗi xảy ra trong vòng lặp tiêu thụ Kafka message. Sẽ thử lại sau 2 giây.");
+                _logger.LogError(ex, "Lỗi xảy ra trong vòng lặp tiêu thụ Kafka message.");
+                if (consumeResult != null)
+                {
+                    try
+                    {
+                        consumer.Seek(new TopicPartitionOffset(consumeResult.TopicPartition, consumeResult.Offset));
+                    }
+                    catch
+                    {
+                        // Ignore seek error during outer loop failure
+                    }
+                }
                 await Task.Delay(2000, stoppingToken);
             }
         }

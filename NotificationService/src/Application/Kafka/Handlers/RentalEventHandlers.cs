@@ -16,9 +16,35 @@ internal static class JsonElementExtensions
         return null;
     }
 
+    public static Guid? GetGuidFromAny(this JsonElement root, params string[] propertyNames)
+    {
+        foreach (var name in propertyNames)
+        {
+            var val = root.GetGuidOrDefault(name);
+            if (val.HasValue && val.Value != Guid.Empty)
+            {
+                return val;
+            }
+        }
+        return null;
+    }
+
     public static string? GetStringOrDefault(this JsonElement root, string propertyName)
     {
         return root.TryGetProperty(propertyName, out var prop) ? prop.GetString() : null;
+    }
+
+    public static string? GetStringFromAny(this JsonElement root, params string[] propertyNames)
+    {
+        foreach (var name in propertyNames)
+        {
+            var val = root.GetStringOrDefault(name);
+            if (!string.IsNullOrWhiteSpace(val))
+            {
+                return val;
+            }
+        }
+        return null;
     }
 
     public static long GetInt64OrDefault(this JsonElement root, string propertyName, long defaultValue = 0)
@@ -28,6 +54,21 @@ internal static class JsonElementExtensions
             if (prop.ValueKind == JsonValueKind.Number && prop.TryGetInt64(out var val))
             {
                 return val;
+            }
+        }
+        return defaultValue;
+    }
+
+    public static long GetInt64FromAny(this JsonElement root, long defaultValue, params string[] propertyNames)
+    {
+        foreach (var name in propertyNames)
+        {
+            if (root.TryGetProperty(name, out var prop))
+            {
+                if (prop.ValueKind == JsonValueKind.Number && prop.TryGetInt64(out var val))
+                {
+                    return val;
+                }
             }
         }
         return defaultValue;
@@ -44,6 +85,21 @@ internal static class JsonElementExtensions
         }
         return defaultValue;
     }
+
+    public static decimal GetDecimalFromAny(this JsonElement root, decimal defaultValue, params string[] propertyNames)
+    {
+        foreach (var name in propertyNames)
+        {
+            if (root.TryGetProperty(name, out var prop))
+            {
+                if (prop.ValueKind == JsonValueKind.Number && prop.TryGetDecimal(out var val))
+                {
+                    return val;
+                }
+            }
+        }
+        return defaultValue;
+    }
 }
 
 public sealed class RentalOrderCreatedHandler : IKafkaEventHandler
@@ -53,17 +109,17 @@ public sealed class RentalOrderCreatedHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
-        var orderId = payload.GetGuidOrDefault("orderId");
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
-            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "orderId không thể để trống."));
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
         }
 
-        var renterId = payload.GetGuidOrDefault("renterId");
-        var orderVersion = payload.GetInt64OrDefault("orderVersion", 1);
-        var orderCode = payload.GetStringOrDefault("orderCode");
-        var totalPayableAmount = payload.GetDecimalOrDefault("totalPayableAmount", 0);
-        var paymentDeadline = payload.GetStringOrDefault("paymentDeadline");
+        var renterId = payload.GetGuidFromAny("renterId", "userId");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var totalPayableAmount = payload.GetDecimalFromAny(0, "totalPayableAmount", "amount");
+        var paymentDeadline = payload.GetStringFromAny("paymentDeadline");
 
         var renderData = new Dictionary<string, object?>
         {
@@ -93,17 +149,17 @@ public sealed class RentalOrderPaidHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
-        var orderId = payload.GetGuidOrDefault("orderId");
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
-            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "orderId không thể để trống."));
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
         }
 
-        var renterId = payload.GetGuidOrDefault("renterId");
-        var orderVersion = payload.GetInt64OrDefault("orderVersion", 2);
-        var orderCode = payload.GetStringOrDefault("orderCode");
-        var paidAmount = payload.GetDecimalOrDefault("paidAmount", 0);
-        var invoiceRef = payload.GetStringOrDefault("invoiceRef");
+        var renterId = payload.GetGuidFromAny("renterId", "userId");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var paidAmount = payload.GetDecimalFromAny(0, "paidAmount", "amount");
+        var invoiceRef = payload.GetStringFromAny("invoiceRef");
 
         var renderData = new Dictionary<string, object?>
         {
@@ -113,12 +169,13 @@ public sealed class RentalOrderPaidHandler : IKafkaEventHandler
             ["invoiceRef"] = invoiceRef
         };
 
+        // PAID là mốc xác nhận thanh toán thành công, KHÔNG PHẢI trạng thái kết thúc toàn bộ vòng đời đơn hàng
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
             AggregateId: orderId.Value,
             OrderVersion: orderVersion,
-            IsTerminal: true,
-            TerminalState: "PAID",
+            IsTerminal: false,
+            TerminalState: null,
             RenterId: renterId,
             SupplierId: null,
             ReturnRequestId: null,
@@ -133,20 +190,22 @@ public sealed class RentalSupplierConfirmationRequestedHandler : IKafkaEventHand
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
-        var orderId = payload.GetGuidOrDefault("orderId");
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
-            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "orderId không thể để trống."));
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
         }
 
-        var supplierId = payload.GetGuidOrDefault("supplierId");
-        var orderVersion = payload.GetInt64OrDefault("orderVersion", 2);
-        var orderCode = payload.GetStringOrDefault("orderCode");
-        var deadline = payload.GetStringOrDefault("supplierConfirmationDeadline");
+        var supplierId = payload.GetGuidFromAny("supplierId");
+        var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var deadline = payload.GetStringFromAny("supplierConfirmationDeadline");
 
         var renderData = new Dictionary<string, object?>
         {
             ["rentalOrderId"] = orderId.Value,
+            ["rentalItemId"] = itemId,
             ["orderCode"] = orderCode,
             ["supplierConfirmationDeadline"] = deadline
         };
@@ -171,16 +230,16 @@ public sealed class RentalOrderExpiredHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
-        var orderId = payload.GetGuidOrDefault("orderId");
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
-            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "orderId không thể để trống."));
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
         }
 
-        var renterId = payload.GetGuidOrDefault("renterId");
-        var orderVersion = payload.GetInt64OrDefault("orderVersion", 99);
-        var orderCode = payload.GetStringOrDefault("orderCode");
-        var reason = payload.GetStringOrDefault("reason") ?? "Hết thời gian thanh toán/xác nhận";
+        var renterId = payload.GetGuidFromAny("renterId", "userId");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var reason = payload.GetStringFromAny("reason") ?? "Hết thời gian thanh toán/xác nhận";
 
         var renderData = new Dictionary<string, object?>
         {
@@ -209,16 +268,16 @@ public sealed class RentalOrderCancelledHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
-        var orderId = payload.GetGuidOrDefault("orderId");
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
-            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "orderId không thể để trống."));
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
         }
 
-        var renterId = payload.GetGuidOrDefault("renterId");
-        var orderVersion = payload.GetInt64OrDefault("orderVersion", 99);
-        var orderCode = payload.GetStringOrDefault("orderCode");
-        var reason = payload.GetStringOrDefault("reason") ?? "Hủy đơn";
+        var renterId = payload.GetGuidFromAny("renterId", "userId");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var reason = payload.GetStringFromAny("reason") ?? "Hủy đơn";
 
         var renderData = new Dictionary<string, object?>
         {
@@ -247,20 +306,23 @@ public sealed class RentalItemHandoverCompletedHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
-        var orderId = payload.GetGuidOrDefault("orderId");
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
-            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "orderId không thể để trống."));
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
         }
 
-        var renterId = payload.GetGuidOrDefault("renterId");
-        var orderVersion = payload.GetInt64OrDefault("orderVersion", 3);
-        var orderCode = payload.GetStringOrDefault("orderCode");
-        var actualHandoverAt = payload.GetStringOrDefault("actualHandoverAt");
+        var renterId = payload.GetGuidFromAny("renterId", "userId");
+        var supplierId = payload.GetGuidFromAny("supplierId");
+        var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var actualHandoverAt = payload.GetStringFromAny("actualHandoverAt");
 
         var renderData = new Dictionary<string, object?>
         {
             ["rentalOrderId"] = orderId.Value,
+            ["rentalItemId"] = itemId,
             ["orderCode"] = orderCode,
             ["actualHandoverAt"] = actualHandoverAt
         };
@@ -272,7 +334,7 @@ public sealed class RentalItemHandoverCompletedHandler : IKafkaEventHandler
             IsTerminal: false,
             TerminalState: null,
             RenterId: renterId,
-            SupplierId: null,
+            SupplierId: supplierId,
             ReturnRequestId: null,
             RenderData: renderData));
     }
@@ -285,21 +347,23 @@ public sealed class RentalHandoverOverdueHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
-        var orderId = payload.GetGuidOrDefault("orderId");
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
-            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "orderId không thể để trống."));
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
         }
 
-        var supplierId = payload.GetGuidOrDefault("supplierId");
-        var renterId = payload.GetGuidOrDefault("renterId");
-        var orderVersion = payload.GetInt64OrDefault("orderVersion", 2);
-        var orderCode = payload.GetStringOrDefault("orderCode");
-        var expectedStartDate = payload.GetStringOrDefault("expectedStartDate");
+        var supplierId = payload.GetGuidFromAny("supplierId");
+        var renterId = payload.GetGuidFromAny("renterId", "userId");
+        var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var expectedStartDate = payload.GetStringFromAny("expectedStartDate");
 
         var renderData = new Dictionary<string, object?>
         {
             ["rentalOrderId"] = orderId.Value,
+            ["rentalItemId"] = itemId,
             ["orderCode"] = orderCode,
             ["expectedStartDate"] = expectedStartDate
         };
@@ -324,22 +388,24 @@ public sealed class ReturnConfirmationOverdueHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
-        var orderId = payload.GetGuidOrDefault("orderId");
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
-            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "orderId không thể để trống."));
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
         }
 
-        var supplierId = payload.GetGuidOrDefault("supplierId");
-        var renterId = payload.GetGuidOrDefault("renterId");
-        var returnRequestId = payload.GetGuidOrDefault("returnRequestId");
-        var orderVersion = payload.GetInt64OrDefault("orderVersion", 4);
-        var orderCode = payload.GetStringOrDefault("orderCode");
-        var confirmationDeadlineAt = payload.GetStringOrDefault("confirmationDeadlineAt");
+        var supplierId = payload.GetGuidFromAny("supplierId");
+        var renterId = payload.GetGuidFromAny("renterId", "userId");
+        var returnRequestId = payload.GetGuidFromAny("returnRequestId");
+        var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var confirmationDeadlineAt = payload.GetStringFromAny("confirmationDeadlineAt");
 
         var renderData = new Dictionary<string, object?>
         {
             ["rentalOrderId"] = orderId.Value,
+            ["rentalItemId"] = itemId,
             ["orderCode"] = orderCode,
             ["returnRequestId"] = returnRequestId,
             ["confirmationDeadlineAt"] = confirmationDeadlineAt
@@ -365,16 +431,16 @@ public sealed class RentalOrderCompletedHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
-        var orderId = payload.GetGuidOrDefault("orderId");
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
-            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "orderId không thể để trống."));
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
         }
 
-        var renterId = payload.GetGuidOrDefault("renterId");
-        var orderVersion = payload.GetInt64OrDefault("orderVersion", 10);
-        var orderCode = payload.GetStringOrDefault("orderCode");
-        var completedAt = payload.GetStringOrDefault("completedAt");
+        var renterId = payload.GetGuidFromAny("renterId", "userId");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var completedAt = payload.GetStringFromAny("completedAt");
 
         var renderData = new Dictionary<string, object?>
         {
@@ -403,16 +469,16 @@ public sealed class LatePaymentRefundRequestedHandler : IKafkaEventHandler
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
-        var orderId = payload.GetGuidOrDefault("orderId");
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
         if (!orderId.HasValue || orderId.Value == Guid.Empty)
         {
-            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "orderId không thể để trống."));
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
         }
 
-        var renterId = payload.GetGuidOrDefault("renterId");
-        var orderVersion = payload.GetInt64OrDefault("orderVersion", 100);
-        var orderCode = payload.GetStringOrDefault("orderCode");
-        var totalRefundAmount = payload.GetDecimalOrDefault("totalRefundAmount", 0);
+        var renterId = payload.GetGuidFromAny("renterId", "userId");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var totalRefundAmount = payload.GetDecimalFromAny(0, "totalRefundAmount", "amount");
 
         var renderData = new Dictionary<string, object?>
         {

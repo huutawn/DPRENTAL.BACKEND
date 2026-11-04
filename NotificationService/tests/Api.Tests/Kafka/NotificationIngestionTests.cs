@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Dprental.NotificationService.Api.Tests.Fixtures;
+using Dprental.NotificationService.Common;
 using Dprental.NotificationService.Application.IServices;
 using Dprental.NotificationService.Application.Kafka.Contracts;
 using Dprental.NotificationService.Application.Kafka.Handlers;
@@ -97,8 +99,8 @@ public sealed class NotificationIngestionTests
 
         var envelope = new KafkaMessageEnvelope
         {
-            EventId = eventId.ToString(),
-            EventType = "RentalOrderPaid",
+            MessageId = eventId,
+            MessageType = "RentalOrderPaid",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -132,8 +134,8 @@ public sealed class NotificationIngestionTests
         var watermark = await db.AggregateWatermarks.FirstOrDefaultAsync(w => w.AggregateId == orderId && w.RecipientUserId == renterId);
         Assert.NotNull(watermark);
         Assert.Equal(2, watermark.LastOrderVersion);
-        Assert.True(watermark.IsTerminal);
-        Assert.Equal("PAID", watermark.TerminalState);
+        Assert.False(watermark.IsTerminal);
+        Assert.Null(watermark.TerminalState);
 
         // Verify realtime invalidation was triggered
         realtime.Verify(r => r.NotifyInboxChangedAsync(
@@ -163,8 +165,8 @@ public sealed class NotificationIngestionTests
 
         var envelope = new KafkaMessageEnvelope
         {
-            EventId = eventId.ToString(),
-            EventType = "RentalOrderCreated",
+            MessageId = eventId,
+            MessageType = "RentalOrderCreated",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -190,8 +192,8 @@ public sealed class NotificationIngestionTests
 
         var envelope = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalDisputeOpened",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalDisputeOpened",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -248,8 +250,8 @@ public sealed class NotificationIngestionTests
         };
         var env1 = new KafkaMessageEnvelope
         {
-            EventId = event1Id.ToString(),
-            EventType = "RentalItemHandoverCompleted",
+            MessageId = event1Id,
+            MessageType = "RentalItemHandoverCompleted",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -269,8 +271,8 @@ public sealed class NotificationIngestionTests
         };
         var env2 = new KafkaMessageEnvelope
         {
-            EventId = event2Id.ToString(),
-            EventType = "RentalHandoverOverdue",
+            MessageId = event2Id,
+            MessageType = "RentalHandoverOverdue",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -293,8 +295,8 @@ public sealed class NotificationIngestionTests
         var webOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         string json = """
         {
-            "eventId": "evt-123",
-            "eventType": "OrderCreated",
+            "messageId": "550e8400-e29b-41d4-a716-446655440000",
+            "messageType": "RentalOrderCreated",
             "producer": "RentalService",
             "version": 1,
             "occurredAt": "2026-11-02T10:00:00Z",
@@ -303,8 +305,8 @@ public sealed class NotificationIngestionTests
         """;
         var env = JsonSerializer.Deserialize<KafkaMessageEnvelope>(json, webOptions);
         Assert.NotNull(env);
-        Assert.Equal("evt-123", env.EventId);
-        Assert.Equal("OrderCreated", env.EventType);
+        Assert.Equal(Guid.Parse("550e8400-e29b-41d4-a716-446655440000"), env.MessageId);
+        Assert.Equal("RentalOrderCreated", env.MessageType);
         Assert.Equal("RentalService", env.Producer);
         Assert.Equal(1, env.Version);
 
@@ -321,5 +323,95 @@ public sealed class NotificationIngestionTests
         Assert.Equal("test@example.com", contactBatch.Contacts[0].Email);
         Assert.True(contactBatch.Contacts[0].IsActive);
         Assert.True(contactBatch.Contacts[0].IsEmailVerified);
+    }
+
+    [Fact]
+    public async Task Ingestion_All10MvpEvents_FromProducerFixtures_Succeeds()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var returnRequestId = Guid.NewGuid();
+
+        var fixtures = new[]
+        {
+            ProducerFixtures.RentalOrderCreated(Guid.NewGuid(), orderId, renterId),
+            ProducerFixtures.RentalOrderPaid(Guid.NewGuid(), orderId, renterId),
+            ProducerFixtures.RentalSupplierConfirmationRequested(Guid.NewGuid(), orderId, itemId, supplierId),
+            ProducerFixtures.RentalItemHandoverCompleted(Guid.NewGuid(), orderId, itemId, renterId, supplierId),
+            ProducerFixtures.RentalHandoverOverdue(Guid.NewGuid(), orderId, itemId, renterId, supplierId),
+            ProducerFixtures.ReturnConfirmationOverdue(Guid.NewGuid(), orderId, itemId, returnRequestId, renterId, supplierId),
+            ProducerFixtures.LatePaymentRefundRequested(Guid.NewGuid(), orderId, renterId),
+            ProducerFixtures.RentalOrderCompleted(Guid.NewGuid(), orderId, renterId)
+        };
+
+        for (var i = 0; i < fixtures.Length; i++)
+        {
+            var outcome = await service.IngestMessageAsync(fixtures[i], "rental.events.v1", 0, i + 1);
+            Assert.Equal(IngestionOutcome.Processed, outcome);
+        }
+
+        var receiptCount = await db.InboxReceipts.CountAsync();
+        Assert.Equal(fixtures.Length, receiptCount);
+    }
+
+    [Fact]
+    public async Task Ingestion_TemplateRenderFailure_QuarantinesAndDoesNotCommitReceipt()
+    {
+        var db = CreateInMemoryDbContext();
+        var uow = new UnitOfWork(db);
+        var inboxRepo = new InboxReceiptRepository(db);
+        var notifRepo = new NotificationRepository(db);
+        var deliveryRepo = new DeliveryJobRepository(db);
+        var prefRepo = new PreferenceRepository(db);
+        var watermarkRepo = new AggregateWatermarkRepository(db);
+        var recipientResolver = new RecipientResolutionService();
+
+        // Mock template renderer that fails
+        var templateRendererMock = new Mock<INotificationTemplateRenderer>();
+        templateRendererMock.Setup(t => t.Render(It.IsAny<string>(), It.IsAny<IDictionary<string, object?>>(), It.IsAny<bool>()))
+            .Returns(Result.Failure<RenderedNotification>(Error.Failure("RENDER_FAILED", "Render error")));
+
+        var dlqMock = new Mock<IKafkaDeadLetterPublisher>();
+        var realtimeMock = new Mock<INotificationRealtimeNotifier>();
+
+        var service = new NotificationIngestionService(
+            new IKafkaEventHandler[] { new RentalOrderCreatedHandler() },
+            recipientResolver,
+            templateRendererMock.Object,
+            inboxRepo,
+            notifRepo,
+            deliveryRepo,
+            prefRepo,
+            watermarkRepo,
+            uow,
+            dlqMock.Object,
+            realtimeMock.Object,
+            NullLogger<NotificationIngestionService>.Instance);
+
+        var messageId = Guid.NewGuid();
+        var raw = ProducerFixtures.RentalOrderCreated(messageId, Guid.NewGuid(), Guid.NewGuid());
+
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 10);
+
+        Assert.Equal(IngestionOutcome.Quarantined, outcome);
+        // Must publish to DLQ
+        dlqMock.Verify(d => d.PublishToDeadLetterQueueAsync(
+            raw,
+            messageId.ToString(),
+            "Render error",
+            "RENDER_FAILED",
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        // Must NOT commit receipt Processed
+        var receipt = await db.InboxReceipts.FirstOrDefaultAsync(r => r.MessageId == messageId);
+        Assert.Null(receipt);
+
+        // Must NOT save any notification
+        var count = await db.Notifications.CountAsync(n => n.SourceEventId == messageId);
+        Assert.Equal(0, count);
     }
 }

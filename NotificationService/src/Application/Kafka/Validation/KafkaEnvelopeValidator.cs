@@ -5,7 +5,16 @@ namespace Dprental.NotificationService.Application.Kafka.Validation;
 
 public static class KafkaEnvelopeValidator
 {
-    public const string ExpectedProducer = "RentalService";
+    private static readonly HashSet<string> AllowedProducers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "RentalService",
+        "rental-service",
+        "PaymentService",
+        "payment-service",
+        "ReviewService",
+        "review-service"
+    };
+
     public const int ExpectedVersion = 1;
 
     public static Result Validate(KafkaMessageEnvelope? envelope)
@@ -15,24 +24,24 @@ public static class KafkaEnvelopeValidator
             return Result.Failure(Error.Validation("NULL_ENVELOPE", "Kafka message envelope không được để trống."));
         }
 
-        if (string.IsNullOrWhiteSpace(envelope.EventId) || !Guid.TryParse(envelope.EventId, out var eventGuid) || eventGuid == Guid.Empty)
+        if (envelope.MessageId == Guid.Empty)
         {
-            return Result.Failure(Error.Validation("INVALID_EVENT_ID", "EventId phải là GUID hợp lệ và khác rỗng."));
+            return Result.Failure(Error.Validation("INVALID_MESSAGE_ID", "MessageId phải là GUID hợp lệ và khác Guid.Empty."));
         }
 
-        if (!string.Equals(envelope.Producer, ExpectedProducer, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(envelope.MessageType))
         {
-            return Result.Failure(Error.Validation("INVALID_PRODUCER", $"Producer không hợp lệ: '{envelope.Producer}'. Kỳ vọng: '{ExpectedProducer}'."));
+            return Result.Failure(Error.Validation("MISSING_MESSAGE_TYPE", "MessageType không được để trống."));
         }
 
-        if (envelope.Version != ExpectedVersion)
+        if (string.IsNullOrWhiteSpace(envelope.Producer) || !AllowedProducers.Contains(envelope.Producer))
         {
-            return Result.Failure(Error.Validation("UNSUPPORTED_VERSION", $"Version '{envelope.Version}' không được hỗ trợ. Kỳ vọng version: {ExpectedVersion}."));
+            return Result.Failure(Error.Validation("INVALID_PRODUCER", $"Producer không hợp lệ: '{envelope.Producer}'. Phải thuộc danh sách producer được ủy quyền."));
         }
 
-        if (string.IsNullOrWhiteSpace(envelope.EventType))
+        if (envelope.Version <= 0)
         {
-            return Result.Failure(Error.Validation("MISSING_EVENT_TYPE", "EventType không được để trống."));
+            return Result.Failure(Error.Validation("UNSUPPORTED_VERSION", $"Version '{envelope.Version}' không được hỗ trợ. Version phải > 0."));
         }
 
         if (envelope.OccurredAt == default)

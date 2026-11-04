@@ -119,8 +119,8 @@ public sealed class E2EScenariosHarnessTests
         // 1. Ingest RentalOrderCreated
         var envCreated = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderCreated",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderCreated",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -140,8 +140,8 @@ public sealed class E2EScenariosHarnessTests
         // 2. Ingest RentalOrderPaid
         var envPaid = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderPaid",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderPaid",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -201,8 +201,8 @@ public sealed class E2EScenariosHarnessTests
         var eventId = Guid.NewGuid();
         var raw = JsonSerializer.Serialize(new KafkaMessageEnvelope
         {
-            EventId = eventId.ToString(),
-            EventType = "RentalOrderPaid",
+            MessageId = eventId,
+            MessageType = "RentalOrderPaid",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -239,8 +239,8 @@ public sealed class E2EScenariosHarnessTests
         // Paid arrives first
         var envPaid = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderPaid",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderPaid",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -260,8 +260,8 @@ public sealed class E2EScenariosHarnessTests
         // Created arrives later (out of order, orderVersion 1 < 2)
         var envCreated = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderCreated",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderCreated",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow.AddMinutes(-10),
@@ -297,8 +297,8 @@ public sealed class E2EScenariosHarnessTests
 
         var envExpired = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderExpired",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderExpired",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -331,8 +331,8 @@ public sealed class E2EScenariosHarnessTests
 
         var raw1 = JsonSerializer.Serialize(new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalItemHandoverCompleted",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalItemHandoverCompleted",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -348,8 +348,8 @@ public sealed class E2EScenariosHarnessTests
 
         var raw2 = JsonSerializer.Serialize(new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalHandoverOverdue",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalHandoverOverdue",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -384,8 +384,8 @@ public sealed class E2EScenariosHarnessTests
 
         var env = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderPaid",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderPaid",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -476,8 +476,8 @@ public sealed class E2EScenariosHarnessTests
 
         var env = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderPaid",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderPaid",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
