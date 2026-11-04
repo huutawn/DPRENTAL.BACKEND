@@ -13,7 +13,10 @@ public sealed class StartupConfigurationValidatorTests
             ["Kafka:BootstrapServers"] = "localhost:9092",
             ["Kafka:Topics"] = "rental.events.v1,payment.analytics.v1",
             ["Services:AuthService:BaseUrl"] = "http://auth-service:8080",
-            ["InternalAuthentication:ApiKey"] = "valid-internal-api-key-2026"
+            ["InternalAuthentication:ApiKey"] = "valid-internal-api-key-2026",
+            ["Jwt:Issuer"] = "https://auth.dprental.vn",
+            ["Jwt:Audience"] = "dprental-platform",
+            ["Jwt:JwksUri"] = "https://auth.dprental.vn/.well-known/jwks.json"
         };
 
     [Fact]
@@ -109,5 +112,57 @@ public sealed class StartupConfigurationValidatorTests
 
         var ex = Assert.Throws<InvalidOperationException>(() => StartupConfigurationValidator.Validate(config));
         Assert.Contains("InternalAuthentication:ApiKey", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_MissingJwtIssuer_ThrowsInvalidOperationException()
+    {
+        var dict = CreateValidConfigDict();
+        dict["Jwt:Issuer"] = "";
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => StartupConfigurationValidator.Validate(config));
+        Assert.Contains("Jwt:Issuer", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_MissingJwtAudience_ThrowsInvalidOperationException()
+    {
+        var dict = CreateValidConfigDict();
+        dict["Jwt:Audience"] = "";
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => StartupConfigurationValidator.Validate(config));
+        Assert.Contains("Jwt:Audience", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_MissingJwtJwksUri_ThrowsInvalidOperationException()
+    {
+        var dict = CreateValidConfigDict();
+        dict["Jwt:JwksUri"] = "";
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => StartupConfigurationValidator.Validate(config));
+        Assert.Contains("Jwt:JwksUri", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("not-a-valid-uri")]
+    [InlineData("/relative/path")]
+    [InlineData("ftp://auth.dprental.vn/jwks.json")]
+    [InlineData("file:///etc/passwd")]
+    public void Validate_InvalidJwtJwksUri_ThrowsInvalidOperationException(string invalidUri)
+    {
+        var dict = CreateValidConfigDict();
+        dict["Jwt:JwksUri"] = invalidUri;
+
+        var config = new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => StartupConfigurationValidator.Validate(config));
+        Assert.Contains("Jwt:JwksUri", ex.Message);
     }
 }
