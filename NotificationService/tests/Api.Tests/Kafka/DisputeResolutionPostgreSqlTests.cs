@@ -1,8 +1,8 @@
 using System.Text.Json;
+using Dprental.NotificationService.Api.Tests.Fixtures;
 using Dprental.NotificationService.Application.Kafka.Services;
 using Dprental.NotificationService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Kafka;
@@ -10,23 +10,12 @@ namespace Dprental.NotificationService.Api.Tests.Kafka;
 public sealed class DisputeResolutionPostgreSqlTests
 {
     [Fact]
-    [Trait("Category", "PostgreSQL")]
+    [Trait("Category", "Integration")]
     public async Task RentalDisputeResolved_PersistsTwoRecipientsAndDeduplicatesReplay()
     {
-        var source = Environment.GetEnvironmentVariable("NOTIFICATION_TEST_POSTGRES")
-            ?? Environment.GetEnvironmentVariable("POSTGRESQL_TEST_CONNECTION_STRING")
-            ?? throw new InvalidOperationException(
-                "Set NOTIFICATION_TEST_POSTGRES to a PostgreSQL connection with CREATE DATABASE permission.");
-        var adminConnection = new NpgsqlConnectionStringBuilder(source) { Database = "postgres" }.ConnectionString;
         var databaseName = $"notification_dispute_test_{Guid.NewGuid():N}";
-        var testConnection = new NpgsqlConnectionStringBuilder(source) { Database = databaseName }.ConnectionString;
-
-        await using (var admin = new NpgsqlConnection(adminConnection))
-        {
-            await admin.OpenAsync();
-            await using var create = new NpgsqlCommand($"CREATE DATABASE \"{databaseName}\"", admin);
-            await create.ExecuteNonQueryAsync();
-        }
+        var testConnection = TestEnvironment.GetPostgreSqlConnectionString(databaseName);
+        await TestEnvironment.RecreateDatabaseAsync(databaseName);
 
         try
         {
@@ -82,11 +71,7 @@ public sealed class DisputeResolutionPostgreSqlTests
         }
         finally
         {
-            NpgsqlConnection.ClearAllPools();
-            await using var admin = new NpgsqlConnection(adminConnection);
-            await admin.OpenAsync();
-            await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{databaseName}\" WITH (FORCE)", admin);
-            await drop.ExecuteNonQueryAsync();
+            await TestEnvironment.DropDatabaseAsync(databaseName);
         }
     }
 }

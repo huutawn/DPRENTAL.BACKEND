@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Moq;
 using Dprental.NotificationService.Api.Controllers;
 using Dprental.NotificationService.Application.DTOs;
 using Dprental.NotificationService.Application.IServices;
@@ -13,6 +14,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Controllers;
 
+[Trait("Category", "Unit")]
 public sealed class NotificationApiEndpointTests
 {
     private static NotificationServiceDbContext CreateInMemoryDbContext()
@@ -47,7 +49,7 @@ public sealed class NotificationApiEndpointTests
         using var db = CreateInMemoryDbContext();
         var notifRepo = new NotificationRepository(db);
         var queryService = new NotificationQueryService(notifRepo);
-        var readService = new NotificationReadService(notifRepo);
+        var readService = new NotificationReadService(notifRepo, Mock.Of<INotificationRealtimeNotifier>());
 
         var controller = new NotificationsController(queryService, readService)
         {
@@ -66,12 +68,64 @@ public sealed class NotificationApiEndpointTests
     }
 
     [Fact]
+    public async Task NotificationsController_MissingSub_ShouldBeUnauthorized()
+    {
+        using var db = CreateInMemoryDbContext();
+        var notifRepo = new NotificationRepository(db);
+        var queryService = new NotificationQueryService(notifRepo);
+        var readService = new NotificationReadService(notifRepo, Mock.Of<INotificationRealtimeNotifier>());
+
+        var controller = new NotificationsController(queryService, readService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("u", "usr") }, "TestAuth"))
+                }
+            }
+        };
+
+        var response = await controller.GetNotifications();
+        var objectResult = Assert.IsType<ObjectResult>(response);
+        Assert.Equal(StatusCodes.Status401Unauthorized, objectResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task NotificationsController_NonGuidSub_ShouldBeUnauthorized()
+    {
+        using var db = CreateInMemoryDbContext();
+        var notifRepo = new NotificationRepository(db);
+        var queryService = new NotificationQueryService(notifRepo);
+        var readService = new NotificationReadService(notifRepo, Mock.Of<INotificationRealtimeNotifier>());
+
+        var controller = new NotificationsController(queryService, readService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+                    {
+                        new Claim("sub", "not-a-valid-guid"),
+                        new Claim("u", "usr")
+                    }, "TestAuth"))
+                }
+            }
+        };
+
+        var response = await controller.GetNotifications();
+        var objectResult = Assert.IsType<ObjectResult>(response);
+        Assert.Equal(StatusCodes.Status401Unauthorized, objectResult.StatusCode);
+    }
+
+    [Fact]
     public async Task NotificationsController_GetNotifications_ShouldReturnPagedResults()
     {
         using var db = CreateInMemoryDbContext();
         var notifRepo = new NotificationRepository(db);
         var queryService = new NotificationQueryService(notifRepo);
-        var readService = new NotificationReadService(notifRepo);
+        var readService = new NotificationReadService(notifRepo, Mock.Of<INotificationRealtimeNotifier>());
 
         var userId = Guid.NewGuid();
         for (int i = 1; i <= 3; i++)
@@ -125,7 +179,7 @@ public sealed class NotificationApiEndpointTests
         using var db = CreateInMemoryDbContext();
         var notifRepo = new NotificationRepository(db);
         var queryService = new NotificationQueryService(notifRepo);
-        var readService = new NotificationReadService(notifRepo);
+        var readService = new NotificationReadService(notifRepo, Mock.Of<INotificationRealtimeNotifier>());
 
         var ownerId = Guid.NewGuid();
         var attackerId = Guid.NewGuid();
@@ -178,7 +232,7 @@ public sealed class NotificationApiEndpointTests
         var fixedTime = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
         var fakeTimeProvider = new FakeTimeProvider(fixedTime);
 
-        var readService = new NotificationReadService(notifRepo, fakeTimeProvider);
+        var readService = new NotificationReadService(notifRepo, Mock.Of<INotificationRealtimeNotifier>(), fakeTimeProvider);
         var userId = Guid.NewGuid();
 
         // Older notification before cutoff
@@ -286,5 +340,53 @@ public sealed class NotificationApiEndpointTests
 
         var orderPref = updatedDto.Preferences.First(p => p.Category == "ORDER");
         Assert.False(orderPref.EmailEnabled);
+    }
+
+    [Fact]
+    public async Task PreferencesController_ServiceToken_ShouldBeForbidden()
+    {
+        using var db = CreateInMemoryDbContext();
+        var prefRepo = new PreferenceRepository(db);
+        var uow = new UnitOfWork(db);
+        var prefService = new PreferenceService(prefRepo, uow);
+
+        var controller = new PreferencesController(prefService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = CreateUserPrincipal(Guid.NewGuid(), tokenUse: "svc")
+                }
+            }
+        };
+
+        var response = await controller.GetPreferences();
+        var objectResult = Assert.IsType<ObjectResult>(response);
+        Assert.Equal(StatusCodes.Status403Forbidden, objectResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task PreferencesController_MissingSub_ShouldBeUnauthorized()
+    {
+        using var db = CreateInMemoryDbContext();
+        var prefRepo = new PreferenceRepository(db);
+        var uow = new UnitOfWork(db);
+        var prefService = new PreferenceService(prefRepo, uow);
+
+        var controller = new PreferencesController(prefService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("u", "usr") }, "TestAuth"))
+                }
+            }
+        };
+
+        var response = await controller.GetPreferences();
+        var objectResult = Assert.IsType<ObjectResult>(response);
+        Assert.Equal(StatusCodes.Status401Unauthorized, objectResult.StatusCode);
     }
 }

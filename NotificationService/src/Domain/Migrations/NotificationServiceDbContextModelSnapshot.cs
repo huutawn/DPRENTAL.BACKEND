@@ -27,105 +27,141 @@ namespace NotificationService.Domain.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<string>("ActionUrl")
                         .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("action_url");
 
                     b.Property<string>("Body")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("body");
 
                     b.Property<string>("Category")
                         .IsRequired()
                         .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("category");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
                         .HasDefaultValueSql("NOW()");
 
                     b.Property<string>("DeepLinkUrl")
                         .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("deep_link_url");
 
                     b.Property<long>("EventVersion")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bigint")
-                        .HasDefaultValue(0L);
+                        .HasDefaultValue(0L)
+                        .HasColumnName("event_version");
 
                     b.Property<bool>("IsActionable")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
-                        .HasDefaultValue(false);
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_actionable");
 
                     b.Property<string>("NotificationType")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("notification_type");
 
                     b.Property<DateTimeOffset>("OccurredAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<Guid?>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
 
                     b.Property<DateTimeOffset?>("ReadAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("read_at");
 
                     b.Property<Guid>("RecipientUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("recipient_user_id");
 
                     b.Property<string>("RenderDataJson")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("render_data_json");
+
+                    b.Property<Guid?>("RentalItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("rental_item_id");
 
                     b.Property<string>("ResourceId")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("resource_id");
 
                     b.Property<string>("ResourceType")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("resource_type");
 
                     b.Property<string>("Severity")
                         .IsRequired()
                         .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("severity");
 
                     b.Property<Guid>("SourceEventId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_event_id");
 
                     b.Property<string>("SourceEventType")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("source_event_type");
 
                     b.Property<string>("SourceProducer")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("source_producer");
 
                     b.Property<string>("TemplateCode")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("template_code");
 
                     b.Property<string>("TemplateVersion")
                         .IsRequired()
                         .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("template_version");
 
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("title");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("OrderId")
+                        .HasDatabaseName("ix_notifications_order_id");
+
+                    b.HasIndex("RentalItemId")
+                        .HasDatabaseName("ix_notifications_rental_item");
+
                     b.HasIndex("RecipientUserId", "ReadAt")
                         .HasDatabaseName("ix_notifications_recipient_unread")
-                        .HasFilter("\"ReadAt\" IS NULL");
+                        .HasFilter("read_at IS NULL");
 
                     b.HasIndex("RecipientUserId", "CreatedAt", "Id")
                         .IsDescending(false, true, true)
@@ -140,36 +176,76 @@ namespace NotificationService.Domain.Migrations
 
             modelBuilder.Entity("Dprental.NotificationService.Domain.Entities.NotificationAggregateWatermark", b =>
                 {
+                    b.Property<string>("Scope")
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasDefaultValue("RentalOrder")
+                        .HasColumnName("scope");
+
                     b.Property<Guid>("AggregateId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("aggregate_id");
 
                     b.Property<Guid>("RecipientUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("recipient_user_id");
+
+                    b.Property<bool>("IsPaid")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_paid");
 
                     b.Property<bool>("IsTerminal")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
-                        .HasDefaultValue(false);
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_terminal");
 
                     b.Property<string>("LastMessageId")
                         .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("last_message_id");
 
                     b.Property<long>("LastOrderVersion")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bigint")
-                        .HasDefaultValue(0L);
+                        .HasDefaultValue(0L)
+                        .HasColumnName("last_order_version");
+
+                    b.Property<Guid?>("ParentItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parent_item_id");
+
+                    b.Property<Guid?>("ParentOrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parent_order_id");
 
                     b.Property<string>("TerminalState")
                         .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("terminal_state");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
                         .HasDefaultValueSql("NOW()");
 
-                    b.HasKey("AggregateId", "RecipientUserId");
+                    b.HasKey("Scope", "AggregateId", "RecipientUserId");
+
+                    b.HasIndex("ParentItemId")
+                        .HasDatabaseName("ix_aggregate_watermarks_parent_item");
+
+                    b.HasIndex("ParentOrderId")
+                        .HasDatabaseName("ix_aggregate_watermarks_parent_order");
+
+                    b.HasIndex("Scope", "AggregateId")
+                        .HasDatabaseName("ix_aggregate_watermarks_scope_aggregate");
+
+                    b.HasIndex("Scope", "AggregateId", "RecipientUserId")
+                        .HasDatabaseName("ix_aggregate_watermarks_scope_aggregate_recipient");
 
                     b.ToTable("aggregate_watermarks", "notification");
                 });
@@ -178,71 +254,88 @@ namespace NotificationService.Domain.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<int>("AttemptCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
-                        .HasDefaultValue(0);
+                        .HasDefaultValue(0)
+                        .HasColumnName("attempt_count");
 
                     b.Property<string>("Channel")
                         .IsRequired()
                         .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("channel");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
                         .HasDefaultValueSql("NOW()");
 
                     b.Property<DateTimeOffset?>("DispatchStartedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dispatch_started_at");
 
                     b.Property<string>("LastErrorCode")
                         .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("last_error_code");
 
                     b.Property<string>("LastErrorDetail")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("last_error_detail");
 
                     b.Property<DateTimeOffset?>("LeaseExpiresAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at");
 
                     b.Property<string>("LeaseToken")
                         .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("lease_token");
 
                     b.Property<int>("MaxAttempts")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
-                        .HasDefaultValue(5);
+                        .HasDefaultValue(5)
+                        .HasColumnName("max_attempts");
 
                     b.Property<DateTimeOffset>("NextAttemptAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at")
                         .HasDefaultValueSql("NOW()");
 
                     b.Property<Guid>("NotificationId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("notification_id");
 
                     b.Property<string>("ProviderMessageId")
                         .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("provider_message_id");
 
                     b.Property<Guid>("RecipientUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("recipient_user_id");
 
                     b.Property<DateTimeOffset?>("SentAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("sent_at");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
                         .HasDefaultValueSql("NOW()");
 
                     b.HasKey("Id");
@@ -253,11 +346,11 @@ namespace NotificationService.Domain.Migrations
 
                     b.HasIndex("Status", "LeaseExpiresAt")
                         .HasDatabaseName("ix_delivery_jobs_lease_recovery")
-                        .HasFilter("\"Status\" = 'Processing'");
+                        .HasFilter("status = 'Processing'");
 
                     b.HasIndex("Status", "NextAttemptAt")
                         .HasDatabaseName("ix_delivery_jobs_pending_claim")
-                        .HasFilter("\"Status\" IN ('Pending', 'RetryScheduled')");
+                        .HasFilter("status IN ('Pending', 'RetryScheduled')");
 
                     b.ToTable("delivery_jobs", "notification");
                 });
@@ -266,42 +359,51 @@ namespace NotificationService.Domain.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<string>("ConsumerName")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("consumer_name");
 
                     b.Property<string>("ErrorCode")
                         .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("error_code");
 
                     b.Property<string>("ErrorDetail")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("error_detail");
 
                     b.Property<Guid>("MessageId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("message_id");
 
                     b.Property<string>("MessageType")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("message_type");
 
                     b.Property<DateTimeOffset>("ProcessedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at")
                         .HasDefaultValueSql("NOW()");
 
                     b.Property<string>("Producer")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("producer");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
 
                     b.HasKey("Id");
 
@@ -320,30 +422,36 @@ namespace NotificationService.Domain.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<string>("Category")
                         .IsRequired()
                         .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("category");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
                         .HasDefaultValueSql("NOW()");
 
                     b.Property<bool>("EmailEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
-                        .HasDefaultValue(true);
+                        .HasDefaultValue(true)
+                        .HasColumnName("email_enabled");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
                         .HasDefaultValueSql("NOW()");
 
                     b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
 
                     b.HasKey("Id");
 

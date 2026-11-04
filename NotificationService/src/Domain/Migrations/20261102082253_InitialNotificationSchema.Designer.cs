@@ -128,7 +128,7 @@ namespace NotificationService.Domain.Migrations
 
                     b.HasIndex("RecipientUserId", "ReadAt")
                         .HasDatabaseName("ix_notifications_recipient_unread")
-                        .HasFilter("\"ReadAt\" IS NULL");
+                        .HasFilter("read_at IS NULL");
 
                     b.HasIndex("RecipientUserId", "CreatedAt", "Id")
                         .IsDescending(false, true, true)
@@ -256,11 +256,11 @@ namespace NotificationService.Domain.Migrations
 
                     b.HasIndex("Status", "LeaseExpiresAt")
                         .HasDatabaseName("ix_delivery_jobs_lease_recovery")
-                        .HasFilter("\"Status\" = 'Processing'");
+                        .HasFilter("status = 'Processing'");
 
                     b.HasIndex("Status", "NextAttemptAt")
                         .HasDatabaseName("ix_delivery_jobs_pending_claim")
-                        .HasFilter("\"Status\" IN ('Pending', 'RetryScheduled')");
+                        .HasFilter("status IN ('Pending', 'RetryScheduled')");
 
                     b.ToTable("delivery_jobs", "notification");
                 });

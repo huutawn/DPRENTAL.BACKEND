@@ -12,14 +12,15 @@ public sealed class NotificationInboxReceiptConfiguration : IEntityTypeConfigura
 
         builder.HasKey(r => r.Id);
 
-        builder.Property(r => r.ConsumerName).HasMaxLength(64).IsRequired();
-        builder.Property(r => r.MessageId).IsRequired();
-        builder.Property(r => r.Producer).HasMaxLength(64).IsRequired();
-        builder.Property(r => r.MessageType).HasMaxLength(64).IsRequired();
-        builder.Property(r => r.Status).HasMaxLength(32).IsRequired();
-        builder.Property(r => r.ProcessedAt).IsRequired().HasDefaultValueSql("NOW()");
-        builder.Property(r => r.ErrorCode).HasMaxLength(64);
-        builder.Property(r => r.ErrorDetail).HasColumnType("text");
+        builder.Property(r => r.Id).HasColumnName("id");
+        builder.Property(r => r.ConsumerName).HasColumnName("consumer_name").HasMaxLength(64).IsRequired();
+        builder.Property(r => r.MessageId).HasColumnName("message_id").IsRequired();
+        builder.Property(r => r.Producer).HasColumnName("producer").HasMaxLength(64).IsRequired();
+        builder.Property(r => r.MessageType).HasColumnName("message_type").HasMaxLength(64).IsRequired();
+        builder.Property(r => r.Status).HasColumnName("status").HasMaxLength(32).IsRequired();
+        builder.Property(r => r.ProcessedAt).HasColumnName("processed_at").IsRequired().HasDefaultValueSql("NOW()");
+        builder.Property(r => r.ErrorCode).HasColumnName("error_code").HasMaxLength(64);
+        builder.Property(r => r.ErrorDetail).HasColumnName("error_detail").HasColumnType("text");
 
         builder.HasIndex(r => new { r.ConsumerName, r.MessageId })
             .IsUnique()

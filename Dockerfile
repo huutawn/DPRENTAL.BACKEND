@@ -25,6 +25,6 @@ EXPOSE 8080
 
 USER $APP_UID
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=6 \
-    CMD perl -MIO::Socket::INET -e '$s=IO::Socket::INET->new("127.0.0.1:8080") or exit 1; print $s "GET /health/ready HTTP/1.0\r\n\r\n"; my $r=<$s>; exit($r =~ /200/ ? 0 : 1)' || exit 1
+    CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /health/ready HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
 
 ENTRYPOINT ["dotnet", "NotificationService.Api.dll"]

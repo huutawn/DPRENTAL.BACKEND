@@ -4,6 +4,7 @@ using Dprental.NotificationService.Application.Clients;
 using Dprental.NotificationService.Application.DTOs;
 using Dprental.NotificationService.Application.Email;
 using Dprental.NotificationService.Application.Email.Workers;
+using Dprental.NotificationService.Application.Email.Services;
 using Dprental.NotificationService.Application.IServices;
 using Dprental.NotificationService.Application.Kafka.Contracts;
 using Dprental.NotificationService.Application.Kafka.Handlers;
@@ -23,6 +24,7 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.E2E;
 
+[Trait("Category", "Unit")]
 public sealed class E2EScenariosHarnessTests
 {
     private sealed class HarnessContext : IAsyncDisposable
@@ -68,7 +70,11 @@ public sealed class E2EScenariosHarnessTests
                 new ReturnConfirmationOverdueHandler(),
                 new RentalOrderCompletedHandler(),
                 new RentalDeductionDisputeResolvedHandler(),
-                new LatePaymentRefundRequestedHandler()
+                new LatePaymentRefundRequestedHandler(),
+                new RentalItemConfirmedHandler(),
+                new RentalItemRejectedHandler(),
+                new RefundCompletedFinancialHandler(),
+                new SupplierPayoutCompletedHandler()
             };
 
             DlqMock = new Mock<IKafkaDeadLetterPublisher>();
@@ -91,7 +97,7 @@ public sealed class E2EScenariosHarnessTests
                 NullLogger<NotificationIngestionService>.Instance);
 
             QueryService = new NotificationQueryService(notifRepo);
-            ReadService = new NotificationReadService(notifRepo);
+            ReadService = new NotificationReadService(notifRepo, RealtimeMock.Object);
             PreferenceService = new PreferenceService(prefRepo, uow);
 
             var services = new ServiceCollection();
@@ -100,6 +106,9 @@ public sealed class E2EScenariosHarnessTests
             services.AddSingleton(AuthClientMock.Object);
             services.AddSingleton(EmailSenderMock.Object);
             services.AddSingleton<INotificationTemplateRenderer>(templateRenderer);
+            services.AddSingleton<IAggregateWatermarkRepository>(watermarkRepo);
+            services.AddSingleton<IUnitOfWork>(uow);
+            services.AddScoped<IEmailDeliveryService, EmailDeliveryService>();
             ServiceProvider = services.BuildServiceProvider();
         }
 
@@ -120,8 +129,8 @@ public sealed class E2EScenariosHarnessTests
         // 1. Ingest RentalOrderCreated
         var envCreated = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderCreated",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderCreated",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -141,8 +150,8 @@ public sealed class E2EScenariosHarnessTests
         // 2. Ingest RentalOrderPaid
         var envPaid = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderPaid",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderPaid",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -167,7 +176,7 @@ public sealed class E2EScenariosHarnessTests
                 new AuthContactDto(renterId, "renter@example.com", IsActive: true, IsEmailVerified: true)
             }));
 
-        ctx.EmailSenderMock.Setup(s => s.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        ctx.EmailSenderMock.Setup(s => s.SendEmailAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EmailSendResult(EmailSendOutcome.Success, "smtp_msg_1", null, null));
 
         var worker = new EmailDeliveryWorker(ctx.ServiceProvider, NullLogger<EmailDeliveryWorker>.Instance);
@@ -189,6 +198,13 @@ public sealed class E2EScenariosHarnessTests
         var markAllResult = await ctx.ReadService.MarkAllAsReadAsync(renterId);
         Assert.True(markAllResult.IsSuccess);
         Assert.Equal(2, markAllResult.Value.MarkedCount);
+        ctx.RealtimeMock.Verify(r => r.NotifyInboxChangedAsync(
+            renterId,
+            (Guid?)null,
+            "READ_ALL",
+            "ALL",
+            markAllResult.Value.ReadAt,
+            It.IsAny<CancellationToken>()), Times.Once);
 
         var unreadAfter = await ctx.QueryService.GetUnreadCountAsync(renterId);
         Assert.Equal(0, unreadAfter.Value.UnreadCount);
@@ -202,8 +218,8 @@ public sealed class E2EScenariosHarnessTests
         var eventId = Guid.NewGuid();
         var raw = JsonSerializer.Serialize(new KafkaMessageEnvelope
         {
-            EventId = eventId.ToString(),
-            EventType = "RentalOrderPaid",
+            MessageId = eventId,
+            MessageType = "RentalOrderPaid",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -240,8 +256,8 @@ public sealed class E2EScenariosHarnessTests
         // Paid arrives first
         var envPaid = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderPaid",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderPaid",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -261,8 +277,8 @@ public sealed class E2EScenariosHarnessTests
         // Created arrives later (out of order, orderVersion 1 < 2)
         var envCreated = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderCreated",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderCreated",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow.AddMinutes(-10),
@@ -298,8 +314,8 @@ public sealed class E2EScenariosHarnessTests
 
         var envExpired = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderExpired",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderExpired",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -332,8 +348,8 @@ public sealed class E2EScenariosHarnessTests
 
         var raw1 = JsonSerializer.Serialize(new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalItemHandoverCompleted",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalItemHandoverCompleted",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -349,8 +365,8 @@ public sealed class E2EScenariosHarnessTests
 
         var raw2 = JsonSerializer.Serialize(new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalHandoverOverdue",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalHandoverOverdue",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -385,8 +401,8 @@ public sealed class E2EScenariosHarnessTests
 
         var env = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderPaid",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderPaid",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,
@@ -410,7 +426,7 @@ public sealed class E2EScenariosHarnessTests
             }));
 
         // Simulate PostDataError
-        ctx.EmailSenderMock.Setup(s => s.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        ctx.EmailSenderMock.Setup(s => s.SendEmailAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EmailSendResult(EmailSendOutcome.PostDataError, null, "SMTP_DROPPED_AFTER_DATA", "Timeout after DATA"));
 
         var worker = new EmailDeliveryWorker(ctx.ServiceProvider, NullLogger<EmailDeliveryWorker>.Instance);
@@ -477,8 +493,8 @@ public sealed class E2EScenariosHarnessTests
 
         var env = new KafkaMessageEnvelope
         {
-            EventId = Guid.NewGuid().ToString(),
-            EventType = "RentalOrderPaid",
+            MessageId = Guid.NewGuid(),
+            MessageType = "RentalOrderPaid",
             Producer = "RentalService",
             Version = 1,
             OccurredAt = DateTimeOffset.UtcNow,

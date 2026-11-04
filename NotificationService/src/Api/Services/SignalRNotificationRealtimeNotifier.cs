@@ -1,6 +1,8 @@
 using Dprental.NotificationService.Api.Hubs;
+using Dprental.NotificationService.Application.DTOs;
 using Dprental.NotificationService.Application.IServices;
 using Microsoft.AspNetCore.SignalR;
+using Dprental.NotificationService.Application.Diagnostics;
 
 namespace Dprental.NotificationService.Api.Services;
 
@@ -19,29 +21,39 @@ public sealed class SignalRNotificationRealtimeNotifier : INotificationRealtimeN
 
     public async Task NotifyInboxChangedAsync(
         Guid userId,
-        Guid notificationId,
-        string changeType,
-        string category,
-        DateTimeOffset occurredAt,
+        NotificationInboxChangedEvent changeEvent,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(changeEvent);
+
         var groupName = $"user:{userId}";
-        var payload = new
-        {
-            notificationId,
-            changeType,
-            category,
-            occurredAt
-        };
 
         try
         {
-            await _hubContext.Clients.Group(groupName).SendAsync("NotificationInboxChanged", payload, cancellationToken);
-            _logger.LogInformation("Đã phát sự kiện NotificationInboxChanged tới {Group} cho NotificationId={NotificationId}", groupName, notificationId);
+            await _hubContext.Clients.Group(groupName).SendAsync("NotificationInboxChanged", changeEvent, cancellationToken);
+            await _hubContext.Clients.Group(groupName).SendAsync("InboxChanged", changeEvent, cancellationToken);
+            _logger.LogInformation(
+                "Đã phát sự kiện NotificationInboxChanged/InboxChanged tới {Group} cho ChangeType={ChangeType}, NotificationId={NotificationId}",
+                groupName, changeEvent.ChangeType, changeEvent.NotificationId);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Lỗi khi phát sự kiện NotificationInboxChanged tới {Group}", groupName);
+            NotificationMetrics.RealtimeFailureCounter.Add(1, new KeyValuePair<string, object?>("operation", changeEvent.ChangeType.ToLowerInvariant()));
         }
+    }
+
+    public Task NotifyInboxChangedAsync(
+        Guid userId,
+        Guid? notificationId,
+        string changeType,
+        string? category,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default)
+    {
+        return NotifyInboxChangedAsync(
+            userId,
+            new NotificationInboxChangedEvent(changeType, notificationId, category, occurredAt),
+            cancellationToken);
     }
 }

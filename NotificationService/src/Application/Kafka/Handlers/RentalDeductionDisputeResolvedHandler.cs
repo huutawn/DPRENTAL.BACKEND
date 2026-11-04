@@ -1,5 +1,6 @@
 using Dprental.NotificationService.Application.Kafka.Contracts;
 using Dprental.NotificationService.Common;
+using Dprental.NotificationService.Domain.Entities;
 
 namespace Dprental.NotificationService.Application.Kafka.Handlers;
 
@@ -23,13 +24,26 @@ public sealed class RentalDeductionDisputeResolvedHandler : IKafkaEventHandler
                 Error.Validation("INVALID_DISPUTE_RESOLUTION_EVENT", "Dispute resolution event is missing required identifiers, version or decision."));
 
         return Result.Success(new NotificationEventIntent(
-            EventType, orderId.Value, version, false, null, renterId, supplierId, null,
-            new Dictionary<string, object?>
+            EventType: EventType,
+            OrderId: orderId.Value,
+            ResourceType: "RentalItem",
+            ResourceId: itemId.Value.ToString("D"),
+            WatermarkScope: NotificationWatermarkScope.RentalItem,
+            WatermarkId: itemId.Value,
+            OrderVersion: version,
+            IsTerminal: false,
+            TerminalState: null,
+            RenterId: renterId,
+            SupplierId: supplierId,
+            ReturnRequestId: null,
+            RenderData: new Dictionary<string, object?>
             {
                 ["rentalOrderId"] = orderId.Value,
                 ["rentalItemId"] = itemId.Value,
                 ["decision"] = decision,
-                ["finalDeductionAmount"] = payload.GetDecimalOrDefault("finalDeductionAmount")
-            }));
+                ["finalDeductionAmount"] = payload.GetDecimalOrDefault("finalDeductionAmount"),
+                ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+            },
+            RentalItemId: itemId.Value));
     }
 }
