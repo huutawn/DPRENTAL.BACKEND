@@ -22,6 +22,8 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<AssetSearchFilterResolver>();
         services.AddScoped<IEquipmentListingService, EquipmentListingService>();
         services.AddScoped<ListingOrganizationConfirmationService>();
+        services.AddScoped<Dprental.InventoryService.Domain.IRepositories.IListingOrganizationBackfillRepository, Dprental.InventoryService.Domain.Repositories.EquipmentListingRepository>();
+        services.AddHostedService<ListingOrganizationBackfillWorker>();
         services.AddScoped<IWarehouseService, WarehouseService>();
         services.AddScoped<IInventoryAssetService, InventoryAssetService>();
         services.AddScoped<IPublicEquipmentListingService, PublicEquipmentListingService>();

@@ -68,6 +68,12 @@ public sealed partial class PublicEquipmentListingService
                     availableQuantity,
                     _mediaOptions.PublicGatewayUrl);
 
+                if (!response.OrganizationId.HasValue && _supplierOrganizationLookup is not null)
+                {
+                    var organizationId = await _supplierOrganizationLookup.FindByOwnerAsync(snapshot.OwnerUserId, ct);
+                    if (organizationId.HasValue) response = response with { OrganizationId = organizationId };
+                }
+
                 if (_catalogClient is not null)
                 {
                     var categoryResult = await _catalogClient.GetPublishedEquipmentTypeAsync(snapshot.EquipmentTypeId, ct);

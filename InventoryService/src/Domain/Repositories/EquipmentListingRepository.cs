@@ -9,8 +9,14 @@ namespace Dprental.InventoryService.Domain.Repositories;
 /// <summary>
 /// Triển khai repository truy xuất và lưu trữ thực thể EquipmentListing trên PostgreSQL.
 /// </summary>
-public sealed partial class EquipmentListingRepository : IEquipmentListingRepository
+public sealed partial class EquipmentListingRepository : IEquipmentListingRepository, IListingOrganizationBackfillRepository
 {
+    public async Task<IReadOnlyList<ListingOrganizationCandidate>> GetMissingAsync(Guid? afterId, int limit, CancellationToken cancellationToken) =>
+        await _context.EquipmentListings.AsNoTracking()
+            .Where(l => l.OrganizationId == null && (!afterId.HasValue || l.Id.CompareTo(afterId.Value) > 0))
+            .OrderBy(l => l.Id).Take(limit)
+            .Select(l => new ListingOrganizationCandidate(l.Id, l.OwnerUserId))
+            .ToListAsync(cancellationToken);
     private readonly InventoryServiceDbContext _context;
 
     public EquipmentListingRepository(InventoryServiceDbContext context)

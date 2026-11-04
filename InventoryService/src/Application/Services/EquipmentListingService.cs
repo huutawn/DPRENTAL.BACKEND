@@ -27,6 +27,7 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
     private readonly IInventoryWriteTransaction _writeTransaction;
     private readonly ICatalogServiceClient _catalogClient;
     private readonly IInventoryMediaService _mediaService;
+    private readonly ISupplierOrganizationLookup? _supplierOrganizationLookup;
     private readonly MediaServiceOptions _mediaOptions;
     private readonly TimeProvider _timeProvider;
     private readonly IInventorySearchIndexService? _searchIndexService;
@@ -60,13 +61,15 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions = null,
         TimeProvider? timeProvider = null,
         IInventorySearchIndexService? searchIndexService = null,
-        ILogger<EquipmentListingService>? logger = null)
+        ILogger<EquipmentListingService>? logger = null,
+        ISupplierOrganizationLookup? supplierOrganizationLookup = null)
     {
         _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _assetRepository = assetRepository ?? throw new ArgumentNullException(nameof(assetRepository));
         _writeTransaction = writeTransaction ?? throw new ArgumentNullException(nameof(writeTransaction));
         _catalogClient = catalogClient ?? throw new ArgumentNullException(nameof(catalogClient));
         _mediaService = mediaService ?? throw new ArgumentNullException(nameof(mediaService));
+        _supplierOrganizationLookup = supplierOrganizationLookup;
         ArgumentNullException.ThrowIfNull(mediaOptions);
         _mediaOptions = mediaOptions.Value ?? throw new ArgumentException("MediaServiceOptions không được null.", nameof(mediaOptions));
         _cache = cache ?? Dprental.InventoryService.Application.Caching.NoOpInventoryReadCache.Instance;
