@@ -1,4 +1,6 @@
 using Dprental.ReviewService.Api.Filters;
+using Dprental.ReviewService.Api.Security;
+using Microsoft.AspNetCore.Authorization;
 using Dprental.ReviewService.Application.DTOs.Reviews;
 using Dprental.ReviewService.Application.Security;
 using Dprental.ReviewService.Application.Services;
@@ -12,7 +14,7 @@ namespace Dprental.ReviewService.Api.Controllers;
 /// Controller xử lý vòng đời đánh giá và truy vấn chi tiết đánh giá riêng tư (Public and Author API).
 /// </summary>
 [ApiController]
-[Route("api/v1/reviews")]
+[Authorize(Policy = JwtAuthenticationExtensions.HumanOnlyPolicy)]
 [Route("reviews")]
 public sealed class ReviewsController : ControllerBase
 {
@@ -237,6 +239,7 @@ public sealed class ReviewsController : ControllerBase
     /// <summary>
     /// Đọc danh sách đánh giá công khai của một thiết bị (GET /api/v1/reviews/listings/{listingId}).
     /// </summary>
+    [AllowAnonymous]
     [HttpGet("listings/{listingId:guid}")]
     public async Task<IActionResult> GetListingReviews(
         [FromRoute] Guid listingId,
@@ -255,6 +258,7 @@ public sealed class ReviewsController : ControllerBase
     /// <summary>
     /// Đọc danh sách đánh giá công khai của nhà cung cấp (GET /api/v1/reviews/suppliers/{supplierId}).
     /// </summary>
+    [AllowAnonymous]
     [HttpGet("suppliers/{supplierId:guid}")]
     public async Task<IActionResult> GetSupplierReviews(
         [FromRoute] Guid supplierId,
@@ -273,6 +277,7 @@ public sealed class ReviewsController : ControllerBase
     /// <summary>
     /// Xem tổng hợp điểm đánh giá cho listing hoặc supplier (GET /api/v1/reviews/summary).
     /// </summary>
+    [AllowAnonymous]
     [HttpGet("summary")]
     public async Task<IActionResult> GetSummary(
         [FromQuery] string? targetType,

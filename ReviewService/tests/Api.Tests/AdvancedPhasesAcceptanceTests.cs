@@ -366,14 +366,8 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
         return request;
     }
 
-    private static string GenerateJwt(Guid userId, string? userType = "cus", string? role = null)
+    private string GenerateJwt(Guid userId, string? userType = "cus", string? role = null)
     {
-        var payload = new Dictionary<string, object> { ["sub"] = userId.ToString() };
-        if (!string.IsNullOrEmpty(userType)) payload["u"] = userType;
-        if (!string.IsNullOrEmpty(role)) payload["r"] = role;
-
-        string json = JsonSerializer.Serialize(payload);
-        string base64Payload = Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        return $"eyJhbGciOiJub25lIn0.{base64Payload}.testsignature";
+        return _fixture.GenerateJwt(userId, userType, role);
     }
 }

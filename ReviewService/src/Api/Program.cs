@@ -1,5 +1,6 @@
 using System.IO;
 using Dprental.ReviewService.Api.Exceptions;
+using Dprental.ReviewService.Api.Routing;
 using Dprental.ReviewService.Api.Security;
 using Dprental.ReviewService.Application.DependencyInjection;
 using Dprental.ReviewService.Application.Security;
@@ -14,9 +15,7 @@ builder.Services.AddReviewServiceDomainRepositories(builder.Configuration.GetCon
 builder.Services.AddReviewServiceApplication(builder.Configuration);
 
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddAuthentication(JwtAuthenticationHandler.SchemeName)
-    .AddScheme<AuthenticationSchemeOptions, JwtAuthenticationHandler>(JwtAuthenticationHandler.SchemeName, _ => { });
-builder.Services.AddAuthorization();
+builder.Services.AddReviewJwtAuthentication(builder.Configuration);
 
 builder.Services.AddScoped<IReviewCallerContext>(sp =>
 {
@@ -30,7 +29,8 @@ builder.Services.AddHealthChecks()
         failureStatus: HealthStatus.Unhealthy,
         tags: ["ready"]);
 
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+    options.Conventions.Add(new ApiRoutePrefixConvention(ApiRoutes.Prefix)));
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddEndpointsApiExplorer();

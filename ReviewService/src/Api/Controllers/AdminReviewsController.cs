@@ -1,4 +1,5 @@
 using Dprental.ReviewService.Api.Filters;
+using Dprental.ReviewService.Api.Security;
 using Dprental.ReviewService.Application.DTOs.Reviews;
 using Dprental.ReviewService.Application.Security;
 using Dprental.ReviewService.Application.Services;
@@ -12,7 +13,7 @@ namespace Dprental.ReviewService.Api.Controllers;
 /// Controller quản trị kiểm duyệt và xử lý vi phạm đánh giá (Admin API).
 /// </summary>
 [ApiController]
-[Route("api/v1/admin/reviews")]
+[Authorize(Policy = JwtAuthenticationExtensions.AdminOnlyPolicy)]
 [Route("admin/reviews")]
 public sealed class AdminReviewsController : ControllerBase
 {

@@ -41,10 +41,7 @@ public sealed class ReviewCallerContext : IReviewCallerContext
         string? userType = principal.FindFirst("u")?.Value;
 
         bool isAdmin = principal.IsInRole("Admin")
-            || principal.IsInRole("adm")
-            || string.Equals(principal.FindFirst("r")?.Value, "Admin", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(principal.FindFirst("r")?.Value, "adm", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(principal.FindFirst("adm")?.Value, "true", StringComparison.OrdinalIgnoreCase);
+            || principal.Claims.Any(c => (c.Type == "r" || c.Type == ClaimTypes.Role) && string.Equals(c.Value, "Admin", StringComparison.Ordinal));
 
         if (string.IsNullOrWhiteSpace(sub) || !Guid.TryParse(sub, out var actorId) || actorId == Guid.Empty)
         {

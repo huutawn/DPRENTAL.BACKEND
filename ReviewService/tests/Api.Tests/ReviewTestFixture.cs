@@ -1,8 +1,13 @@
 using System.Collections.Concurrent;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using Dprental.ReviewService.Api.Security;
 using Dprental.ReviewService.Application.Clients;
 using Dprental.ReviewService.Application.DTOs.Rental;
 using Dprental.ReviewService.Common;
 using Dprental.ReviewService.Domain.Repositories;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -10,6 +15,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Tokens;
 
 namespace Dprental.ReviewService.Api.Tests;
 
@@ -19,10 +27,14 @@ namespace Dprental.ReviewService.Api.Tests;
 public sealed class ReviewTestFixture : WebApplicationFactory<Program>
 {
     private readonly string _databaseName = Guid.NewGuid().ToString("N");
+    private readonly RSA _rsa = RSA.Create(2048);
+    public const string TestKeyId = "review-test-key-01";
+    public const string Issuer = "dprental-authservice-dev";
+    public const string Audience = "dprental-clients";
+
     public DateTimeOffset CurrentTime { get; } = new(2026, 11, 4, 10, 0, 0, TimeSpan.Zero);
     public TestRentalServiceClient RentalClient { get; } = new();
     public TestTimeProvider TimeProvider { get; }
-
     public ReviewTestFixture()
     {
         TimeProvider = new TestTimeProvider(CurrentTime);
@@ -44,7 +56,109 @@ public sealed class ReviewTestFixture : WebApplicationFactory<Program>
 
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(TimeProvider);
+            services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
+            {
+                options.ConfigurationManager = new TestJwksConfigurationManager(_rsa, TestKeyId);
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidIssuer = Issuer,
+                    ValidateAudience = true,
+                    ValidAudience = Audience,
+                    ValidateLifetime = true,
+                    ClockSkew = TimeSpan.FromSeconds(5),
+                    RequireSignedTokens = true,
+                    RequireExpirationTime = true,
+                    NameClaimType = "sub",
+                    RoleClaimType = "r"
+                };
+            });
         });
+    }
+
+    public string GenerateJwt(
+        Guid userId,
+        string? userType = "cus",
+        string? role = null,
+        string? issuer = Issuer,
+        string? audience = Audience,
+        bool expired = false,
+        RSA? customKey = null,
+        string? keyId = TestKeyId)
+    {
+        var key = new RsaSecurityKey(customKey ?? _rsa) { KeyId = keyId };
+        var claims = new List<Claim> { new("sub", userId.ToString()) };
+        if (!string.IsNullOrEmpty(userType)) claims.Add(new Claim("u", userType));
+        if (!string.IsNullOrEmpty(role))
+        {
+            claims.Add(new Claim("r", role));
+            claims.Add(new Claim(ClaimTypes.Role, role));
+        }
+
+        var token = new JwtSecurityToken(
+            issuer: issuer,
+            audience: audience,
+            claims: claims,
+            notBefore: DateTime.UtcNow.AddMinutes(expired ? -10 : -1),
+            expires: expired ? DateTime.UtcNow.AddMinutes(-5) : DateTime.UtcNow.AddMinutes(15),
+            signingCredentials: new SigningCredentials(key, SecurityAlgorithms.RsaSha256));
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    public static string CreateTokenWithInvalidSignature(Guid userId, string? userType = "cus", string? role = null)
+    {
+        using RSA otherKey = RSA.Create(2048);
+        var key = new RsaSecurityKey(otherKey) { KeyId = "tampered-key-id" };
+        var claims = new List<Claim> { new("sub", userId.ToString()) };
+        if (!string.IsNullOrEmpty(userType)) claims.Add(new Claim("u", userType));
+        if (!string.IsNullOrEmpty(role)) claims.Add(new Claim("r", role));
+
+        var token = new JwtSecurityToken(
+            issuer: Issuer,
+            audience: Audience,
+            claims: claims,
+            notBefore: DateTime.UtcNow.AddMinutes(-1),
+            expires: DateTime.UtcNow.AddMinutes(15),
+            signingCredentials: new SigningCredentials(key, SecurityAlgorithms.RsaSha256));
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    public static string CreateUnsignedToken(Guid userId, string? userType = "cus", string? role = null)
+    {
+        var header = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("{\"alg\":\"none\",\"typ\":\"JWT\"}")).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var payloadObj = new Dictionary<string, object> { ["sub"] = userId.ToString() };
+        if (!string.IsNullOrEmpty(userType)) payloadObj["u"] = userType;
+        if (!string.IsNullOrEmpty(role)) payloadObj["r"] = role;
+        var payloadJson = System.Text.Json.JsonSerializer.Serialize(payloadObj);
+        var payload = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(payloadJson)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return $"{header}.{payload}.";
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing)
+        {
+            _rsa.Dispose();
+        }
+    }
+
+    private sealed class TestJwksConfigurationManager(RSA rsa, string keyId) : IConfigurationManager<OpenIdConnectConfiguration>
+    {
+        private readonly OpenIdConnectConfiguration _config = CreateConfiguration(rsa, keyId);
+
+        public Task<OpenIdConnectConfiguration> GetConfigurationAsync(CancellationToken cancel) => Task.FromResult(_config);
+
+        public void RequestRefresh() { }
+
+        private static OpenIdConnectConfiguration CreateConfiguration(RSA rsa, string keyId)
+        {
+            var config = new OpenIdConnectConfiguration();
+            config.SigningKeys.Add(new RsaSecurityKey(rsa) { KeyId = keyId });
+            return config;
+        }
     }
 }
 
