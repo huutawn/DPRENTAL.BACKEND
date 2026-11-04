@@ -2,9 +2,10 @@
 
 `GET /api/v1/auth/organizations/{id}` yêu cầu đăng nhập: Owner nhận hồ sơ đầy đủ,
 người khác nhận thông tin giới hạn nếu tổ chức đang hoạt động, nếu không trả 404.
-`GET /api/v1/auth/organizations/by-owner/{userId}` trả thông tin giới hạn; nếu một
-người là owner của nhiều tổ chức, API trả 409 để tránh chọn sai. API liên hệ
-`GET /api/v1/auth/organizations/{organizationId}/supplier-contact` cũng yêu cầu đăng nhập.
+`GET /api/v1/auth/organizations/{organizationId}/supplier-contact` cho phép khách chưa
+đăng nhập và người đã đăng nhập xem cùng một tập thông tin công khai của tổ chức Supplier
+đang Active: ID, tên, slug, loại, trạng thái, số điện thoại liên hệ và logo. Tổ chức
+không tồn tại hoặc không đủ điều kiện được trả 404; response không chứa hồ sơ pháp lý.
 
 ## Ranh giới các lớp
 
