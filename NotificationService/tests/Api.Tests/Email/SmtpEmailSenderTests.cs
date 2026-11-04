@@ -30,10 +30,10 @@ public sealed class SmtpEmailSenderTests
 
         // An invalid email address causes FormatException in MailAddress before sendStarted = true
         var result = await sender.SendEmailAsync(
+            deliveryJobId: Guid.NewGuid(),
             recipientEmail: "invalid-email-address-without-at",
             subject: "Test Subject",
             bodyHtml: "<p>Hello</p>",
-            deliveryJobId: Guid.NewGuid(),
             cancellationToken: CancellationToken.None);
 
         Assert.Equal(EmailSendOutcome.PreDataError, result.Outcome);
@@ -49,10 +49,10 @@ public sealed class SmtpEmailSenderTests
         var deliveryJobId = Guid.NewGuid();
 
         var result = await sender.SendEmailAsync(
+            deliveryJobId: deliveryJobId,
             recipientEmail: "test@example.com",
             subject: "Test Subject",
             bodyHtml: "<p>Hello</p>",
-            deliveryJobId: deliveryJobId,
             cancellationToken: CancellationToken.None);
 
         // Ambiguous failure after send started must be classified as PostDataError
@@ -66,5 +66,28 @@ public sealed class SmtpEmailSenderTests
         var deliveryJobId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef");
         var expectedMessageId = $"<notif_{deliveryJobId:N}@dprental.vn>";
         Assert.Equal("<notif_0123456789abcdef0123456789abcdef@dprental.vn>", expectedMessageId);
+    }
+
+    [Fact]
+    public void SmtpEmailSender_HasOnlySingleSignatureWithDeliveryJobIdFirst()
+    {
+        var interfaceMethods = typeof(IEmailSender).GetMethods()
+            .Where(m => m.Name == nameof(IEmailSender.SendEmailAsync))
+            .ToList();
+
+        Assert.Single(interfaceMethods);
+        var method = interfaceMethods[0];
+        var parameters = method.GetParameters();
+        Assert.Equal(5, parameters.Length);
+        Assert.Equal(typeof(Guid), parameters[0].ParameterType);
+        Assert.Equal("deliveryJobId", parameters[0].Name);
+        Assert.Equal(typeof(string), parameters[1].ParameterType);
+        Assert.Equal("recipientEmail", parameters[1].Name);
+        Assert.Equal(typeof(string), parameters[2].ParameterType);
+        Assert.Equal("subject", parameters[2].Name);
+        Assert.Equal(typeof(string), parameters[3].ParameterType);
+        Assert.Equal("bodyHtml", parameters[3].Name);
+        Assert.Equal(typeof(CancellationToken), parameters[4].ParameterType);
+        Assert.Equal("cancellationToken", parameters[4].Name);
     }
 }

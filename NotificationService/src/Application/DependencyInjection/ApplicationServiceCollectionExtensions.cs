@@ -1,3 +1,4 @@
+using Dprental.NotificationService.Application.Email.Services;
 using Dprental.NotificationService.Application.IServices;
 using Dprental.NotificationService.Application.Kafka.Consumers;
 using Dprental.NotificationService.Application.Kafka.Contracts;
@@ -47,6 +48,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<INotificationQueryService, NotificationQueryService>();
         services.AddScoped<INotificationReadService, NotificationReadService>();
         services.AddScoped<IPreferenceService, PreferenceService>();
+        services.AddScoped<IEmailDeliveryService, EmailDeliveryService>();
 
         return services;
     }
