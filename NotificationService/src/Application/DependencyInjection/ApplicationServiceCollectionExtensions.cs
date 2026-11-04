@@ -7,6 +7,7 @@ using Dprental.NotificationService.Application.Recipients;
 using Dprental.NotificationService.Application.Services;
 using Dprental.NotificationService.Application.Templates;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Dprental.NotificationService.Application.DependencyInjection;
 
@@ -15,6 +16,7 @@ public static class ApplicationServiceCollectionExtensions
     public static IServiceCollection AddNotificationServiceApplication(this IServiceCollection services)
     {
         services.AddSingleton(TimeProvider.System);
+        services.TryAddSingleton<INotificationRealtimeNotifier, NoOpNotificationRealtimeNotifier>();
 
         services.AddSingleton<IRecipientResolutionService, RecipientResolutionService>();
         services.AddSingleton<INotificationTemplateRenderer, NotificationTemplateRenderer>();
