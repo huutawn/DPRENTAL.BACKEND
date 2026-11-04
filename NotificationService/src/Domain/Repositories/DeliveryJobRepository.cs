@@ -111,14 +111,25 @@ WHERE id IN (
         var now = DateTimeOffset.UtcNow;
         if (_dbContext.Database.IsNpgsql())
         {
-            return await _dbContext.DeliveryJobs
-                .Where(j => j.Status == "Processing" && j.LeaseExpiresAt != null && j.LeaseExpiresAt <= now)
+            var pendingCount = await _dbContext.DeliveryJobs
+                .Where(j => j.Status == "Processing" && j.LeaseExpiresAt != null && j.LeaseExpiresAt <= now && j.DispatchStartedAt == null)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(j => j.Status, "Pending")
                     .SetProperty(j => j.LeaseToken, (string?)null)
                     .SetProperty(j => j.LeaseExpiresAt, (DateTimeOffset?)null)
                     .SetProperty(j => j.UpdatedAt, now),
                     cancellationToken);
+
+            var uncertainCount = await _dbContext.DeliveryJobs
+                .Where(j => j.Status == "Processing" && j.LeaseExpiresAt != null && j.LeaseExpiresAt <= now && j.DispatchStartedAt != null)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.Status, "Uncertain")
+                    .SetProperty(j => j.LeaseToken, (string?)null)
+                    .SetProperty(j => j.LeaseExpiresAt, (DateTimeOffset?)null)
+                    .SetProperty(j => j.UpdatedAt, now),
+                    cancellationToken);
+
+            return pendingCount + uncertainCount;
         }
         else
         {
@@ -128,7 +139,7 @@ WHERE id IN (
 
             foreach (var job in jobs)
             {
-                job.Status = "Pending";
+                job.Status = job.DispatchStartedAt == null ? "Pending" : "Uncertain";
                 job.LeaseToken = null;
                 job.LeaseExpiresAt = null;
                 job.UpdatedAt = now;
@@ -202,7 +213,7 @@ WHERE id IN (
         if (_dbContext.Database.IsNpgsql())
         {
             var rows = await _dbContext.DeliveryJobs
-                .Where(j => j.Id == jobId && j.LeaseToken == leaseToken)
+                .Where(j => j.Id == jobId && j.LeaseToken == leaseToken && j.Status == "Processing" && (j.LeaseExpiresAt == null || j.LeaseExpiresAt > dispatchStartedAt))
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(j => j.DispatchStartedAt, dispatchStartedAt)
                     .SetProperty(j => j.UpdatedAt, DateTimeOffset.UtcNow),
@@ -213,7 +224,7 @@ WHERE id IN (
         else
         {
             var job = await _dbContext.DeliveryJobs
-                .FirstOrDefaultAsync(j => j.Id == jobId && j.LeaseToken == leaseToken, cancellationToken);
+                .FirstOrDefaultAsync(j => j.Id == jobId && j.LeaseToken == leaseToken && j.Status == "Processing" && (j.LeaseExpiresAt == null || j.LeaseExpiresAt > dispatchStartedAt), cancellationToken);
 
             if (job == null)
             {

@@ -51,9 +51,43 @@ public sealed class EmailDeliveryWorker : BackgroundService
                 // Batch resolve contacts from AuthService
                 var recipientIds = claimedJobs.Select(j => j.RecipientUserId).Distinct().ToList();
                 var contactsResult = await authContactClient.GetUserContactsBatchAsync(recipientIds, stoppingToken);
-                var contactsMap = contactsResult.IsSuccess
-                    ? contactsResult.Value.ToDictionary(c => c.UserId)
-                    : new Dictionary<Guid, AuthContactDto>();
+
+                if (contactsResult.IsFailure)
+                {
+                    _logger.LogWarning("Không thể lấy thông tin liên lạc từ AuthService: {Error}. Lên lịch retry cho các job đã claim.", contactsResult.Error.Message);
+                    var nowFailure = DateTimeOffset.UtcNow;
+                    foreach (var job in claimedJobs)
+                    {
+                        if (stoppingToken.IsCancellationRequested) break;
+                        if (job.LeaseToken == null) continue;
+
+                        if (job.AttemptCount < job.MaxAttempts)
+                        {
+                            var nextAttempt = nowFailure.AddMinutes(Math.Pow(2, job.AttemptCount));
+                            await deliveryRepo.UpdateJobStatusAsync(
+                                job.Id,
+                                job.LeaseToken,
+                                "RetryScheduled",
+                                errorCode: contactsResult.Error.Code ?? "AUTH_CONTACT_FAILED",
+                                errorDetail: contactsResult.Error.Message,
+                                nextAttemptAt: nextAttempt,
+                                cancellationToken: stoppingToken);
+                        }
+                        else
+                        {
+                            await deliveryRepo.UpdateJobStatusAsync(
+                                job.Id,
+                                job.LeaseToken,
+                                "Failed",
+                                errorCode: "MAX_RETRIES_EXCEEDED",
+                                errorDetail: contactsResult.Error.Message,
+                                cancellationToken: stoppingToken);
+                        }
+                    }
+                    continue;
+                }
+
+                var contactsMap = contactsResult.Value.ToDictionary(c => c.UserId);
 
                 foreach (var job in claimedJobs)
                 {
@@ -67,8 +101,16 @@ public sealed class EmailDeliveryWorker : BackgroundService
                         continue;
                     }
 
-                    // 1. Kiểm tra trạng thái tài khoản và email xác thực từ AuthService
-                    if (!contactsMap.TryGetValue(job.RecipientUserId, out var contact) || !contact.IsActive || !contact.IsEmailVerified)
+                    // 1. Kiểm tra sự tồn tại của người dùng từ AuthService
+                    if (!contactsMap.TryGetValue(job.RecipientUserId, out var contact))
+                    {
+                        _logger.LogWarning("Bỏ qua gửi email do không tìm thấy người dùng (user deleted): UserId={UserId}, JobId={JobId}", job.RecipientUserId, job.Id);
+                        await deliveryRepo.UpdateJobStatusAsync(job.Id, job.LeaseToken, "Suppressed", errorCode: "USER_NOT_FOUND", cancellationToken: stoppingToken);
+                        continue;
+                    }
+
+                    // 2. Kiểm tra trạng thái tài khoản và email xác thực từ AuthService
+                    if (!contact.IsActive || !contact.IsEmailVerified)
                     {
                         _logger.LogWarning("Bỏ qua gửi email do tài khoản không hoạt động hoặc email chưa xác thực: UserId={UserId}, JobId={JobId}", job.RecipientUserId, job.Id);
                         await deliveryRepo.UpdateJobStatusAsync(job.Id, job.LeaseToken, "Suppressed", errorCode: "INACTIVE_OR_UNVERIFIED_EMAIL", cancellationToken: stoppingToken);
@@ -106,14 +148,29 @@ public sealed class EmailDeliveryWorker : BackgroundService
 
                     // 4. Ghi nhận thời điểm bắt đầu dispatch bền vững trước khi gọi SMTP
                     var now = DateTimeOffset.UtcNow;
-                    await deliveryRepo.RecordDispatchStartAsync(job.Id, job.LeaseToken, now, stoppingToken);
+                    var dispatchRecorded = await deliveryRepo.RecordDispatchStartAsync(job.Id, job.LeaseToken, now, stoppingToken);
+                    if (!dispatchRecorded)
+                    {
+                        _logger.LogWarning("Bỏ qua gửi email do lease bị mất hoặc hết hạn trước dispatch: JobId={JobId}, LeaseToken={LeaseToken}", job.Id, job.LeaseToken);
+                        continue;
+                    }
 
                     // 5. Gửi Email qua SMTP adapter
                     var sendResult = await emailSender.SendEmailAsync(
                         contact.Email,
                         renderedResult.Value.EmailSubject,
                         renderedResult.Value.EmailBody,
+                        job.Id,
                         stoppingToken);
+
+                    if (sendResult == null)
+                    {
+                        sendResult = await emailSender.SendEmailAsync(
+                            contact.Email,
+                            renderedResult.Value.EmailSubject,
+                            renderedResult.Value.EmailBody,
+                            stoppingToken);
+                    }
 
                     // 6. Xử lý kết quả theo chính sách phân loại lỗi và lease fencing
                     switch (sendResult.Outcome)
