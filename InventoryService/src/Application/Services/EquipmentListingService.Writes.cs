@@ -165,8 +165,6 @@ public sealed partial class EquipmentListingService
         // 7. Atomic write transaction: tạo Listing Draft và đúng 1 physical asset ban đầu kế thừa năm sản xuất của Listing
         var listingId = Guid.NewGuid();
         now = _timeProvider.GetUtcNow();
-        var organizationId = _supplierOrganizationLookup is null ? caller.OrganizationId :
-            (await _supplierOrganizationLookup.FindByOwnerAsync(caller.UserId!.Value, cancellationToken)) ?? caller.OrganizationId;
 
         var listingResult = EquipmentListing.Create(
             listingId,
@@ -187,7 +185,7 @@ public sealed partial class EquipmentListingService
             validMediaIds,
             validThumb,
             targetDeposit,
-            organizationId);
+            caller.OrganizationId);
 
         if (listingResult.IsFailure)
         {

@@ -70,17 +70,6 @@ public static class ClientsServiceCollectionExtensions
             }
         }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 
-        services.AddHttpClient<ISupplierOrganizationLookup, SupplierOrganizationLookup>((_, client) =>
-        {
-            string baseUrl = configuration["AuthService:BaseUrl"] ?? "http://auth-service:8080";
-            client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
-            client.Timeout = TimeSpan.FromSeconds(3);
-            var internalKey = configuration["InternalAuthentication:ApiKey"] ?? configuration["INTERNAL_API_KEY"];
-            if (!string.IsNullOrWhiteSpace(internalKey)) client.DefaultRequestHeaders.Add("X-Api-Key", internalKey);
-            var lookupKey = configuration["InventorySupplierLookup:ApiKey"];
-            if (!string.IsNullOrWhiteSpace(lookupKey)) client.DefaultRequestHeaders.Add("X-Inventory-Lookup-Key", lookupKey);
-        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
-
         return services;
     }
 }

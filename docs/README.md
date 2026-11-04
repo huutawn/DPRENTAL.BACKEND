@@ -420,8 +420,3 @@ latency guarantee.
 p50 7.95 ms and p95 9.89 ms on the local Docker test environment. Broad queries still
 truncate at 5,000 candidates and require PostgreSQL fallback; this measurement does not
 represent their latency or concurrent production traffic.
-# Tự động gắn tổ chức nhà cung cấp
-
-Auth và Inventory cần cấu hình cùng secret `InventorySupplierLookup__ApiKey` (khóa riêng, không dùng chung API key khác). Inventory gọi trực tiếp Auth qua `AuthService__BaseUrl`, đồng thời gửi `InternalAuthentication__ApiKey` theo cấu hình Auth hiện tại. Không đưa các khóa này cho trình duyệt hoặc commit vào repository.
-
-Worker Inventory chạy theo lô, chỉ gắn tổ chức cho listing chưa có ID khi Auth xác định đúng một Supplier Active với membership Owner Active. Trường hợp không tìm thấy, trùng tổ chức hoặc Auth lỗi sẽ được thử lại; dữ liệu đã gắn không bị ghi đè. Gateway cần triển khai rule chặn route `/api/v1/auth/internal/` trước khi công bố API Auth nội bộ.

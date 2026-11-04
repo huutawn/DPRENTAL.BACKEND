@@ -36,7 +36,6 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
     private readonly IRecommendationRankingReader? _recommendationReader;
     private readonly IRecommendationMetrics? _recommendationMetrics;
     private readonly IBehaviorEventRecorder? _behaviorRecorder;
-    private readonly ISupplierOrganizationLookup? _supplierOrganizationLookup;
 
     public PublicEquipmentListingService(
         IEquipmentListingRepository listingRepository,
@@ -52,8 +51,7 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
         IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions = null,
         IRecommendationRankingReader? recommendationReader = null,
         IRecommendationMetrics? recommendationMetrics = null,
-        IBehaviorEventRecorder? behaviorRecorder = null,
-        ISupplierOrganizationLookup? supplierOrganizationLookup = null)
+        IBehaviorEventRecorder? behaviorRecorder = null)
     {
         _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _queryValidator = queryValidator ?? throw new ArgumentNullException(nameof(queryValidator));
@@ -70,7 +68,6 @@ public sealed partial class PublicEquipmentListingService : IPublicEquipmentList
         _recommendationReader = recommendationReader;
         _recommendationMetrics = recommendationMetrics;
         _behaviorRecorder = behaviorRecorder;
-        _supplierOrganizationLookup = supplierOrganizationLookup;
     }
 
     private sealed record CoreSearchResult(
