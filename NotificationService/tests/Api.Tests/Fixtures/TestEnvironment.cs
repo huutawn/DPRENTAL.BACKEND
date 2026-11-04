@@ -94,8 +94,8 @@ public static class TestEnvironment
         await conn.OpenAsync(cancellationToken);
 
         var terminateSql = $@"
-            SELECT pg_terminate_backend(pid) 
-            FROM pg_stat_activity 
+            SELECT pg_terminate_backend(pid)
+            FROM pg_stat_activity
             WHERE datname = '{dbName}' AND pid <> pg_backend_pid();";
         await using (var termCmd = new NpgsqlCommand(terminateSql, conn))
         {
@@ -133,8 +133,8 @@ public static class TestEnvironment
             await conn.OpenAsync(cancellationToken);
 
             var terminateSql = $@"
-                SELECT pg_terminate_backend(pid) 
-                FROM pg_stat_activity 
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
                 WHERE datname = '{dbName}' AND pid <> pg_backend_pid();";
             await using (var termCmd = new NpgsqlCommand(terminateSql, conn))
             {

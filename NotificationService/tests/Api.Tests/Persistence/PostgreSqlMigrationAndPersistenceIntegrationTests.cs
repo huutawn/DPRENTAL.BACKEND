@@ -135,7 +135,7 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
 
                 // Insert watermark without scope or is_paid
                 var insertWatermarkSql = @"
-                    INSERT INTO notification.aggregate_watermarks 
+                    INSERT INTO notification.aggregate_watermarks
                     (""AggregateId"", ""RecipientUserId"", ""LastOrderVersion"", ""IsTerminal"", ""TerminalState"", ""UpdatedAt"")
                     VALUES (@aggId, @userId, 3, true, 'PAID', NOW());";
                 await using (var cmd = new NpgsqlCommand(insertWatermarkSql, conn))
@@ -148,7 +148,7 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
                 // Insert notification
                 var insertNotifSql = @"
                     INSERT INTO notification.notifications
-                    (""Id"", ""RecipientUserId"", ""NotificationType"", ""Category"", ""Severity"", ""Title"", ""Body"", 
+                    (""Id"", ""RecipientUserId"", ""NotificationType"", ""Category"", ""Severity"", ""Title"", ""Body"",
                      ""ResourceType"", ""ResourceId"", ""SourceEventId"", ""SourceProducer"", ""SourceEventType"", ""EventVersion"",
                      ""TemplateCode"", ""TemplateVersion"", ""OccurredAt"", ""CreatedAt"")
                     VALUES (@id, @userId, 'RENTAL_ORDER_PAID', 'Order', 'Info', 'Paid', 'Your order was paid',
