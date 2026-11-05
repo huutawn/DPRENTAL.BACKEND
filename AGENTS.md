@@ -34,13 +34,14 @@ Giữ nguyên cấu trúc project hiện tại của service (`Domain`, `Applica
 
 ---
 
-## 3. Nguyên Lý SOLID & Thiết Kế
+## 3. Nguyên Lý SOLID, DRY & Thiết Kế
 
 - **SRP (Single Responsibility)**: Mỗi class, service hoặc hàm chỉ tập trung giải quyết một trách nhiệm nghiệp vụ hoặc một use case cụ thể; tránh các god service hoặc god repository ôm đồm quá nhiều trách nhiệm.
 - **OCP (Open/Closed)**: Tận dụng các component và abstraction sẵn có; chỉ mở rộng khi có yêu cầu nghiệp vụ thực tế phát sinh từ task; không xây trước abstraction phỏng đoán tương lai.
 - **LSP (Liskov Substitution)**: Mọi implementation phải tuân thủ nghiêm ngặt contract của abstraction (kiểu trả về, mã lỗi, hành vi biên); không giả vờ thành công hoặc âm thầm trả về tập rỗng cho chức năng chưa hỗ trợ.
 - **ISP (Interface Segregation)**: Interface nhỏ gọn, thiết kế xoay quanh nhu cầu thực tế của consumer; không tạo interface máy móc kiểu 1-class-1-interface nếu không có consumer riêng biệt hoặc nhu cầu kiểm thử thực tế.
 - **DIP (Dependency Inversion)**: Các tầng cấp cao phụ thuộc vào abstraction thông qua Dependency Injection; tầng Domain hoàn toàn độc lập, không tham chiếu ngược lại tầng Application hay API.
+- **DRY (Don't Repeat Yourself)**: Triệt tiêu sự trùng lặp tri thức và logic nghiệp vụ; mỗi thành phần nghiệp vụ, quy tắc tính toán hoặc mapping chỉ được định nghĩa tại một nguồn chân lý duy nhất. Tái sử dụng các helper, policy và service sẵn có thay vì sao chép mã nguồn; tuyệt đối không trừu tượng hóa gượng ép khi hai đoạn code chỉ trùng lặp ngẫu nhiên mà không cùng lý do thay đổi.
 
 ---
 
