@@ -60,12 +60,12 @@ public sealed class GatewayCorsOptions
     /// <summary>
     /// Danh sách các tiêu đề HTTP (Headers) mà client được phép gửi lên.
     /// </summary>
-    public string[] AllowedHeaders { get; set; } = ["Authorization", "Content-Type", "Idempotency-Key", "X-Correlation-ID", "Accept", "Origin", "X-Requested-With"];
+    public string[] AllowedHeaders { get; set; } = ["Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Correlation-ID", "Accept", "Origin", "X-Requested-With"];
 
     /// <summary>
     /// Danh sách các tiêu đề HTTP mà trình duyệt của client được phép đọc từ phản hồi.
     /// </summary>
-    public string[] ExposedHeaders { get; set; } = ["X-Correlation-ID", "Retry-After"];
+    public string[] ExposedHeaders { get; set; } = ["X-Correlation-ID", "Retry-After", "ETag"];
 
     /// <summary>
     /// Cho phép gửi kèm thông tin xác thực (cookies, authorization headers) trong cross-origin request.

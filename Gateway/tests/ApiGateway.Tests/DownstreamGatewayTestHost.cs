@@ -111,6 +111,7 @@ internal static class DownstreamGatewayTestHost
         public Uri BaseAddress { get; }
         public string Jwks { get; }
         public int ResponseStatusCode { get; set; } = (int)HttpStatusCode.OK;
+        public Dictionary<string, string> ResponseHeaders { get; } = new();
         public string ResponseBody { get; set; } = "{\"proxied\":true}";
         public string ResponseContentType { get; set; } = "application/json";
         public ReceivedTestRequest? LastRequest { get; private set; }
@@ -208,6 +209,10 @@ internal static class DownstreamGatewayTestHost
                 headers,
                 await bodyReader.ReadToEndAsync(cancellationTokenSource.Token));
 
+            foreach (var header in ResponseHeaders)
+            {
+                context.Response.Headers[header.Key] = header.Value;
+            }
             await WriteResponseAsync(context.Response, ResponseBody, ResponseContentType, ResponseStatusCode);
         }
 

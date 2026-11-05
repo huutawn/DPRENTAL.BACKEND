@@ -1,0 +1,95 @@
+{
+  "Routes": [
+    {
+      "Key": "review-public-listings",
+      "UpstreamPathTemplate": "/api/v1/reviews/listings/{listingId}",
+      "DownstreamPathTemplate": "/api/v1/reviews/listings/{listingId}",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "review-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      },
+      "Priority": 10
+    },
+    {
+      "Key": "review-public-suppliers",
+      "UpstreamPathTemplate": "/api/v1/reviews/suppliers/{supplierId}",
+      "DownstreamPathTemplate": "/api/v1/reviews/suppliers/{supplierId}",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "review-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      },
+      "Priority": 10
+    },
+    {
+      "Key": "review-public-summary",
+      "UpstreamPathTemplate": "/api/v1/reviews/summary",
+      "DownstreamPathTemplate": "/api/v1/reviews/summary",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "review-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      },
+      "Priority": 10
+    },
+    {
+      "Key": "review-reviews",
+      "UpstreamPathTemplate": "/api/v1/reviews/{everything}",
+      "DownstreamPathTemplate": "/api/v1/reviews/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "review-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AuthenticationProviderKeys": [
+          "Bearer"
+        ]
+      }
+    },
+    {
+      "Key": "review-admin",
+      "UpstreamPathTemplate": "/api/v1/admin/reviews/{everything}",
+      "DownstreamPathTemplate": "/api/v1/admin/reviews/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "review-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AuthenticationProviderKeys": [
+          "Bearer"
+        ]
+      }
+    }
+  ]
+}

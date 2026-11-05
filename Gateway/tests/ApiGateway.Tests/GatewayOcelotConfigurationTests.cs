@@ -61,6 +61,11 @@ public sealed class GatewayOcelotConfigurationTests
         "rental-order-hub-ws",
         "rental-service",
         "rental-service-openapi",
+        "review-public-listings",
+        "review-public-suppliers",
+        "review-public-summary",
+        "review-reviews",
+        "review-admin",
     ];
 
     private sealed class MockWebEnvironment : IWebHostEnvironment
