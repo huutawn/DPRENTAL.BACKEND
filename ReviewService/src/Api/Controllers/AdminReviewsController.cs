@@ -14,7 +14,7 @@ namespace Dprental.ReviewService.Api.Controllers;
 /// </summary>
 [ApiController]
 [Authorize(Policy = JwtAuthenticationExtensions.AdminOnlyPolicy)]
-[Route("admin/reviews")]
+[Route("reviews/admin")]
 public sealed class AdminReviewsController : ControllerBase
 {
     private readonly IReviewModerationService _moderationService;
@@ -29,7 +29,7 @@ public sealed class AdminReviewsController : ControllerBase
     }
 
     /// <summary>
-    /// Quản trị viên ẩn một đánh giá vi phạm (POST /api/v1/admin/reviews/{reviewId}/hide).
+    /// Quản trị viên ẩn một đánh giá vi phạm (POST /api/v1/reviews/admin/{reviewId}/hide).
     /// </summary>
     [HttpPost("{reviewId:guid}/hide")]
     public async Task<IActionResult> HideReview(
@@ -79,7 +79,7 @@ public sealed class AdminReviewsController : ControllerBase
     }
 
     /// <summary>
-    /// Quản trị viên khôi phục đánh giá về Visible (POST /api/v1/admin/reviews/{reviewId}/restore).
+    /// Quản trị viên khôi phục đánh giá về Visible (POST /api/v1/reviews/admin/{reviewId}/restore).
     /// </summary>
     [HttpPost("{reviewId:guid}/restore")]
     public async Task<IActionResult> RestoreReview(
@@ -129,7 +129,7 @@ public sealed class AdminReviewsController : ControllerBase
     }
 
     /// <summary>
-    /// Xem danh sách báo cáo vi phạm đánh giá (GET /api/v1/admin/reviews/reports).
+    /// Xem danh sách báo cáo vi phạm đánh giá (GET /api/v1/reviews/admin/reports).
     /// </summary>
     [HttpGet("reports")]
     public async Task<IActionResult> GetReports(
@@ -164,7 +164,7 @@ public sealed class AdminReviewsController : ControllerBase
     }
 
     /// <summary>
-    /// Xử lý giải quyết báo cáo vi phạm (POST /api/v1/admin/reviews/reports/{reportId}/resolve).
+    /// Xử lý giải quyết báo cáo vi phạm (POST /api/v1/reviews/admin/reports/{reportId}/resolve).
     /// </summary>
     [HttpPost("reports/{reportId:guid}/resolve")]
     public async Task<IActionResult> ResolveReport(

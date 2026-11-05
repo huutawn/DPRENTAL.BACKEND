@@ -137,7 +137,7 @@ public sealed class SecurityAuthenticationTests : IClassFixture<ReviewTestFixtur
         var customerId = Guid.NewGuid();
         var customerToken = _fixture.GenerateJwt(customerId, userType: "cus", role: "Customer");
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/admin/reviews/{Guid.NewGuid()}/hide");
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/reviews/admin/{Guid.NewGuid()}/hide");
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customerToken);
         req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
         req.Headers.Add("If-Match", "\"1\"");
@@ -158,7 +158,7 @@ public sealed class SecurityAuthenticationTests : IClassFixture<ReviewTestFixtur
             role: "Customer",
             extraClaims: new[] { new Claim("adm", "true") });
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/admin/reviews/{Guid.NewGuid()}/hide");
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/reviews/admin/{Guid.NewGuid()}/hide");
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
         req.Headers.Add("If-Match", "\"1\"");
@@ -175,7 +175,7 @@ public sealed class SecurityAuthenticationTests : IClassFixture<ReviewTestFixtur
         // AuthService standard role claim r = "adm"
         var adminToken = _fixture.GenerateJwt(adminId, userType: "cus", role: "adm");
 
-        using var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/admin/reviews/reports");
+        using var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/reviews/admin/reports");
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
 
         using var res = await _client.SendAsync(req);
@@ -189,7 +189,7 @@ public sealed class SecurityAuthenticationTests : IClassFixture<ReviewTestFixtur
         // Service token (u = "svc") with r = "adm" must still be rejected
         var serviceToken = _fixture.GenerateJwt(serviceId, userType: "svc", role: "adm");
 
-        using var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/admin/reviews/reports");
+        using var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/reviews/admin/reports");
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", serviceToken);
 
         using var res = await _client.SendAsync(req);
@@ -207,7 +207,7 @@ public sealed class SecurityAuthenticationTests : IClassFixture<ReviewTestFixtur
             role: null,
             extraClaims: new[] { new Claim("adm", "true") });
 
-        using var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/admin/reviews/reports");
+        using var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/reviews/admin/reports");
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         using var res = await _client.SendAsync(req);

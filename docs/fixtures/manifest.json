@@ -161,7 +161,7 @@
           "file": "valid/admin-hide-request.json",
           "operation": "AdminHide",
           "method": "POST",
-          "route": "/api/v1/admin/reviews/{reviewId}/hide"
+          "route": "/api/v1/reviews/admin/{reviewId}/hide"
         },
         {
           "file": "valid/admin-hide-response-active-hidden.json",
@@ -172,7 +172,7 @@
           "file": "valid/admin-restore-request.json",
           "operation": "AdminRestore",
           "method": "POST",
-          "route": "/api/v1/admin/reviews/{reviewId}/restore"
+          "route": "/api/v1/reviews/admin/{reviewId}/restore"
         },
         {
           "file": "valid/admin-restore-response-active-visible.json",

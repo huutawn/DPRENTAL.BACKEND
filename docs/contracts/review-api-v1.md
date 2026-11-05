@@ -6,7 +6,7 @@ Tài liệu này đặc tả toàn bộ các endpoints, cấu trúc DTO theo cơ
 
 ## 1. Chuẩn giao thức và Quy ước chung
 
-1. **Base URL:** `/api/v1/reviews` và `/api/v1/admin/reviews`.
+1. **Base URL:** `/api/v1/reviews` và `/api/v1/reviews/admin`.
 2. **Định dạng dữ liệu:** `application/json; charset=utf-8`.
 3. **Chuẩn lỗi:** Tuân thủ RFC 9110 và RFC 7807 (`application/problem+json`).
 4. **Chuỗi thời gian:** ISO 8601 UTC mở rộng (`YYYY-MM-DDTHH:mm:ss.fffZ`).
@@ -43,8 +43,8 @@ Tài liệu này đặc tả toàn bộ các endpoints, cấu trúc DTO theo cơ
 | **8** | **Xem review nhà cung cấp** | `/api/v1/reviews/suppliers/{supplierId}` | `GET` | Public (Không yêu cầu đăng nhập) | `200 OK` | `400`, `404` |
 | **9** | **Xem tổng hợp điểm (Summary)** | `/api/v1/reviews/summary` | `GET` | Public (Không yêu cầu đăng nhập) | `200 OK` | `400` |
 | **10**| **Báo cáo vi phạm** | `/api/v1/reviews/{reviewId}/reports` | `POST` | Bearer JWT (Người dùng bất kỳ) + `Idempotency-Key` | `201 Created` | `400`, `401`, `404`, `409` |
-| **11**| **Admin ẩn review** | `/api/v1/admin/reviews/{reviewId}/hide` | `POST` | Bearer JWT (`Admin` role) + `Idempotency-Key` + `If-Match` | `200 OK` | `400`, `401`, `403`, `404`, `409`, `412`, `428` |
-| **12**| **Admin khôi phục review** | `/api/v1/admin/reviews/{reviewId}/restore` | `POST` | Bearer JWT (`Admin` role) + `Idempotency-Key` + `If-Match` | `200 OK` | `400`, `401`, `403`, `404`, `409`, `412`, `428` |
+| **11**| **Admin ẩn review** | `/api/v1/reviews/admin/{reviewId}/hide` | `POST` | Bearer JWT (`Admin` role) + `Idempotency-Key` + `If-Match` | `200 OK` | `400`, `401`, `403`, `404`, `409`, `412`, `428` |
+| **12**| **Admin khôi phục review** | `/api/v1/reviews/admin/{reviewId}/restore` | `POST` | Bearer JWT (`Admin` role) + `Idempotency-Key` + `If-Match` | `200 OK` | `400`, `401`, `403`, `404`, `409`, `412`, `428` |
 
 ---
 
@@ -269,7 +269,7 @@ Dựa trên bảng chiếu (`review_projections`) đã hydrate đầy đủ và 
 
 ---
 
-### 3.8 `POST /api/v1/admin/reviews/{reviewId}/hide` & `restore` (Kiểm duyệt Admin)
+### 3.8 `POST /api/v1/reviews/admin/{reviewId}/hide` & `restore` (Kiểm duyệt Admin)
 
 - **Phân quyền:** Chỉ chấp nhận JWT của người dùng có role `Admin`.
 - **Cơ chế:** Thao tác **chỉ thay đổi `moderationState`** (`Hidden` $\leftrightarrow$ `Visible`).
