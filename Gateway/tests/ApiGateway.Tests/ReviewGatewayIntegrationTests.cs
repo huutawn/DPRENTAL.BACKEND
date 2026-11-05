@@ -33,8 +33,8 @@ public sealed class ReviewGatewayIntegrationTests
     [InlineData("POST", "/api/v1/reviews/summary")]
     [InlineData("GET", "/api/v1/reviews/my/received")]
     [InlineData("GET", "/api/v1/reviews/my/reputation")]
-    [InlineData("GET", "/api/v1/admin/reviews/reports")]
-    [InlineData("POST", "/api/v1/admin/reviews/11111111-1111-1111-1111-111111111111/hide")]
+    [InlineData("GET", "/api/v1/reviews/admin/reports")]
+    [InlineData("POST", "/api/v1/reviews/admin/11111111-1111-1111-1111-111111111111/hide")]
     public async Task ProtectedRoutesRejectAnonymousAndInvalidAudience(string method, string path)
     {
         using RSA key = RSA.Create(2048);
@@ -101,6 +101,18 @@ public sealed class ReviewGatewayIntegrationTests
         using var response = await client.SendAsync(read);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Contains("ETag", string.Join(",", response.Headers.GetValues("Access-Control-Expose-Headers")), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReplacedAdminRouteIsNotProxied()
+    {
+        using RSA key = RSA.Create(2048);
+        await using LoopbackTestService upstream = new(CreateJwks(key, "key-1"));
+        using var factory = CreateFactory(upstream.BaseAddress);
+        using HttpClient client = factory.CreateClient();
+        using var response = await client.GetAsync("/api/v1/admin/reviews/reports");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Null(upstream.LastRequest);
     }
 
     [Fact]

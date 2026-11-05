@@ -342,3 +342,7 @@ Trước khi merge vào `gateway/develop-ci-cd`, kiểm tra cấu hình VM tươ
 ReviewService xuất tài liệu tại `/review/swagger/v1/swagger.json`; chọn ReviewService
 trong menu `/swagger/index.html` khi chạy Development. API nghiệp vụ giữ nguyên
 xác thực; route OpenAPI cho phép đọc anonymous giống các service khác.
+
+Admin Review API dùng `/api/v1/reviews/admin/...` qua route Review chung,
+yêu cầu Bearer và quyền Admin được ReviewService kiểm tra. Đường dẫn cũ
+`/api/v1/admin/reviews/...` đã được gỡ bỏ.

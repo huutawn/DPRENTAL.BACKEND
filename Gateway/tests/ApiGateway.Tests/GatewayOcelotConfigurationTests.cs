@@ -65,7 +65,6 @@ public sealed class GatewayOcelotConfigurationTests
         "review-public-suppliers",
         "review-public-summary",
         "review-reviews",
-        "review-admin",
         "review-service-openapi",
     ];
 
