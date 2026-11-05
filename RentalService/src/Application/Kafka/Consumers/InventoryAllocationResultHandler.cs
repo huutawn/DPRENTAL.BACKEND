@@ -523,10 +523,28 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             return Result.Success(AllocationEventApplyResult.NoChange());
         }
 
-        // Order đã Paid hoặc đi tiếp thì kết quả hold thông thường chỉ cập nhật receipt.
-        // Không lặp chuyển trạng thái thanh toán, tính lại deadline, tăng version hoặc phát lại sự kiện thanh toán.
+        // Đơn đã thanh toán chỉ báo supplier sau khi Inventory xác nhận tất cả hold.
+        // Không lặp chuyển trạng thái hoặc phát lại sự kiện thanh toán.
         if (order.Status != RentalOrderStatus.PendingPayment)
         {
+            if (order.Status == RentalOrderStatus.Paid && _rentalEvents != null)
+            {
+                foreach (var item in order.Items.Where(i => i.Status == RentalItemStatus.PendingSupplierConfirmation))
+                {
+                    var confirmRes = await _rentalEvents.EnqueueRentalSupplierConfirmationRequestedAsync(
+                        new RentalSupplierConfirmationRequestedPayload(
+                            order.Id,
+                            item.Id,
+                            item.SupplierId,
+                            item.EquipmentListingId,
+                            item.Quantity,
+                            item.SupplierConfirmationDeadline ?? utcNow.AddHours(24),
+                            order.Version,
+                            order.OrderCode),
+                        order.Id.ToString("D"), null, cancellationToken);
+                    if (confirmRes.IsFailure) return confirmRes.Error;
+                }
+            }
             await _orderRepository.UpdateAsync(order, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             return Result.Success(AllocationEventApplyResult.NoChange());

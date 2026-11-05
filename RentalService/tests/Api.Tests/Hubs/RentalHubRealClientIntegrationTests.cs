@@ -56,7 +56,7 @@ namespace Dprental.RentalService.Api.Tests.Hubs;
 
 public sealed class RentalHubRealClientIntegrationTests
 {
-    private static readonly DateTimeOffset FixedNow = new(2026, 10, 26, 14, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset FixedNow = DateTimeOffset.UtcNow;
     private static readonly TimeSpan ReceiveTimeout = TimeSpan.FromSeconds(5);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     public sealed class KestrelRentalHubFactory : WebApplicationFactory<global::Program>
@@ -190,14 +190,16 @@ public sealed class RentalHubRealClientIntegrationTests
     {
         var itemA = new InitialRentalItemDto(
             Guid.NewGuid(), Guid.NewGuid(), supplierA, 1,
-            new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5),
+            DateOnly.FromDateTime(FixedNow.UtcDateTime).AddDays(7),
+            DateOnly.FromDateTime(FixedNow.UtcDateTime).AddDays(11),
             "Máy xúc A", "Desc", "Kho 1", 1_000_000m, 5_000_000m,
             "grp-A", [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
             TestListingSnapshots.Default);
 
         var itemB = new InitialRentalItemDto(
             Guid.NewGuid(), Guid.NewGuid(), supplierB, 1,
-            new DateOnly(2026, 11, 1), new DateOnly(2026, 11, 5),
+            DateOnly.FromDateTime(FixedNow.UtcDateTime).AddDays(7),
+            DateOnly.FromDateTime(FixedNow.UtcDateTime).AddDays(11),
             "Máy ủi B", "Desc", "Kho 2", 1_000_000m, 5_000_000m,
             "grp-B", [new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())],
             TestListingSnapshots.Default);
@@ -581,8 +583,8 @@ public sealed class RentalHubRealClientIntegrationTests
                 Guid.NewGuid(),
                 it.SupplierId,
                 1,
-                new DateOnly(2026, 11, 1),
-                new DateOnly(2026, 11, 5),
+                DateOnly.FromDateTime(FixedNow.UtcDateTime).AddDays(7),
+                DateOnly.FromDateTime(FixedNow.UtcDateTime).AddDays(11),
                 $"Thiết bị {idx + 1}",
                 "Mô tả",
                 "Kho 1",
