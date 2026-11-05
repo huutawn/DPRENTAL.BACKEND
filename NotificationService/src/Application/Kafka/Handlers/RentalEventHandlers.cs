@@ -858,7 +858,7 @@ public sealed class RentalItemConfirmedHandler : IKafkaEventHandler
             ["decisionAt"] = decisionAt,
             ["inventoryConfirmationRef"] = inventoryConfirmationRef,
             ["orderVersion"] = orderVersion,
-            ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+            ["deepLinkUrl"] = $"/orders/{orderId.Value}"
         };
 
         return Result.Success(new NotificationEventIntent(
@@ -921,7 +921,7 @@ public sealed class RentalItemRejectedHandler : IKafkaEventHandler
             ["reason"] = reason,
             ["optionalNote"] = optionalNote,
             ["orderVersion"] = orderVersion,
-            ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+            ["deepLinkUrl"] = $"/orders/{orderId.Value}"
         };
 
         return Result.Success(new NotificationEventIntent(
@@ -996,7 +996,7 @@ public sealed class RefundCompletedFinancialHandler : IKafkaEventHandler
             ["completedAt"] = completedAt,
             ["orderCode"] = orderCode,
             ["orderVersion"] = orderVersion,
-            ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+            ["deepLinkUrl"] = $"/orders/{orderId.Value}"
         };
 
         return Result.Success(new NotificationEventIntent(
@@ -1074,7 +1074,7 @@ public sealed class SupplierPayoutCompletedHandler : IKafkaEventHandler
             ["currency"] = currency,
             ["completedAt"] = completedAt,
             ["orderVersion"] = orderVersion,
-            ["deepLinkUrl"] = $"/supplier/settlements/{settlementId.Value}"
+            ["deepLinkUrl"] = "/own/orders"
         };
 
         if (realOrderId.HasValue)
@@ -1129,7 +1129,7 @@ public sealed class RentalOrderRejectedHandler : IKafkaEventHandler
             ["reason"] = reason,
             ["rejectedAt"] = rejectedAt,
             ["orderVersion"] = orderVersion,
-            ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+            ["deepLinkUrl"] = $"/orders/{orderId.Value}"
         };
 
         return Result.Success(new NotificationEventIntent(
@@ -1180,7 +1180,7 @@ public sealed class RentalItemExpiredHandler : IKafkaEventHandler
             ["reason"] = reason,
             ["expiredAt"] = expiredAt,
             ["orderVersion"] = orderVersion,
-            ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+            ["deepLinkUrl"] = $"/orders/{orderId.Value}"
         };
 
         // Item scope: Không phải terminal state của toàn bộ aggregate order
@@ -1232,7 +1232,7 @@ public sealed class RentalItemCancelledHandler : IKafkaEventHandler
             ["reason"] = reason,
             ["cancelledAt"] = cancelledAt,
             ["orderVersion"] = orderVersion,
-            ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+            ["deepLinkUrl"] = $"/orders/{orderId.Value}"
         };
 
         // Item scope: Không phải terminal state của toàn bộ aggregate order
@@ -1284,7 +1284,7 @@ public sealed class RentalItemReturnedHandler : IKafkaEventHandler
             ["supplierId"] = supplierId,
             ["returnedAt"] = returnedAt,
             ["orderVersion"] = orderVersion,
-            ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+            ["deepLinkUrl"] = $"/orders/{orderId.Value}"
         };
 
         return Result.Success(new NotificationEventIntent(
@@ -1334,7 +1334,7 @@ public sealed class RentalItemCompletedHandler : IKafkaEventHandler
             ["supplierId"] = supplierId,
             ["completedAt"] = completedAt,
             ["orderVersion"] = orderVersion,
-            ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+            ["deepLinkUrl"] = $"/orders/{orderId.Value}"
         };
 
         return Result.Success(new NotificationEventIntent(

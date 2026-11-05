@@ -54,8 +54,8 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "ORDER",
                     Severity: "ACTION_REQUIRED",
                     IsActionable: true,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
-                    ActionUrl: $"/checkout/payment?orderId={orderId}"));
+                    DeepLinkUrl: $"/orders/{orderId}",
+                    ActionUrl: $"/orders/{orderId}"));
                 break;
 
             case "RentalOrderPaid":
@@ -71,7 +71,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "PAYMENT",
                     Severity: "SUCCESS",
                     IsActionable: false,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));
                 break;
 
@@ -88,8 +88,8 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "ORDER",
                     Severity: "ACTION_REQUIRED",
                     IsActionable: true,
-                    DeepLinkUrl: $"/supplier/sub-orders/{orderId}",
-                    ActionUrl: $"/supplier/sub-orders/{orderId}/confirm"));
+                    DeepLinkUrl: "/own/orders",
+                    ActionUrl: "/own/orders"));
                 break;
 
             case "RentalOrderExpired":
@@ -105,7 +105,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "ORDER",
                     Severity: "WARNING",
                     IsActionable: false,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));
                 break;
 
@@ -122,7 +122,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "ORDER",
                     Severity: "WARNING",
                     IsActionable: false,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));
                 break;
 
@@ -139,7 +139,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "HANDOVER",
                     Severity: "SUCCESS",
                     IsActionable: false,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));
                 break;
 
@@ -156,8 +156,8 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "HANDOVER",
                     Severity: "ACTION_REQUIRED",
                     IsActionable: true,
-                    DeepLinkUrl: $"/supplier/sub-orders/{orderId}/handover",
-                    ActionUrl: $"/supplier/sub-orders/{orderId}/handover"));
+                    DeepLinkUrl: "/own/orders",
+                    ActionUrl: "/own/orders"));
 
                 if (renterId.HasValue && renterId.Value != Guid.Empty)
                 {
@@ -168,7 +168,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                         Category: "HANDOVER",
                         Severity: "INFO",
                         IsActionable: false,
-                        DeepLinkUrl: $"/renter/orders/{orderId}",
+                        DeepLinkUrl: $"/orders/{orderId}",
                         ActionUrl: null));
                 }
                 break;
@@ -179,10 +179,6 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
                         Error.Validation("MISSING_RECIPIENT", "ReturnConfirmationOverdue yêu cầu supplierId hợp lệ."));
                 }
-                var returnLink = returnRequestId.HasValue && returnRequestId.Value != Guid.Empty
-                    ? $"/supplier/returns/{returnRequestId.Value}"
-                    : $"/supplier/returns/{orderId}";
-
                 results.Add(new ResolvedRecipient(
                     RecipientUserId: supplierId.Value,
                     RecipientRole: "Supplier",
@@ -190,9 +186,8 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "RETURN",
                     Severity: "ACTION_REQUIRED",
                     IsActionable: true,
-                    DeepLinkUrl: returnLink,
-                    ActionUrl: returnLink));
-
+                    DeepLinkUrl: "/own/orders",
+                    ActionUrl: "/own/orders"));
                 if (renterId.HasValue && renterId.Value != Guid.Empty)
                 {
                     results.Add(new ResolvedRecipient(
@@ -202,7 +197,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                         Category: "RETURN",
                         Severity: "INFO",
                         IsActionable: false,
-                        DeepLinkUrl: $"/renter/orders/{orderId}",
+                        DeepLinkUrl: $"/orders/{orderId}",
                         ActionUrl: null));
                 }
                 break;
@@ -220,7 +215,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "ORDER",
                     Severity: "SUCCESS",
                     IsActionable: false,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));
                 break;
 
@@ -231,10 +226,10 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                         Error.Validation("MISSING_RECIPIENT", "Dispute resolution requires renterId and supplierId."));
                 results.Add(new ResolvedRecipient(
                     renterId.Value, "Renter", "DEDUCTION_DISPUTE_RESOLVED_RENTER",
-                    "SETTLEMENT", "INFO", false, $"/renter/orders/{orderId}", null));
+                    "SETTLEMENT", "INFO", false, $"/orders/{orderId}", null));
                 results.Add(new ResolvedRecipient(
                     supplierId.Value, "Supplier", "DEDUCTION_DISPUTE_RESOLVED_SUPPLIER",
-                    "SETTLEMENT", "INFO", false, "/supplier/sub-orders", null));
+                    "SETTLEMENT", "INFO", false, "/own/orders", null));
                 break;
 
             case "LatePaymentRefundRequested":
@@ -250,7 +245,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "PAYMENT",
                     Severity: "INFO",
                     IsActionable: false,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));
                 break;
 
@@ -267,7 +262,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "ORDER",
                     Severity: "INFO",
                     IsActionable: false,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));
                 break;
 
@@ -284,7 +279,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "ORDER",
                     Severity: "WARNING",
                     IsActionable: false,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));
                 break;
 
@@ -301,7 +296,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "PAYMENT",
                     Severity: "SUCCESS",
                     IsActionable: false,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));
                 break;
 
@@ -318,7 +313,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "PAYMENT",
                     Severity: "SUCCESS",
                     IsActionable: false,
-                    DeepLinkUrl: $"/supplier/settlements/{orderId}",
+                    DeepLinkUrl: "/own/orders",
                     ActionUrl: null));
                 break;
 
@@ -335,7 +330,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "ORDER",
                     Severity: "WARNING",
                     IsActionable: false,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));
                 break;
 
@@ -352,7 +347,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "ORDER",
                     Severity: "WARNING",
                     IsActionable: false,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));
                 break;
 
@@ -369,7 +364,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     Category: "ORDER",
                     Severity: "WARNING",
                     IsActionable: false,
-                    DeepLinkUrl: $"/renter/orders/{orderId}",
+                    DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));
                 break;
 
@@ -389,15 +384,11 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                         Category: "RETURN",
                         Severity: "INFO",
                         IsActionable: false,
-                        DeepLinkUrl: $"/renter/orders/{orderId}",
+                        DeepLinkUrl: $"/orders/{orderId}",
                         ActionUrl: null));
                 }
                 if (supplierId.HasValue && supplierId.Value != Guid.Empty)
                 {
-                    var returnedLink = returnRequestId.HasValue && returnRequestId.Value != Guid.Empty
-                        ? $"/supplier/returns/{returnRequestId.Value}"
-                        : $"/supplier/returns/{orderId}";
-
                     results.Add(new ResolvedRecipient(
                         RecipientUserId: supplierId.Value,
                         RecipientRole: "Supplier",
@@ -405,7 +396,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                         Category: "RETURN",
                         Severity: "INFO",
                         IsActionable: false,
-                        DeepLinkUrl: returnedLink,
+                        DeepLinkUrl: "/own/orders",
                         ActionUrl: null));
                 }
                 break;
@@ -426,7 +417,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                         Category: "ORDER",
                         Severity: "SUCCESS",
                         IsActionable: false,
-                        DeepLinkUrl: $"/renter/orders/{orderId}",
+                        DeepLinkUrl: $"/orders/{orderId}",
                         ActionUrl: null));
                 }
                 if (supplierId.HasValue && supplierId.Value != Guid.Empty)
@@ -438,7 +429,7 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                         Category: "ORDER",
                         Severity: "SUCCESS",
                         IsActionable: false,
-                        DeepLinkUrl: $"/supplier/sub-orders/{orderId}",
+                        DeepLinkUrl: "/own/orders",
                         ActionUrl: null));
                 }
                 break;

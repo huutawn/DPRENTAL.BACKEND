@@ -69,18 +69,35 @@ Retrieves a paginated list of notifications for the authenticated user with stab
       "body": "Đơn thuê RNT-20261102-0001 đang chờ thanh toán 1,500,000 VND trước hạn 10:30 02/11/2026.",
       "resourceType": "RentalOrder",
       "resourceId": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
-      "deepLinkUrl": "/renter/orders/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+      "deepLinkUrl": "/orders/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
       "isActionable": true,
-      "actionUrl": "/checkout/payment?orderId=a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+      "actionUrl": "/orders/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
       "isRead": false,
       "readAt": null,
       "occurredAt": "2026-11-02T03:00:00Z",
       "createdAt": "2026-11-02T03:00:01Z"
+    },
+    {
+      "id": "f5c6d7e8-f9a0-4b1c-2d3e-4f5a6b7c8d9e",
+      "notificationType": "SUPPLIER_CONFIRMATION_REQUIRED",
+      "category": "ORDER",
+      "severity": "ACTION_REQUIRED",
+      "title": "Yêu cầu xác nhận đơn thuê mới #RNT-20261102-0002",
+      "body": "Bạn có yêu cầu thuê thiết bị mới cho đơn hàng RNT-20261102-0002. Vui lòng xác nhận trước 12:00 02/11/2026.",
+      "resourceType": "RentalOrder",
+      "resourceId": "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e",
+      "deepLinkUrl": "/own/orders",
+      "isActionable": true,
+      "actionUrl": "/own/orders",
+      "isRead": false,
+      "readAt": null,
+      "occurredAt": "2026-11-02T03:05:00Z",
+      "createdAt": "2026-11-02T03:05:01Z"
     }
   ],
   "page": 1,
   "pageSize": 20,
-  "totalCount": 1,
+  "totalCount": 2,
   "totalPages": 1,
   "hasPrevious": false,
   "hasNext": false
@@ -119,17 +136,11 @@ Marks an unread notification belonging to the authenticated user as read.
 - **Method**: `PATCH`
 - **Path**: `/api/v1/notifications/{id}/read`
 - **Authentication**: Bearer Human JWT (`sub = <UserGuid>`)
-- **Idempotency**: If the notification is already marked read, returns `200 OK` with the existing `readAt` timestamp.
+- **Idempotency**: If the notification is already marked read, returns `200 OK` with no response body.
 - **Resource Ownership Invariant**: If `{id}` does not exist or belongs to another user, returns `404 Not Found` (preventing IDOR reconnaissance).
 
 - **Response 200 OK**:
-```json
-{
-  "id": "e4b5c6d7-e8f9-4a0b-1c2d-3e4f5a6b7c8d",
-  "isRead": true,
-  "readAt": "2026-11-02T03:10:00Z"
-}
-```
+*(No response body)*
 
 - **Error Responses**:
   - `400 Bad Request`: `{id}` is not a valid GUID.

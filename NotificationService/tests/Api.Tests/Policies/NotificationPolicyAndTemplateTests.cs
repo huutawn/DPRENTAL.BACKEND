@@ -432,7 +432,7 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Equal("ORDER", confirmedRecipient.Category);
         Assert.Equal("INFO", confirmedRecipient.Severity);
         Assert.False(confirmedRecipient.IsActionable);
-        Assert.Equal($"/renter/orders/{orderId}", confirmedRecipient.DeepLinkUrl);
+        Assert.Equal($"/orders/{orderId}", confirmedRecipient.DeepLinkUrl);
 
         // RentalItemRejected -> Renter (Category ORDER, Severity WARNING, NotificationType ORDER_REJECTED)
         var rejected = _recipientResolver.ResolveRecipients("RentalItemRejected", orderId, renterId, supplierId);
@@ -445,7 +445,7 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Equal("ORDER", rejectedRecipient.Category);
         Assert.Equal("WARNING", rejectedRecipient.Severity);
         Assert.False(rejectedRecipient.IsActionable);
-        Assert.Equal($"/renter/orders/{orderId}", rejectedRecipient.DeepLinkUrl);
+        Assert.Equal($"/orders/{orderId}", rejectedRecipient.DeepLinkUrl);
 
         // RefundCompletedFinancial -> Renter (Category PAYMENT, Severity SUCCESS, NotificationType REFUND_COMPLETED)
         var refund = _recipientResolver.ResolveRecipients("RefundCompletedFinancial", orderId, renterId, null);
@@ -458,7 +458,7 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Equal("PAYMENT", refundRecipient.Category);
         Assert.Equal("SUCCESS", refundRecipient.Severity);
         Assert.False(refundRecipient.IsActionable);
-        Assert.Equal($"/renter/orders/{orderId}", refundRecipient.DeepLinkUrl);
+        Assert.Equal($"/orders/{orderId}", refundRecipient.DeepLinkUrl);
 
         // SupplierPayoutCompleted -> Supplier (Category PAYMENT, Severity SUCCESS, NotificationType PAYOUT_COMPLETED)
         var payout = _recipientResolver.ResolveRecipients("SupplierPayoutCompleted", settlementId, null, supplierId);
@@ -471,7 +471,7 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Equal("PAYMENT", payoutRecipient.Category);
         Assert.Equal("SUCCESS", payoutRecipient.Severity);
         Assert.False(payoutRecipient.IsActionable);
-        Assert.Equal($"/supplier/settlements/{settlementId}", payoutRecipient.DeepLinkUrl);
+        Assert.Equal("/own/orders", payoutRecipient.DeepLinkUrl);
     }
 
     [Fact]
@@ -491,7 +491,7 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Contains("INV-CONF-999", result.Value.Body);
         Assert.Contains("xác nhận", result.Value.Title.ToLowerInvariant());
         Assert.NotNull(result.Value.EmailBody);
-        Assert.Contains($"/renter/orders/{orderId}", result.Value.EmailBody);
+        Assert.Contains($"/orders/{orderId}", result.Value.EmailBody);
     }
 
     [Fact]
@@ -511,7 +511,7 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Contains("từ chối", result.Value.Title.ToLowerInvariant());
         Assert.Contains(System.Net.WebUtility.HtmlEncode("Thiết bị đang bảo trì khẩn cấp"), result.Value.Body);
         Assert.NotNull(result.Value.EmailBody);
-        Assert.Contains($"/renter/orders/{orderId}", result.Value.EmailBody);
+        Assert.Contains($"/orders/{orderId}", result.Value.EmailBody);
     }
 
     [Fact]
@@ -534,7 +534,7 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Contains(itemId.ToString(), result.Value.Body);
         Assert.Contains("Các phần thuê khác trong đơn (nếu có) vẫn tiếp tục được xử lý", result.Value.Body);
         Assert.NotNull(result.Value.EmailBody);
-        Assert.Contains($"/renter/orders/{orderId}", result.Value.EmailBody);
+        Assert.Contains($"/orders/{orderId}", result.Value.EmailBody);
     }
 
     [Fact]
@@ -557,7 +557,7 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Contains(itemId.ToString(), result.Value.Body);
         Assert.Contains("Thiết bị đã được giải phóng", result.Value.Body);
         Assert.NotNull(result.Value.EmailBody);
-        Assert.Contains($"/renter/orders/{orderId}", result.Value.EmailBody);
+        Assert.Contains($"/orders/{orderId}", result.Value.EmailBody);
     }
 
     [Fact]
@@ -582,7 +582,7 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Contains("hoàn tiền thành công", result.Value.Title.ToLowerInvariant());
         Assert.NotNull(result.Value.EmailBody);
         Assert.Contains("1.500.000", result.Value.EmailBody);
-        Assert.Contains($"/renter/orders/{orderId}", result.Value.EmailBody);
+        Assert.Contains($"/orders/{orderId}", result.Value.EmailBody);
     }
 
     [Fact]
@@ -605,7 +605,7 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Contains("doanh thu", result.Value.Body.ToLowerInvariant());
         Assert.NotNull(result.Value.EmailBody);
         Assert.Contains("900.000", result.Value.EmailBody);
-        Assert.Contains($"/supplier/settlements/{settlementId}", result.Value.EmailBody);
+        Assert.Contains("/own/orders", result.Value.EmailBody);
     }
 
     [Fact]
@@ -758,5 +758,95 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.False(result.IsStale);
         Assert.False(result.SuppressAction);
         Assert.False(result.SuppressEmail);
+    }
+
+    [Fact]
+    public void StandardizedNotificationLinks_RenterAndSupplierContracts_ShouldMatchSpecification()
+    {
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var returnReqId = Guid.NewGuid();
+
+        // 1. RentalOrderCreated: Renter DeepLinkUrl = /orders/{orderId}, ActionUrl = /orders/{orderId}, IsActionable = true
+        var created = _recipientResolver.ResolveRecipients("RentalOrderCreated", orderId, renterId, null);
+        Assert.True(created.IsSuccess);
+        var createdRenter = Assert.Single(created.Value);
+        Assert.Equal($"/orders/{orderId}", createdRenter.DeepLinkUrl);
+        Assert.Equal($"/orders/{orderId}", createdRenter.ActionUrl);
+        Assert.True(createdRenter.IsActionable);
+
+        // 2. RentalOrderPaid: Renter DeepLinkUrl = /orders/{orderId}, ActionUrl = null, IsActionable = false
+        var paid = _recipientResolver.ResolveRecipients("RentalOrderPaid", orderId, renterId, null);
+        Assert.True(paid.IsSuccess);
+        var paidRenter = Assert.Single(paid.Value);
+        Assert.Equal($"/orders/{orderId}", paidRenter.DeepLinkUrl);
+        Assert.Null(paidRenter.ActionUrl);
+        Assert.False(paidRenter.IsActionable);
+
+        // 3. RentalSupplierConfirmationRequested: Supplier DeepLinkUrl = /own/orders, ActionUrl = /own/orders, IsActionable = true
+        var supplierConf = _recipientResolver.ResolveRecipients("RentalSupplierConfirmationRequested", orderId, null, supplierId);
+        Assert.True(supplierConf.IsSuccess);
+        var confSupplier = Assert.Single(supplierConf.Value);
+        Assert.Equal("/own/orders", confSupplier.DeepLinkUrl);
+        Assert.Equal("/own/orders", confSupplier.ActionUrl);
+        Assert.True(confSupplier.IsActionable);
+
+        // 4. RentalHandoverOverdue: Supplier = /own/orders (Actionable), Renter = /orders/{orderId} (Not actionable)
+        var handover = _recipientResolver.ResolveRecipients("RentalHandoverOverdue", orderId, renterId, supplierId);
+        Assert.True(handover.IsSuccess);
+        var hoSupplier = Assert.Single(handover.Value, r => r.RecipientRole == "Supplier");
+        var hoRenter = Assert.Single(handover.Value, r => r.RecipientRole == "Renter");
+        Assert.Equal("/own/orders", hoSupplier.DeepLinkUrl);
+        Assert.Equal("/own/orders", hoSupplier.ActionUrl);
+        Assert.True(hoSupplier.IsActionable);
+        Assert.Equal($"/orders/{orderId}", hoRenter.DeepLinkUrl);
+        Assert.Null(hoRenter.ActionUrl);
+        Assert.False(hoRenter.IsActionable);
+
+        // 5. ReturnConfirmationOverdue: Supplier = /own/orders (Actionable), Renter = /orders/{orderId} (Not actionable)
+        var retOverdue = _recipientResolver.ResolveRecipients("ReturnConfirmationOverdue", orderId, renterId, supplierId, returnReqId);
+        Assert.True(retOverdue.IsSuccess);
+        var roSupplier = Assert.Single(retOverdue.Value, r => r.RecipientRole == "Supplier");
+        var roRenter = Assert.Single(retOverdue.Value, r => r.RecipientRole == "Renter");
+        Assert.Equal("/own/orders", roSupplier.DeepLinkUrl);
+        Assert.Equal("/own/orders", roSupplier.ActionUrl);
+        Assert.True(roSupplier.IsActionable);
+        Assert.Equal($"/orders/{orderId}", roRenter.DeepLinkUrl);
+        Assert.Null(roRenter.ActionUrl);
+        Assert.False(roRenter.IsActionable);
+
+        // 6. RentalDeductionDisputeResolved: Supplier = /own/orders (Not actionable), Renter = /orders/{orderId} (Not actionable)
+        var dispute = _recipientResolver.ResolveRecipients("RentalDeductionDisputeResolved", orderId, renterId, supplierId);
+        Assert.True(dispute.IsSuccess);
+        var dispSupplier = Assert.Single(dispute.Value, r => r.RecipientRole == "Supplier");
+        var dispRenter = Assert.Single(dispute.Value, r => r.RecipientRole == "Renter");
+        Assert.Equal("/own/orders", dispSupplier.DeepLinkUrl);
+        Assert.Null(dispSupplier.ActionUrl);
+        Assert.False(dispSupplier.IsActionable);
+        Assert.Equal($"/orders/{orderId}", dispRenter.DeepLinkUrl);
+        Assert.Null(dispRenter.ActionUrl);
+        Assert.False(dispRenter.IsActionable);
+
+        // 7. SupplierPayoutCompleted: Supplier = /own/orders (Not actionable)
+        var payout = _recipientResolver.ResolveRecipients("SupplierPayoutCompleted", orderId, null, supplierId);
+        Assert.True(payout.IsSuccess);
+        var payoutSupplier = Assert.Single(payout.Value);
+        Assert.Equal("/own/orders", payoutSupplier.DeepLinkUrl);
+        Assert.Null(payoutSupplier.ActionUrl);
+        Assert.False(payoutSupplier.IsActionable);
+
+        // 8. TemplateRenderer fallback deepLinkUrl tests
+        var renderOrder = _renderer.Render("ORDER_PAID", new Dictionary<string, object?> { ["rentalOrderId"] = orderId, ["orderCode"] = "ORD-01", ["paidAmount"] = 1000m, ["invoiceRef"] = "INV-01" });
+        Assert.True(renderOrder.IsSuccess);
+        Assert.Contains($"/orders/{orderId}", renderOrder.Value.RenderDataJson);
+
+        var renderSettlement = _renderer.Render("PAYOUT_COMPLETED", new Dictionary<string, object?> { ["settlementId"] = Guid.NewGuid(), ["payoutRef"] = "P-01", ["amount"] = 500m });
+        Assert.True(renderSettlement.IsSuccess);
+        Assert.Contains("/own/orders", renderSettlement.Value.RenderDataJson);
+
+        var renderPayout = _renderer.Render("PAYOUT_COMPLETED", new Dictionary<string, object?> { ["payoutId"] = Guid.NewGuid(), ["payoutRef"] = "P-02", ["amount"] = 500m });
+        Assert.True(renderPayout.IsSuccess);
+        Assert.Contains("/own/orders", renderPayout.Value.RenderDataJson);
     }
 }

@@ -128,7 +128,7 @@ public sealed class NotificationIngestionTests
             n.NotificationType == "DEDUCTION_DISPUTE_RESOLVED_RENTER");
         Assert.Contains(notifications, n => n.RecipientUserId == supplierId &&
             n.NotificationType == "DEDUCTION_DISPUTE_RESOLVED_SUPPLIER" &&
-            n.DeepLinkUrl == "/supplier/sub-orders");
+            n.DeepLinkUrl == "/own/orders");
     }
 
     [Fact]
@@ -540,7 +540,7 @@ public sealed class NotificationIngestionTests
         Assert.Equal("INFO", notification.Severity);
         Assert.False(notification.IsActionable);
         Assert.Contains("INV-CONF-12345", notification.Body);
-        Assert.Equal($"/renter/orders/{orderId}", notification.DeepLinkUrl);
+        Assert.Equal($"/orders/{orderId}", notification.DeepLinkUrl);
 
         // RentalItemConfirmed does not send email
         var deliveryJob = await db.DeliveryJobs.FirstOrDefaultAsync(j => j.NotificationId == notification.Id);
@@ -590,7 +590,7 @@ public sealed class NotificationIngestionTests
         Assert.Equal("WARNING", notification.Severity);
         Assert.False(notification.IsActionable);
         Assert.Contains("Thiết bị hỏng đột xuất", notification.Body);
-        Assert.Equal($"/renter/orders/{orderId}", notification.DeepLinkUrl);
+        Assert.Equal($"/orders/{orderId}", notification.DeepLinkUrl);
 
         // RentalItemRejected does not send email
         var deliveryJob = await db.DeliveryJobs.FirstOrDefaultAsync(j => j.NotificationId == notification.Id);
@@ -624,7 +624,7 @@ public sealed class NotificationIngestionTests
         Assert.Equal("SUCCESS", notification.Severity);
         Assert.False(notification.IsActionable);
         Assert.Contains("2.500.000", notification.Body);
-        Assert.Equal($"/renter/orders/{orderId}", notification.DeepLinkUrl);
+        Assert.Equal($"/orders/{orderId}", notification.DeepLinkUrl);
 
         // RefundCompletedFinancial sends email (per user preference default true)
         var deliveryJob = await db.DeliveryJobs.FirstOrDefaultAsync(j => j.NotificationId == notification.Id);
@@ -666,7 +666,7 @@ public sealed class NotificationIngestionTests
         Assert.Equal("SUCCESS", notification.Severity);
         Assert.False(notification.IsActionable);
         Assert.Contains("850.000", notification.Body);
-        Assert.Equal($"/supplier/settlements/{settlementId}", notification.DeepLinkUrl);
+        Assert.Equal("/own/orders", notification.DeepLinkUrl);
         Assert.Null(notification.OrderId);
         Assert.Equal("Settlement", notification.ResourceType);
         Assert.Equal(settlementId.ToString(), notification.ResourceId);
