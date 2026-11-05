@@ -281,7 +281,7 @@ public sealed partial class RentalOperationExecutor
 
             // Ghi event/command vào Outbox; enqueue thành công chỉ xác nhận đã lưu ý định gửi, chưa xác nhận service đích đã thực thi.
             var cancelOrderRes = await _rentalEvents.EnqueueRentalOrderCancelledAsync(
-                new RentalOrderCancelledPayload(order.Id, order.RenterId, utcNow, KafkaContractSpec.ReasonCodes.RenterCancelled, order.Version),
+                new RentalOrderCancelledPayload(order.Id, order.RenterId, utcNow, KafkaContractSpec.ReasonCodes.RenterCancelled, order.OrderCode, order.Version),
                 correlationId: normalizedKey,
                 cancellationToken: cancellationToken);
             // Không ghi tiếp khi bước xử lý lỗi: rollback phần đang làm và bỏ thay đổi tracked trước khi trả lỗi.
@@ -410,7 +410,7 @@ public sealed partial class RentalOperationExecutor
             {
                 // Ghi event/command vào Outbox; enqueue thành công chỉ xác nhận đã lưu ý định gửi, chưa xác nhận service đích đã thực thi.
                 var cancelOrderRes = await _rentalEvents.EnqueueRentalOrderCancelledAsync(
-                    new RentalOrderCancelledPayload(order.Id, order.RenterId, utcNow, KafkaContractSpec.ReasonCodes.RenterCancelled, order.Version),
+                    new RentalOrderCancelledPayload(order.Id, order.RenterId, utcNow, KafkaContractSpec.ReasonCodes.RenterCancelled, order.OrderCode, order.Version),
                     correlationId: normalizedKey,
                     cancellationToken: cancellationToken);
                 // Không ghi tiếp khi bước xử lý lỗi: rollback phần đang làm và bỏ thay đổi tracked trước khi trả lỗi.

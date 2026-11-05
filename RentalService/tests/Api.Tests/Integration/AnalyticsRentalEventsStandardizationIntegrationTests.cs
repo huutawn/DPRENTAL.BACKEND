@@ -623,6 +623,7 @@ public sealed class AnalyticsRentalEventsStandardizationIntegrationTests
             var orderCancelled = await verifyCtx.RentalOutboxMessages.FirstAsync(m => m.MessageType == KafkaContractSpec.EventTypes.RentalOrderCancelled);
             using var cancelDoc = JsonDocument.Parse(orderCancelled.Payload);
             Assert.Equal(KafkaContractSpec.ReasonCodes.RenterCancelled, cancelDoc.RootElement.GetProperty("payload").GetProperty("reason").GetString());
+            Assert.Equal(order1.OrderCode, cancelDoc.RootElement.GetProperty("payload").GetProperty("orderCode").GetString());
 
             var orderExpired = await verifyCtx.RentalOutboxMessages.FirstAsync(m => m.MessageType == KafkaContractSpec.EventTypes.RentalOrderExpired);
             using var expireDoc = JsonDocument.Parse(orderExpired.Payload);
@@ -701,7 +702,7 @@ public sealed class AnalyticsRentalEventsStandardizationIntegrationTests
                     new RentalItemCancelledPayload(orderId, itemId, renterId, "Renter", FixedNow, KafkaContractSpec.ReasonCodes.RenterCancelled, 300m, 3));
 
                 await producer.EnqueueRentalOrderCancelledAsync(
-                    new RentalOrderCancelledPayload(orderId, renterId, FixedNow, KafkaContractSpec.ReasonCodes.RenterCancelled, 3));
+                    new RentalOrderCancelledPayload(orderId, renterId, FixedNow, KafkaContractSpec.ReasonCodes.RenterCancelled, "ORD-CANCEL-1", 3));
 
                 await producer.EnqueueRentalItemHandoverCompletedAsync(
                     new RentalItemHandoverCompletedPayload(orderId, itemId, renterId, supplierId, listingId, 1, Guid.NewGuid(), FixedNow, FixedNow, 4));

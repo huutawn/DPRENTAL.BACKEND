@@ -177,7 +177,7 @@ public sealed record RentalItemReturnedPayload(
 
 public sealed record RentalOrderCancelledPayload(
     Guid RentalOrderId, Guid RenterId, DateTimeOffset CancelledAt, string Reason,
-    long OrderVersion = 1);
+    string OrderCode, long OrderVersion = 1);
 
 public sealed record RentalOrderCompletedPayload(
     Guid RentalOrderId, Guid RenterId, DateTimeOffset CompletedAt,
