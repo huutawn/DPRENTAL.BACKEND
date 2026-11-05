@@ -210,6 +210,20 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                     cancellationToken: cancellationToken);
                 // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
                 if (enqueueResult.IsFailure) return enqueueResult.Error;
+                var confirmationResult = await _rentalEventProducer.EnqueueRentalSupplierConfirmationRequestedAsync(
+                    new RentalSupplierConfirmationRequestedPayload(
+                        order.Id,
+                        item.Id,
+                        item.SupplierId,
+                        item.EquipmentListingId,
+                        item.Quantity,
+                        item.SupplierConfirmationDeadline ?? utcNow.AddHours(24),
+                        order.Version,
+                        order.OrderCode),
+                    correlationId: envelope.CorrelationId,
+                    causationId: envelope.MessageId,
+                    cancellationToken: cancellationToken);
+                if (confirmationResult.IsFailure) return confirmationResult.Error;
                 string opKey = RentalOperationExecutor.ComputeOperationKey("ExtendHold", $"{order.Id}:{item.Id}");
                 var existingReceipt = order.OperationReceipts.FirstOrDefault(r => r.OperationId == opKey);
                 // Kiểm tra dữ liệu tùy chọn hoặc kết quả tra cứu trước khi dùng; xử lý riêng trường hợp không có giá trị.

@@ -591,7 +591,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                         item.EquipmentListingId,
                         item.Quantity,
                         item.SupplierConfirmationDeadline ?? utcNow.AddHours(24),
-                        order.Version),
+                        order.Version,
+                        order.OrderCode),
                     order.Id.ToString("D"), null, cancellationToken);
                 if (confirmRes.IsFailure) return confirmRes.Error;
             }

@@ -45,7 +45,8 @@ public sealed record RentalSupplierConfirmationRequestedPayload(
     Guid EquipmentListingId,
     int Quantity,
     DateTimeOffset SupplierConfirmationDeadline,
-    long OrderVersion = 1);
+    long OrderVersion = 1,
+    string? OrderCode = null);
 
 public sealed record RentalItemConfirmedPayload(
     Guid RentalOrderId,
