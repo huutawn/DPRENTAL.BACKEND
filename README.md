@@ -338,3 +338,7 @@ User `deploy` phải thuộc group `docker`; quyền Docker tương đương quy
 CI/CD dùng `/opt/dprental/dev/compose.yaml` và script root-owned trên VM, không tự sao chép `docker-compose.yml` từ repository. Gateway Development trong Docker cần override downstream cho toàn bộ route theo thứ tự file ordinal, giữ thứ tự route trong từng file. Mọi service trên stack VM dùng cổng 8080; chỉ route hub WebSocket dùng `ws`. Route Payment API dùng `http`.
 
 Trước khi merge vào `gateway/develop-ci-cd`, kiểm tra cấu hình VM tương ứng với image mới và sao lưu Compose cũ để rollback cùng image cũ. Mở PR không deploy; push/merge vào nhánh đích mới kích hoạt workflow.
+
+ReviewService xuất tài liệu tại `/review/swagger/v1/swagger.json`; chọn ReviewService
+trong menu `/swagger/index.html` khi chạy Development. API nghiệp vụ giữ nguyên
+xác thực; route OpenAPI cho phép đọc anonymous giống các service khác.
