@@ -90,6 +90,21 @@
           "Bearer"
         ]
       }
+    },
+    {
+      "Key": "review-service-openapi",
+      "UpstreamPathTemplate": "/review/swagger/v1/swagger.json",
+      "DownstreamPathTemplate": "/swagger/v1/swagger.json",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "review-service",
+          "Port": 8080
+        }
+      ],
+      "AuthenticationOptions": {
+        "AllowAnonymous": true
+      }
     }
   ]
 }

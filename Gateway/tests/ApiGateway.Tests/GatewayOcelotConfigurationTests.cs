@@ -66,6 +66,7 @@ public sealed class GatewayOcelotConfigurationTests
         "review-public-summary",
         "review-reviews",
         "review-admin",
+        "review-service-openapi",
     ];
 
     private sealed class MockWebEnvironment : IWebHostEnvironment
