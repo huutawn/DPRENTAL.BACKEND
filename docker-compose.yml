@@ -221,10 +221,6 @@ services:
       - Routes__47__DownstreamScheme=${REVIEW_SERVICE_SCHEME:-http}
       - Routes__47__DownstreamHostAndPorts__0__Host=${REVIEW_SERVICE_HOST:-review-service}
       - Routes__47__DownstreamHostAndPorts__0__Port=${REVIEW_SERVICE_PORT:-8080}
-      # [48] Review OpenAPI
-      - Routes__48__DownstreamScheme=${REVIEW_SERVICE_SCHEME:-http}
-      - Routes__48__DownstreamHostAndPorts__0__Host=${REVIEW_SERVICE_HOST:-review-service}
-      - Routes__48__DownstreamHostAndPorts__0__Port=${REVIEW_SERVICE_PORT:-8080}
     networks:
       - dprental-network
 
