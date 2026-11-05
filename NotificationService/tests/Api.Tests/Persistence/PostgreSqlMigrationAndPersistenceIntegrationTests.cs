@@ -942,4 +942,192 @@ public sealed class PostgreSqlMigrationAndPersistenceIntegrationTests
             await TestEnvironment.DropDatabaseAsync(dbName);
         }
     }
+
+    [Fact]
+    public async Task DatabaseAt20261104084104_UpgradeNormalizeUrlsMigration_NormalizesUrlsAndPreservesActionableFlags()
+    {
+        var dbName = "notif_migr_url_norm_" + Guid.NewGuid().ToString("N")[..8];
+        await RecreateDatabaseAsync(dbName);
+        try
+        {
+            var connString = GetTestConnectionString(dbName);
+            var options = new DbContextOptionsBuilder<NotificationServiceDbContext>()
+                .UseNpgsql(connString)
+                .Options;
+
+            // 1. Migrate up to previous migration (20261104084104_CorrectNotificationLinkageBackfill)
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                var migrator = context.GetService<IMigrator>();
+                await migrator.MigrateAsync("20261104084104_CorrectNotificationLinkageBackfill");
+            }
+
+            var userId = Guid.NewGuid();
+            var orderId1 = Guid.NewGuid();
+            var orderId2 = Guid.NewGuid();
+            var orderId3 = Guid.NewGuid();
+            var returnId = Guid.NewGuid();
+            var settlementId = Guid.NewGuid();
+
+            var idRenterPayment = Guid.NewGuid();
+            var idRenterOther = Guid.NewGuid();
+            var idSupplierSubOrder = Guid.NewGuid();
+            var idSupplierReturn = Guid.NewGuid();
+            var idSupplierSettlement = Guid.NewGuid();
+            var idSupplierDispute = Guid.NewGuid();
+            var idSuppressedCta = Guid.NewGuid();
+
+            // 2. Insert records with legacy URL formats
+            await using (var conn = new NpgsqlConnection(connString))
+            {
+                await conn.OpenAsync();
+
+                var insertSql = @"
+                    INSERT INTO notification.notifications
+                    (id, recipient_user_id, notification_type, category, severity, title, body,
+                     resource_type, resource_id, source_event_id, source_producer, source_event_type, event_version,
+                     template_code, template_version, occurred_at, created_at,
+                     deep_link_url, action_url, is_actionable)
+                    VALUES
+                    -- 1. Renter order placed with checkout payment CTA
+                    (@idRenterPayment, @userId, 'ORDER_CREATED', 'ORDER', 'ACTION_REQUIRED', 'T1', 'B1',
+                     'RentalOrder', @ord1, @src1, 'RentalService', 'RentalOrderCreated', 1,
+                     'ORDER_CREATED', '1.0', NOW(), NOW(),
+                     '/renter/orders/' || @ord1, '/checkout/payment?orderId=' || @ord1, true),
+
+                    -- 2. Renter other order link (action_url had renter link)
+                    (@idRenterOther, @userId, 'ORDER_CONFIRMED', 'ORDER', 'INFO', 'T2', 'B2',
+                     'RentalOrder', @ord2, @src2, 'RentalService', 'RentalItemConfirmed', 1,
+                     'ORDER_CONFIRMED', '1.0', NOW(), NOW(),
+                     '/renter/orders/' || @ord2, '/renter/orders/' || @ord2, false),
+
+                    -- 3. Supplier confirmation sub-order link
+                    (@idSupplierSubOrder, @userId, 'SUPPLIER_CONFIRMATION_REQUIRED', 'ORDER', 'ACTION_REQUIRED', 'T3', 'B3',
+                     'RentalOrder', @ord3, @src3, 'RentalService', 'RentalSupplierConfirmationRequested', 1,
+                     'SUPPLIER_CONFIRMATION_REQUIRED', '1.0', NOW(), NOW(),
+                     '/supplier/sub-orders/' || @ord3, '/supplier/sub-orders/' || @ord3 || '/confirm', true),
+
+                    -- 4. Supplier return link
+                    (@idSupplierReturn, @userId, 'RETURN_CONFIRMATION_OVERDUE_SUPPLIER', 'RETURN', 'ACTION_REQUIRED', 'T4', 'B4',
+                     'ReturnRequest', @retId, @src4, 'RentalService', 'ReturnConfirmationOverdue', 1,
+                     'RETURN_CONFIRMATION_OVERDUE_SUPPLIER', '1.0', NOW(), NOW(),
+                     '/supplier/returns/' || @retId, '/supplier/returns/' || @retId, true),
+
+                    -- 5. Supplier settlement link
+                    (@idSupplierSettlement, @userId, 'PAYOUT_COMPLETED', 'PAYMENT', 'SUCCESS', 'T5', 'B5',
+                     'Settlement', @stlId, @src5, 'PaymentService', 'SupplierPayoutCompleted', 1,
+                     'PAYOUT_COMPLETED', '1.0', NOW(), NOW(),
+                     '/supplier/settlements/' || @stlId, NULL, false),
+
+                    -- 6. Supplier dispute resolution link (/supplier/sub-orders)
+                    (@idSupplierDispute, @userId, 'DEDUCTION_DISPUTE_RESOLVED_SUPPLIER', 'SETTLEMENT', 'INFO', 'T6', 'B6',
+                     'RentalItem', @ord1, @src6, 'RentalService', 'RentalDeductionDisputeResolved', 1,
+                     'DEDUCTION_DISPUTE_RESOLVED_SUPPLIER', '1.0', NOW(), NOW(),
+                     '/supplier/sub-orders', NULL, false),
+
+                    -- 7. Suppressed CTA: renter link, action_url is null, is_actionable is false
+                    (@idSuppressedCta, @userId, 'ORDER_CREATED', 'ORDER', 'INFO', 'T7', 'B7',
+                     'RentalOrder', @ord1, @src7, 'RentalService', 'RentalOrderCreated', 1,
+                     'ORDER_CREATED', '1.0', NOW(), NOW(),
+                     '/renter/orders/' || @ord1, NULL, false);";
+
+                await using var cmd = new NpgsqlCommand(insertSql, conn);
+                cmd.Parameters.AddWithValue("idRenterPayment", idRenterPayment);
+                cmd.Parameters.AddWithValue("idRenterOther", idRenterOther);
+                cmd.Parameters.AddWithValue("idSupplierSubOrder", idSupplierSubOrder);
+                cmd.Parameters.AddWithValue("idSupplierReturn", idSupplierReturn);
+                cmd.Parameters.AddWithValue("idSupplierSettlement", idSupplierSettlement);
+                cmd.Parameters.AddWithValue("idSupplierDispute", idSupplierDispute);
+                cmd.Parameters.AddWithValue("idSuppressedCta", idSuppressedCta);
+                cmd.Parameters.AddWithValue("userId", userId);
+                cmd.Parameters.AddWithValue("ord1", orderId1.ToString());
+                cmd.Parameters.AddWithValue("ord2", orderId2.ToString());
+                cmd.Parameters.AddWithValue("ord3", orderId3.ToString());
+                cmd.Parameters.AddWithValue("retId", returnId.ToString());
+                cmd.Parameters.AddWithValue("stlId", settlementId.ToString());
+                cmd.Parameters.AddWithValue("src1", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("src2", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("src3", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("src4", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("src5", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("src6", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("src7", Guid.NewGuid());
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            // 3. Migrate to latest (NormalizeNotificationUrls)
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                await context.Database.MigrateAsync();
+            }
+
+            // 4. Verify URL normalization and preservation of actionable flags
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                // Row 1: Renter payment CTA
+                var n1 = await context.Notifications.FindAsync(idRenterPayment);
+                Assert.NotNull(n1);
+                Assert.Equal($"/orders/{orderId1}", n1.DeepLinkUrl);
+                Assert.Equal($"/orders/{orderId1}", n1.ActionUrl);
+                Assert.True(n1.IsActionable);
+
+                // Row 2: Renter other order link
+                var n2 = await context.Notifications.FindAsync(idRenterOther);
+                Assert.NotNull(n2);
+                Assert.Equal($"/orders/{orderId2}", n2.DeepLinkUrl);
+                Assert.Equal($"/orders/{orderId2}", n2.ActionUrl);
+                Assert.False(n2.IsActionable);
+
+                // Row 3: Supplier sub-order confirmation
+                var n3 = await context.Notifications.FindAsync(idSupplierSubOrder);
+                Assert.NotNull(n3);
+                Assert.Equal("/own/orders", n3.DeepLinkUrl);
+                Assert.Equal("/own/orders", n3.ActionUrl);
+                Assert.True(n3.IsActionable);
+
+                // Row 4: Supplier return
+                var n4 = await context.Notifications.FindAsync(idSupplierReturn);
+                Assert.NotNull(n4);
+                Assert.Equal("/own/orders", n4.DeepLinkUrl);
+                Assert.Equal("/own/orders", n4.ActionUrl);
+                Assert.True(n4.IsActionable);
+
+                // Row 5: Supplier settlement
+                var n5 = await context.Notifications.FindAsync(idSupplierSettlement);
+                Assert.NotNull(n5);
+                Assert.Equal("/own/orders", n5.DeepLinkUrl);
+                Assert.Null(n5.ActionUrl);
+                Assert.False(n5.IsActionable);
+
+                // Row 6: Supplier dispute resolution
+                var n6 = await context.Notifications.FindAsync(idSupplierDispute);
+                Assert.NotNull(n6);
+                Assert.Equal("/own/orders", n6.DeepLinkUrl);
+                Assert.Null(n6.ActionUrl);
+                Assert.False(n6.IsActionable);
+
+                // Row 7: Suppressed CTA - Invariant: must NOT restore suppressed CTAs!
+                var n7 = await context.Notifications.FindAsync(idSuppressedCta);
+                Assert.NotNull(n7);
+                Assert.Equal($"/orders/{orderId1}", n7.DeepLinkUrl);
+                Assert.Null(n7.ActionUrl);
+                Assert.False(n7.IsActionable);
+            }
+
+            // 5. Idempotency check: run MigrateAsync() a second time
+            await using (var context = new NotificationServiceDbContext(options))
+            {
+                await context.Database.MigrateAsync();
+
+                var n1Again = await context.Notifications.FindAsync(idRenterPayment);
+                Assert.NotNull(n1Again);
+                Assert.Equal($"/orders/{orderId1}", n1Again.DeepLinkUrl);
+                Assert.Equal($"/orders/{orderId1}", n1Again.ActionUrl);
+            }
+        }
+        finally
+        {
+            await TestEnvironment.DropDatabaseAsync(dbName);
+        }
+    }
 }

@@ -56,14 +56,14 @@ All user-facing templates are standardized in Vietnamese (`vi-VN`) and versioned
 - **Body**: `Đơn thuê {orderCode} đang chờ thanh toán {totalPayableAmount:N0} VND trước {paymentDeadline:HH:mm dd/MM/yyyy}.`
 - **IsActionable**: `true`
 - **CallToAction**: `Thanh toán ngay`
-- **DeepLinkUrl**: `/renter/orders/{rentalOrderId}`
-- **ActionUrl**: `/checkout/payment?orderId={rentalOrderId}`
+- **DeepLinkUrl**: `/orders/{rentalOrderId}`
+- **ActionUrl**: `/orders/{rentalOrderId}`
 
 ### 3.2. `ORDER_PAID` (Renter)
 - **Title**: `Thanh toán thành công đơn thuê #{orderCode}`
 - **Body**: `Đơn thuê {orderCode} đã thanh toán thành công {paidAmount:N0} VND. Nhà cung cấp sẽ chuẩn bị thiết bị để bàn giao.`
 - **IsActionable**: `false`
-- **DeepLinkUrl**: `/renter/orders/{rentalOrderId}`
+- **DeepLinkUrl**: `/orders/{rentalOrderId}`
 - **Email Subject**: `[DPRental] Xác nhận thanh toán thành công đơn thuê #{orderCode}`
 - **Email Body**: `Kính gửi Quý khách, DPRental xác nhận đã nhận thanh toán số tiền {paidAmount:N0} VND cho đơn thuê {orderCode}. Mã hóa đơn: {invoiceRef}.`
 
@@ -72,68 +72,70 @@ All user-facing templates are standardized in Vietnamese (`vi-VN`) and versioned
 - **Body**: `Bạn có yêu cầu thuê thiết bị mới cho đơn hàng {orderCode}. Vui lòng xác nhận trước {supplierConfirmationDeadline:HH:mm dd/MM/yyyy}.`
 - **IsActionable**: `true`
 - **CallToAction**: `Xem và xác nhận`
-- **DeepLinkUrl**: `/supplier/sub-orders/{rentalOrderId}`
-- **ActionUrl**: `/supplier/sub-orders/{rentalOrderId}/confirm`
+- **DeepLinkUrl**: `/own/orders`
+- **ActionUrl**: `/own/orders`
 - **Email Subject**: `[DPRental] Yêu cầu xác nhận đơn thuê #{orderCode}`
 
 ### 3.4. `ORDER_EXPIRED` (Renter)
 - **Title**: `Đơn thuê #{orderCode} đã hết hạn`
 - **Body**: `Đơn thuê {orderCode} đã hết hạn do quá thời gian quy định ({reason}). Thiết bị đã được giải phóng.`
 - **IsActionable**: `false`
-- **DeepLinkUrl**: `/renter/orders/{rentalOrderId}`
+- **DeepLinkUrl**: `/orders/{rentalOrderId}`
 
 ### 3.5. `ORDER_CANCELLED` (Renter)
 - **Title**: `Đơn thuê #{orderCode} đã bị hủy`
 - **Body**: `Đơn thuê {orderCode} đã bị hủy vì lý do: {reason}. Các khoản tiền liên quan sẽ được xử lý theo chính sách hoàn tiền.`
 - **IsActionable**: `false`
-- **DeepLinkUrl**: `/renter/orders/{rentalOrderId}`
+- **DeepLinkUrl**: `/orders/{rentalOrderId}`
 
 ### 3.6. `HANDOVER_COMPLETED` (Renter)
 - **Title**: `Bàn giao thiết bị thành công cho đơn thuê #{orderCode}`
 - **Body**: `Thiết bị trong đơn thuê {orderCode} đã được bàn giao thành công lúc {actualHandoverAt:HH:mm dd/MM/yyyy}. Chúc Quý khách có trải nghiệm thuê tốt đẹp.`
 - **IsActionable**: `false`
-- **DeepLinkUrl**: `/renter/orders/{rentalOrderId}`
+- **DeepLinkUrl**: `/orders/{rentalOrderId}`
 
 ### 3.7. `HANDOVER_OVERDUE_SUPPLIER` (Supplier)
 - **Title**: `CẢNH BÁO: Quá hạn bàn giao thiết bị đơn thuê #{orderCode}`
 - **Body**: `Đơn thuê {orderCode} đã quá hạn bàn giao dự kiến ({expectedStartDate:dd/MM/yyyy}). Vui lòng tiến hành bàn giao ngay hoặc liên hệ hỗ trợ.`
 - **IsActionable**: `true`
 - **CallToAction**: `Thực hiện bàn giao`
-- **DeepLinkUrl**: `/supplier/sub-orders/{rentalOrderId}/handover`
+- **DeepLinkUrl**: `/own/orders`
+- **ActionUrl**: `/own/orders`
 - **Email Subject**: `[Khẩn cấp] Đơn thuê #{orderCode} đã quá hạn bàn giao thiết bị`
 
 ### 3.8. `HANDOVER_OVERDUE_RENTER` (Renter)
 - **Title**: `Thông báo chậm trễ bàn giao đơn thuê #{orderCode}`
 - **Body**: `Đơn thuê {orderCode} hiện chưa được bàn giao theo lịch hẹn ({expectedStartDate:dd/MM/yyyy}). DPRental đang đôn đốc nhà cung cấp xử lý.`
 - **IsActionable**: `false`
-- **DeepLinkUrl**: `/renter/orders/{rentalOrderId}`
+- **DeepLinkUrl**: `/orders/{rentalOrderId}`
 
 ### 3.9. `RETURN_CONFIRMATION_OVERDUE_SUPPLIER` (Supplier)
 - **Title**: `CẢNH BÁO: Quá hạn kiểm tra thiết bị hoàn trả đơn thuê #{orderCode}`
 - **Body**: `Đã hết hạn xác nhận hoàn trả ({confirmationDeadlineAt:HH:mm dd/MM/yyyy}) cho đơn thuê {orderCode}. Vui lòng hoàn tất kiểm tra tình trạng máy.`
 - **IsActionable**: `true`
 - **CallToAction**: `Kiểm tra hoàn trả`
-- **DeepLinkUrl**: `/supplier/returns/{returnRequestId}`
+- **DeepLinkUrl**: `/own/orders`
+- **ActionUrl**: `/own/orders`
 - **Email Subject**: `[Khẩn cấp] Quá hạn xác nhận hoàn trả thiết bị đơn thuê #{orderCode}`
 
 ### 3.10. `RETURN_CONFIRMATION_OVERDUE_RENTER` (Renter)
 - **Title**: `Đang chờ nhà cung cấp xác nhận hoàn trả đơn thuê #{orderCode}`
 - **Body**: `Nhà cung cấp đang chậm trễ kiểm tra thiết bị hoàn trả cho đơn thuê {orderCode}. Hệ thống sẽ tự động hoàn tất nếu nhà cung cấp không phản hồi.`
 - **IsActionable**: `false`
-- **DeepLinkUrl**: `/renter/orders/{rentalOrderId}`
+- **DeepLinkUrl**: `/orders/{rentalOrderId}`
 
 ### 3.11. `ORDER_COMPLETED` (Renter)
 - **Title**: `Đơn thuê #{orderCode} đã hoàn tất`
 - **Body**: `Đơn thuê {orderCode} đã hoàn tất toàn bộ chu kỳ thuê và quyết toán cọc vào lúc {completedAt:HH:mm dd/MM/yyyy}. Cảm ơn Quý khách!`
 - **IsActionable**: `false`
-- **DeepLinkUrl**: `/renter/orders/{rentalOrderId}`
+- **DeepLinkUrl**: `/orders/{rentalOrderId}`
 - **Email Subject**: `[DPRental] Đơn thuê #{orderCode} đã hoàn tất chu kỳ thuê`
 
 ### 3.12. `LATE_PAYMENT_REFUND_REQUESTED` (Renter) — CRITICAL FINANCIAL WORDING
 - **Title**: `Yêu cầu hoàn tiền đơn thuê #{orderCode}`
 - **Body**: `Khoản thanh toán {totalRefundAmount:N0} VND cho đơn thuê {orderCode} (do thanh toán sau khi đơn đã kết thúc) đang được xử lý hoàn tiền. Vui lòng theo dõi tiến độ xử lý tại chi tiết đơn.`
 - **IsActionable**: `false`
-- **DeepLinkUrl**: `/renter/orders/{rentalOrderId}`
+- **DeepLinkUrl**: `/orders/{rentalOrderId}`
 - **FINANCIAL WORDING INVARIANT**:
   - The notification body **MUST ONLY ASSERT**: *"Yêu cầu hoàn tiền đang được xử lý"* or *"Khoản thanh toán đang chờ xử lý hoàn tiền"*.
   - It is **STRICTLY FORBIDDEN** to assert *"Đã hoàn tiền thành công"* or *"Tiền đã chuyển về tài khoản của bạn"* because PaymentService has only received the request and has not settled the refund.

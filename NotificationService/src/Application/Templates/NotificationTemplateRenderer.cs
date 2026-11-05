@@ -55,15 +55,15 @@ public sealed partial class NotificationTemplateRenderer : INotificationTemplate
         {
             if (safeData.TryGetValue("rentalOrderId", out var rId) && rId != null && !string.IsNullOrWhiteSpace(rId.ToString()))
             {
-                safeData["deepLinkUrl"] = $"/renter/orders/{rId}";
+                safeData["deepLinkUrl"] = $"/orders/{rId}";
             }
             else if (safeData.TryGetValue("settlementId", out var sId) && sId != null && !string.IsNullOrWhiteSpace(sId.ToString()))
             {
-                safeData["deepLinkUrl"] = $"/supplier/settlements/{sId}";
+                safeData["deepLinkUrl"] = "/own/orders";
             }
             else if (safeData.TryGetValue("payoutId", out var pId) && pId != null && !string.IsNullOrWhiteSpace(pId.ToString()))
             {
-                safeData["deepLinkUrl"] = $"/supplier/settlements/{pId}";
+                safeData["deepLinkUrl"] = "/own/orders";
             }
         }
 
