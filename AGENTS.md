@@ -69,7 +69,7 @@ RecommendationService/src/
 - Không chứa quyết định nghiệp vụ và không trực tiếp gọi DbContext hay database để né Application Service.
 ---
 
-## 3. Nguyên Lý SOLID & Thiết Kế
+## 3. Nguyên Lý SOLID, DRY & Thiết Kế
 
 - **SRP (Single Responsibility)**: Mỗi class, service, controller hoặc hàm chỉ tập trung giải quyết một trách nhiệm cụ thể. Giữ kích thước file và hàm vừa phải:
   - Một phương thức/hàm không nên vượt quá 50 dòng code nếu không có lý do đặc thù.
@@ -78,6 +78,7 @@ RecommendationService/src/
 - **LSP (Liskov Substitution)**: Mọi implementation phải tuân thủ nghiêm ngặt contract của abstraction (kiểu trả về, mã lỗi, hành vi biên); không giả vờ thành công hoặc âm thầm trả về tập rỗng cho chức năng chưa hỗ trợ.
 - **ISP (Interface Segregation)**: Interface nhỏ gọn, thiết kế xoay quanh nhu cầu thực tế của consumer. Không dùng CRUD interface chung kiểu `IRepo<TEntity, TKey>`; mỗi aggregate/use case định nghĩa contract repository nhỏ và chuyên biệt theo đúng nhu cầu.
 - **DIP (Dependency Inversion)**: Các tầng cấp cao phụ thuộc vào abstraction persistence qua Dependency Injection; không khởi tạo concrete repository bằng `new`.
+- **DRY (Don't Repeat Yourself)**: Loại bỏ trùng lặp tri thức và logic tính toán đề xuất; mỗi thuật toán xếp hạng, quy tắc lọc hoặc mapping dữ liệu chỉ được biểu diễn tại một nơi duy nhất. Tái sử dụng các helper, policy và service dùng chung thay vì sao chép code; không vội vàng trừu tượng hóa khi hai khối xử lý chỉ tương đồng ngẫu nhiên.
 
 ---
 
