@@ -815,7 +815,7 @@ public sealed class Phase3ConcurrencyAndStaleEmailSuppressionIntegrationTests
                 TemplateVersion = "1.0",
                 RenderDataJson = $"{{\"displayOrderCode\":\"RNT-P3-01\",\"confirmationDeadlineAt\":\"2026-11-04T12:00:00Z\",\"rentalItemId\":\"{itemId}\",\"returnRequestId\":\"{returnRequestId}\"}}",
                 IsActionable = true,
-                ActionUrl = $"/supplier/returns/{returnRequestId}",
+                ActionUrl = "/own/orders",
                 OccurredAt = DateTimeOffset.UtcNow,
                 CreatedAt = DateTimeOffset.UtcNow
             };
@@ -1083,7 +1083,7 @@ public sealed class Phase3ConcurrencyAndStaleEmailSuppressionIntegrationTests
                 TemplateVersion = "1.0",
                 RenderDataJson = $"{{\"displayOrderCode\":\"RNT-P3-A\",\"confirmationDeadlineAt\":\"2026-11-04T12:00:00Z\",\"rentalItemId\":\"{itemAId}\"}}",
                 IsActionable = true,
-                ActionUrl = $"/supplier/returns/{returnReqAId}",
+                ActionUrl = "/own/orders",
                 OccurredAt = DateTimeOffset.UtcNow,
                 CreatedAt = DateTimeOffset.UtcNow
             };
@@ -1124,7 +1124,7 @@ public sealed class Phase3ConcurrencyAndStaleEmailSuppressionIntegrationTests
                 TemplateVersion = "1.0",
                 RenderDataJson = $"{{\"displayOrderCode\":\"RNT-P3-B\",\"confirmationDeadlineAt\":\"2026-11-04T12:00:00Z\",\"rentalItemId\":\"{itemBId}\"}}",
                 IsActionable = true,
-                ActionUrl = $"/supplier/returns/{returnReqBId}",
+                ActionUrl = "/own/orders",
                 OccurredAt = DateTimeOffset.UtcNow,
                 CreatedAt = DateTimeOffset.UtcNow
             };

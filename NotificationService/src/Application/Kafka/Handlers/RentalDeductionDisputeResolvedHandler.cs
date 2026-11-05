@@ -42,7 +42,7 @@ public sealed class RentalDeductionDisputeResolvedHandler : IKafkaEventHandler
                 ["rentalItemId"] = itemId.Value,
                 ["decision"] = decision,
                 ["finalDeductionAmount"] = payload.GetDecimalOrDefault("finalDeductionAmount"),
-                ["deepLinkUrl"] = $"/renter/orders/{orderId.Value}"
+                ["deepLinkUrl"] = $"/orders/{orderId.Value}"
             },
             RentalItemId: itemId.Value));
     }

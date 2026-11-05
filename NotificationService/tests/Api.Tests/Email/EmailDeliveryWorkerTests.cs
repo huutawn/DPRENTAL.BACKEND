@@ -1139,7 +1139,7 @@ public sealed class EmailDeliveryWorkerTests
                 ["completedAt"] = DateTimeOffset.UtcNow,
                 ["refundRef"] = "REF-9999",
                 ["refundKind"] = "FULL_CANCELLATION",
-                ["deepLinkUrl"] = $"/renter/orders/{orderId}"
+                ["deepLinkUrl"] = $"/orders/{orderId}"
             }),
             TemplateCode = "REFUND_COMPLETED",
             TemplateVersion = "1.0",

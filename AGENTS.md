@@ -35,13 +35,14 @@ Giữ nguyên cấu trúc project hiện tại của service (`Domain`, `Applica
 
 ---
 
-## 3. Nguyên Lý SOLID & Thiết Kế
+## 3. Nguyên Lý SOLID, DRY & Thiết Kế
 
 - **SRP (Single Responsibility)**: Mỗi class, service hoặc handler chỉ tập trung giải quyết một trách nhiệm nghiệp vụ hoặc một event/channel cụ thể; tránh các god service ôm đồm toàn bộ template và luồng gửi.
 - **OCP (Open/Closed)**: Tận dụng các component và abstraction sẵn có (`INotificationEventHandler`, `IEmailSender`, `ITemplateRenderer`); mở rộng bằng cách thêm handler hoặc template mới theo contract; không sửa đổi cấu trúc core consumer khi chỉ thêm loại event.
 - **LSP (Liskov Substitution)**: Mọi implementation phải tuân thủ nghiêm ngặt contract của abstraction (kiểu trả về, mã lỗi, hành vi biên); không giả vờ thành công hoặc âm thầm bỏ qua lỗi đối với channel chưa sẵn sàng.
 - **ISP (Interface Segregation)**: Interface nhỏ gọn, thiết kế xoay quanh nhu cầu thực tế của consumer (tách biệt `INotificationQueryService`, `INotificationReadService`, `IEmailDeliveryService`); không tạo interface máy móc kiểu 1-class-1-interface nếu không có nhu cầu thực tế.
 - **DIP (Dependency Inversion)**: Các tầng cấp cao phụ thuộc vào abstraction thông qua Dependency Injection; tầng Domain hoàn toàn độc lập, không tham chiếu ngược lại tầng Application hay API.
+- **DRY (Don't Repeat Yourself)**: Triệt tiêu sự trùng lặp template, logic định tuyến thông báo và mapping dữ liệu; mỗi quy tắc format, URL redirect hoặc payload notification chỉ được quản lý tại một nguồn chân lý duy nhất. Tái sử dụng template renderer, contact resolver và handler abstractions thay vì sao chép mã nguồn.
 
 ---
 
