@@ -6,6 +6,7 @@ using System.Text.Json;
 using Dprental.ReviewService.Application.DTOs.Rental;
 using Dprental.ReviewService.Application.DTOs.Reviews;
 using Xunit;
+using Microsoft.AspNetCore.Hosting;
 
 namespace Dprental.ReviewService.Api.Tests;
 
@@ -39,7 +40,7 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
         var adminId = Guid.NewGuid();
         var token = _fixture.GenerateJwt(adminId, userType: "cus", role: "adm");
 
-        using var request = CreateRequest(HttpMethod.Get, "/api/v1/admin/reviews/reports", token: token);
+        using var request = CreateRequest(HttpMethod.Get, "/api/v1/reviews/admin/reports", token: token);
         using var response = await _client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -51,7 +52,7 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
         var adminId = Guid.NewGuid();
         var token = _fixture.GenerateJwt(adminId, userType: "cus", role: "Admin");
 
-        using var request = CreateRequest(HttpMethod.Get, "/api/v1/admin/reviews/reports", token: token);
+        using var request = CreateRequest(HttpMethod.Get, "/api/v1/reviews/admin/reports", token: token);
         using var response = await _client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -63,7 +64,7 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
         var serviceId = Guid.NewGuid();
         var token = _fixture.GenerateJwt(serviceId, userType: "svc", role: "adm");
 
-        using var request = CreateRequest(HttpMethod.Get, "/api/v1/admin/reviews/reports", token: token);
+        using var request = CreateRequest(HttpMethod.Get, "/api/v1/reviews/admin/reports", token: token);
         using var response = await _client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -79,7 +80,7 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
             role: "Customer",
             extraClaims: new[] { new Claim("adm", "true") });
 
-        using var request = CreateRequest(HttpMethod.Get, "/api/v1/admin/reviews/reports", token: token);
+        using var request = CreateRequest(HttpMethod.Get, "/api/v1/reviews/admin/reports", token: token);
         using var response = await _client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -91,7 +92,7 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
         var customerId = Guid.NewGuid();
         var token = _fixture.GenerateJwt(customerId, userType: "cus", role: "Customer");
 
-        using var request = CreateRequest(HttpMethod.Get, "/api/v1/admin/reviews/reports", token: token);
+        using var request = CreateRequest(HttpMethod.Get, "/api/v1/reviews/admin/reports", token: token);
         using var response = await _client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -126,7 +127,7 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
 
         using var hideReq = CreateRequest(
             HttpMethod.Post,
-            $"/api/v1/admin/reviews/{detail.ReviewId}/hide",
+            $"/api/v1/reviews/admin/{detail.ReviewId}/hide",
             hideBody,
             adminToken,
             Guid.NewGuid().ToString("N"),
@@ -151,7 +152,7 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
 
         using var hideReq = CreateRequest(
             HttpMethod.Post,
-            $"/api/v1/admin/reviews/{Guid.NewGuid()}/hide",
+            $"/api/v1/reviews/admin/{Guid.NewGuid()}/hide",
             hideBody,
             serviceToken,
             Guid.NewGuid().ToString("N"),
@@ -174,7 +175,7 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
 
         using var hideReq = CreateRequest(
             HttpMethod.Post,
-            $"/api/v1/admin/reviews/{Guid.NewGuid()}/hide",
+            $"/api/v1/reviews/admin/{Guid.NewGuid()}/hide",
             hideBody,
             token,
             Guid.NewGuid().ToString("N"),
@@ -211,7 +212,7 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
         // 1. Hide
         using var hideReq = CreateRequest(
             HttpMethod.Post,
-            $"/api/v1/admin/reviews/{detail.ReviewId}/hide",
+            $"/api/v1/reviews/admin/{detail.ReviewId}/hide",
             new AdminModerationRequest("Tạm ẩn"),
             adminToken,
             Guid.NewGuid().ToString("N"),
@@ -222,7 +223,7 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
         // 2. Restore với r="adm"
         using var restoreReq = CreateRequest(
             HttpMethod.Post,
-            $"/api/v1/admin/reviews/{detail.ReviewId}/restore",
+            $"/api/v1/reviews/admin/{detail.ReviewId}/restore",
             new AdminModerationRequest("Đã duyệt lại hợp lệ"),
             adminToken,
             Guid.NewGuid().ToString("N"),
@@ -246,7 +247,7 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
 
         using var restoreReq = CreateRequest(
             HttpMethod.Post,
-            $"/api/v1/admin/reviews/{Guid.NewGuid()}/restore",
+            $"/api/v1/reviews/admin/{Guid.NewGuid()}/restore",
             new AdminModerationRequest("Khôi phục"),
             serviceToken,
             Guid.NewGuid().ToString("N"),
@@ -296,7 +297,7 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
 
         using var resolveReq = CreateRequest(
             HttpMethod.Post,
-            $"/api/v1/admin/reviews/reports/{report.Id}/resolve",
+            $"/api/v1/reviews/admin/reports/{report.Id}/resolve",
             new ResolveReviewReportRequest("ReviewedDismissed"),
             adminToken,
             Guid.NewGuid().ToString("N"));
@@ -316,13 +317,54 @@ public sealed class AdminReviewsControllerTests : IClassFixture<ReviewTestFixtur
 
         using var resolveReq = CreateRequest(
             HttpMethod.Post,
-            $"/api/v1/admin/reviews/reports/{Guid.NewGuid()}/resolve",
+            $"/api/v1/reviews/admin/reports/{Guid.NewGuid()}/resolve",
             new ResolveReviewReportRequest("ReviewedDismissed"),
             serviceToken,
             Guid.NewGuid().ToString("N"));
 
         using var res = await _client.SendAsync(resolveReq);
         Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("GET", "/api/v1/reviews/admin/reports")]
+    [InlineData("POST", "/api/v1/reviews/admin/11111111-1111-1111-1111-111111111111/hide")]
+    [InlineData("POST", "/api/v1/reviews/admin/11111111-1111-1111-1111-111111111111/restore")]
+    [InlineData("POST", "/api/v1/reviews/admin/reports/11111111-1111-1111-1111-111111111111/resolve")]
+    public async Task AdminRoutes_RequireAuthentication(string method, string path)
+    {
+        using var request = new HttpRequestMessage(new HttpMethod(method), path);
+        using var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("GET", "/api/v1/admin/reviews/reports")]
+    [InlineData("POST", "/api/v1/admin/reviews/11111111-1111-1111-1111-111111111111/hide")]
+    [InlineData("POST", "/api/v1/admin/reviews/11111111-1111-1111-1111-111111111111/restore")]
+    [InlineData("POST", "/api/v1/admin/reviews/reports/11111111-1111-1111-1111-111111111111/resolve")]
+    public async Task ReplacedAdminRoutes_Return404(string method, string path)
+    {
+        var token = _fixture.GenerateJwt(Guid.NewGuid(), role: "adm");
+        using var request = CreateRequest(new HttpMethod(method), path, token: token);
+        using var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Swagger_OnlyDocumentsCurrentAdminRoutes()
+    {
+        using var factory = _fixture.WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+        using var client = factory.CreateClient();
+        using var response = await client.GetAsync("/swagger/v1/swagger.json");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths");
+        foreach (string path in new[] { "/api/v1/reviews/admin/{reviewId}/hide", "/api/v1/reviews/admin/{reviewId}/restore", "/api/v1/reviews/admin/reports", "/api/v1/reviews/admin/reports/{reportId}/resolve" })
+        {
+            Assert.True(paths.TryGetProperty(path, out _), path);
+        }
+        Assert.DoesNotContain(paths.EnumerateObject(), path => path.Name.StartsWith("/api/v1/admin/reviews", StringComparison.Ordinal));
     }
 
     private static HttpRequestMessage CreateRequest(

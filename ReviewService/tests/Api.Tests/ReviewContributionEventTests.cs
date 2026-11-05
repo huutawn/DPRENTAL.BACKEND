@@ -336,7 +336,7 @@ public sealed class ReviewContributionEventTests : IClassFixture<ReviewTestFixtu
         var adminToken = _fixture.GenerateJwt(Guid.NewGuid(), userType: "cus", role: "adm");
         using var hideReq = CreateRequest(
             HttpMethod.Post,
-            $"/api/v1/admin/reviews/{detail.ReviewId}/hide",
+            $"/api/v1/reviews/admin/{detail.ReviewId}/hide",
             new AdminModerationRequest("Ẩn vi phạm"),
             adminToken,
             Guid.NewGuid().ToString("N"),
@@ -391,7 +391,7 @@ public sealed class ReviewContributionEventTests : IClassFixture<ReviewTestFixtu
         // 1. Hide
         using var hideReq = CreateRequest(
             HttpMethod.Post,
-            $"/api/v1/admin/reviews/{detail.ReviewId}/hide",
+            $"/api/v1/reviews/admin/{detail.ReviewId}/hide",
             new AdminModerationRequest("Tạm ẩn"),
             adminToken,
             Guid.NewGuid().ToString("N"),
@@ -401,7 +401,7 @@ public sealed class ReviewContributionEventTests : IClassFixture<ReviewTestFixtu
         // 2. Restore
         using var restoreReq = CreateRequest(
             HttpMethod.Post,
-            $"/api/v1/admin/reviews/{detail.ReviewId}/restore",
+            $"/api/v1/reviews/admin/{detail.ReviewId}/restore",
             new AdminModerationRequest("Khôi phục"),
             adminToken,
             Guid.NewGuid().ToString("N"),
@@ -466,7 +466,7 @@ public sealed class ReviewContributionEventTests : IClassFixture<ReviewTestFixtu
         var adminToken = _fixture.GenerateJwt(Guid.NewGuid(), userType: "cus", role: "adm");
         using var resolveReq = CreateRequest(
             HttpMethod.Post,
-            $"/api/v1/admin/reviews/reports/{report.Id}/resolve",
+            $"/api/v1/reviews/admin/reports/{report.Id}/resolve",
             new ResolveReviewReportRequest("ReviewedHidden"),
             adminToken,
             Guid.NewGuid().ToString("N"));

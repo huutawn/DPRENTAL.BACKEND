@@ -115,7 +115,7 @@ stateDiagram-v2
    - Báo cáo được lưu vào bảng `review_reports` với trạng thái `PendingReview` để chờ Admin xử lý.
 2. **Kiểm duyệt bởi Quản trị viên:**
    - Admin kiểm tra báo cáo và nội dung review.
-   - Nếu vi phạm: Gọi `POST /api/v1/admin/reviews/{reviewId}/hide` kèm `If-Match: "<version>"` $\rightarrow$ Đổi `moderationState = 'Hidden'`, tăng `version = version + 1`, ghi audit log.
+   - Nếu vi phạm: Gọi `POST /api/v1/reviews/admin/{reviewId}/hide` kèm `If-Match: "<version>"` $\rightarrow$ Đổi `moderationState = 'Hidden'`, tăng `version = version + 1`, ghi audit log.
    - Nếu không vi phạm: Đóng báo cáo với trạng thái `ReviewedDismissed`.
 
 ---

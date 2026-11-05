@@ -13,7 +13,7 @@ public static class ApiRoutes
 
 /// <summary>
 /// Ghép tiền tố <see cref="ApiRoutes.Prefix"/> vào trước route của mọi controller trong API assembly,
-/// cho phép controller chỉ khai báo route tương đối (như [Route("reviews")], [Route("admin/reviews")]).
+/// cho phép controller chỉ khai báo route tương đối (như [Route("reviews")], [Route("reviews/admin")]).
 /// </summary>
 public sealed class ApiRoutePrefixConvention : IApplicationModelConvention
 {

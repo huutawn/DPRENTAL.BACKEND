@@ -238,13 +238,13 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
         // Người dùng thường gọi endpoint admin/hide -> 403 Forbidden
         var normalUser = Guid.NewGuid();
         var hideBody = new AdminModerationRequest("Vi phạm tiêu chuẩn.");
-        using var forbidReq = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/{detail.ReviewId}/hide", hideBody, GenerateJwt(normalUser, role: "customer"), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        using var forbidReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/admin/{detail.ReviewId}/hide", hideBody, GenerateJwt(normalUser, role: "customer"), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
         using var forbidRes = await _client.SendAsync(forbidReq);
         Assert.Equal(HttpStatusCode.Forbidden, forbidRes.StatusCode);
 
         // Admin gọi endpoint admin/hide -> 200 OK
         var adminId = Guid.NewGuid();
-        using var adminReq = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/{detail.ReviewId}/hide", hideBody, GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        using var adminReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/admin/{detail.ReviewId}/hide", hideBody, GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
         using var adminRes = await _client.SendAsync(adminReq);
 
         Assert.Equal(HttpStatusCode.OK, adminRes.StatusCode);
@@ -274,12 +274,12 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
 
         var adminId = Guid.NewGuid();
         // 1. Hide
-        using var hideReq = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/{detail.ReviewId}/hide",
+        using var hideReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/admin/{detail.ReviewId}/hide",
             new AdminModerationRequest("Lý do ẩn"), GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
         await _client.SendAsync(hideReq);
 
         // 2. Restore
-        using var restoreReq = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/{detail.ReviewId}/restore",
+        using var restoreReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/admin/{detail.ReviewId}/restore",
             new AdminModerationRequest("Khôi phục"), GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"), ifMatch: "\"2\"");
         using var restoreRes = await _client.SendAsync(restoreReq);
 
@@ -382,13 +382,13 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
 
         // Admin resolve lần 1 -> 200 OK
         var adminId = Guid.NewGuid();
-        using var resolveReq1 = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/reports/{report.Id}/resolve",
+        using var resolveReq1 = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/admin/reports/{report.Id}/resolve",
             new ResolveReviewReportRequest("ReviewedDismissed"), GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"));
         var resolveRes1 = await _client.SendAsync(resolveReq1);
         Assert.Equal(HttpStatusCode.OK, resolveRes1.StatusCode);
 
         // Admin resolve lần 2 -> 409 Conflict (đã giải quyết)
-        using var resolveReq2 = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/reports/{report.Id}/resolve",
+        using var resolveReq2 = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/admin/reports/{report.Id}/resolve",
             new ResolveReviewReportRequest("ReviewedHidden"), GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"));
         var resolveRes2 = await _client.SendAsync(resolveReq2);
         Assert.Equal(HttpStatusCode.Conflict, resolveRes2.StatusCode);
@@ -484,7 +484,7 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
 
         // Admin hides the review
         var adminId = Guid.NewGuid();
-        using var hideReq = CreateRequest(HttpMethod.Post, $"/api/v1/admin/reviews/{detail.ReviewId}/hide",
+        using var hideReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/admin/{detail.ReviewId}/hide",
             new AdminModerationRequest("Vi phạm tiêu chuẩn"), GenerateJwt(adminId, role: "Admin"), Guid.NewGuid().ToString("N"), ifMatch: "\"2\"");
         var hideRes = await _client.SendAsync(hideReq);
         Assert.Equal(HttpStatusCode.OK, hideRes.StatusCode);
