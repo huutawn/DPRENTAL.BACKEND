@@ -76,3 +76,38 @@ với dữ liệu lớn, contract chuyên biệt phải hỗ trợ phân trang.
 Template test kiểm tra Result invariant, ánh xạ error và exception qua HTTP ở
 Production, gồm fallback khi client không nhận JSON. Không sao chép mã lỗi,
 constraint database hay dependency đặc thù nghiệp vụ AuthService.
+
+## CI/CD dev
+
+Workflow `.github/workflows/reviewservice-dev.yml` chạy khi push vào
+`review/develop-ci-cd`, theo pipeline Rental: validate deployment scripts, publish
+runtime/migrator, kiểm tra quyền đọc GHCR rồi deploy bằng entrypoint quản trị.
+Hai image `dprental-review` và `dprental-review-migrator` dùng tag full commit SHA.
+Environment `dev` cần `GHCR_IMAGE_NAMESPACE` và `DEV_DEPLOY_ENABLED=true`;
+runner mang label `dprental-deploy`. Credentials đi qua stdin, không qua argv.
+
+Gateway được cập nhật trên `gateway/develop`: ba GET listing/supplier/summary
+được anonymous, các API Review/admin còn lại cần Bearer. Review tự kiểm tra
+quyền admin/người dùng. CORS cho phép `If-Match` và expose `ETag`. Các route
+Review đứng sau Rental trong thứ tự merge nên giữ nguyên chỉ số route cũ.
+
+Pre-deploy ở `/opt/dprental/dev` dùng database/role `reviewservice` riêng trên
+PostgreSQL hiện có, cấu hình `REVIEW_POSTGRES_DB`, `REVIEW_POSTGRES_USER`,
+`REVIEW_POSTGRES_PASSWORD`, cùng hai image mapping `REVIEW_SERVICE_IMAGE` và
+`REVIEW_MIGRATOR_IMAGE`. Secret chỉ nằm trong `.env` root-only. Các API key
+Rental/Media lấy từ cấu hình nội bộ hiện có; JWT dùng JWKS của AuthService.
+Compose và examples tại `../deploy/dev` là nguồn cấu hình triển khai.
+
+Pre-deploy chỉ chuẩn bị cấu hình/database rỗng; không chạy migration hoặc
+restart container. Tag `predeploy` là placeholder, không phải image phát hành.
+Trước lần deploy đầu, publish và deploy Gateway chứa routes Review, rồi push
+Review workflow. `dprental-deploy review <SHA>` tạo candidate image mappings
+từ SHA thực tế, pull image, kiểm tra dependencies, backup database Review,
+chạy migrator, recreate riêng Review và kiểm tra readiness/API qua Gateway.
+Chỉ ghi release thành công sau khi các checks pass.
+
+Deployment dùng lock/journal chung và không tự rollback schema. Nếu lỗi sau
+mutation, xem `/opt/dprental/dev/.deployment-pending` cùng journal tương ứng
+trong `.deployments`; quản trị viên cần đánh giá database/container và recovery
+trước khi gỡ pending. Không tự xóa pending để retry mù. Backup cấu hình trước
+pre-deploy nằm trong `/opt/dprental/dev/backups/review-predeploy-*`.
