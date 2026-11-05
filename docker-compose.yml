@@ -201,6 +201,26 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+      # [43] Review
+      - Routes__43__DownstreamScheme=${REVIEW_SERVICE_SCHEME:-http}
+      - Routes__43__DownstreamHostAndPorts__0__Host=${REVIEW_SERVICE_HOST:-review-service}
+      - Routes__43__DownstreamHostAndPorts__0__Port=${REVIEW_SERVICE_PORT:-8080}
+      # [44] Review
+      - Routes__44__DownstreamScheme=${REVIEW_SERVICE_SCHEME:-http}
+      - Routes__44__DownstreamHostAndPorts__0__Host=${REVIEW_SERVICE_HOST:-review-service}
+      - Routes__44__DownstreamHostAndPorts__0__Port=${REVIEW_SERVICE_PORT:-8080}
+      # [45] Review
+      - Routes__45__DownstreamScheme=${REVIEW_SERVICE_SCHEME:-http}
+      - Routes__45__DownstreamHostAndPorts__0__Host=${REVIEW_SERVICE_HOST:-review-service}
+      - Routes__45__DownstreamHostAndPorts__0__Port=${REVIEW_SERVICE_PORT:-8080}
+      # [46] Review
+      - Routes__46__DownstreamScheme=${REVIEW_SERVICE_SCHEME:-http}
+      - Routes__46__DownstreamHostAndPorts__0__Host=${REVIEW_SERVICE_HOST:-review-service}
+      - Routes__46__DownstreamHostAndPorts__0__Port=${REVIEW_SERVICE_PORT:-8080}
+      # [47] Review
+      - Routes__47__DownstreamScheme=${REVIEW_SERVICE_SCHEME:-http}
+      - Routes__47__DownstreamHostAndPorts__0__Host=${REVIEW_SERVICE_HOST:-review-service}
+      - Routes__47__DownstreamHostAndPorts__0__Port=${REVIEW_SERVICE_PORT:-8080}
     networks:
       - dprental-network
 
