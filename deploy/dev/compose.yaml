@@ -1,6 +1,50 @@
 name: dprental-dev
 
 services:
+  review-service:
+    image: ${REVIEW_SERVICE_IMAGE:?Set REVIEW_SERVICE_IMAGE in release.env}
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Staging}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${REVIEW_POSTGRES_DB:?Set
+        REVIEW_POSTGRES_DB};Username=${REVIEW_POSTGRES_USER:?Set REVIEW_POSTGRES_USER};Password=${REVIEW_POSTGRES_PASSWORD:?Set
+        REVIEW_POSTGRES_PASSWORD}
+      Authentication__Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER}
+      Authentication__Jwt__Audience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE}
+      Authentication__Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
+      Kafka__BootstrapServers: kafka:9092
+      RentalService__BaseUrl: http://rental-service:8080
+      RentalService__ApiKey: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
+      MediaService__BaseUrl: http://media-service:8080
+      MediaService__ApiKey: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      rental-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+    - services
+  review-migrate:
+    image: ${REVIEW_MIGRATOR_IMAGE:?Set REVIEW_MIGRATOR_IMAGE in release.env}
+    profiles:
+    - migration
+    restart: 'no'
+    environment:
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${REVIEW_POSTGRES_DB:?Set
+        REVIEW_POSTGRES_DB};Username=${REVIEW_POSTGRES_USER:?Set REVIEW_POSTGRES_USER};Password=${REVIEW_POSTGRES_PASSWORD:?Set
+        REVIEW_POSTGRES_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+    - services
   caddy:
     image: ${CADDY_IMAGE:?Set CADDY_IMAGE in .env}
     restart: unless-stopped
@@ -27,35 +71,156 @@ services:
     image: ${GATEWAY_IMAGE:?Set GATEWAY_IMAGE in .env}
     restart: unless-stopped
     environment:
+      Routes__0__DownstreamHostAndPorts__0__Host: analytics-service
+      Routes__0__DownstreamHostAndPorts__0__Port: 8080
+      Routes__0__DownstreamScheme: http
+      Routes__1__DownstreamHostAndPorts__0__Host: analytics-service
+      Routes__1__DownstreamHostAndPorts__0__Port: 8080
+      Routes__1__DownstreamScheme: ws
+      Routes__2__DownstreamHostAndPorts__0__Host: analytics-service
+      Routes__2__DownstreamHostAndPorts__0__Port: 8080
+      Routes__2__DownstreamScheme: http
+      Routes__3__DownstreamHostAndPorts__0__Host: analytics-service
+      Routes__3__DownstreamHostAndPorts__0__Port: 8080
+      Routes__3__DownstreamScheme: http
+      Routes__4__DownstreamHostAndPorts__0__Host: auth-service
+      Routes__4__DownstreamHostAndPorts__0__Port: 8080
+      Routes__4__DownstreamScheme: http
+      Routes__5__DownstreamHostAndPorts__0__Host: auth-service
+      Routes__5__DownstreamHostAndPorts__0__Port: 8080
+      Routes__5__DownstreamScheme: http
+      Routes__6__DownstreamHostAndPorts__0__Host: auth-service
+      Routes__6__DownstreamHostAndPorts__0__Port: 8080
+      Routes__6__DownstreamScheme: http
+      Routes__7__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__7__DownstreamHostAndPorts__0__Port: 8080
+      Routes__7__DownstreamScheme: http
+      Routes__8__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__8__DownstreamHostAndPorts__0__Port: 8080
+      Routes__8__DownstreamScheme: http
+      Routes__9__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__9__DownstreamHostAndPorts__0__Port: 8080
+      Routes__9__DownstreamScheme: http
+      Routes__10__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__10__DownstreamHostAndPorts__0__Port: 8080
+      Routes__10__DownstreamScheme: http
+      Routes__11__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__11__DownstreamHostAndPorts__0__Port: 8080
+      Routes__11__DownstreamScheme: http
+      Routes__12__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__12__DownstreamHostAndPorts__0__Port: 8080
+      Routes__12__DownstreamScheme: http
+      Routes__13__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__13__DownstreamHostAndPorts__0__Port: 8080
+      Routes__13__DownstreamScheme: http
+      Routes__14__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__14__DownstreamHostAndPorts__0__Port: 8080
+      Routes__14__DownstreamScheme: http
+      Routes__15__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__15__DownstreamHostAndPorts__0__Port: 8080
+      Routes__15__DownstreamScheme: http
+      Routes__16__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__16__DownstreamHostAndPorts__0__Port: 8080
+      Routes__16__DownstreamScheme: http
+      Routes__17__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__17__DownstreamHostAndPorts__0__Port: 8080
+      Routes__17__DownstreamScheme: http
+      Routes__18__DownstreamHostAndPorts__0__Host: catalog-service
+      Routes__18__DownstreamHostAndPorts__0__Port: 8080
+      Routes__18__DownstreamScheme: http
+      Routes__19__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__19__DownstreamHostAndPorts__0__Port: 8080
+      Routes__19__DownstreamScheme: http
+      Routes__20__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__20__DownstreamHostAndPorts__0__Port: 8080
+      Routes__20__DownstreamScheme: http
+      Routes__21__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__21__DownstreamHostAndPorts__0__Port: 8080
+      Routes__21__DownstreamScheme: http
+      Routes__22__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__22__DownstreamHostAndPorts__0__Port: 8080
+      Routes__22__DownstreamScheme: http
+      Routes__23__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__23__DownstreamHostAndPorts__0__Port: 8080
+      Routes__23__DownstreamScheme: http
+      Routes__24__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__24__DownstreamHostAndPorts__0__Port: 8080
+      Routes__24__DownstreamScheme: http
+      Routes__25__DownstreamHostAndPorts__0__Host: inventory-service
+      Routes__25__DownstreamHostAndPorts__0__Port: 8080
+      Routes__25__DownstreamScheme: http
+      Routes__26__DownstreamHostAndPorts__0__Host: media-service
+      Routes__26__DownstreamHostAndPorts__0__Port: 8080
+      Routes__26__DownstreamScheme: http
+      Routes__27__DownstreamHostAndPorts__0__Host: media-service
+      Routes__27__DownstreamHostAndPorts__0__Port: 8080
+      Routes__27__DownstreamScheme: http
+      Routes__28__DownstreamHostAndPorts__0__Host: media-service
+      Routes__28__DownstreamHostAndPorts__0__Port: 8080
+      Routes__28__DownstreamScheme: http
+      Routes__29__DownstreamHostAndPorts__0__Host: notification-service
+      Routes__29__DownstreamHostAndPorts__0__Port: 8080
+      Routes__29__DownstreamScheme: http
+      Routes__30__DownstreamHostAndPorts__0__Host: notification-service
+      Routes__30__DownstreamHostAndPorts__0__Port: 8080
+      Routes__30__DownstreamScheme: http
+      Routes__31__DownstreamHostAndPorts__0__Host: notification-service
+      Routes__31__DownstreamHostAndPorts__0__Port: 8080
+      Routes__31__DownstreamScheme: ws
+      Routes__32__DownstreamHostAndPorts__0__Host: notification-service
+      Routes__32__DownstreamHostAndPorts__0__Port: 8080
+      Routes__32__DownstreamScheme: http
+      Routes__33__DownstreamHostAndPorts__0__Host: notification-service
+      Routes__33__DownstreamHostAndPorts__0__Port: 8080
+      Routes__33__DownstreamScheme: http
+      Routes__34__DownstreamHostAndPorts__0__Host: payment-service
+      Routes__34__DownstreamHostAndPorts__0__Port: 8080
+      Routes__34__DownstreamScheme: http
+      Routes__35__DownstreamHostAndPorts__0__Host: payment-service
+      Routes__35__DownstreamHostAndPorts__0__Port: 8080
+      Routes__35__DownstreamScheme: ws
+      Routes__36__DownstreamHostAndPorts__0__Host: payment-service
+      Routes__36__DownstreamHostAndPorts__0__Port: 8080
+      Routes__36__DownstreamScheme: http
+      Routes__37__DownstreamHostAndPorts__0__Host: payment-service
+      Routes__37__DownstreamHostAndPorts__0__Port: 8080
+      Routes__37__DownstreamScheme: http
+      Routes__38__DownstreamHostAndPorts__0__Host: recommendation-service
+      Routes__38__DownstreamHostAndPorts__0__Port: 8080
+      Routes__38__DownstreamScheme: http
+      Routes__39__DownstreamHostAndPorts__0__Host: rental-service
+      Routes__39__DownstreamHostAndPorts__0__Port: 8080
+      Routes__39__DownstreamScheme: http
+      Routes__40__DownstreamHostAndPorts__0__Host: rental-service
+      Routes__40__DownstreamHostAndPorts__0__Port: 8080
+      Routes__40__DownstreamScheme: ws
+      Routes__41__DownstreamHostAndPorts__0__Host: rental-service
+      Routes__41__DownstreamHostAndPorts__0__Port: 8080
+      Routes__41__DownstreamScheme: http
+      Routes__42__DownstreamHostAndPorts__0__Host: rental-service
+      Routes__42__DownstreamHostAndPorts__0__Port: 8080
+      Routes__42__DownstreamScheme: http
+      Routes__43__DownstreamHostAndPorts__0__Host: review-service
+      Routes__43__DownstreamHostAndPorts__0__Port: 8080
+      Routes__43__DownstreamScheme: http
+      Routes__44__DownstreamHostAndPorts__0__Host: review-service
+      Routes__44__DownstreamHostAndPorts__0__Port: 8080
+      Routes__44__DownstreamScheme: http
+      Routes__45__DownstreamHostAndPorts__0__Host: review-service
+      Routes__45__DownstreamHostAndPorts__0__Port: 8080
+      Routes__45__DownstreamScheme: http
+      Routes__46__DownstreamHostAndPorts__0__Host: review-service
+      Routes__46__DownstreamHostAndPorts__0__Port: 8080
+      Routes__46__DownstreamScheme: http
+      Routes__47__DownstreamHostAndPorts__0__Host: review-service
+      Routes__47__DownstreamHostAndPorts__0__Port: 8080
+      Routes__47__DownstreamScheme: http
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Staging}
       ASPNETCORE_URLS: http://+:8080
       Gateway__Authentication__Jwt__Issuer: ${AUTH_JWT_ISSUER:?Set AUTH_JWT_ISSUER in .env}
       Gateway__Authentication__Jwt__Audience: ${AUTH_JWT_AUDIENCE:?Set AUTH_JWT_AUDIENCE in .env}
       Gateway__Authentication__Jwt__JwksUri: http://auth-service:8080/.well-known/jwks.json
-      Routes__0__DownstreamHostAndPorts__0__Port: 8080
-      Routes__1__DownstreamHostAndPorts__0__Port: 8080
-      Routes__2__DownstreamHostAndPorts__0__Port: 8080
       Gateway__Authentication__Jwt__InventoryAudience: ${INVENTORY_JWT_SERVICE_AUDIENCE:-inventory-api}
-      Routes__6__DownstreamHostAndPorts__0__Host: inventory-service
-      Routes__6__DownstreamHostAndPorts__0__Port: 8080
-      Routes__7__DownstreamHostAndPorts__0__Host: inventory-service
-      Routes__7__DownstreamHostAndPorts__0__Port: 8080
-      Routes__8__DownstreamHostAndPorts__0__Host: catalog-service
-      Routes__8__DownstreamHostAndPorts__0__Port: 8080
-      Routes__9__DownstreamHostAndPorts__0__Host: catalog-service
-      Routes__9__DownstreamHostAndPorts__0__Port: 8080
-      Routes__10__DownstreamHostAndPorts__0__Host: catalog-service
-      Routes__10__DownstreamHostAndPorts__0__Port: 8080
-      Routes__11__DownstreamHostAndPorts__0__Host: catalog-service
-      Routes__11__DownstreamHostAndPorts__0__Port: 8080
-      Routes__12__DownstreamHostAndPorts__0__Host: catalog-service
-      Routes__12__DownstreamHostAndPorts__0__Port: 8080
-      Routes__13__DownstreamHostAndPorts__0__Host: catalog-service
-      Routes__13__DownstreamHostAndPorts__0__Port: 8080
-      Routes__14__DownstreamHostAndPorts__0__Host: inventory-service
-      Routes__14__DownstreamHostAndPorts__0__Port: 8080
-      Routes__15__DownstreamHostAndPorts__0__Host: inventory-service
-      Routes__15__DownstreamHostAndPorts__0__Port: 8080
       GlobalConfiguration__BaseUrl: https://${DEV_DOMAIN:?Set DEV_DOMAIN in .env}
       Gateway__Security__Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN_0:?Set CORS_ALLOWED_ORIGIN_0 in .env}
       Gateway__Security__ForwardedHeaders__KnownNetworks__0: ${EDGE_NETWORK_CIDR:-172.30.0.0/24}
