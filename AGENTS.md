@@ -32,6 +32,15 @@ Domain models and contracts must stay free of HTTP, SQL, and MinIO types even th
 - Modify or replace an existing implementation before adding another. Remove obsolete code, adapters, configuration, tests, and documentation after replacement. Temporary coexistence requires a documented reason, owner, removal condition, and tests. Avoid `V2`, `New`, and `Legacy` names used to hide parallel paths.
 - Keep interfaces small and owned by their consumer. Do not add ceremonial abstractions or placeholder business types. Prefer capability-focused folders and reasonably sized files over global `Services`, `Helpers`, or `Utils` dumping grounds.
 
+## SOLID and DRY engineering principles
+
+- **SRP (Single Responsibility Principle)**: Each class, service, handler, or repository method must focus on a single business responsibility or media capability; avoid god services or monolithic processors.
+- **OCP (Open/Closed Principle)**: Leverage existing components and abstractions; extend media behavior through established pipelines and strategies rather than modifying stable core pipelines without requirement.
+- **LSP (Liskov Substitution Principle)**: Implementations must strictly adhere to abstraction contracts (return types, error codes, edge cases); never pretend success or silently ignore upload/storage failures.
+- **ISP (Interface Segregation Principle)**: Keep interfaces small, cohesive, and driven by consumer needs (e.g., separating media storage, metadata querying, and media processing); do not introduce artificial 1:1 interfaces without distinct consumers.
+- **DIP (Dependency Inversion Principle)**: High-level modules depend on abstractions via Dependency Injection; Domain and Application layers must never depend on Api transport or concrete third-party SDK adapters directly.
+- **DRY (Don't Repeat Yourself)**: Eliminate duplicate knowledge and business logic; media URL parsing, MIME validation, thumbnail calculations, and storage keys must have a single authoritative definition. Reuse existing helpers, policies, and contracts rather than duplicating logic across handlers.
+
 ## Use-case and boundary rules
 
 - Application is the authoritative place for semantic input validation, permission checks, ownership checks, media state rules, idempotency decisions, and orchestration. Validate every entry to a use case, including calls that do not originate from HTTP. Api may reject malformed HTTP and map Application outcomes to HTTP; it must not repeat business rules.
