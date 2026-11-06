@@ -280,7 +280,7 @@ public sealed class ItemCancellationService : IItemCancellationService
             {
                 // Ghi event/command vào Outbox; enqueue thành công chỉ xác nhận đã lưu ý định gửi, chưa xác nhận service đích đã thực thi.
                 var orderCancelledRes = await _rentalEvents.EnqueueRentalOrderCancelledAsync(
-                    new RentalOrderCancelledPayload(order.Id, order.RenterId, utcNow, KafkaContractSpec.ReasonCodes.HandoverNotDelivered, order.Version),
+                    new RentalOrderCancelledPayload(order.Id, order.RenterId, utcNow, KafkaContractSpec.ReasonCodes.HandoverNotDelivered, order.OrderCode, order.Version),
                     correlationId: normalizedKey,
                     cancellationToken: cancellationToken);
                 // Không ghi tiếp khi bước xử lý lỗi: rollback phần đang làm và bỏ thay đổi tracked trước khi trả lỗi.
