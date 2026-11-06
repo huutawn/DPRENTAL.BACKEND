@@ -63,10 +63,10 @@ public sealed class KafkaOptions
     public int LeaseDurationSeconds { get; set; } = 30;
     /// <summary>Số bản tin tối đa publisher xử lý mỗi vòng; claim lần lượt từng bản tin.</summary>
     public int MaxBatchPerRound { get; set; } = 50;
-    /// <summary>Khoảng nghỉ giữa các vòng quét Outbox, tính bằng giây.</summary>
-    public int OutboxPollingIntervalSeconds { get; set; } = 15;
-    /// <summary>Khoảng nghỉ giữa các vòng xử lý Inbox đến lịch retry, tính bằng giây.</summary>
-    public int InboxPollingIntervalSeconds { get; set; } = 15;
+    /// <summary>Thời gian nghỉ khi vòng quét Outbox không gửi được bản tin nào, tính bằng giây; còn việc thì publisher chạy vòng tiếp ngay.</summary>
+    public int OutboxPollingIntervalSeconds { get; set; } = 1;
+    /// <summary>Thời gian nghỉ khi vòng xử lý Inbox không xử lý được bản tin nào, tính bằng giây; còn việc thì worker chạy vòng tiếp ngay.</summary>
+    public int InboxPollingIntervalSeconds { get; set; } = 1;
     /// <summary>Ngân sách flush producer khi publisher dừng, tính bằng giây.</summary>
     public int ShutdownTimeoutSeconds { get; set; } = 15;
     /// <summary>Thời gian tối đa một lần poll broker chờ bản tin, tính bằng mili giây.</summary>
