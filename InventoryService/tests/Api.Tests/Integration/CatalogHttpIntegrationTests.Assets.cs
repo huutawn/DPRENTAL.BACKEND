@@ -83,6 +83,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame", resolution = "4K" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" },
         };
 
@@ -277,6 +278,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             mediaIds = new[] { thumbId },
             thumbnailMediaId = thumbId
@@ -378,6 +380,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -469,6 +472,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { resolution = 123 },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -601,6 +605,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             mediaIds = new[] { thumbId },
             thumbnailMediaId = thumbId
@@ -677,6 +682,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             mediaIds = new[] { thumbId },
             thumbnailMediaId = thumbId
@@ -750,6 +756,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -817,6 +824,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -894,6 +902,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 3,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -971,6 +980,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 

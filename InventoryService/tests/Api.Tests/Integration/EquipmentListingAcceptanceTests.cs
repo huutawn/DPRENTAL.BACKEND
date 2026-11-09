@@ -148,6 +148,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 1_000_000m,
             rentalRate = new { dailyRate = 500_000m, currency = "VND" }
         };
 
@@ -608,6 +609,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             specValues = new { sensor = "Full-Frame" },
             mediaIds = new[] { vid1, img1, img2 },
             thumbnailMediaId = img2,
+            depositAmount = 1_000_000m,
             rentalRate = new { dailyRate = 500_000m, currency = "VND" }
         };
 
@@ -690,6 +692,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             model = "FX3",
             serialNumber = "SN-BAD-YEAR",
             specValues = new { },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
         var missingYearResp = await client.PostAsync("api/v1/inventory/equipment-listings",
@@ -842,6 +845,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 1_000_000m,
             rentalRate = new { dailyRate = 500_000m, currency = "VND" }
         };
         var respDefault = await client.PostAsync("api/v1/inventory/equipment-listings",
@@ -863,7 +867,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
-            rentalRate = new { dailyRate = 500_000m, currency = "VND" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             depositAmount = 500_000m
         };
         var respCustom = await client.PostAsync("api/v1/inventory/equipment-listings",
@@ -944,7 +948,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
-            rentalRate = new { dailyRate = 500_000m, currency = "VND" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             depositAmount = 500_000m
         };
         var createResp = await client.PostAsync("api/v1/inventory/equipment-listings",

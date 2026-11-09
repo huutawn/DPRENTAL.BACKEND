@@ -4,6 +4,7 @@ using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Mapping;
 using Dprental.InventoryService.Application.Security;
+using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Domain.Entities;
@@ -97,6 +98,13 @@ public sealed partial class EquipmentListingService
         if (depositValidation.IsFailure)
         {
             return depositValidation.Error;
+        }
+
+        var depositRateValidation = ListingDepositValidator.ValidateDepositExceedsDailyRate(
+            targetDeposit, request.RentalRate.DailyRate!.Value);
+        if (depositRateValidation.IsFailure)
+        {
+            return depositRateValidation.Error;
         }
 
 
@@ -479,6 +487,14 @@ public sealed partial class EquipmentListingService
 
             if (request.IsDepositAmountSpecified)
             {
+                // So với giá thuê đọc trong transaction, không dùng snapshot đọc trước đó vì có thể đã cũ.
+                var depositRateValidation = ListingDepositValidator.ValidateDepositExceedsDailyRate(
+                    request.DepositAmount!.Value, listing.DailyRate);
+                if (depositRateValidation.IsFailure)
+                {
+                    return depositRateValidation.Error;
+                }
+
                 var depRes = listing.UpdateDepositAmount(request.DepositAmount!.Value, now);
                 if (depRes.IsFailure)
                 {
@@ -557,6 +573,14 @@ public sealed partial class EquipmentListingService
             if (listing.Version != snapshot.Version)
             {
                 return Error.Conflict("STALE_INVENTORY_WRITE", "Dữ liệu Listing đã được thay đổi; đọc lại trước khi thử lại.");
+            }
+
+            // Tăng giá thuê không được làm cọc hiện tại tụt xuống bằng hoặc thấp hơn giá mới.
+            var depositRateValidation = ListingDepositValidator.ValidateDepositExceedsDailyRate(
+                listing.DepositAmount, request.DailyRate!.Value);
+            if (depositRateValidation.IsFailure)
+            {
+                return depositRateValidation.Error;
             }
 
             var now = _timeProvider.GetUtcNow();
