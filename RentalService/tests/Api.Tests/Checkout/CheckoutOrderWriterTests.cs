@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using Dprental.RentalService.Api.Tests.Domain;
 using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.DTOs.Settlement;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Common;
@@ -95,6 +96,7 @@ public sealed class CheckoutOrderWriterTests
         orders ?? new RentalOrderRepository(context),
         new RentalCartRepository(context),
         orderCodes ?? _orderCodes,
+        new DamageLevelRepository(context),
         unitOfWork ?? context,
         NullLogger<CheckoutOrderWriter>.Instance);
 
@@ -207,6 +209,26 @@ public sealed class CheckoutOrderWriterTests
         Assert.Equal("VCB", refund.RootElement.GetProperty("bankCode").GetString());
         Assert.Equal("0123456789", refund.RootElement.GetProperty("accountNumber").GetString());
         Assert.Equal("NGUYỄN VĂN A", refund.RootElement.GetProperty("accountHolderName").GetString());
+    }
+
+    [Fact]
+    public async Task CreateOrder_SnapshotsDamageLevelsIntoEveryItem()
+    {
+        IReadOnlyList<CheckoutHeldLine> held = await HoldAsync(_plan);
+
+        await using RentalServiceDbContext writeContext = NewContext();
+        writeContext.Database.EnsureCreated(); // InMemory chỉ nạp dữ liệu seed khi EnsureCreated.
+        await CreateWriter(writeContext).CreateOrderAsync(_plan, held, OperationId, Now);
+
+        await using RentalServiceDbContext readContext = NewContext();
+        RentalOrder order = (await new RentalOrderRepository(readContext).GetByCheckoutOperationIdAsync(OperationId))!;
+
+        Assert.All(order.Items, item =>
+        {
+            var levels = DamageLevelSnapshot.Deserialize(item.DamageLevelsSnapshot)!;
+            Assert.Equal([0, 10, 30, 50, 100], levels.Select(l => l.Percent));
+            Assert.Equal([0, 1, 2, 3, 4], levels.Select(l => l.Level));
+        });
     }
 
     [Fact]

@@ -36,7 +36,7 @@ public sealed class DeductionService(
         // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (supplier.IsFailure) return supplier.Error;
         // Kiểm tra dữ liệu tùy chọn hoặc kết quả tra cứu trước khi dùng; xử lý riêng trường hợp không có giá trị.
-        if (request is null || request.EvidenceMediaIds is null || request.AffectedAssetIds is null)
+        if (request is null || request.EvidenceMediaIds is null || request.Assessments is null)
             return Error.Validation("INVALID_DEDUCTION_REQUEST", "Deduction request is incomplete.");
         // Từ chối key rỗng hoặc vượt giới hạn lưu trữ để mỗi thao tác có thể được nhận diện khi client gửi lại.
         if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Trim().Length > 64)
@@ -63,10 +63,9 @@ public sealed class DeductionService(
         {
             ItemId = itemId,
             SupplierId = supplierId,
-            request.DeductionAmount,
+            Assessments = request.Assessments.OrderBy(a => a.AssetId),
             DamageDescription = request.DamageDescription?.Trim(),
-            EvidenceMediaIds = request.EvidenceMediaIds.OrderBy(x => x),
-            AffectedAssetIds = request.AffectedAssetIds.OrderBy(x => x)
+            EvidenceMediaIds = request.EvidenceMediaIds.OrderBy(x => x)
         });
         string fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
         // Trả kết quả đã lưu trước khi kiểm tra deadline/trạng thái hiện tại: retry hợp lệ
@@ -87,8 +86,12 @@ public sealed class DeductionService(
 
         // Lấy mốc thời gian cho lần kiểm tra này; các deadline được đối chiếu với mốc của bước xử lý tương ứng.
         DateTimeOffset now = clock.GetUtcNow();
-        var validation = item.ValidateDeductionSubmission(supplierId, request.DeductionAmount,
-            request.DamageDescription, request.EvidenceMediaIds, request.AffectedAssetIds, now);
+        var calculated = DeductionCalculator.Calculate(item, request.Assessments);
+        if (calculated.IsFailure) return calculated.Error;
+        decimal amount = calculated.Value.Total;
+        IReadOnlyList<Guid> affectedAssetIds = calculated.Value.AffectedAssetIds;
+        var validation = item.ValidateDeductionSubmission(supplierId, amount,
+            request.DamageDescription, request.EvidenceMediaIds, affectedAssetIds, now);
         // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (validation.IsFailure) return validation.Error;
         var evidence = await RentalEvidenceValidator.ValidateAndVerifyEvidenceAsync(
@@ -99,8 +102,8 @@ public sealed class DeductionService(
         // Lấy lại thời gian sau xác minh Media; SubmitDeduction kiểm tra theo mốc mới,
         // tránh nhận đề xuất đã quá hạn trong lúc chờ service bên ngoài.
         now = clock.GetUtcNow();
-        var submitted = item.SubmitDeduction(supplierId, request.DeductionAmount,
-            request.DamageDescription!, request.EvidenceMediaIds, request.AffectedAssetIds, now);
+        var submitted = item.SubmitDeduction(supplierId, amount,
+            request.DamageDescription!, request.EvidenceMediaIds, affectedAssetIds, now);
         // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (submitted.IsFailure) return submitted.Error;
         var proposal = submitted.Value;

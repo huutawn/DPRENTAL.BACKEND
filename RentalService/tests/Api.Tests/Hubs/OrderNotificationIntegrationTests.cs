@@ -331,7 +331,7 @@ public sealed class OrderNotificationIntegrationTests
         var operations = new RentalCheckoutOperationRepository(db);
         var outbox = new OutboxRepository(db);
         var inventoryCommands = new InventoryCommandProducer(outbox, Options.Create(new KafkaOptions { Enabled = true }), harness.Clock);
-        var orderWriter = new CheckoutOrderWriter(orders, carts, harness.OrderCodes, db, NullLogger<CheckoutOrderWriter>.Instance);
+        var orderWriter = new CheckoutOrderWriter(orders, carts, harness.OrderCodes, new DamageLevelRepository(db), db, NullLogger<CheckoutOrderWriter>.Instance);
         var rentalEvents = new RentalEventProducer(new KafkaOutboxWriter(outbox), Options.Create(new KafkaOptions { Enabled = true }), harness.Clock);
         var invoiceIssuer = new CheckoutInvoiceIssuer(harness.Payment, orders, operations, db, harness.Clock, NullLogger<CheckoutInvoiceIssuer>.Instance, notifier);
 

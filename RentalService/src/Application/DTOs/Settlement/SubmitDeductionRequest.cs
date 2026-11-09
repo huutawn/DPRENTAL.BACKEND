@@ -1,10 +1,12 @@
-﻿namespace Dprental.RentalService.Application.DTOs.Settlement;
+namespace Dprental.RentalService.Application.DTOs.Settlement;
+
+/// <summary>Mức hư hại supplier chọn cho một máy; số tiền do hệ thống tính.</summary>
+public sealed record DamageAssessment(Guid AssetId, int Level);
 
 public sealed record SubmitDeductionRequest(
-    decimal DeductionAmount,
+    IReadOnlyList<DamageAssessment> Assessments,
     string DamageDescription,
-    IReadOnlyList<Guid> EvidenceMediaIds,
-    IReadOnlyList<Guid> AffectedAssetIds);
+    IReadOnlyList<Guid> EvidenceMediaIds);
 
 public sealed record SubmitDeductionResponse(
     Guid ProposalId,

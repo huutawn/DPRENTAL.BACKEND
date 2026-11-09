@@ -30,6 +30,7 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
     public DbSet<ReturnRequestResolutionUnit> ReturnRequestResolutionUnits => Set<ReturnRequestResolutionUnit>();
     public DbSet<DeductionProposal> DeductionProposals => Set<DeductionProposal>();
     public DbSet<Dispute> Disputes => Set<Dispute>();
+    public DbSet<DamageLevel> DamageLevels => Set<DamageLevel>();
     public DbSet<RentalOperationReceipt> RentalOperationReceipts => Set<RentalOperationReceipt>();
     public DbSet<RentalInboxMessage> RentalInboxMessages => Set<RentalInboxMessage>();
     public DbSet<RentalOutboxMessage> RentalOutboxMessages => Set<RentalOutboxMessage>();
@@ -169,6 +170,16 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
         });
 
         // RentalItem
+        modelBuilder.Entity<DamageLevel>(b =>
+        {
+            b.HasData(
+                new { Level = 0, Name = "Không hư", Description = "Máy nguyên vẹn, không khấu trừ.", Percent = 0 },
+                new { Level = 1, Name = "Nhẹ", Description = "Hư hại nhẹ, không ảnh hưởng vận hành.", Percent = 10 },
+                new { Level = 2, Name = "Vừa", Description = "Hư hại vừa, cần sửa chữa.", Percent = 30 },
+                new { Level = 3, Name = "Nặng", Description = "Hư hại nặng, sửa chữa tốn kém.", Percent = 50 },
+                new { Level = 4, Name = "Hỏng hoàn toàn", Description = "Máy không còn sử dụng được.", Percent = 100 });
+        });
+
         modelBuilder.Entity<RentalItem>(b =>
         {
             b.Property(i => i.DailyRateSnapshot)
