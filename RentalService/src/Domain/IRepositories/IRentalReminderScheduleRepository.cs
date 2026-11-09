@@ -78,4 +78,18 @@ public interface IRentalReminderScheduleRepository
         Guid? afterId,
         int pageSize,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ReminderBackfillCandidate>> GetHandoverBackfillCandidatesAsync(
+        Guid? afterItemId,
+        int batchSize,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ReminderBackfillCandidate>> GetReturnBackfillCandidatesAsync(
+        Guid? afterItemId,
+        int batchSize,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> TryCreateScheduleIfMissingAsync(
+        RentalReminderSchedule schedule,
+        CancellationToken cancellationToken = default);
 }

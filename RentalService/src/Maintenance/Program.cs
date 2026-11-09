@@ -2,6 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.IServices.Reminders;
+using Dprental.RentalService.Application.Services.Reminders;
+using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Repositories;
@@ -89,6 +92,35 @@ public static partial class Program
 
             return await RunReplayAsync(optionsBuilder.Options, messageId);
         }
+        else if (command is "backfill-reminders" or "backfill-reminder-schedules")
+        {
+            int batchSize = 100;
+            Guid? checkpoint = null;
+
+            for (int i = 1; i < args.Length; i++)
+            {
+                if ((args[i] == "--batch-size" || args[i] == "-b") && i + 1 < args.Length && int.TryParse(args[i + 1], out int bs))
+                {
+                    batchSize = bs;
+                    i++;
+                }
+                else if ((args[i] == "--checkpoint" || args[i] == "-c") && i + 1 < args.Length && Guid.TryParse(args[i + 1], out var cp))
+                {
+                    checkpoint = cp;
+                    i++;
+                }
+            }
+
+            try
+            {
+                return await RunReminderBackfillAsync(optionsBuilder.Options, apply, batchSize, checkpoint);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Reminder backfill failed: {ex.Message}");
+                return 1;
+            }
+        }
         else
         {
             Console.Error.WriteLine($"Unknown command '{args[0]}'.");
@@ -115,6 +147,7 @@ public static partial class Program
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- reconcile-return-requests [--apply]");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- reconcile-refund-confirmations [--apply]");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- replay-outbox --message-id <Guid>");
+        Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- backfill-reminders [--apply] [--batch-size N] [--checkpoint <guid>]");
     }
 
     public static async Task<int> RunBackfillAsync(
@@ -468,5 +501,84 @@ public static partial class Program
 
         await output.WriteLineAsync($"Reconciliation complete. Total updated: {totalUpdated} unit(s).");
         return totalUpdated;
+    }
+
+    public static async Task<int> RunReminderBackfillAsync(
+        DbContextOptions<RentalServiceDbContext> dbOptions,
+        bool apply,
+        int batchSize = 100,
+        Guid? checkpoint = null,
+        TextWriter? output = null,
+        CancellationToken cancellationToken = default)
+    {
+        output ??= Console.Out;
+        await output.WriteLineAsync($"=== Backfill Reminder Schedules (Mode: {(apply ? "APPLY" : "DRY-RUN")}, BatchSize: {batchSize}, Checkpoint: {checkpoint?.ToString() ?? "None"}) ===");
+
+        if (batchSize <= 0) batchSize = 100;
+
+        var services = new ServiceCollection();
+        services.AddSingleton(dbOptions);
+        services.AddScoped(sp => new RentalServiceDbContext(dbOptions));
+        services.AddScoped<IRentalReminderScheduleRepository, RentalReminderScheduleRepository>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddLogging();
+
+        await using (var testDb = new RentalServiceDbContext(dbOptions))
+        {
+            if (testDb.Database.IsNpgsql())
+            {
+                string connString = testDb.Database.GetConnectionString() ?? "";
+                var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:Postgres"] = connString
+                }).Build();
+                services.AddSingleton<IConfiguration>(config);
+                services.AddSingleton<IOrderLockManager, PostgresOrderLockManager>();
+            }
+            else
+            {
+                services.AddSingleton<IOrderLockManager, NoOpOrderLockManager>();
+            }
+        }
+
+        services.AddScoped<IRentalReminderBackfillService>(sp =>
+            new RentalReminderBackfillService(
+                sp.GetRequiredService<IServiceScopeFactory>(),
+                sp.GetRequiredService<IOrderLockManager>(),
+                sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RentalReminderBackfillService>>()));
+        await using var provider = services.BuildServiceProvider();
+
+        using var scope = provider.CreateScope();
+        var backfillService = scope.ServiceProvider.GetRequiredService<IRentalReminderBackfillService>();
+
+        var result = await backfillService.BackfillActiveItemsAsync(
+            batchSize: batchSize,
+            startAfterItemId: checkpoint,
+            apply: apply,
+            onBatchCompleted: progress =>
+            {
+                output.WriteLine($"Batch {progress.BatchNumber}: Handover created: {progress.HandoverCreated}, Return created: {progress.ReturnCreated}, Checkpoint: {progress.LastProcessedItemId}");
+            },
+            cancellationToken: cancellationToken);
+
+        await output.WriteLineAsync($"Backfill completed: {result.HandoverSchedulesCreated} Handover schedule(s), {result.ReturnSchedulesCreated} Return schedule(s) created across {result.TotalBatches} batch(es). Final Checkpoint: {result.LastProcessedItemId?.ToString() ?? "None"}.");
+
+        return 0;
+    }
+
+    private sealed class NoOpOrderLockManager : IOrderLockManager
+    {
+        private sealed class Releaser : IAsyncDisposable
+        {
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+        private static readonly IAsyncDisposable SharedReleaser = new Releaser();
+
+        public Task<IAsyncDisposable> AcquireOrderLockAsync(Guid orderId, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(SharedReleaser);
+
+        public Task<IAsyncDisposable> AcquireRenterLockAsync(Guid renterUserId, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(SharedReleaser);
     }
 }

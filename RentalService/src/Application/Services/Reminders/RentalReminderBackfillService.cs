@@ -3,17 +3,41 @@ using Dprental.RentalService.Application.IServices.Reminders;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Reminders;
 
 public sealed class RentalReminderBackfillService : IRentalReminderBackfillService
 {
-    private readonly RentalServiceDbContext _dbContext;
+    private readonly IServiceScopeFactory? _scopeFactory;
+    private readonly RentalServiceDbContext? _dbContext;
+    private readonly IRentalReminderScheduleRepository? _scheduleRepo;
+    private readonly IOrderLockManager? _lockManager;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RentalReminderBackfillService> _logger;
+
+    private sealed class NoOpAsyncDisposable : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+    private static readonly IAsyncDisposable NoOpLock = new NoOpAsyncDisposable();
+
+    [ActivatorUtilitiesConstructor]
+    public RentalReminderBackfillService(
+        IServiceScopeFactory scopeFactory,
+        IOrderLockManager orderLockManager,
+        TimeProvider timeProvider,
+        ILogger<RentalReminderBackfillService> logger)
+    {
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        _lockManager = orderLockManager ?? throw new ArgumentNullException(nameof(orderLockManager));
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
 
     public RentalReminderBackfillService(
         RentalServiceDbContext dbContext,
@@ -21,114 +45,218 @@ public sealed class RentalReminderBackfillService : IRentalReminderBackfillServi
         ILogger<RentalReminderBackfillService> logger)
     {
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+        _scheduleRepo = new RentalReminderScheduleRepository(dbContext);
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _lockManager = null;
     }
 
-    public async Task<BackfillResult> BackfillActiveItemsAsync(int batchSize = 100, CancellationToken cancellationToken = default)
+    public async Task<BackfillResult> BackfillActiveItemsAsync(
+        int batchSize = 100,
+        Guid? startAfterItemId = null,
+        bool apply = true,
+        Action<BackfillProgress>? onBatchCompleted = null,
+        CancellationToken cancellationToken = default)
     {
-        int handoverCreated = 0;
-        int returnCreated = 0;
+        if (batchSize <= 0) batchSize = 100;
+
+        int totalHandoverCreated = 0;
+        int totalReturnCreated = 0;
         int totalBatches = 0;
-        DateTimeOffset now = _timeProvider.GetUtcNow();
+        Guid? lastProcessedItemId = startAfterItemId;
 
-        // 1. Backfill Handover schedules for AwaitingHandover items
-        Guid? lastItemId = null;
-        while (!cancellationToken.IsCancellationRequested)
+        RentalItemStatus? checkpointStatus = await GetCheckpointItemStatusAsync(startAfterItemId, cancellationToken);
+
+        bool skipHandover = checkpointStatus == RentalItemStatus.InRental;
+        Guid? handoverLastItemId = skipHandover ? null : startAfterItemId;
+        Guid? returnLastItemId = skipHandover ? startAfterItemId : null;
+
+        // 1. Handover phase for AwaitingHandover items
+        if (!skipHandover)
         {
-            var query = _dbContext.RentalItems
-                .Where(i => i.Status == RentalItemStatus.AwaitingHandover
-                         && !_dbContext.RentalReminderSchedules.Any(s => s.RentalItemId == i.Id && s.ScheduleType == RentalReminderScheduleType.Handover));
-
-            if (lastItemId.HasValue)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                query = query.Where(i => i.Id > lastItemId.Value);
-            }
+                DateTimeOffset batchNow = _timeProvider.GetUtcNow();
 
-            var batch = await query
-                .OrderBy(i => i.Id)
-                .Take(batchSize)
-                .Select(i => new { i.Id, i.RentalOrderId, i.ExpectedStartDate, i.Quantity })
-                .ToListAsync(cancellationToken);
+                using var batchScope = _scopeFactory?.CreateScope();
+                var repo = batchScope != null
+                    ? batchScope.ServiceProvider.GetRequiredService<IRentalReminderScheduleRepository>()
+                    : (_scheduleRepo ?? new RentalReminderScheduleRepository(_dbContext!));
+                var lockMgr = batchScope?.ServiceProvider.GetService<IOrderLockManager>() ?? _lockManager;
 
-            if (batch.Count == 0) break;
+                var candidates = await repo.GetHandoverBackfillCandidatesAsync(handoverLastItemId, batchSize, cancellationToken);
+                if (candidates.Count == 0) break;
 
-            totalBatches++;
-            lastItemId = batch[^1].Id;
+                totalBatches++;
+                handoverLastItemId = candidates[^1].ItemId;
+                lastProcessedItemId = handoverLastItemId;
+                int batchHandoverCreated = 0;
 
-            foreach (var item in batch)
-            {
-                var triggerAt = RentalReminderPolicy.CalculateInitialTriggerAt(RentalReminderScheduleType.Handover, item.ExpectedStartDate, now);
-                var schedule = RentalReminderSchedule.Create(
-                    item.RentalOrderId,
-                    item.Id,
-                    RentalReminderScheduleType.Handover,
-                    item.Quantity,
-                    triggerAt,
-                    now);
-                await _dbContext.RentalReminderSchedules.AddAsync(schedule, cancellationToken);
-                handoverCreated++;
-            }
-
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            _logger.LogInformation("Backfilled batch {Batch}: {Count} Handover schedules created", totalBatches, batch.Count);
-        }
-
-        // 2. Backfill Return schedules for InRental items
-        lastItemId = null;
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            var query = _dbContext.RentalItems
-                .Where(i => i.Status == RentalItemStatus.InRental
-                         && !_dbContext.RentalReminderSchedules.Any(s => s.RentalItemId == i.Id && s.ScheduleType == RentalReminderScheduleType.Return));
-
-            if (lastItemId.HasValue)
-            {
-                query = query.Where(i => i.Id > lastItemId.Value);
-            }
-
-            var batch = await query
-                .OrderBy(i => i.Id)
-                .Take(batchSize)
-                .Select(i => new
+                var orderGroups = candidates.GroupBy(c => c.OrderId);
+                foreach (var group in orderGroups)
                 {
-                    i.Id,
-                    i.RentalOrderId,
-                    i.ExpectedEndDate,
-                    i.Quantity,
-                    ReturnedCount = i.UnitAssignments.Count(u => u.ReturnRecordId != null),
-                    PendingUnits = i.ReturnRequests.SelectMany(r => r.Units).Count(u => u.ClosedAt == null && u.RejectedAt == null)
-                })
-                .ToListAsync(cancellationToken);
+                    Guid orderId = group.Key;
+                    await using var orderLock = lockMgr != null
+                        ? await lockMgr.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(15), cancellationToken)
+                        : NoOpLock;
 
-            if (batch.Count == 0) break;
+                    foreach (var candidate in group)
+                    {
+                        var eval = RentalReminderPolicy.Evaluate(
+                            RentalReminderScheduleType.Handover,
+                            candidate.TargetDate,
+                            lastNotifiedDate: null,
+                            overdueDayCount: 0,
+                            batchNow);
 
-            totalBatches++;
-            lastItemId = batch[^1].Id;
+                        if (eval.Action == ReminderPolicyAction.WindowExpired)
+                        {
+                            _logger.LogInformation("Item {ItemId} Handover schedule skipped: WindowExpired", candidate.ItemId);
+                            continue;
+                        }
 
-            foreach (var item in batch)
-            {
-                int remaining = Math.Max(0, item.Quantity - (item.ReturnedCount + item.PendingUnits));
-                DateTimeOffset? triggerAt = remaining > 0
-                    ? RentalReminderPolicy.CalculateInitialTriggerAt(RentalReminderScheduleType.Return, item.ExpectedEndDate, now)
-                    : null;
+                        DateTimeOffset? triggerAt = eval.Action switch
+                        {
+                            ReminderPolicyAction.SendToday => batchNow,
+                            ReminderPolicyAction.Reschedule => eval.NextTriggerAt,
+                            _ => null
+                        };
 
-                var schedule = RentalReminderSchedule.Create(
-                    item.RentalOrderId,
-                    item.Id,
-                    RentalReminderScheduleType.Return,
-                    remaining,
-                    triggerAt,
-                    now);
+                        var schedule = RentalReminderSchedule.Create(
+                            candidate.OrderId,
+                            candidate.ItemId,
+                            RentalReminderScheduleType.Handover,
+                            candidate.Quantity,
+                            triggerAt,
+                            batchNow);
 
-                await _dbContext.RentalReminderSchedules.AddAsync(schedule, cancellationToken);
-                returnCreated++;
+                        if (apply)
+                        {
+                            bool created = await repo.TryCreateScheduleIfMissingAsync(schedule, cancellationToken);
+                            if (created) batchHandoverCreated++;
+                        }
+                        else
+                        {
+                            batchHandoverCreated++;
+                        }
+                    }
+                }
+
+                totalHandoverCreated += batchHandoverCreated;
+                _logger.LogInformation("Backfill batch {Batch}: Handover={Count}, Checkpoint={LastId}",
+                    totalBatches, batchHandoverCreated, lastProcessedItemId);
+
+                onBatchCompleted?.Invoke(new BackfillProgress(totalBatches, batchHandoverCreated, 0, lastProcessedItemId.Value));
             }
-
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            _logger.LogInformation("Backfilled batch {Batch}: {Count} Return schedules created", totalBatches, batch.Count);
         }
 
-        return new BackfillResult(handoverCreated, returnCreated, totalBatches);
+        // 2. Return phase for InRental items
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            DateTimeOffset batchNow = _timeProvider.GetUtcNow();
+
+            using var batchScope = _scopeFactory?.CreateScope();
+            var repo = batchScope != null
+                ? batchScope.ServiceProvider.GetRequiredService<IRentalReminderScheduleRepository>()
+                : (_scheduleRepo ?? new RentalReminderScheduleRepository(_dbContext!));
+            var lockMgr = batchScope?.ServiceProvider.GetService<IOrderLockManager>() ?? _lockManager;
+
+            var candidates = await repo.GetReturnBackfillCandidatesAsync(returnLastItemId, batchSize, cancellationToken);
+            if (candidates.Count == 0) break;
+
+            totalBatches++;
+            returnLastItemId = candidates[^1].ItemId;
+            lastProcessedItemId = returnLastItemId;
+            int batchReturnCreated = 0;
+
+            var orderGroups = candidates.GroupBy(c => c.OrderId);
+            foreach (var group in orderGroups)
+            {
+                Guid orderId = group.Key;
+                await using var orderLock = lockMgr != null
+                    ? await lockMgr.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(15), cancellationToken)
+                    : NoOpLock;
+
+                foreach (var candidate in group)
+                {
+                    var eval = RentalReminderPolicy.Evaluate(
+                        RentalReminderScheduleType.Return,
+                        candidate.TargetDate,
+                        lastNotifiedDate: null,
+                        overdueDayCount: 0,
+                        batchNow);
+
+                    if (eval.Action == ReminderPolicyAction.WindowExpired)
+                    {
+                        _logger.LogInformation("Item {ItemId} Return schedule skipped: WindowExpired", candidate.ItemId);
+                        continue;
+                    }
+
+                    DateTimeOffset? triggerAt = candidate.Quantity > 0
+                        ? (eval.Action switch
+                        {
+                            ReminderPolicyAction.SendToday => batchNow,
+                            ReminderPolicyAction.Reschedule => eval.NextTriggerAt,
+                            _ => null
+                        })
+                        : null;
+
+                    var schedule = RentalReminderSchedule.Create(
+                        candidate.OrderId,
+                        candidate.ItemId,
+                        RentalReminderScheduleType.Return,
+                        candidate.Quantity,
+                        triggerAt,
+                        batchNow);
+
+                    if (apply)
+                    {
+                        bool created = await repo.TryCreateScheduleIfMissingAsync(schedule, cancellationToken);
+                        if (created) batchReturnCreated++;
+                    }
+                    else
+                    {
+                        batchReturnCreated++;
+                    }
+                }
+            }
+
+            totalReturnCreated += batchReturnCreated;
+            _logger.LogInformation("Backfill batch {Batch}: Return={Count}, Checkpoint={LastId}",
+                totalBatches, batchReturnCreated, lastProcessedItemId);
+
+            onBatchCompleted?.Invoke(new BackfillProgress(totalBatches, 0, batchReturnCreated, lastProcessedItemId.Value));
+        }
+
+        return new BackfillResult(totalHandoverCreated, totalReturnCreated, totalBatches, lastProcessedItemId);
+    }
+
+    private async Task<RentalItemStatus?> GetCheckpointItemStatusAsync(Guid? checkpointId, CancellationToken cancellationToken)
+    {
+        if (!checkpointId.HasValue || checkpointId.Value == Guid.Empty)
+        {
+            return null;
+        }
+
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            return await db.RentalItems
+                .AsNoTracking()
+                .Where(i => i.Id == checkpointId.Value)
+                .Select(i => (RentalItemStatus?)i.Status)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+        else if (_dbContext != null)
+        {
+            return await _dbContext.RentalItems
+                .AsNoTracking()
+                .Where(i => i.Id == checkpointId.Value)
+                .Select(i => (RentalItemStatus?)i.Status)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        return null;
     }
 }

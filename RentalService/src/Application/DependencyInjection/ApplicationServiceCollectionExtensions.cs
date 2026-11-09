@@ -129,7 +129,12 @@ public static class ApplicationServiceCollectionExtensions
         // Dịch vụ quản lý vòng đời lịch nhắc nhở bàn giao, trả máy và cảnh báo quá hạn.
         services.AddScoped<Dprental.RentalService.Application.IServices.Reminders.IRentalReminderScheduleService, Dprental.RentalService.Application.Services.Reminders.RentalReminderScheduleService>();
         services.AddScoped<Dprental.RentalService.Application.IServices.Reminders.IRentalReminderBatchProcessor, Dprental.RentalService.Application.Services.Reminders.RentalReminderBatchProcessor>();
-        services.AddScoped<Dprental.RentalService.Application.IServices.Reminders.IRentalReminderBackfillService, Dprental.RentalService.Application.Services.Reminders.RentalReminderBackfillService>();
+        services.AddScoped<Dprental.RentalService.Application.IServices.Reminders.IRentalReminderBackfillService>(sp =>
+            new Dprental.RentalService.Application.Services.Reminders.RentalReminderBackfillService(
+                sp.GetRequiredService<IServiceScopeFactory>(),
+                sp.GetRequiredService<Dprental.RentalService.Domain.IRepositories.IOrderLockManager>(),
+                sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Dprental.RentalService.Application.Services.Reminders.RentalReminderBackfillService>>()));
         services.AddOptions<Dprental.RentalService.Application.Options.RentalReminderOptions>()
             .BindConfiguration(Dprental.RentalService.Application.Options.RentalReminderOptions.SectionName);
         services.AddHostedService<RentalReminderWorker>();
