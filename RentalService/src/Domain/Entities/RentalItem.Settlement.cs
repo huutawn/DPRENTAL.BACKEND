@@ -176,6 +176,7 @@ public partial class RentalItem
 
         string from = Status.ToString();
         Status = RentalItemStatus.Completed;
+        CompletedAt ??= now.ToUniversalTime();
 
         RentalOrder?.AddStateTransition(new RentalStateTransition(
             Guid.NewGuid(), RentalOrderId, Id,

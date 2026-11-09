@@ -12,6 +12,7 @@ namespace Dprental.RentalService.Domain.Entities;
 [Index(nameof(Status))]
 [Index(nameof(SupplierConfirmationDeadline))]
 [Index(nameof(DeductionDeadline))]
+[Index(nameof(Status), nameof(CompletedAt), nameof(Id))]
 public partial class RentalItem
 {
     [Key]
@@ -81,7 +82,15 @@ public partial class RentalItem
 
     public RentalItemStatus Status { get; private set; }
 
-    internal void SetStatus(RentalItemStatus status) => Status = status;
+    internal void SetStatus(RentalItemStatus status)
+    {
+        Status = status;
+        if (status == RentalItemStatus.Completed && !CompletedAt.HasValue)
+        {
+            CompletedAt = DateTimeOffset.UtcNow;
+        }
+    }
+    internal void SetCompletedAt(DateTimeOffset? completedAt) => CompletedAt = completedAt?.ToUniversalTime();
     internal void SetReturnsCompleted(DateTimeOffset completedAt, DateTimeOffset? deductionDeadline, decimal? finalDeductionAmount)
     {
         ReturnsCompletedAt = completedAt.ToUniversalTime();
@@ -128,6 +137,8 @@ public partial class RentalItem
     public DateTimeOffset? InventoryClosureConfirmedAt { get; private set; }
 
     public DateTimeOffset? FinancialClosureConfirmedAt { get; private set; }
+
+    public DateTimeOffset? CompletedAt { get; private set; }
 
     [NotMapped]
     public int RentalDays => RentalPricingPolicy.CalculateRentalDays(ExpectedStartDate, ExpectedEndDate);

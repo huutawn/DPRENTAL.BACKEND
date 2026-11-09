@@ -82,8 +82,11 @@ public sealed class RentalItemPickupLocationSnapshotMigrationPostgreSqlTests
             // 3. Đọc lại từ database và kiểm tra snapshot được lưu nguyên vẹn
             await using (RentalServiceDbContext context = new(options))
             {
-                var loadedItem = await context.RentalItems.FirstAsync(i => i.RentalOrderId == order.Id);
-                Assert.Equal(longSnapshot, loadedItem.PickupLocationSnapshot);
+                var loadedSnapshot = await context.RentalItems
+                    .Where(i => i.RentalOrderId == order.Id)
+                    .Select(i => i.PickupLocationSnapshot)
+                    .FirstAsync();
+                Assert.Equal(longSnapshot, loadedSnapshot);
             }
 
             // 4. Down migration phải bị từ chối vì có dòng dài hơn 500 ký tự

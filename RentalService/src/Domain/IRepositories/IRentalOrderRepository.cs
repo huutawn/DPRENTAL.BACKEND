@@ -142,4 +142,23 @@ public interface IRentalOrderRepository
     /// tiền; không lọc theo người sở hữu, chỉ dùng cho Admin. Không theo dõi thay đổi.
     /// </summary>
     Task<RentalOrder?> GetOrderForAdminAsync(Guid orderId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy snapshot của một mục thuê phục vụ tích hợp ReviewService.
+    /// </summary>
+    Task<RentalItemReviewSnapshotRecord?> GetReviewSnapshotRecordAsync(
+        Guid itemId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<RentalItemReviewSnapshotRecord?>(null);
+
+    /// <summary>
+    /// Lấy một trang dữ liệu đối soát mục thuê hoàn tất (keyset pagination) phục vụ ReviewService.
+    /// </summary>
+    Task<RentalReviewReconciliationPageRecord> GetReviewReconciliationPageAsync(
+        DateTimeOffset windowStart,
+        DateTimeOffset? lastCompletedAt,
+        Guid? lastItemId,
+        int limit,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new RentalReviewReconciliationPageRecord([], false));
 }

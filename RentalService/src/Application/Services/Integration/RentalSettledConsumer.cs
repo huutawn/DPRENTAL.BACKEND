@@ -100,6 +100,13 @@ public sealed class RentalSettledConsumer(
         if (!wasCompleted && isNowCompleted)
         {
             // Ghi event/command vào Outbox; enqueue thành công chỉ xác nhận đã lưu ý định gửi, chưa xác nhận service đích đã thực thi.
+            if (!item.CompletedAt.HasValue)
+            {
+                return Error.Failure("COMPLETED_AT_MISSING",
+                    "Mục thuê chuyển sang Completed nhưng không có timestamp CompletedAt hợp lệ.");
+            }
+
+            DateTimeOffset itemCompletedAt = item.CompletedAt.Value;
             var enqueueResult = await eventProducer.EnqueueRentalItemCompletedAsync(
                 new RentalItemCompletedPayload(
                     order.RenterId,
@@ -108,7 +115,7 @@ public sealed class RentalSettledConsumer(
                     order.Id,
                     item.Id,
                     order.Version,
-                    payload.CompletedAt),
+                    itemCompletedAt),
                 correlationId: envelope.CorrelationId,
                 causationId: envelope.MessageId,
                 cancellationToken: cancellationToken);
