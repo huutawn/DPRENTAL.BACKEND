@@ -60,7 +60,8 @@ public sealed class RentalReminderBatchProcessor : IRentalReminderBatchProcessor
         try
         {
             // 3. Khóa các schedule cần xử lý theo thứ tự ID tăng dần (chống deadlock)
-            var scheduleIds = descriptors.Select(d => d.ScheduleId).ToList();
+            var orderedDescriptors = descriptors.OrderBy(d => d.ScheduleId).ToList();
+            var scheduleIds = orderedDescriptors.Select(d => d.ScheduleId).Distinct().ToList();
             await _scheduleRepo.LockSchedulesForUpdateAsync(scheduleIds, cancellationToken);
 
             // Đọc trạng thái hiện tại của schedule (LastNotifiedDate, OverdueDayCount)
@@ -83,7 +84,7 @@ public sealed class RentalReminderBatchProcessor : IRentalReminderBatchProcessor
                 return new ProcessOrderGroupResult(processed, noticesSent, completed, failed);
             }
 
-            foreach (var desc in descriptors)
+            foreach (var desc in orderedDescriptors)
             {
                 processed++;
 
@@ -211,6 +212,11 @@ public sealed class RentalReminderBatchProcessor : IRentalReminderBatchProcessor
             // 6. Commit atomicity: outbox và cập nhật lịch được lưu cùng lúc
             await tx.CommitAsync(cancellationToken);
             return new ProcessOrderGroupResult(processed, noticesSent, completed, failed);
+        }
+        catch (OperationCanceledException)
+        {
+            await tx.RollbackAsync(CancellationToken.None);
+            throw;
         }
         catch (Exception ex)
         {

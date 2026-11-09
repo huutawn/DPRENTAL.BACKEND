@@ -1,6 +1,7 @@
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.IRepositories;
+using Dprental.RentalService.Domain.Policies;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -175,14 +176,13 @@ public sealed class RentalReminderScheduleRepository : IRentalReminderScheduleRe
 
         if (_dbContext.Database.IsNpgsql())
         {
-            return await _dbContext.RentalReminderSchedules
-                .FromSqlInterpolated($@"
-                    SELECT s.*
+            return await _dbContext.Database
+                .SqlQuery<Guid>($@"
+                    SELECT s.""Id""
                     FROM rental.rental_reminder_schedules s
                     WHERE s.""Id"" = ANY({idList.ToArray()})
                     ORDER BY s.""Id""
-                    FOR UPDATE;")
-                .Select(s => s.Id)
+                    FOR UPDATE")
                 .ToListAsync(cancellationToken);
         }
         else
@@ -205,14 +205,16 @@ public sealed class RentalReminderScheduleRepository : IRentalReminderScheduleRe
         bool markCompleted,
         CancellationToken cancellationToken = default)
     {
+        DateTimeOffset utcFiredAt = firedAt.ToUniversalTime();
+        DateTimeOffset? utcNextTriggerAt = nextTriggerAt?.ToUniversalTime();
+
         if (_dbContext.Database.IsNpgsql())
         {
-            string statusVal = markCompleted ? "Completed" : "Active";
             int rowsAffected = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
                 UPDATE rental.rental_reminder_schedules
                 SET last_notified_date = {notifiedDate},
-                    last_notified_at = {firedAt},
-                    next_trigger_at = {nextTriggerAt},
+                    last_notified_at = {utcFiredAt},
+                    next_trigger_at = {utcNextTriggerAt},
                     retry_count = 0,
                     next_retry_at = NULL,
                     leased_by = NULL,
@@ -220,11 +222,11 @@ public sealed class RentalReminderScheduleRepository : IRentalReminderScheduleRe
                     leased_until = NULL,
                     status = CASE WHEN {markCompleted} THEN 'Completed' ELSE status END,
                     overdue_day_count = CASE WHEN {isOverdue} THEN overdue_day_count + 1 ELSE overdue_day_count END,
-                    updated_at = {firedAt}
+                    updated_at = {utcFiredAt}
                 WHERE ""Id"" = {scheduleId}
                   AND status = 'Active'
                   AND lease_token = {leaseToken}
-                  AND (leased_until IS NOT NULL AND leased_until >= {firedAt});",
+                  AND (leased_until IS NOT NULL AND leased_until >= {utcFiredAt});",
                 cancellationToken);
 
             return rowsAffected > 0;
@@ -233,7 +235,7 @@ public sealed class RentalReminderScheduleRepository : IRentalReminderScheduleRe
         {
             var schedule = await _dbContext.RentalReminderSchedules
                 .FirstOrDefaultAsync(s => s.Id == scheduleId && s.LeaseToken == leaseToken, cancellationToken);
-            if (schedule == null || schedule.LeasedUntil < firedAt) return false;
+            if (schedule == null || schedule.Status != RentalReminderScheduleStatus.Active || schedule.LeasedUntil == null || schedule.LeasedUntil < firedAt) return false;
 
             schedule.AdvanceSchedule(notifiedDate, firedAt, nextTriggerAt, isOverdue, firedAt);
             if (markCompleted) schedule.Complete(firedAt);
@@ -249,16 +251,19 @@ public sealed class RentalReminderScheduleRepository : IRentalReminderScheduleRe
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
+        DateTimeOffset utcNow = now.ToUniversalTime();
+        DateTimeOffset utcNextRetryAt = nextRetryAt.ToUniversalTime();
+
         if (_dbContext.Database.IsNpgsql())
         {
             int rowsAffected = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
                 UPDATE rental.rental_reminder_schedules
                 SET retry_count = retry_count + 1,
-                    next_retry_at = {nextRetryAt},
+                    next_retry_at = {utcNextRetryAt},
                     leased_by = NULL,
                     lease_token = NULL,
                     leased_until = NULL,
-                    updated_at = {now}
+                    updated_at = {utcNow}
                 WHERE ""Id"" = {scheduleId}
                   AND lease_token = {leaseToken};",
                 cancellationToken);
@@ -284,6 +289,9 @@ public sealed class RentalReminderScheduleRepository : IRentalReminderScheduleRe
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
+        DateTimeOffset utcNow = now.ToUniversalTime();
+        DateTimeOffset? utcPostpone = postponeTriggerTo?.ToUniversalTime();
+
         if (_dbContext.Database.IsNpgsql())
         {
             int rowsAffected = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
@@ -291,8 +299,8 @@ public sealed class RentalReminderScheduleRepository : IRentalReminderScheduleRe
                 SET leased_by = NULL,
                     lease_token = NULL,
                     leased_until = NULL,
-                    next_trigger_at = COALESCE({postponeTriggerTo}, next_trigger_at),
-                    updated_at = {now}
+                    next_trigger_at = COALESCE({utcPostpone}, next_trigger_at),
+                    updated_at = {utcNow}
                 WHERE ""Id"" = {scheduleId}
                   AND lease_token = {leaseToken};",
                 cancellationToken);
@@ -317,6 +325,8 @@ public sealed class RentalReminderScheduleRepository : IRentalReminderScheduleRe
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
+        DateTimeOffset utcNow = now.ToUniversalTime();
+
         if (_dbContext.Database.IsNpgsql())
         {
             int rowsAffected = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
@@ -326,7 +336,7 @@ public sealed class RentalReminderScheduleRepository : IRentalReminderScheduleRe
                     leased_by = NULL,
                     lease_token = NULL,
                     leased_until = NULL,
-                    updated_at = {now}
+                    updated_at = {utcNow}
                 WHERE ""Id"" = {scheduleId}
                   AND lease_token = {leaseToken};",
                 cancellationToken);
@@ -416,5 +426,165 @@ public sealed class RentalReminderScheduleRepository : IRentalReminderScheduleRe
             .OrderBy(s => s.Id)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ReminderBackfillCandidate>> GetHandoverBackfillCandidatesAsync(
+        Guid? afterItemId,
+        int batchSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.AwaitingHandover
+                     && !_dbContext.RentalReminderSchedules.Any(s => s.RentalItemId == i.Id && s.ScheduleType == RentalReminderScheduleType.Handover));
+
+        if (afterItemId.HasValue && afterItemId.Value != Guid.Empty)
+        {
+            query = query.Where(i => i.Id > afterItemId.Value);
+        }
+
+        return await query
+            .OrderBy(i => i.Id)
+            .Take(batchSize)
+            .Select(i => new ReminderBackfillCandidate(
+                i.Id,
+                i.RentalOrderId,
+                RentalReminderScheduleType.Handover,
+                i.ExpectedStartDate,
+                i.Quantity))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ReminderBackfillCandidate>> GetReturnBackfillCandidatesAsync(
+        Guid? afterItemId,
+        int batchSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.InRental
+                     && !_dbContext.RentalReminderSchedules.Any(s => s.RentalItemId == i.Id && s.ScheduleType == RentalReminderScheduleType.Return));
+
+        if (afterItemId.HasValue && afterItemId.Value != Guid.Empty)
+        {
+            query = query.Where(i => i.Id > afterItemId.Value);
+        }
+
+        var rawItems = await query
+            .OrderBy(i => i.Id)
+            .Take(batchSize)
+            .Select(i => new
+            {
+                i.Id,
+                i.RentalOrderId,
+                i.ExpectedEndDate,
+                i.Quantity,
+                AllAssignmentIds = i.UnitAssignments.Select(u => u.Id).ToList(),
+                ReturnedAssignmentIds = i.UnitAssignments.Where(u => u.ReturnRecordId != null).Select(u => u.Id).ToList(),
+                ActiveReturnRequestedAssignmentIds = i.ReturnRequests
+                    .SelectMany(r => r.Units)
+                    .Where(u => u.ClosedAt == null && u.RejectedAt == null)
+                    .Select(u => u.RentalUnitAssignmentId)
+                    .ToList()
+            })
+            .ToListAsync(cancellationToken);
+
+        var candidates = new List<ReminderBackfillCandidate>(rawItems.Count);
+        foreach (var item in rawItems)
+        {
+            int activeRemaining = item.AllAssignmentIds.Count > 0
+                ? RentalReturnActiveUnitsCalculator.Calculate(
+                    item.Quantity,
+                    item.AllAssignmentIds,
+                    item.ReturnedAssignmentIds,
+                    item.ActiveReturnRequestedAssignmentIds)
+                : Math.Max(0, item.Quantity - item.ReturnedAssignmentIds.Count - item.ActiveReturnRequestedAssignmentIds.Count);
+
+            candidates.Add(new ReminderBackfillCandidate(
+                item.Id,
+                item.RentalOrderId,
+                RentalReminderScheduleType.Return,
+                item.ExpectedEndDate,
+                activeRemaining));
+        }
+
+        return candidates;
+    }
+
+    public async Task<bool> TryCreateScheduleIfMissingAsync(
+        RentalReminderSchedule schedule,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(schedule);
+
+        if (_dbContext.Database.IsNpgsql())
+        {
+            string scheduleTypeStr = schedule.ScheduleType.ToString();
+            string statusStr = schedule.Status.ToString();
+
+            int rowsAffected = await _dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+                INSERT INTO rental.rental_reminder_schedules (
+                    ""Id"",
+                    rental_order_id,
+                    rental_item_id,
+                    schedule_type,
+                    status,
+                    next_trigger_at,
+                    last_notified_date,
+                    last_notified_at,
+                    overdue_day_count,
+                    remaining_unit_count,
+                    leased_until,
+                    leased_by,
+                    lease_token,
+                    retry_count,
+                    next_retry_at,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    {schedule.Id},
+                    {schedule.RentalOrderId},
+                    {schedule.RentalItemId},
+                    {scheduleTypeStr},
+                    {statusStr},
+                    {schedule.NextTriggerAt},
+                    {schedule.LastNotifiedDate},
+                    {schedule.LastNotifiedAt},
+                    {schedule.OverdueDayCount},
+                    {schedule.RemainingUnitCount},
+                    {schedule.LeasedUntil},
+                    {schedule.LeasedBy},
+                    {schedule.LeaseToken},
+                    {schedule.RetryCount},
+                    {schedule.NextRetryAt},
+                    {schedule.CreatedAt},
+                    {schedule.UpdatedAt}
+                )
+                ON CONFLICT (rental_item_id, schedule_type) DO NOTHING;",
+                cancellationToken);
+
+            return rowsAffected > 0;
+        }
+        else
+        {
+            bool exists = await _dbContext.RentalReminderSchedules
+                .AnyAsync(s => s.RentalItemId == schedule.RentalItemId && s.ScheduleType == schedule.ScheduleType, cancellationToken);
+
+            if (exists)
+            {
+                return false;
+            }
+
+            try
+            {
+                await _dbContext.RentalReminderSchedules.AddAsync(schedule, cancellationToken);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                return true;
+            }
+            catch (DbUpdateException)
+            {
+                return false;
+            }
+        }
     }
 }

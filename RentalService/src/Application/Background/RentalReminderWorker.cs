@@ -50,31 +50,48 @@ public sealed class RentalReminderWorker : BackgroundService
         _logger.LogInformation("RentalReminderWorker started with worker ID {WorkerId}, poll interval {Interval}s, batch size {BatchSize}",
             _workerId, _pollingInterval.TotalSeconds, _batchSize);
 
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            var sw = Stopwatch.StartNew();
-            var result = await ProcessBatchAsync(stoppingToken);
-            sw.Stop();
-
-            // Nếu số lượng claim đạt batch size, tiếp tục xử lý backlog ngay nhưng có rate limiting 100 lịch/giây
-            if (result.Claimed >= _batchSize)
+            while (!stoppingToken.IsCancellationRequested)
             {
-                var minDuration = TimeSpan.FromSeconds((double)result.Claimed / MaxRatePerSecond);
-                if (sw.Elapsed < minDuration)
+                var sw = Stopwatch.StartNew();
+                var result = await ProcessBatchAsync(stoppingToken);
+                sw.Stop();
+
+                // Rate limiting 100 lịch/giây/replica
+                if (result.Claimed > 0)
                 {
-                    await Task.Delay(minDuration - sw.Elapsed, stoppingToken);
+                    var minDuration = TimeSpan.FromSeconds((double)result.Claimed / MaxRatePerSecond);
+                    if (sw.Elapsed < minDuration)
+                    {
+                        await Task.Delay(minDuration - sw.Elapsed, stoppingToken);
+                    }
                 }
-                continue;
+
+                // Nếu số lượng claim đạt batch size, tiếp tục xử lý backlog ngay
+                if (result.Claimed >= _batchSize)
+                {
+                    continue;
+                }
+
+                await Task.Delay(_pollingInterval, stoppingToken);
             }
-
-            await Task.Delay(_pollingInterval, stoppingToken);
         }
-
-        _logger.LogInformation("RentalReminderWorker stopped.");
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Graceful shutdown: truyền OperationCanceledException ra ngoài, không log lỗi
+            throw;
+        }
+        finally
+        {
+            _logger.LogInformation("RentalReminderWorker stopped.");
+        }
     }
 
     public async Task<ReminderBatchResult> ProcessBatchAsync(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         IReadOnlyList<ReminderClaimDescriptor> claimedDescriptors;
 
         // Scope riêng để claim batch

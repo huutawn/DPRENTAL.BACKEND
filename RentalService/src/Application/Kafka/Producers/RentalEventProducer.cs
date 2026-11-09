@@ -648,7 +648,7 @@ public sealed class RentalEventProducer : IRentalEventProducer
         if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RentalItemId == Guid.Empty ||
             payload.SupplierId == Guid.Empty || payload.RenterId == Guid.Empty ||
             string.IsNullOrWhiteSpace(payload.ReminderType) || payload.RemainingUnitCount <= 0 ||
-            payload.OrderVersion <= 0)
+            payload.OrderVersion <= 0 || payload.ReminderDate == default)
             return Error.Validation("INVALID_PAYLOAD", "RentalReminderDue payload is incomplete or invalid.");
 
         string aggregateId = payload.RentalOrderId.ToString("D");

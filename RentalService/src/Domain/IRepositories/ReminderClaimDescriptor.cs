@@ -8,4 +8,7 @@ public sealed record ReminderClaimDescriptor(
     Guid ItemId,
     RentalReminderScheduleType ScheduleType,
     Guid LeaseToken,
-    DateTimeOffset LeaseExpiry);
+    DateTimeOffset LeaseExpiry)
+{
+    public DateTimeOffset LeasedUntil => LeaseExpiry;
+}
