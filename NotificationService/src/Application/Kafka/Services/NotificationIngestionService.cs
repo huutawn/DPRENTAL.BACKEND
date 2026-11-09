@@ -176,12 +176,14 @@ public sealed class NotificationIngestionService : INotificationIngestionService
             ? (Guid.TryParse(intent.ResourceId, out var resGuid) ? resGuid : (intent.FinancialId ?? intent.OrderId ?? Guid.Empty))
             : (intent.OrderId ?? intent.FinancialId ?? Guid.Empty);
 
+        string? subType = intent.RenderData.TryGetValue("reminderType", out var st) ? st?.ToString() : null;
         var recipientsResult = _recipientResolver.ResolveRecipients(
             intent.EventType,
             primaryId,
             intent.RenterId,
             intent.SupplierId,
-            intent.ReturnRequestId);
+            intent.ReturnRequestId,
+            subType);
         if (recipientsResult.IsFailure)
         {
             _logger.LogWarning("Không xác định được người nhận hợp lệ ({Code}): {Message}. Đẩy vào DLQ: {MessageId}", recipientsResult.Error.Code, recipientsResult.Error.Message, envelope.MessageId);
@@ -212,6 +214,53 @@ public sealed class NotificationIngestionService : INotificationIngestionService
             if (hasRentalOrder)
             {
                 await _watermarkRepo.AcquireAdvisoryLockAsync(intent.OrderId!.Value, cancellationToken);
+            }
+
+            if (string.Equals(intent.EventType, "RentalReminderDue", StringComparison.OrdinalIgnoreCase))
+            {
+                var vnOffset = TimeSpan.FromHours(7);
+                var todayVn = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(vnOffset).DateTime);
+                var reminderDateStr = intent.RenderData.TryGetValue("reminderDate", out var rd) ? rd?.ToString() : null;
+
+                if (DateOnly.TryParseExact(reminderDateStr, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var remDate))
+                {
+                    if (remDate < todayVn)
+                    {
+                        _logger.LogInformation("Reminder ngày cũ ({ReminderDate} < {TodayVn}) đã hết hiệu lực, bỏ qua và lưu inbox receipt: MessageId={MessageId}",
+                            remDate, todayVn, envelope.MessageId);
+
+                        await _inboxRepo.AddAsync(new NotificationInboxReceipt
+                        {
+                            Id = Guid.NewGuid(),
+                            ConsumerName = _consumerGroupName,
+                            MessageId = envelope.MessageId,
+                            Producer = envelope.Producer,
+                            MessageType = envelope.MessageType,
+                            Status = "DismissedStaleReminder",
+                            ProcessedAt = DateTimeOffset.UtcNow,
+                            ErrorCode = null,
+                            ErrorDetail = $"Reminder date {remDate} is in the past compared to current Vietnam date {todayVn}"
+                        }, cancellationToken);
+
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                        await transaction.CommitAsync(cancellationToken);
+                        return IngestionOutcome.Processed;
+                    }
+                    else if (remDate > todayVn)
+                    {
+                        var errDetail = $"Reminder date {remDate} is in the future compared to current Vietnam date {todayVn}";
+                        _logger.LogWarning("Reminder ngày tương lai: {Detail}. Đẩy vào DLQ: {MessageId}", errDetail, envelope.MessageId);
+                        await transaction.RollbackAsync(cancellationToken);
+                        await _dlqPublisher.PublishToDeadLetterQueueAsync(rawMessage, envelope.MessageId.ToString(), errDetail, "FUTURE_REMINDER_DATE", cancellationToken);
+                        return IngestionOutcome.Quarantined;
+                    }
+                }
+            }
+
+            if (string.Equals(intent.EventType, "RentalItemHandoverCompleted", StringComparison.OrdinalIgnoreCase) && intent.RentalItemId.HasValue)
+            {
+                var hoSuppressed = await _notificationRepo.DismissHandoverActionsForRentalItemAsync(intent.RentalItemId.Value, cancellationToken);
+                suppressedCtaNotifications.AddRange(hoSuppressed);
             }
 
             AggregateStateProjection? currentAggregateState = null;
@@ -254,6 +303,20 @@ public sealed class NotificationIngestionService : INotificationIngestionService
 
             foreach (var recipient in recipients)
             {
+                if (string.Equals(intent.EventType, "RentalReminderDue", StringComparison.OrdinalIgnoreCase) && intent.RentalItemId.HasValue)
+                {
+                    var alreadyDelivered = await _notificationRepo.ExistsReminderNotificationAsync(
+                        recipient.RecipientUserId,
+                        intent.RentalItemId.Value,
+                        recipient.NotificationType,
+                        intent.ResourceId,
+                        cancellationToken);
+                    if (alreadyDelivered)
+                    {
+                        _logger.LogInformation("Nhắc nhở {Key} đã được gửi cho người nhận {UserId}, bỏ qua.", intent.ResourceId, recipient.RecipientUserId);
+                        continue;
+                    }
+                }
                 NotificationAggregateWatermark? watermark = null;
 
                 if (intent.WatermarkScope != null && intent.WatermarkId.HasValue)
@@ -266,7 +329,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
 
                     // Conflicting state check at same version:
                     // Two different messageIds with same version are processed; conflicting states at same version return validation error.
-                    if (watermark != null && watermark.LastOrderVersion == intent.OrderVersion)
+                    if (intent.RaisesWatermark && watermark != null && watermark.LastOrderVersion == intent.OrderVersion)
                     {
                         if (!string.IsNullOrEmpty(watermark.LastMessageId) &&
                             !string.Equals(watermark.LastMessageId, envelope.MessageId.ToString(), StringComparison.OrdinalIgnoreCase))
@@ -340,7 +403,8 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                 notificationsToCreate.Add(notification);
 
                 // Channel policy and preference check for Email
-                var shouldSendEmail = NotificationChannelPolicy.ShouldSendEmail(recipient.NotificationType, recipient.RecipientRole);
+                var shouldSendEmail = !string.Equals(envelope.MessageType, "RentalReminderDue", StringComparison.OrdinalIgnoreCase)
+                    && NotificationChannelPolicy.ShouldSendEmail(recipient.NotificationType, recipient.RecipientRole);
                 if (shouldSendEmail && !staleEval.SuppressEmail)
                 {
                     var emailAllowed = await _preferenceRepo.IsEmailEnabledAsync(recipient.RecipientUserId, recipient.Category, cancellationToken);
@@ -400,21 +464,20 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                 }
                 else if (intent.WatermarkScope == NotificationWatermarkScope.RentalItem)
                 {
-                    var suppressed = await _notificationRepo.SuppressPendingActionsForResourceAsync("RentalItem", intent.ResourceId, cancellationToken);
-                    suppressedCtaNotifications.AddRange(suppressed);
-                    await _deliveryJobRepo.SuppressPendingAndUndispatchedJobsForResourceAsync("RentalItem", intent.ResourceId, terminalReason, cancellationToken);
-
                     var itemGuid = intent.RentalItemId ?? (Guid.TryParse(intent.ResourceId, out var parsedId) ? parsedId : (Guid?)null);
                     if (itemGuid.HasValue)
                     {
+                        var suppressed = await _notificationRepo.SuppressPendingActionsForRentalItemAsync(itemGuid.Value, cancellationToken);
+                        suppressedCtaNotifications.AddRange(suppressed);
+                        await _deliveryJobRepo.SuppressPendingAndUndispatchedJobsForRentalItemAsync(itemGuid.Value, terminalReason, cancellationToken);
+
                         var overdueSuppressed = await _notificationRepo.DismissReturnOverdueActionsForRentalItemAsync(itemGuid.Value, cancellationToken);
                         suppressedCtaNotifications.AddRange(overdueSuppressed);
-                        await _deliveryJobRepo.SuppressPendingAndUndispatchedJobsForRentalItemAsync(itemGuid.Value, terminalReason, cancellationToken);
                     }
                 }
             }
 
-            if (intent.WatermarkScope != null && intent.WatermarkId.HasValue)
+            if (intent.RaisesWatermark && intent.WatermarkScope != null && intent.WatermarkId.HasValue)
             {
                 var isPaidEvent = intent.IsPaid;
                 var recipientIds = recipients.Select(r => r.RecipientUserId).Distinct().ToList();

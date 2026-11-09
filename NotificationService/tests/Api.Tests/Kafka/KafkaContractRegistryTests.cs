@@ -17,6 +17,7 @@ public sealed class KafkaContractRegistryTests
         new RentalOrderCancelledHandler(),
         new RentalItemHandoverCompletedHandler(),
         new RentalHandoverOverdueHandler(),
+        new RentalReminderDueHandler(),
         new ReturnConfirmationOverdueHandler(),
         new RentalOrderCompletedHandler(),
         new LatePaymentRefundRequestedHandler(),

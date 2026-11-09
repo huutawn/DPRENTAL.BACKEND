@@ -210,6 +210,41 @@ public static class ProducerFixtures
     }
     """;
 
+    public static string RentalReminderDue(
+        Guid messageId,
+        Guid orderId,
+        Guid itemId,
+        Guid renterId,
+        Guid supplierId,
+        string reminderType,
+        string reminderDate = "2026-11-09",
+        int remainingUnitCount = 1,
+        long orderVersion = 3) => $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RentalReminderDue",
+      "version": 1,
+      "producer": "RentalService",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-09T08:00:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "rentalOrderId": "{{orderId}}",
+        "rentalItemId": "{{itemId}}",
+        "orderCode": "DH-2026-0001",
+        "supplierId": "{{supplierId}}",
+        "renterId": "{{renterId}}",
+        "reminderType": "{{reminderType}}",
+        "reminderDate": "{{reminderDate}}",
+        "targetDate": "{{reminderDate}}",
+        "actionDeadline": "2026-11-10T00:00:00.0000000+00:00",
+        "remainingUnitCount": {{remainingUnitCount}},
+        "orderVersion": {{orderVersion}}
+      }
+    }
+    """;
+
     public static string ReturnConfirmationOverdue(
         Guid messageId,
         Guid orderId,

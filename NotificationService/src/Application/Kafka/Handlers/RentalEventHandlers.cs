@@ -646,6 +646,119 @@ public sealed class RentalHandoverOverdueHandler : IKafkaEventHandler
     }
 }
 
+public sealed class RentalReminderDueHandler : IKafkaEventHandler
+{
+    public string EventType => "RentalReminderDue";
+
+    public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
+    {
+        var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "supplierId", "renterId", "userId", "rentalItemId", "itemId"],
+            numberFields: ["orderVersion", "version", "remainingUnitCount"],
+            utcTimestampFields: ["actionDeadline"],
+            stringFields: ["reminderType", "reminderDate"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId");
+        if (!orderId.HasValue || orderId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
+        }
+
+        var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
+        if (!itemId.HasValue || itemId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ITEM_ID", "rentalItemId không thể để trống."));
+        }
+
+        var supplierId = payload.GetGuidFromAny("supplierId");
+        var renterId = payload.GetGuidFromAny("renterId", "userId");
+        var reminderType = payload.GetStringFromAny("reminderType") ?? string.Empty;
+        if (reminderType is not ("HandoverReminder" or "HandoverOverdue" or "ReturnReminder" or "ReturnOverdue"))
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("INVALID_REMINDER_TYPE", $"Loại nhắc '{reminderType}' không được hỗ trợ."));
+        }
+
+        var reminderDate = payload.GetStringFromAny("reminderDate") ?? string.Empty;
+        if (!DateOnly.TryParseExact(reminderDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsedReminderDate))
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("INVALID_REMINDER_DATE", "reminderDate phải theo định dạng yyyy-MM-dd."));
+        }
+
+        var targetDate = payload.GetStringFromAny("targetDate") ?? reminderDate;
+        if (!DateOnly.TryParseExact(targetDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsedTargetDate))
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("INVALID_TARGET_DATE", "targetDate phải theo định dạng yyyy-MM-dd."));
+        }
+
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        if (orderVersion <= 0)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("INVALID_ORDER_VERSION", "orderVersion phải lớn hơn 0."));
+        }
+
+        var remainingUnitCount = (int)payload.GetInt64FromAny(1, "remainingUnitCount");
+        if (remainingUnitCount <= 0)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("INVALID_REMAINING_UNITS", "remainingUnitCount phải lớn hơn 0."));
+        }
+
+        int diff = parsedReminderDate.DayNumber - parsedTargetDate.DayNumber;
+        if (reminderType is "HandoverReminder" or "ReturnReminder")
+        {
+            if (diff < -3 || diff > 0)
+            {
+                return Result.Failure<NotificationEventIntent>(Error.Validation("REMINDER_DATE_OUT_OF_WINDOW", $"Ngày nhắc {reminderDate} không thuộc cửa sổ D-3..D của ngày đích {targetDate}."));
+            }
+        }
+        else // Overdue
+        {
+            if (diff < 1 || diff > 30)
+            {
+                return Result.Failure<NotificationEventIntent>(Error.Validation("OVERDUE_DATE_OUT_OF_WINDOW", $"Ngày quá hạn {reminderDate} không thuộc khoảng D+1..D+30 của ngày đích {targetDate}."));
+            }
+        }
+
+        var actionDeadline = payload.GetStringFromAny("actionDeadline");
+        var stableBusinessKey = $"{itemId.Value:D}:{reminderType}:{reminderDate}";
+
+        var renderData = new Dictionary<string, object?>
+        {
+            ["rentalOrderId"] = orderId.Value,
+            ["rentalItemId"] = itemId.Value,
+            ["orderCode"] = orderCode,
+            ["reminderType"] = reminderType,
+            ["reminderDate"] = reminderDate,
+            ["targetDate"] = targetDate,
+            ["expectedStartDate"] = targetDate,
+            ["actionDeadline"] = actionDeadline,
+            ["remainingUnitCount"] = remainingUnitCount
+        };
+
+        return Result.Success(new NotificationEventIntent(
+            EventType: EventType,
+            OrderId: orderId.Value,
+            ResourceType: "RentalItem",
+            ResourceId: stableBusinessKey,
+            WatermarkScope: NotificationWatermarkScope.RentalItem,
+            WatermarkId: itemId.Value,
+            OrderVersion: orderVersion,
+            IsTerminal: false,
+            TerminalState: null,
+            RenterId: renterId,
+            SupplierId: supplierId,
+            ReturnRequestId: null,
+            RenderData: renderData,
+            RentalItemId: itemId.Value,
+            RaisesWatermark: false));
+    }
+}
+
 public sealed class ReturnConfirmationOverdueHandler : IKafkaEventHandler
 {
     public string EventType => "ReturnConfirmationOverdue";

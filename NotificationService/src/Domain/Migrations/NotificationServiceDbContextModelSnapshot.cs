@@ -171,6 +171,11 @@ namespace NotificationService.Domain.Migrations
                         .IsUnique()
                         .HasDatabaseName("uq_notifications_source_recipient_type");
 
+                    b.HasIndex("RecipientUserId", "RentalItemId", "NotificationType", "ResourceId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_notifications_reminder_dedup")
+                        .HasFilter("source_event_type = 'RentalReminderDue' AND rental_item_id IS NOT NULL");
+
                     b.ToTable("notifications", "notification");
                 });
 

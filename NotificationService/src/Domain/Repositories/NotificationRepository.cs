@@ -180,6 +180,23 @@ public sealed class NotificationRepository : INotificationRepository
         return actionableNotifications;
     }
 
+    public async Task<IReadOnlyList<Notification>> DismissHandoverActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default)
+    {
+        var actionableNotifications = await _dbContext.Notifications
+            .Where(n => n.RentalItemId == rentalItemId
+                     && (n.NotificationType == "HANDOVER_REMINDER_SUPPLIER" || n.NotificationType == "HANDOVER_OVERDUE_SUPPLIER")
+                     && n.IsActionable)
+            .ToListAsync(cancellationToken);
+
+        foreach (var notification in actionableNotifications)
+        {
+            notification.IsActionable = false;
+            notification.ActionUrl = null;
+        }
+
+        return actionableNotifications;
+    }
+
     public async Task<IReadOnlyList<Notification>> SuppressPendingActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default)
     {
         var itemIdStr = rentalItemId.ToString();
@@ -194,5 +211,15 @@ public sealed class NotificationRepository : INotificationRepository
         }
 
         return actionableNotifications;
+    }
+
+    public async Task<bool> ExistsReminderNotificationAsync(Guid recipientUserId, Guid rentalItemId, string notificationType, string resourceId, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Notifications
+            .AsNoTracking()
+            .AnyAsync(n => n.RecipientUserId == recipientUserId
+                        && n.RentalItemId == rentalItemId
+                        && n.NotificationType == notificationType
+                        && n.ResourceId == resourceId, cancellationToken);
     }
 }

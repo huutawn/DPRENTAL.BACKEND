@@ -55,6 +55,11 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
         builder.HasIndex(n => n.RentalItemId)
             .HasDatabaseName("ix_notifications_rental_item");
 
+        builder.HasIndex(n => new { n.RecipientUserId, n.RentalItemId, n.NotificationType, n.ResourceId })
+            .IsUnique()
+            .HasFilter("source_event_type = 'RentalReminderDue' AND rental_item_id IS NOT NULL")
+            .HasDatabaseName("uq_notifications_reminder_dedup");
+
         builder.HasMany(n => n.DeliveryJobs)
             .WithOne(j => j.Notification)
             .HasForeignKey(j => j.NotificationId)

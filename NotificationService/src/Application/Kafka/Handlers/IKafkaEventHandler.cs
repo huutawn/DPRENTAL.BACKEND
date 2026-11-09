@@ -19,7 +19,8 @@ public sealed record NotificationEventIntent(
     Dictionary<string, object?> RenderData,
     bool IsPaid = false,
     Guid? FinancialId = null,
-    Guid? RentalItemId = null);
+    Guid? RentalItemId = null,
+    bool RaisesWatermark = true);
 
 public interface IKafkaEventHandler
 {

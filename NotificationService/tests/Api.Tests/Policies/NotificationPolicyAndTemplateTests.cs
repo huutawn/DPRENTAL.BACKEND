@@ -849,4 +849,100 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.True(renderPayout.IsSuccess);
         Assert.Contains("/own/orders", renderPayout.Value.RenderDataJson);
     }
+
+    [Fact]
+    public void ResolveRecipients_RentalReminderDue_ResolvesExpectedRecipients()
+    {
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        // 1. HandoverReminder -> Supplier only
+        var hoReminder = _recipientResolver.ResolveRecipients("RentalReminderDue", orderId, renterId, supplierId, subType: "HandoverReminder");
+        Assert.True(hoReminder.IsSuccess);
+        var sup = Assert.Single(hoReminder.Value);
+        Assert.Equal("Supplier", sup.RecipientRole);
+        Assert.Equal("HANDOVER_REMINDER_SUPPLIER", sup.NotificationType);
+        Assert.True(sup.IsActionable);
+        Assert.Equal("/own/orders", sup.ActionUrl);
+
+        // 2. HandoverOverdue -> Supplier + Renter
+        var hoOverdue = _recipientResolver.ResolveRecipients("RentalReminderDue", orderId, renterId, supplierId, subType: "HandoverOverdue");
+        Assert.True(hoOverdue.IsSuccess);
+        Assert.Equal(2, hoOverdue.Value.Count);
+        var hoSup = Assert.Single(hoOverdue.Value, r => r.RecipientRole == "Supplier");
+        Assert.Equal("HANDOVER_OVERDUE_SUPPLIER", hoSup.NotificationType);
+        var hoRen = Assert.Single(hoOverdue.Value, r => r.RecipientRole == "Renter");
+        Assert.Equal("HANDOVER_OVERDUE_RENTER", hoRen.NotificationType);
+
+        // 3. ReturnReminder -> Renter only
+        var retReminder = _recipientResolver.ResolveRecipients("RentalReminderDue", orderId, renterId, supplierId, subType: "ReturnReminder");
+        Assert.True(retReminder.IsSuccess);
+        var ren = Assert.Single(retReminder.Value);
+        Assert.Equal("Renter", ren.RecipientRole);
+        Assert.Equal("RETURN_REMINDER_RENTER", ren.NotificationType);
+        Assert.True(ren.IsActionable);
+        Assert.Equal($"/orders/{orderId}", ren.ActionUrl);
+
+        // 4. ReturnOverdue -> Supplier + Renter
+        var retOverdue = _recipientResolver.ResolveRecipients("RentalReminderDue", orderId, renterId, supplierId, subType: "ReturnOverdue");
+        Assert.True(retOverdue.IsSuccess);
+        Assert.Equal(2, retOverdue.Value.Count);
+        var retSup = Assert.Single(retOverdue.Value, r => r.RecipientRole == "Supplier");
+        Assert.Equal("RETURN_OVERDUE_SUPPLIER", retSup.NotificationType);
+        Assert.True(retSup.IsActionable);
+        var retRen = Assert.Single(retOverdue.Value, r => r.RecipientRole == "Renter");
+        Assert.Equal("RETURN_OVERDUE_RENTER", retRen.NotificationType);
+        Assert.True(retRen.IsActionable);
+    }
+
+    [Fact]
+    public void Render_RentalReminderTemplates_RendersCorrectly()
+    {
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var data = new Dictionary<string, object?>
+        {
+            ["rentalOrderId"] = orderId,
+            ["rentalItemId"] = itemId,
+            ["orderCode"] = "ORD-TEST-99",
+            ["targetDate"] = "2026-11-12",
+            ["remainingUnitCount"] = 3
+        };
+
+        // HandoverReminder
+        var hoRender = _renderer.Render("HANDOVER_REMINDER_SUPPLIER", data);
+        Assert.True(hoRender.IsSuccess);
+        Assert.Contains("ORD-TEST-99", hoRender.Value.Title);
+        Assert.Contains("3", hoRender.Value.Body);
+        Assert.Contains("12/11/2026", hoRender.Value.Body);
+
+        // ReturnReminder
+        var retRender = _renderer.Render("RETURN_REMINDER_RENTER", data);
+        Assert.True(retRender.IsSuccess);
+        Assert.Contains("ORD-TEST-99", retRender.Value.Title);
+        Assert.Contains("3", retRender.Value.Body);
+        Assert.Contains("12/11/2026", retRender.Value.Body);
+
+        // ReturnOverdue Supplier
+        var retOverdueSup = _renderer.Render("RETURN_OVERDUE_SUPPLIER", data);
+        Assert.True(retOverdueSup.IsSuccess);
+        Assert.Contains("CẢNH BÁO", retOverdueSup.Value.Title);
+        Assert.Contains("3", retOverdueSup.Value.Body);
+
+        // ReturnOverdue Renter
+        var retOverdueRen = _renderer.Render("RETURN_OVERDUE_RENTER", data);
+        Assert.True(retOverdueRen.IsSuccess);
+        Assert.Contains("CẢNH BÁO", retOverdueRen.Value.Title);
+        Assert.Contains("3", retOverdueRen.Value.Body);
+    }
+
+    [Fact]
+    public void ChannelPolicy_ReminderTypes_NeverSendEmail()
+    {
+        Assert.False(NotificationChannelPolicy.ShouldSendEmail("HANDOVER_REMINDER_SUPPLIER", "Supplier"));
+        Assert.False(NotificationChannelPolicy.ShouldSendEmail("RETURN_REMINDER_RENTER", "Renter"));
+        Assert.False(NotificationChannelPolicy.ShouldSendEmail("RETURN_OVERDUE_SUPPLIER", "Supplier"));
+        Assert.False(NotificationChannelPolicy.ShouldSendEmail("RETURN_OVERDUE_RENTER", "Renter"));
+    }
 }
