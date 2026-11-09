@@ -52,14 +52,16 @@ public sealed partial class AssetHttpIntegrationTests
         using var client = app.CreateClient();
 
         var owner = Guid.NewGuid();
+        var brand = Guid.NewGuid();
         var asset = await SeedAssetAsync(
             owner,
+            brandId: brand,
             model: "Toyota 8FD25",
             serial: "SECRET-SN-12345",
             specValues: "{\"capacityKg\": 2500, \"fuelType\": \"diesel\", \"ownerUserId\": \"leak-attempt\"}");
 
-        // 1. List
-        var resList = await client.GetAsync("api/v1/inventory/public/equipment-listings");
+        // 1. List (lọc theo brand riêng để không phụ thuộc listing của các test khác trong cùng DB)
+        var resList = await client.GetAsync($"api/v1/inventory/public/equipment-listings?brandId={brand:D}");
         Assert.Equal(HttpStatusCode.OK, resList.StatusCode);
         var listJson = await resList.Content.ReadAsStringAsync();
         using var docList = JsonDocument.Parse(listJson);
