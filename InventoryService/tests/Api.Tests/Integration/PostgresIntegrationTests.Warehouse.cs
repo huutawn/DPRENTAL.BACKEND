@@ -236,10 +236,10 @@ public sealed class PostgresWarehouseIntegrationTests
             using var doc = JsonDocument.Parse("{}");
             var req1 = new CreateEquipmentListingRequest(
                 Guid.NewGuid(), Guid.NewGuid(), "Listing 1", "Model 1", "SN-CONC-001",
-                doc.RootElement, new RentalRateDto(100_000m, null, null, "VND"), 2024);
+                doc.RootElement, new RentalRateDto(100_000m, null, null, "VND"), 2024, DepositAmount: 1_000_000m);
             var req2 = new CreateEquipmentListingRequest(
                 Guid.NewGuid(), Guid.NewGuid(), "Listing 2", "Model 2", "SN-CONC-002",
-                doc.RootElement, new RentalRateDto(200_000m, null, null, "VND"), 2024);
+                doc.RootElement, new RentalRateDto(200_000m, null, null, "VND"), 2024, DepositAmount: 1_000_000m);
 
             var task1 = Task.Run(async () =>
             {
@@ -294,7 +294,7 @@ public sealed class PostgresWarehouseIntegrationTests
             using var doc = JsonDocument.Parse("{}");
             var listingReq = new CreateEquipmentListingRequest(
                 Guid.NewGuid(), Guid.NewGuid(), "Listing Concurrent", "Model 1", "SN-CONC-003",
-                doc.RootElement, new RentalRateDto(100_000m, null, null, "VND"), 2024);
+                doc.RootElement, new RentalRateDto(100_000m, null, null, "VND"), 2024, DepositAmount: 1_000_000m);
 
             var whReq = new UpdateWarehouseRequest("123 Phố Huế", "01", "00070", 21.01, 105.85);
 

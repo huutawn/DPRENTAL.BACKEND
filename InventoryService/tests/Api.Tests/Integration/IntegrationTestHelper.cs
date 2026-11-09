@@ -50,7 +50,8 @@ public static class IntegrationTestHelper
             actualNow,
             manufactureYear ?? 2024,
             actualMediaIds,
-            thumbnailMediaId).Value;
+            thumbnailMediaId,
+            depositAmount: 100_000_000m).Value; // cọc phải lớn hơn giá thuê ngày (DPR-275), kể cả sau khi test PUT tăng giá
         if (!await db.Warehouses.AnyAsync(w => w.OwnerUserId == actualOwner))
         {
             db.Warehouses.Add(Warehouse.CreateWithAddress(actualOwner, "123 Test Street", "01", "Thành phố Hà Nội", "00070", "Phường Hoàn Kiếm", 21.0, 105.8, actualNow).Value);
@@ -121,7 +122,8 @@ public static class IntegrationTestHelper
             actualNow,
             manufactureYear,
             actualMediaIds,
-            thumbnailMediaId).Value;
+            thumbnailMediaId,
+            depositAmount: 100_000_000m).Value; // cọc phải lớn hơn giá thuê ngày (DPR-275), kể cả sau khi test PUT tăng giá
         if (!await db.Warehouses.AnyAsync(w => w.OwnerUserId == actualOwner))
         {
             db.Warehouses.Add(Warehouse.CreateWithAddress(actualOwner, "123 Test Street", "01", "Thành phố Hà Nội", "00070", "Phường Hoàn Kiếm", 21.0, 105.8, actualNow).Value);
