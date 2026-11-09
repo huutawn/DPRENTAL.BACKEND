@@ -157,6 +157,7 @@ public static class ApplicationServiceCollectionExtensions
         // Đề xuất, phản hồi và giải quyết tranh chấp khấu trừ để lập lịch quyết toán.
         services.AddScoped<IDeductionService, DeductionService>();
         services.AddScoped<IDeductionResponseService, DeductionResponseService>();
+        services.AddScoped<IDamageLevelService, DamageLevelService>();
         // Worker lần lượt xử lý deadline khấu trừ và lập lịch quyết toán.
         services.AddHostedService<DeductionDeadlineWorker>();
         services.AddHostedService<RefundReconciliationWorker>();

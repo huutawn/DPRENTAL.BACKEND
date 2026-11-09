@@ -224,10 +224,9 @@ public sealed class OwnershipIdorTests
                 $"{Root}/items/{unknown}/deductions",
                 new
                 {
-                    deductionAmount = 1,
+                    assessments = new[] { new { assetId = Guid.NewGuid(), level = 2 } },
                     damageDescription = "Vỡ thùng trộn",
-                    evidenceMediaIds = new[] { Guid.NewGuid() },
-                    affectedAssetIds = new[] { Guid.NewGuid() }
+                    evidenceMediaIds = new[] { Guid.NewGuid() }
                 }),
             _ => throw new ArgumentOutOfRangeException(nameof(action), action, null)
         };

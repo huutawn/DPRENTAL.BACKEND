@@ -280,6 +280,7 @@ erDiagram
 | `deposit_per_unit_snapshot`| `numeric(18,2)`| No | — | Security deposit required per unit in VND. |
 | `rental_amount` | `numeric(18,2)`| No | — | Calculated: `daily_rate * quantity * days`. |
 | `deposit_amount` | `numeric(18,2)`| No | — | Calculated: `deposit_per_unit * quantity`. |
+| `DamageLevelsSnapshot` | `jsonb` | Yes | — | Damage level table (`Level`, `Name`, `Percent`) frozen at checkout; basis for deduction amounts. |
 | `status` | `integer` | No | — | `RentalItemStatus` enum value. |
 | `allocation_group_id` | `varchar(64)` | No | Index | Inventory allocation group hold reference. |
 | `supplier_confirmation_deadline`| `timestamptz` | Yes | — | Deadline for supplier decision (24h after payment). |
@@ -389,7 +390,7 @@ The following state machine table specifies the target business workflow transit
 | **TR-09** | `AwaitingHandover` | `InRental` | `SubmitHandover` | Supplier | Actor is item supplier, observations provided for all units, private media verified. | `HandoverRecord` created, units marked `HandedOver`, item moves to `InRental`. | Media: `VerifyMedia` | `RentalStarted` |
 | **TR-10** | `InRental` | `InRental` (Partial) / `PendingSettlement` | `SubmitReturn` | Supplier | Actor is item supplier, actual return time >= handover time, units observed. | `ReturnRecord` created, damaged units observed. If all returned & has damage -> `PendingSettlement` (48h proposal deadline). | Media: `VerifyMedia` | `RentalUnitsReturned` |
 | **TR-11** | `InRental` | `Completed` (Normal) | `NormalReturnSettled` | System | All units returned normal (no damage), 0 deduction, deposit refund complete. | Inventory & financial closure confirmed, item moves to `Completed`. | Inventory: `MarkAssetsReturned`, Payment: `SettleRental` (0 deduction) | `RentalItemCompleted` |
-| **TR-12** | `PendingSettlement` | `PendingSettlement` | `SubmitDeductionProposal` | Supplier | Actor is item supplier, within 48h deadline, proposed amount <= deposit. | `DeductionProposal` created, 48h renter response deadline set. | Media: `VerifyMedia` | `DeductionProposed` |
+| **TR-12** | `PendingSettlement` | `PendingSettlement` | `SubmitDeductionProposal` | Supplier | Actor is item supplier, within 48h deadline; amount computed from per-asset damage levels in the item snapshot, capped at deposit. | `DeductionProposal` created, 48h renter response deadline set. | Media: `VerifyMedia` | `DeductionProposed` |
 | **TR-13** | `PendingSettlement` | `Completed` | `AcceptDeductionProposal` | Renter / Timeout | Renter accepts proposal or 48h response deadline expires. | Final deduction locked = proposed amount. Settlement executed. | Payment: `SettleRental` | `DeductionSettled` |
 | **TR-14** | `PendingSettlement` | `PendingSettlement` | `DisputeDeductionProposal` | Renter | Renter disputes proposal within 48h response deadline, reason provided. | `Dispute` record created with status `Open`. | Media: `VerifyMedia` | `DeductionDisputed` |
 | **TR-15** | `PendingSettlement` | `Completed` | `ResolveDispute` | Admin | Admin resolves dispute with final deduction <= proposed amount. | Final deduction locked. Settlement executed. | Payment: `SettleRental` | `DisputeResolved` |

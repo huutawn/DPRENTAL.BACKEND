@@ -46,6 +46,7 @@ public sealed class CheckoutOrderWriterTests
         _unselectedLine = AddCartLine(cart, 1);
 
         using RentalServiceDbContext context = NewContext();
+        context.Database.EnsureCreated(); // InMemory chỉ nạp seed (bảng mức hư hại) khi EnsureCreated chạy trên store mới.
         context.RentalCarts.Add(cart);
         context.SaveChanges();
 
@@ -217,7 +218,6 @@ public sealed class CheckoutOrderWriterTests
         IReadOnlyList<CheckoutHeldLine> held = await HoldAsync(_plan);
 
         await using RentalServiceDbContext writeContext = NewContext();
-        writeContext.Database.EnsureCreated(); // InMemory chỉ nạp dữ liệu seed khi EnsureCreated.
         await CreateWriter(writeContext).CreateOrderAsync(_plan, held, OperationId, Now);
 
         await using RentalServiceDbContext readContext = NewContext();

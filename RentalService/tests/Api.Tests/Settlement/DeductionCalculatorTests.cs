@@ -1,6 +1,7 @@
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.DTOs.Settlement;
 using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Xunit;
 
@@ -8,11 +9,15 @@ namespace Dprental.RentalService.Api.Tests.Settlement;
 
 public sealed class DeductionCalculatorTests
 {
-    // Fixture: cọc mỗi máy 500_000, 2 máy.
-    private static RentalItem Item(string? snapshot = null)
+    // Fixture: cọc mỗi máy 500_000, 2 máy đã trả; máy thứ hai trả hỏng trừ khi secondUnitNormal.
+    private static RentalItem Item(string? snapshot = null, bool secondUnitNormal = false)
     {
         var item = Returns.ReturnTests.NewOrder(2).Items.Single();
         item.SetDamageLevelsSnapshot(snapshot ?? DamageLevelTestData.SnapshotJson);
+        var at = DateTimeOffset.UtcNow;
+        var units = item.UnitAssignments.Select((u, i) => new ReturnUnitData(u.Id,
+            i == 1 && secondUnitNormal ? UnitCondition.Normal : UnitCondition.Damaged, "Gãy răng gầu", [])).ToList();
+        ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, at, null, units, at, item.SupplierId);
         return item;
     }
 
@@ -20,7 +25,6 @@ public sealed class DeductionCalculatorTests
         new(item.UnitAssignments.ElementAt(unitIndex).AssetId, level);
 
     [Theory]
-    [InlineData(0, 0)]
     [InlineData(1, 50_000)]
     [InlineData(2, 150_000)]
     [InlineData(3, 250_000)]
@@ -89,6 +93,35 @@ public sealed class DeductionCalculatorTests
         var result = DeductionCalculator.Calculate(item, [new DamageAssessment(Guid.NewGuid(), 1)]);
 
         Assert.Equal("DAMAGE_LEVELS_SNAPSHOT_MISSING", result.Error.Code);
+    }
+
+    [Fact]
+    public void AllZeroPercentLevelsAreRejectedWithClearCode()
+    {
+        var item = Item();
+        var result = DeductionCalculator.Calculate(item, [A(item, 0, 0), A(item, 1, 0)]);
+
+        Assert.Equal("NO_DAMAGE_SELECTED", result.Error.Code);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public void UnitReturnedNormalIsRejected_EvenAtZeroPercent(int level)
+    {
+        var item = Item(secondUnitNormal: true);
+        var result = DeductionCalculator.Calculate(item, [A(item, 0, 2), A(item, 1, level)]);
+
+        Assert.Equal("ASSET_NOT_DAMAGED_IN_ITEM", result.Error.Code);
+    }
+
+    [Fact]
+    public void AssetOutsideItemIsRejected()
+    {
+        var item = Item();
+        var result = DeductionCalculator.Calculate(item, [new DamageAssessment(Guid.NewGuid(), 2)]);
+
+        Assert.Equal("ASSET_NOT_DAMAGED_IN_ITEM", result.Error.Code);
     }
 
     [Fact]

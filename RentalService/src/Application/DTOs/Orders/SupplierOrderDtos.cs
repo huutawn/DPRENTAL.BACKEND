@@ -6,7 +6,7 @@ namespace Dprental.RentalService.Application.DTOs.Orders;
 /// Một máy cụ thể Inventory đã gán cho dòng, chỉ trả cho nhà cung cấp sở hữu máy.
 /// </summary>
 /// <param name="AssignmentId">Mã gán máy, gửi vào API ghi nhận trả máy.</param>
-/// <param name="AssetId">Máy cụ thể của nhà cung cấp, gửi vào affectedAssetIds khi đề xuất khấu trừ.</param>
+/// <param name="AssetId">Máy cụ thể của nhà cung cấp, gửi vào assessments[].assetId khi đề xuất khấu trừ.</param>
 /// <param name="Status">Tình trạng của máy trong dòng: đã gán, đã nhả, đã giao, đã trả.</param>
 /// <param name="ReturnCondition">Tình trạng lúc trả, rỗng khi chưa trả.</param>
 public sealed record SupplierUnitResponse(
