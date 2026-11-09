@@ -84,10 +84,40 @@ public sealed class RentalServiceClient : IRentalServiceClient
 
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
-                return Result.Failure<RentalItemReviewSnapshotDto>(
-                    Error.NotFound("RENTAL_ITEM_NOT_FOUND", "Không tìm thấy mục thuê hoặc mục thuê không thuộc về đơn hàng đã chỉ định."));
-            }
+                string notFoundContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                bool isItemNotFound = false;
+                if (!string.IsNullOrWhiteSpace(notFoundContent))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(notFoundContent);
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("title", out var titleProp) &&
+                            (string.Equals(titleProp.GetString(), "RENTAL_ITEM_NOT_FOUND", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(titleProp.GetString(), "ITEM_NOT_FOUND", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(titleProp.GetString(), "ORDER_NOT_FOUND", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            isItemNotFound = true;
+                        }
+                    }
+                    catch
+                    {
+                        // non-JSON
+                    }
+                }
 
+                if (isItemNotFound)
+                {
+                    return Result.Failure<RentalItemReviewSnapshotDto>(
+                        Error.NotFound("RENTAL_ITEM_NOT_FOUND", "Không tìm thấy mục thuê hoặc mục thuê không thuộc về đơn hàng đã chỉ định."));
+                }
+
+                _logger?.LogWarning("RentalService returned generic 404 (missing route) for order {OrderId}, item {ItemId}",
+                    orderId, itemId);
+
+                return Result.Failure<RentalItemReviewSnapshotDto>(
+                    Error.BadGateway("RENTAL_SERVICE_INVALID_RESPONSE", "RentalService trả về mã 404 chung do thiếu route (không có mã nghiệp vụ xác nhận mục thuê)."));
+            }
             if (response.StatusCode == HttpStatusCode.GatewayTimeout)
             {
                 return Result.Failure<RentalItemReviewSnapshotDto>(
@@ -113,10 +143,17 @@ public sealed class RentalServiceClient : IRentalServiceClient
             try
             {
                 var dto = JsonSerializer.Deserialize<RentalItemReviewSnapshotDto>(content, JsonOptions);
-                if (dto == null)
+                if (dto == null ||
+                    dto.OrderId == Guid.Empty ||
+                    dto.ItemId == Guid.Empty ||
+                    dto.RenterId == Guid.Empty ||
+                    dto.SupplierId == Guid.Empty ||
+                    dto.EquipmentListingId == Guid.Empty ||
+                    dto.OrderId != orderId ||
+                    dto.ItemId != itemId)
                 {
                     return Result.Failure<RentalItemReviewSnapshotDto>(
-                        Error.Failure("RENTAL_SERVICE_INVALID_RESPONSE", "Không thể phân tích cú pháp dữ liệu snapshot từ RentalService."));
+                        Error.BadGateway("RENTAL_SERVICE_INVALID_RESPONSE", "Dữ liệu snapshot từ RentalService không đúng định dạng schema hoặc không khớp orderId/itemId đã yêu cầu."));
                 }
 
                 return Result.Success(dto);
@@ -127,7 +164,7 @@ public sealed class RentalServiceClient : IRentalServiceClient
                     orderId, itemId);
 
                 return Result.Failure<RentalItemReviewSnapshotDto>(
-                    Error.Failure("RENTAL_SERVICE_INVALID_RESPONSE", "Dữ liệu snapshot từ RentalService không đúng định dạng JSON."));
+                    Error.BadGateway("RENTAL_SERVICE_INVALID_RESPONSE", "Dữ liệu snapshot từ RentalService không đúng định dạng JSON."));
             }
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
@@ -161,7 +198,7 @@ public sealed class RentalServiceClient : IRentalServiceClient
         int limit = 100,
         CancellationToken cancellationToken = default)
     {
-        string relativePath = $"internal/reconciliation/rental-items?limit={limit}";
+        string relativePath = $"internal/orders/review-reconciliation?limit={limit}";
         if (!string.IsNullOrWhiteSpace(cursor))
         {
             relativePath += $"&cursor={Uri.EscapeDataString(cursor)}";
@@ -185,6 +222,12 @@ public sealed class RentalServiceClient : IRentalServiceClient
             using var response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    return Result.Failure<ReconciliationBatchDto>(
+                        Error.BadGateway("RENTAL_SERVICE_INVALID_RESPONSE", "Endpoint đối soát RentalService không tồn tại (404)."));
+                }
+
                 return Result.Failure<ReconciliationBatchDto>(
                     Error.Failure("RENTAL_SERVICE_ERROR", $"RentalService trả về mã lỗi HTTP {(int)response.StatusCode}."));
             }
@@ -193,7 +236,7 @@ public sealed class RentalServiceClient : IRentalServiceClient
             var batch = JsonSerializer.Deserialize<ReconciliationBatchDto>(content, JsonOptions);
             return batch != null
                 ? Result.Success(batch)
-                : Result.Failure<ReconciliationBatchDto>(Error.Failure("RENTAL_SERVICE_INVALID_RESPONSE", "Dữ liệu đối soát không đúng định dạng."));
+                : Result.Failure<ReconciliationBatchDto>(Error.BadGateway("RENTAL_SERVICE_INVALID_RESPONSE", "Dữ liệu đối soát không đúng định dạng."));
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
         {

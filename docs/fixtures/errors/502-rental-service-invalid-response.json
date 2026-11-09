@@ -1,0 +1,8 @@
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.6.3",
+  "title": "RENTAL_SERVICE_INVALID_RESPONSE",
+  "status": 502,
+  "detail": "Dịch vụ RentalService trả về lỗi 404 chung do thiếu route hoặc payload snapshot/reconciliation không hợp lệ.",
+  "instance": "/api/v1/reviews",
+  "code": "RENTAL_SERVICE_INVALID_RESPONSE"
+}

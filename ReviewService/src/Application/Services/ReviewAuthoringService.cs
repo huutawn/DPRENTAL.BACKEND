@@ -141,6 +141,19 @@ public sealed class ReviewAuthoringService : IReviewAuthoringService
 
         var snapshot = snapshotResult.Value;
 
+        // Kiểm tra schema/ID snapshot trước khi dùng dữ liệu cấp quyền hoặc tạo review
+        if (snapshot.OrderId == Guid.Empty ||
+            snapshot.ItemId == Guid.Empty ||
+            snapshot.RenterId == Guid.Empty ||
+            snapshot.SupplierId == Guid.Empty ||
+            snapshot.EquipmentListingId == Guid.Empty ||
+            snapshot.OrderId != request.OrderId ||
+            snapshot.ItemId != request.ItemId)
+        {
+            return Result.Failure<ReviewDetailResponse>(
+                Error.BadGateway("RENTAL_SERVICE_INVALID_RESPONSE", "Dữ liệu snapshot từ RentalService không đúng schema hoặc không khớp đơn hàng/mục thuê."));
+        }
+
         // 3. Xác thực trạng thái mục thuê hoàn tất
         if (!string.Equals(snapshot.Status, "Completed", StringComparison.OrdinalIgnoreCase) || snapshot.CompletedAt == null)
         {
