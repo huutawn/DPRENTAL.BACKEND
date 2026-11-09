@@ -14,6 +14,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
+using Moq;
 
 namespace Dprental.RentalService.Api.Tests.Maintenance;
 
@@ -38,6 +39,29 @@ public sealed class RentalReminderMaintenanceTests
         }
         guids.Sort();
         return guids;
+    }
+
+    private static RentalReminderBackfillService CreateBackfillService(
+        DbContextOptions<RentalServiceDbContext> options,
+        TimeProvider timeProvider,
+        IOrderLockManager? lockManager = null)
+    {
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new RentalServiceDbContext(options));
+        services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
+        services.AddScoped<IRentalReminderScheduleRepository, RentalReminderScheduleRepository>();
+        services.AddSingleton(lockManager ?? new FakeOrderLockManager());
+        services.AddSingleton(timeProvider);
+        services.AddLogging();
+
+        var sp = services.BuildServiceProvider();
+        var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+
+        return new RentalReminderBackfillService(
+            scopeFactory,
+            lockManager ?? new FakeOrderLockManager(),
+            timeProvider,
+            NullLogger<RentalReminderBackfillService>.Instance);
     }
 
     private static RentalOrder CreateTestOrder(Guid orderId, Guid itemId, RentalItemStatus status, DateOnly? startDate = null, DateOnly? endDate = null, int quantity = 1)
@@ -111,7 +135,7 @@ public sealed class RentalReminderMaintenanceTests
         await using (var db = new RentalServiceDbContext(options))
         {
             var timeProvider = new FixedTimeProvider(FixedNow);
-            var service = new RentalReminderBackfillService(db, timeProvider, NullLogger<RentalReminderBackfillService>.Instance);
+            var service = CreateBackfillService(options, timeProvider);
 
             var batchProgressList = new List<BackfillProgress>();
             var result = await service.BackfillActiveItemsAsync(
@@ -162,12 +186,13 @@ public sealed class RentalReminderMaintenanceTests
         await using (var db = new RentalServiceDbContext(options))
         {
             var timeProvider = new FixedTimeProvider(FixedNow);
-            var service = new RentalReminderBackfillService(db, timeProvider, NullLogger<RentalReminderBackfillService>.Instance);
+            var service = CreateBackfillService(options, timeProvider);
 
-            // Resume after sortedIds[1] (item 2)
+            // Resume after sortedIds[1] (item 2) with explicit phase "handover"
             var result = await service.BackfillActiveItemsAsync(
                 batchSize: 2,
-                startAfterItemId: sortedIds[1]);
+                phase: "handover",
+                afterItemId: sortedIds[1]);
 
             Assert.Equal(2, result.HandoverSchedulesCreated);
             Assert.Equal(sortedIds[3], result.LastProcessedItemId);
@@ -204,7 +229,7 @@ public sealed class RentalReminderMaintenanceTests
         await using (var db = new RentalServiceDbContext(options))
         {
             var timeProvider = new FixedTimeProvider(FixedNow);
-            var service = new RentalReminderBackfillService(db, timeProvider, NullLogger<RentalReminderBackfillService>.Instance);
+            var service = CreateBackfillService(options, timeProvider);
 
             // Run 1: creates 1 Handover and 1 Return schedule
             var result1 = await service.BackfillActiveItemsAsync(batchSize: 10);
@@ -245,7 +270,7 @@ public sealed class RentalReminderMaintenanceTests
         await using (var db = new RentalServiceDbContext(options))
         {
             var timeProvider = new FixedTimeProvider(FixedNow);
-            var service = new RentalReminderBackfillService(db, timeProvider, NullLogger<RentalReminderBackfillService>.Instance);
+            var service = CreateBackfillService(options, timeProvider);
 
             var result = await service.BackfillActiveItemsAsync(batchSize: 10);
             Assert.Equal(0, result.HandoverSchedulesCreated);
@@ -310,7 +335,7 @@ public sealed class RentalReminderMaintenanceTests
         await using (var db = new RentalServiceDbContext(options))
         {
             var timeProvider = new FixedTimeProvider(FixedNow);
-            var service = new RentalReminderBackfillService(db, timeProvider, NullLogger<RentalReminderBackfillService>.Instance);
+            var service = CreateBackfillService(options, timeProvider);
 
             var result = await service.BackfillActiveItemsAsync(batchSize: 10);
             Assert.Equal(1, result.ReturnSchedulesCreated);
@@ -407,7 +432,7 @@ public sealed class RentalReminderMaintenanceTests
         }
 
         var output = new StringWriter();
-        int exitCode = await Dprental.RentalService.Maintenance.Program.RunReminderBackfillAsync(options, apply: true, batchSize: 10, checkpoint: sortedIds[0], output: output);
+        int exitCode = await Dprental.RentalService.Maintenance.Program.RunReminderBackfillAsync(options, apply: true, batchSize: 10, phase: "handover", afterItemId: sortedIds[0], output: output);
 
         Assert.Equal(0, exitCode);
         string text = output.ToString();
@@ -421,6 +446,187 @@ public sealed class RentalReminderMaintenanceTests
             Assert.DoesNotContain(schedules, s => s.RentalItemId == sortedIds[0]);
             Assert.Contains(schedules, s => s.RentalItemId == sortedIds[1]);
             Assert.Contains(schedules, s => s.RentalItemId == sortedIds[2]);
+        }
+    }
+
+    [Fact]
+    public async Task BackfillActiveItemsAsync_WhenItemTransitionsFromAwaitingHandoverToInRentalBetweenCandidateReadAndLock_HandoverBackfillSkipsItem()
+    {
+        string dbName = $"StaleHandover_{Guid.NewGuid():N}";
+        var options = CreateOptions(dbName);
+        var itemId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+
+        await using (var db = new RentalServiceDbContext(options))
+        {
+            var order = CreateTestOrder(orderId, itemId, RentalItemStatus.AwaitingHandover,
+                startDate: DateOnly.FromDateTime(FixedNow.AddDays(2).DateTime));
+            db.RentalOrders.Add(order);
+            await db.SaveChangesAsync();
+        }
+
+        // Custom LockManager: before returning lock, simulate a race where another process transitions item to InRental
+        var racingLockManager = new Mock<IOrderLockManager>();
+        racingLockManager
+            .Setup(m => m.AcquireOrderLockAsync(orderId, It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
+            .Returns<Guid, TimeSpan?, CancellationToken>(async (id, timeout, ct) =>
+            {
+                await using var modifyDb = new RentalServiceDbContext(options);
+                var item = await modifyDb.RentalItems.FirstAsync(i => i.Id == itemId, ct);
+                typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(item, RentalItemStatus.InRental);
+                await modifyDb.SaveChangesAsync(ct);
+
+                var releaserMock = new Mock<IAsyncDisposable>();
+                return releaserMock.Object;
+            });
+
+        await using (var db = new RentalServiceDbContext(options))
+        {
+            var timeProvider = new FixedTimeProvider(FixedNow);
+            var service = CreateBackfillService(options, timeProvider, racingLockManager.Object);
+
+            // Run Handover phase
+            var result = await service.BackfillActiveItemsAsync(batchSize: 10, phase: "handover");
+
+            // Because item transitioned to InRental under lock, handover backfill must skip it
+            Assert.Equal(0, result.HandoverSchedulesCreated);
+
+            var schedules = await db.RentalReminderSchedules.ToListAsync();
+            Assert.Empty(schedules);
+        }
+    }
+
+    [Fact]
+    public async Task BackfillActiveItemsAsync_WhenReturnRequestRejectedBetweenCandidateReadAndLock_ReReadUnderLockCreatesActiveScheduleWithNewUnitsAndTrigger()
+    {
+        string dbName = $"StaleReject_{Guid.NewGuid():N}";
+        var options = CreateOptions(dbName);
+        var itemId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+
+        await using (var db = new RentalServiceDbContext(options))
+        {
+            var order = CreateTestOrder(orderId, itemId, RentalItemStatus.InRental,
+                startDate: DateOnly.FromDateTime(FixedNow.AddDays(-2).DateTime),
+                endDate: DateOnly.FromDateTime(FixedNow.AddDays(2).DateTime), quantity: 2);
+            var item = order.Items.First();
+
+            // Create active return request for all units (so candidate snapshot sees 0 active remaining units)
+            var assignmentIds = item.UnitAssignments.Select(u => u.Id).ToList();
+            var reqUnits = assignmentIds.Select(a => new ReturnRequestUnit(Guid.NewGuid(), Guid.NewGuid(), a, Array.Empty<Guid>())).ToList();
+            var req = new ReturnRequest(Guid.NewGuid(), itemId, FixedNow.AddHours(-1), "Returning", Guid.NewGuid(), FixedNow.AddHours(-1), reqUnits);
+            item.AddReturnRequest(req);
+
+            db.RentalOrders.Add(order);
+            await db.SaveChangesAsync();
+        }
+
+        // Custom LockManager: before returning lock, simulate return request rejection
+        var racingLockManager = new Mock<IOrderLockManager>();
+        racingLockManager
+            .Setup(m => m.AcquireOrderLockAsync(orderId, It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
+            .Returns<Guid, TimeSpan?, CancellationToken>(async (id, timeout, ct) =>
+            {
+                await using var modifyDb = new RentalServiceDbContext(options);
+                var order = await modifyDb.RentalOrders.Include(o => o.Items).ThenInclude(i => i.ReturnRequests).ThenInclude(r => r.Units).FirstAsync(o => o.Id == orderId, ct);
+                var req = order.Items.First().ReturnRequests.First();
+                foreach (var u in req.Units)
+                {
+                    u.SetRejectedAt(FixedNow);
+                }
+                await modifyDb.SaveChangesAsync(ct);
+
+                var releaserMock = new Mock<IAsyncDisposable>();
+                return releaserMock.Object;
+            });
+
+        await using (var db = new RentalServiceDbContext(options))
+        {
+            var timeProvider = new FixedTimeProvider(FixedNow);
+            var service = CreateBackfillService(options, timeProvider, racingLockManager.Object);
+
+            // Run Return phase
+            var result = await service.BackfillActiveItemsAsync(batchSize: 10, phase: "return");
+
+            Assert.Equal(1, result.ReturnSchedulesCreated);
+
+            var schedule = await db.RentalReminderSchedules.FirstAsync(s => s.RentalItemId == itemId);
+            Assert.Equal(RentalReminderScheduleType.Return, schedule.ScheduleType);
+            Assert.Equal(2, schedule.RemainingUnitCount);
+            Assert.NotNull(schedule.NextTriggerAt);
+        }
+    }
+
+    [Fact]
+    public async Task BackfillActiveItemsAsync_WhenCheckpointItemDeleted_DoesNotInferPhaseAndMaintainsSpecifiedPhase()
+    {
+        string dbName = $"DeletedCheckpoint_{Guid.NewGuid():N}";
+        var options = CreateOptions(dbName);
+        var existingItemId = Guid.NewGuid();
+        var nonExistentCursorId = Guid.NewGuid();
+
+        await using (var db = new RentalServiceDbContext(options))
+        {
+            var order = CreateTestOrder(Guid.NewGuid(), existingItemId, RentalItemStatus.InRental,
+                startDate: DateOnly.FromDateTime(FixedNow.AddDays(-2).DateTime),
+                endDate: DateOnly.FromDateTime(FixedNow.AddDays(2).DateTime));
+            db.RentalOrders.Add(order);
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = new RentalServiceDbContext(options))
+        {
+            var timeProvider = new FixedTimeProvider(FixedNow);
+            var service = CreateBackfillService(options, timeProvider);
+
+            // Resume Return phase with a cursor that doesn't exist in DB
+            // Must NOT fail or guess phase: it runs Return phase directly
+            var result = await service.BackfillActiveItemsAsync(batchSize: 10, phase: "return", afterItemId: nonExistentCursorId);
+
+            Assert.True(result.Succeeded);
+            Assert.Equal("return", result.LastPhase);
+        }
+    }
+
+    [Fact]
+    public async Task BackfillActiveItemsAsync_WhenOrderFailsInMiddleOfPage_CheckpointDoesNotAdvanceAndRerunIsSafe()
+    {
+        string dbName = $"PageFail_{Guid.NewGuid():N}";
+        var options = CreateOptions(dbName);
+        var sortedIds = GenerateSortedGuids(3);
+        var order1Id = Guid.NewGuid();
+        var order2Id = Guid.NewGuid();
+
+        await using (var db = new RentalServiceDbContext(options))
+        {
+            var order1 = CreateTestOrder(order1Id, sortedIds[0], RentalItemStatus.AwaitingHandover,
+                startDate: DateOnly.FromDateTime(FixedNow.AddDays(1).DateTime));
+            var order2 = CreateTestOrder(order2Id, sortedIds[1], RentalItemStatus.AwaitingHandover,
+                startDate: DateOnly.FromDateTime(FixedNow.AddDays(1).DateTime));
+            db.RentalOrders.AddRange(order1, order2);
+            await db.SaveChangesAsync();
+        }
+
+        var failingLockManager = new Mock<IOrderLockManager>();
+        // Order 1 succeeds
+        failingLockManager
+            .Setup(m => m.AcquireOrderLockAsync(order1Id, It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Mock<IAsyncDisposable>().Object);
+        // Order 2 fails
+        failingLockManager
+            .Setup(m => m.AcquireOrderLockAsync(order2Id, It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Simulated lock failure on order 2"));
+
+        await using (var db = new RentalServiceDbContext(options))
+        {
+            var timeProvider = new FixedTimeProvider(FixedNow);
+            var service = CreateBackfillService(options, timeProvider, failingLockManager.Object);
+
+            var result = await service.BackfillActiveItemsAsync(batchSize: 10, phase: "handover");
+
+            Assert.False(result.Succeeded);
+            // Checkpoint must NOT advance past the failed page!
+            Assert.Null(result.LastProcessedItemId);
         }
     }
 }

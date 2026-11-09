@@ -134,7 +134,7 @@ public sealed partial class ReturnService
 
         if (reminderSchedules != null)
         {
-            int remainingActive = Dprental.RentalService.Domain.Policies.RentalReturnActiveUnitsCalculator.Calculate(item);
+            int remainingActive = Dprental.RentalService.Application.Policies.RentalReturnActiveUnitsCalculator.Calculate(item);
             await reminderSchedules.OnReturnUnitsChangedAsync(item.Id, remainingActive, item.ExpectedEndDate, now, cancellationToken);
         }
         // Thực hiện lời gọi có thể phát sinh exception; nhánh catch phía dưới quyết định trả lỗi, retry hoặc chuyển tiếp exception.

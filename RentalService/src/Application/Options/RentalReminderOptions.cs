@@ -10,4 +10,6 @@ public sealed class RentalReminderOptions
     public int LeaseDurationSeconds { get; set; } = 60;
     public int BaseRetryDelaySeconds { get; set; } = 30;
     public int MaxRetryDelaySeconds { get; set; } = 3600;
+    public int MinClaimFailureBackoffSeconds { get; set; } = 5;
+    public int MaxClaimFailureBackoffSeconds { get; set; } = 60;
 }

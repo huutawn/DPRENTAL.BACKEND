@@ -5,15 +5,12 @@ using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.IRepositories;
-using Dprental.RentalService.Domain.Repositories;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Reminders;
 
 public sealed class RentalReminderBatchProcessor : IRentalReminderBatchProcessor
 {
-    private readonly RentalServiceDbContext _dbContext;
     private readonly IRentalReminderScheduleRepository _scheduleRepo;
     private readonly IOrderLockManager _lockManager;
     private readonly IRentalEventProducer _eventProducer;
@@ -22,21 +19,19 @@ public sealed class RentalReminderBatchProcessor : IRentalReminderBatchProcessor
     private readonly IUnitOfWork _unitOfWork;
 
     public RentalReminderBatchProcessor(
-        RentalServiceDbContext dbContext,
         IRentalReminderScheduleRepository scheduleRepo,
         IOrderLockManager lockManager,
         IRentalEventProducer eventProducer,
+        IUnitOfWork unitOfWork,
         TimeProvider timeProvider,
-        IUnitOfWork? unitOfWork = null,
         ILogger<RentalReminderBatchProcessor>? logger = null)
     {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
         _scheduleRepo = scheduleRepo ?? throw new ArgumentNullException(nameof(scheduleRepo));
         _lockManager = lockManager ?? throw new ArgumentNullException(nameof(lockManager));
         _eventProducer = eventProducer ?? throw new ArgumentNullException(nameof(eventProducer));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<RentalReminderBatchProcessor>.Instance;
-        _unitOfWork = unitOfWork ?? (IUnitOfWork)dbContext;
     }
 
     public async Task<ProcessOrderGroupResult> ProcessOrderReminderGroupAsync(
@@ -51,6 +46,7 @@ public sealed class RentalReminderBatchProcessor : IRentalReminderBatchProcessor
         int noticesSent = 0;
         int completed = 0;
         int failed = 0;
+        var itemResults = new List<ReminderItemProcessResult>(descriptors.Count);
 
         // 1. Lấy order lock trước khi mở transaction và truy cập dữ liệu
         await using var orderLock = await _lockManager.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(15), cancellationToken);
@@ -64,78 +60,110 @@ public sealed class RentalReminderBatchProcessor : IRentalReminderBatchProcessor
             var scheduleIds = orderedDescriptors.Select(d => d.ScheduleId).Distinct().ToList();
             await _scheduleRepo.LockSchedulesForUpdateAsync(scheduleIds, cancellationToken);
 
-            // Đọc trạng thái hiện tại của schedule (LastNotifiedDate, OverdueDayCount)
-            var scheduleStates = await _dbContext.RentalReminderSchedules
-                .AsNoTracking()
-                .Where(s => scheduleIds.Contains(s.Id))
-                .ToDictionaryAsync(s => s.Id, s => new { s.LastNotifiedDate, s.OverdueDayCount, s.Status }, cancellationToken);
+            // Đọc trạng thái hiện tại của schedule qua abstraction Repository
+            var scheduleStates = await _scheduleRepo.GetScheduleStatesAsync(scheduleIds, cancellationToken);
 
-            // 4. Đọc projection tối thiểu của Order (AsNoTracking, không tải full aggregate)
+            // 4. Đọc projection tối thiểu của Order
             var order = await _scheduleRepo.GetOrderReminderProjectionAsync(orderId, cancellationToken);
             if (order == null || order.OrderStatus is RentalOrderStatus.Cancelled or RentalOrderStatus.Expired or RentalOrderStatus.Completed)
             {
                 foreach (var desc in descriptors)
                 {
-                    await _scheduleRepo.CompleteScheduleWithLeaseCheckAsync(desc.ScheduleId, desc.LeaseToken, now, cancellationToken);
-                    completed++;
-                    processed++;
+                    bool ok = await _scheduleRepo.CompleteScheduleWithLeaseCheckAsync(desc.ScheduleId, desc.LeaseToken, now, cancellationToken);
+                    if (ok)
+                    {
+                        completed++;
+                        processed++;
+                        itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ReminderItemProcessOutcome.Succeeded));
+                    }
+                    else
+                    {
+                        itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ReminderItemProcessOutcome.LeaseLost));
+                    }
                 }
                 await tx.CommitAsync(cancellationToken);
-                return new ProcessOrderGroupResult(processed, noticesSent, completed, failed);
+                return new ProcessOrderGroupResult(processed, noticesSent, completed, failed, itemResults);
             }
 
             foreach (var desc in orderedDescriptors)
             {
                 processed++;
 
-                if (!scheduleStates.TryGetValue(desc.ScheduleId, out var state) || state.Status != RentalReminderScheduleStatus.Active)
+                if (!scheduleStates.TryGetValue(desc.ScheduleId, out var state) ||
+                    state.Status != RentalReminderScheduleStatus.Active ||
+                    state.LeaseToken != desc.LeaseToken ||
+                    state.LeasedUntil == null ||
+                    state.LeasedUntil < now)
                 {
+                    itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ReminderItemProcessOutcome.LeaseLost));
                     continue;
                 }
 
                 var item = order.Items.FirstOrDefault(i => i.ItemId == desc.ItemId);
                 if (item == null)
                 {
-                    await _scheduleRepo.CompleteScheduleWithLeaseCheckAsync(desc.ScheduleId, desc.LeaseToken, now, cancellationToken);
-                    completed++;
+                    bool ok = await _scheduleRepo.CompleteScheduleWithLeaseCheckAsync(desc.ScheduleId, desc.LeaseToken, now, cancellationToken);
+                    if (ok) completed++;
+                    itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ok ? ReminderItemProcessOutcome.Succeeded : ReminderItemProcessOutcome.LeaseLost));
                     continue;
                 }
 
                 DateOnly targetDate;
+                int activeUnits;
 
                 if (desc.ScheduleType == RentalReminderScheduleType.Handover)
                 {
                     if (item.Status != RentalItemStatus.AwaitingHandover)
                     {
-                        await _scheduleRepo.CompleteScheduleWithLeaseCheckAsync(desc.ScheduleId, desc.LeaseToken, now, cancellationToken);
-                        completed++;
+                        bool ok = await _scheduleRepo.CompleteScheduleWithLeaseCheckAsync(desc.ScheduleId, desc.LeaseToken, now, cancellationToken);
+                        if (ok) completed++;
+                        itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ok ? ReminderItemProcessOutcome.Succeeded : ReminderItemProcessOutcome.LeaseLost));
                         continue;
                     }
 
                     if (item.HandoverInProgress)
                     {
-                        // Handover đang đối soát: hoãn lần xét tiếp 5 phút, không chỉ nhả lease
+                        // Handover đang đối soát: hoãn lần xét tiếp 5 phút
                         _logger.LogInformation("Item {ItemId} đang có bàn giao dở dang/đối soát, hoãn lịch nhắc 5 phút", item.ItemId);
-                        await _scheduleRepo.ReleaseLeaseWithTokenAsync(desc.ScheduleId, desc.LeaseToken, now.AddMinutes(5), now, cancellationToken);
+                        bool ok = await _scheduleRepo.ReleaseLeaseWithTokenAsync(desc.ScheduleId, desc.LeaseToken, now.AddMinutes(5), now, cancellationToken);
+                        itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ok ? ReminderItemProcessOutcome.Deferred : ReminderItemProcessOutcome.LeaseLost));
                         continue;
                     }
 
                     targetDate = item.ExpectedStartDate;
+                    activeUnits = item.TotalQuantity;
                 }
                 else // Return
                 {
                     if (item.Status != RentalItemStatus.InRental)
                     {
-                        await _scheduleRepo.CompleteScheduleWithLeaseCheckAsync(desc.ScheduleId, desc.LeaseToken, now, cancellationToken);
-                        completed++;
+                        bool ok = await _scheduleRepo.CompleteScheduleWithLeaseCheckAsync(desc.ScheduleId, desc.LeaseToken, now, cancellationToken);
+                        if (ok) completed++;
+                        itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ok ? ReminderItemProcessOutcome.Succeeded : ReminderItemProcessOutcome.LeaseLost));
                         continue;
                     }
 
-                    if (item.ActiveRemainingUnits <= 0)
+                    try
                     {
-                        // Máy đang chờ xác nhận trả: tạm dừng lịch nhắc (không gửi, nhả lease không dời trigger)
+                        activeUnits = RentalReturnActiveUnitsCalculator.Calculate(
+                            item.AllAssignmentIds,
+                            item.ReturnedAssignmentIds,
+                            item.ActiveReturnRequestedAssignmentIds);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Item {ItemId} có dữ liệu assignment không hợp lệ khi tính active units", item.ItemId);
+                        failed++;
+                        itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ReminderItemProcessOutcome.PermanentFailure, ex.Message));
+                        continue;
+                    }
+
+                    if (activeUnits <= 0)
+                    {
+                        // Máy đang chờ xác nhận trả: cập nhật rõ remaining_unit_count=0, next_trigger_at=NULL và xóa lease
                         _logger.LogInformation("Item {ItemId} không còn máy cần trả (đang chờ xác nhận hoặc đã trả hết), tạm dừng lịch nhắc", item.ItemId);
-                        await _scheduleRepo.ReleaseLeaseWithTokenAsync(desc.ScheduleId, desc.LeaseToken, null, now, cancellationToken);
+                        bool ok = await _scheduleRepo.PauseScheduleWithLeaseCheckAsync(desc.ScheduleId, desc.LeaseToken, now, cancellationToken);
+                        itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ok ? ReminderItemProcessOutcome.Deferred : ReminderItemProcessOutcome.LeaseLost));
                         continue;
                     }
 
@@ -152,14 +180,16 @@ public sealed class RentalReminderBatchProcessor : IRentalReminderBatchProcessor
 
                 if (eval.Action == ReminderPolicyAction.WindowExpired)
                 {
-                    await _scheduleRepo.CompleteScheduleWithLeaseCheckAsync(desc.ScheduleId, desc.LeaseToken, now, cancellationToken);
-                    completed++;
+                    bool ok = await _scheduleRepo.CompleteScheduleWithLeaseCheckAsync(desc.ScheduleId, desc.LeaseToken, now, cancellationToken);
+                    if (ok) completed++;
+                    itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ok ? ReminderItemProcessOutcome.Succeeded : ReminderItemProcessOutcome.LeaseLost));
                     continue;
                 }
 
                 if (eval.Action == ReminderPolicyAction.Reschedule)
                 {
-                    await _scheduleRepo.ReleaseLeaseWithTokenAsync(desc.ScheduleId, desc.LeaseToken, eval.NextTriggerAt, now, cancellationToken);
+                    bool ok = await _scheduleRepo.ReleaseLeaseWithTokenAsync(desc.ScheduleId, desc.LeaseToken, eval.NextTriggerAt, now, cancellationToken);
+                    itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ok ? ReminderItemProcessOutcome.Deferred : ReminderItemProcessOutcome.LeaseLost));
                     continue;
                 }
 
@@ -175,7 +205,7 @@ public sealed class RentalReminderBatchProcessor : IRentalReminderBatchProcessor
                         eval.ReminderType!,
                         eval.ReminderDate!.Value,
                         eval.ActionDeadline ?? RentalReminderPolicy.ActionDeadline(targetDate),
-                        item.ActiveRemainingUnits,
+                        activeUnits,
                         targetDate,
                         order.OrderVersion);
 
@@ -198,7 +228,10 @@ public sealed class RentalReminderBatchProcessor : IRentalReminderBatchProcessor
 
                     if (!advanced)
                     {
-                        throw new InvalidOperationException($"Fencing lease check thất bại cho schedule {desc.ScheduleId}. Token không khớp hoặc lease đã hết hạn.");
+                        // Fencing lease check thất bại -> worker đã mất lease. Rollback và trả LeaseLost
+                        await tx.RollbackAsync(CancellationToken.None);
+                        itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ReminderItemProcessOutcome.LeaseLost));
+                        return new ProcessOrderGroupResult(processed, noticesSent, completed, failed, itemResults);
                     }
 
                     noticesSent++;
@@ -206,12 +239,13 @@ public sealed class RentalReminderBatchProcessor : IRentalReminderBatchProcessor
                     {
                         completed++;
                     }
+                    itemResults.Add(new ReminderItemProcessResult(desc.ScheduleId, desc.LeaseToken, ReminderItemProcessOutcome.Succeeded));
                 }
             }
 
             // 6. Commit atomicity: outbox và cập nhật lịch được lưu cùng lúc
             await tx.CommitAsync(cancellationToken);
-            return new ProcessOrderGroupResult(processed, noticesSent, completed, failed);
+            return new ProcessOrderGroupResult(processed, noticesSent, completed, failed, itemResults);
         }
         catch (OperationCanceledException)
         {
@@ -223,7 +257,12 @@ public sealed class RentalReminderBatchProcessor : IRentalReminderBatchProcessor
             await tx.RollbackAsync(CancellationToken.None);
             _logger.LogError(ex, "Lỗi xử lý nhóm lịch nhắc cho Order {OrderId}, đã rollback transaction.", orderId);
             failed += descriptors.Count;
-            return new ProcessOrderGroupResult(processed, 0, 0, failed);
+            var retryableResults = descriptors.Select(d => new ReminderItemProcessResult(
+                d.ScheduleId,
+                d.LeaseToken,
+                ReminderItemProcessOutcome.RetryableFailure,
+                ex.Message)).ToList();
+            return new ProcessOrderGroupResult(processed, 0, 0, failed, retryableResults);
         }
     }
 }

@@ -1,4 +1,5 @@
 using Dprental.RentalService.Api.Tests.TestHelpers;
+using Dprental.RentalService.Application.IServices.Reminders;
 using Dprental.RentalService.Application.Kafka.Configuration;
 using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.Kafka.Producers;
@@ -11,6 +12,7 @@ using Dprental.RentalService.Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
 
@@ -330,18 +332,17 @@ public sealed class RentalReminderPostgreSqlIntegrationTests
                 var lockManager = new FakeOrderLockManager();
 
                 var processor = new RentalReminderBatchProcessor(
-                    db,
                     repo,
                     lockManager,
                     producer,
-                    timeProvider,
                     unitOfWork: db,
+                    timeProvider: timeProvider,
                     logger: NullLogger<RentalReminderBatchProcessor>.Instance);
 
                 var result = await processor.ProcessOrderReminderGroupAsync(orderId, [staleDescriptor]);
 
-                Assert.Equal(1, result.Failed);
                 Assert.Equal(0, result.NoticesSent);
+                Assert.Equal(ReminderItemProcessOutcome.LeaseLost, result.ItemResults[0].Outcome);
             }
 
             // Verify in PostgreSQL: Atomicity guarantees no orphaned outbox messages and schedule has not advanced
@@ -483,14 +484,19 @@ public sealed class RentalReminderPostgreSqlIntegrationTests
 
                 var order1 = PostgresTestDatabaseHelper.CreateOrderWithItem(
                     Guid.NewGuid(), item1Id, Guid.NewGuid(), 2, now);
+                var item1 = order1.Items.First();
                 typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!
-                    .SetValue(order1.Items.First(), RentalItemStatus.AwaitingHandover);
+                    .SetValue(item1, RentalItemStatus.AwaitingHandover);
+                typeof(RentalItem).GetProperty(nameof(RentalItem.ExpectedStartDate))!
+                    .SetValue(item1, DateOnly.FromDateTime(now.AddDays(2).DateTime));
 
                 var order2 = PostgresTestDatabaseHelper.CreateOrderWithItem(
                     Guid.NewGuid(), item2Id, Guid.NewGuid(), 1, now);
+                var item2 = order2.Items.First();
                 typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!
-                    .SetValue(order2.Items.First(), RentalItemStatus.InRental);
-
+                    .SetValue(item2, RentalItemStatus.InRental);
+                typeof(RentalItem).GetProperty(nameof(RentalItem.ExpectedEndDate))!
+                    .SetValue(item2, DateOnly.FromDateTime(now.AddDays(2).DateTime));
                 db.RentalOrders.AddRange(order1, order2);
                 await db.SaveChangesAsync();
             }
@@ -498,9 +504,19 @@ public sealed class RentalReminderPostgreSqlIntegrationTests
             // Run Backfill
             await using (var db = new RentalServiceDbContext(options))
             {
-                var backfillService = new RentalReminderBackfillService(
-                    db, timeProvider, NullLogger<RentalReminderBackfillService>.Instance);
+                var services = new ServiceCollection();
+                services.AddScoped(_ => new RentalServiceDbContext(options));
+                services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
+                services.AddScoped<IRentalReminderScheduleRepository, RentalReminderScheduleRepository>();
+                var sp = services.BuildServiceProvider();
+                var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+                var lockManager = new FakeOrderLockManager();
 
+                var backfillService = new RentalReminderBackfillService(
+                    scopeFactory,
+                    lockManager,
+                    timeProvider,
+                    NullLogger<RentalReminderBackfillService>.Instance);
                 var result1 = await backfillService.BackfillActiveItemsAsync(batchSize: 10);
                 Assert.Equal(1, result1.HandoverSchedulesCreated);
                 Assert.Equal(1, result1.ReturnSchedulesCreated);
@@ -600,6 +616,246 @@ public sealed class RentalReminderPostgreSqlIntegrationTests
             var locked = await repo.LockSchedulesForUpdateAsync(new[] { id2, id1 });
             Assert.Equal(2, locked.Count);
             Assert.Equal(new[] { id1, id2 }.OrderBy(x => x).ToList(), locked);
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task Ownership_WhenWorkerALostLease_AllOperationsByWorkerAFailWithoutMutatingData()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            Guid scheduleId;
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+                var schedule = RentalReminderSchedule.Create(
+                    Guid.NewGuid(), Guid.NewGuid(), RentalReminderScheduleType.Handover, 1, now.AddMinutes(-5), now.AddDays(-1));
+                db.RentalReminderSchedules.Add(schedule);
+                await db.SaveChangesAsync();
+                scheduleId = schedule.Id;
+            }
+
+            // 1. Worker A claims schedule with 2s lease
+            ReminderClaimDescriptor claimA;
+            await using (var dbA = new RentalServiceDbContext(options))
+            {
+                var repoA = new RentalReminderScheduleRepository(dbA);
+                var claimed = await repoA.ClaimDueBatchAsync("worker-A", TimeSpan.FromSeconds(2), 10);
+                claimA = Assert.Single(claimed);
+            }
+
+            // 2. Expire Worker A lease in database
+            await using (var dbExpire = new RentalServiceDbContext(options))
+            {
+                await dbExpire.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE rental.rental_reminder_schedules SET leased_until = NOW() - interval '1 second' WHERE \"Id\" = {scheduleId};");
+            }
+
+            // 3. Worker B claims schedule
+            ReminderClaimDescriptor claimB;
+            await using (var dbB = new RentalServiceDbContext(options))
+            {
+                var repoB = new RentalReminderScheduleRepository(dbB);
+                var claimed = await repoB.ClaimDueBatchAsync("worker-B", TimeSpan.FromMinutes(2), 10);
+                claimB = Assert.Single(claimed);
+                Assert.NotEqual(claimA.LeaseToken, claimB.LeaseToken);
+            }
+
+            // 4. Worker A attempts ALL operations with stale token A -> all MUST return false
+            await using (var dbA = new RentalServiceDbContext(options))
+            {
+                var repoA = new RentalReminderScheduleRepository(dbA);
+
+                bool advanceResult = await repoA.AdvanceScheduleWithLeaseCheckAsync(
+                    scheduleId, claimA.LeaseToken, DateOnly.FromDateTime(DateTime.UtcNow), now, now.AddDays(1), false, false);
+                Assert.False(advanceResult, "Advance must fail when lease is lost.");
+
+                bool failResult = await repoA.FailScheduleWithLeaseCheckAsync(
+                    scheduleId, claimA.LeaseToken, now.AddMinutes(5), now);
+                Assert.False(failResult, "Fail must fail when lease is lost.");
+
+                bool releaseResult = await repoA.ReleaseLeaseWithTokenAsync(
+                    scheduleId, claimA.LeaseToken, now.AddMinutes(5), now);
+                Assert.False(releaseResult, "Release must fail when lease is lost.");
+
+                bool pauseResult = await repoA.PauseScheduleWithLeaseCheckAsync(
+                    scheduleId, claimA.LeaseToken, now);
+                Assert.False(pauseResult, "Pause must fail when lease is lost.");
+
+                bool completeResult = await repoA.CompleteScheduleWithLeaseCheckAsync(
+                    scheduleId, claimA.LeaseToken, now);
+                Assert.False(completeResult, "Complete must fail when lease is lost.");
+            }
+
+            // 5. Verify database state is untouched by Worker A and remains leased to Worker B
+            await using (var verifyDb = new RentalServiceDbContext(options))
+            {
+                var dbSchedule = await verifyDb.RentalReminderSchedules.FirstAsync(s => s.Id == scheduleId);
+                Assert.Equal("worker-B", dbSchedule.LeasedBy);
+                Assert.Equal(claimB.LeaseToken, dbSchedule.LeaseToken);
+                Assert.Equal(RentalReminderScheduleStatus.Active, dbSchedule.Status);
+                Assert.Null(dbSchedule.LastNotifiedDate);
+                Assert.Equal(0, dbSchedule.RetryCount);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task Lifecycle_PauseResumeAfterClaim_StaleDescriptorCannotOverwrite()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            Guid scheduleId;
+            Guid itemId = Guid.NewGuid();
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+                var schedule = RentalReminderSchedule.Create(
+                    Guid.NewGuid(), itemId, RentalReminderScheduleType.Return, 2, now.AddMinutes(-5), now.AddDays(-1));
+                db.RentalReminderSchedules.Add(schedule);
+                await db.SaveChangesAsync();
+                scheduleId = schedule.Id;
+            }
+
+            // 1. Worker claims schedule
+            ReminderClaimDescriptor claim;
+            await using (var dbClaim = new RentalServiceDbContext(options))
+            {
+                var repo = new RentalReminderScheduleRepository(dbClaim);
+                var claimed = await repo.ClaimDueBatchAsync("worker-1", TimeSpan.FromMinutes(2), 10);
+                claim = Assert.Single(claimed);
+            }
+
+            // 2. Lifecycle updates schedule: pause due to all units in return request (remaining = 0)
+            await using (var dbLifecycle = new RentalServiceDbContext(options))
+            {
+                var scheduleService = new RentalReminderScheduleService(
+                    new RentalReminderScheduleRepository(dbLifecycle),
+                    NullLogger<RentalReminderScheduleService>.Instance);
+
+                await scheduleService.OnReturnUnitsChangedAsync(itemId, 0, DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5)), now);
+                await dbLifecycle.SaveChangesAsync();
+            }
+
+            // 3. Worker tries to advance with descriptor token -> MUST fail (fenced by lease clearing)
+            await using (var dbWorker = new RentalServiceDbContext(options))
+            {
+                var repo = new RentalReminderScheduleRepository(dbWorker);
+                bool advanced = await repo.AdvanceScheduleWithLeaseCheckAsync(
+                    scheduleId,
+                    claim.LeaseToken,
+                    DateOnly.FromDateTime(DateTime.UtcNow),
+                    now,
+                    now.AddDays(1),
+                    false,
+                    false);
+
+                Assert.False(advanced, "Worker with stale descriptor must not be able to advance a paused schedule.");
+            }
+
+            // 4. Verify schedule in DB remains paused with remaining_unit_count = 0 and trigger = null
+            await using (var verifyDb = new RentalServiceDbContext(options))
+            {
+                var dbSchedule = await verifyDb.RentalReminderSchedules.FirstAsync(s => s.Id == scheduleId);
+                Assert.Equal(0, dbSchedule.RemainingUnitCount);
+                Assert.Null(dbSchedule.NextTriggerAt);
+                Assert.Null(dbSchedule.LeasedBy);
+                Assert.Null(dbSchedule.LeaseToken);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task Retry_WhenRollbackFinished_RetryRecordedInNewContext_NextRetryAtPreventsImmediateReclaim()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            Guid scheduleId;
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+                var schedule = RentalReminderSchedule.Create(
+                    Guid.NewGuid(), Guid.NewGuid(), RentalReminderScheduleType.Handover, 1, now.AddMinutes(-5), now.AddDays(-1));
+                db.RentalReminderSchedules.Add(schedule);
+                await db.SaveChangesAsync();
+                scheduleId = schedule.Id;
+            }
+
+            // 1. Worker claims schedule
+            ReminderClaimDescriptor claim;
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                var repo = new RentalReminderScheduleRepository(db);
+                var claimed = await repo.ClaimDueBatchAsync("worker-1", TimeSpan.FromMinutes(2), 1);
+                claim = Assert.Single(claimed);
+            }
+
+            // 2. Order transaction rolls back
+            await using (var orderDb = new RentalServiceDbContext(options))
+            {
+                await using var tx = await orderDb.Database.BeginTransactionAsync();
+                // Some operations happened... then error -> rollback!
+                await tx.RollbackAsync();
+            }
+
+            // 3. Record retry in a fresh scope/context
+            DateTimeOffset nextRetry = now.AddMinutes(10);
+            await using (var retryDb = new RentalServiceDbContext(options))
+            {
+                var repo = new RentalReminderScheduleRepository(retryDb);
+                bool recorded = await repo.FailScheduleWithLeaseCheckAsync(
+                    claim.ScheduleId,
+                    claim.LeaseToken,
+                    nextRetry,
+                    now);
+
+                Assert.True(recorded);
+            }
+
+            // 4. Verify in DB: retry_count = 1, next_retry_at = nextRetry, lease is released
+            await using (var verifyDb = new RentalServiceDbContext(options))
+            {
+                var dbSchedule = await verifyDb.RentalReminderSchedules.FirstAsync(s => s.Id == scheduleId);
+                Assert.Equal(1, dbSchedule.RetryCount);
+                Assert.True(dbSchedule.NextRetryAt.HasValue && (dbSchedule.NextRetryAt.Value - nextRetry).Duration() < TimeSpan.FromMilliseconds(1));
+                Assert.Null(dbSchedule.LeasedBy);
+                Assert.Null(dbSchedule.LeaseToken);
+
+                // 5. A competing worker attempts to claim: MUST be skipped because next_retry_at > NOW()!
+                var repo = new RentalReminderScheduleRepository(verifyDb);
+                var reclaimed = await repo.ClaimDueBatchAsync("competing-worker", TimeSpan.FromMinutes(1), 10);
+                Assert.Empty(reclaimed);
+            }
         }
         finally
         {

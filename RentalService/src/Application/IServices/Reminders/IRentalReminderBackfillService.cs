@@ -1,28 +1,29 @@
 namespace Dprental.RentalService.Application.IServices.Reminders;
 
 public sealed record BackfillProgress(
+    string Phase,
     int BatchNumber,
     int HandoverCreated,
     int ReturnCreated,
-    Guid LastProcessedItemId);
+    Guid LastProcessedItemId,
+    string ResumeCommand);
 
 public sealed record BackfillResult(
     int HandoverSchedulesCreated,
     int ReturnSchedulesCreated,
     int TotalBatches,
-    Guid? LastProcessedItemId = null);
+    string? LastPhase = null,
+    Guid? LastProcessedItemId = null,
+    bool Succeeded = true,
+    string? ErrorMessage = null);
 
 public interface IRentalReminderBackfillService
 {
     Task<BackfillResult> BackfillActiveItemsAsync(
         int batchSize = 100,
-        Guid? startAfterItemId = null,
+        string? phase = null,
+        Guid? afterItemId = null,
         bool apply = true,
         Action<BackfillProgress>? onBatchCompleted = null,
         CancellationToken cancellationToken = default);
-
-    Task<BackfillResult> BackfillActiveItemsAsync(
-        int batchSize,
-        CancellationToken cancellationToken) =>
-        BackfillActiveItemsAsync(batchSize, startAfterItemId: null, apply: true, onBatchCompleted: null, cancellationToken);
 }

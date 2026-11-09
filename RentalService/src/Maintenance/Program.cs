@@ -95,7 +95,8 @@ public static partial class Program
         else if (command is "backfill-reminders" or "backfill-reminder-schedules")
         {
             int batchSize = 100;
-            Guid? checkpoint = null;
+            string? phase = null;
+            Guid? afterItemId = null;
 
             for (int i = 1; i < args.Length; i++)
             {
@@ -104,16 +105,27 @@ public static partial class Program
                     batchSize = bs;
                     i++;
                 }
-                else if ((args[i] == "--checkpoint" || args[i] == "-c") && i + 1 < args.Length && Guid.TryParse(args[i + 1], out var cp))
+                else if (args[i] == "--phase" && i + 1 < args.Length)
                 {
-                    checkpoint = cp;
+                    phase = args[i + 1];
+                    i++;
+                }
+                else if (args[i] == "--after-item-id" && i + 1 < args.Length && Guid.TryParse(args[i + 1], out var aid))
+                {
+                    afterItemId = aid;
                     i++;
                 }
             }
 
+            if (afterItemId.HasValue && string.IsNullOrWhiteSpace(phase))
+            {
+                Console.Error.WriteLine("Error: --phase <handover|return> is required when --after-item-id is provided.");
+                return 1;
+            }
+
             try
             {
-                return await RunReminderBackfillAsync(optionsBuilder.Options, apply, batchSize, checkpoint);
+                return await RunReminderBackfillAsync(optionsBuilder.Options, apply, batchSize, phase, afterItemId);
             }
             catch (Exception ex)
             {
@@ -147,7 +159,7 @@ public static partial class Program
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- reconcile-return-requests [--apply]");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- reconcile-refund-confirmations [--apply]");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- replay-outbox --message-id <Guid>");
-        Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- backfill-reminders [--apply] [--batch-size N] [--checkpoint <guid>]");
+        Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- backfill-reminders [--apply] [--batch-size N] [--phase <handover|return>] [--after-item-id <guid>]");
     }
 
     public static async Task<int> RunBackfillAsync(
@@ -507,18 +519,26 @@ public static partial class Program
         DbContextOptions<RentalServiceDbContext> dbOptions,
         bool apply,
         int batchSize = 100,
-        Guid? checkpoint = null,
+        string? phase = null,
+        Guid? afterItemId = null,
         TextWriter? output = null,
         CancellationToken cancellationToken = default)
     {
         output ??= Console.Out;
-        await output.WriteLineAsync($"=== Backfill Reminder Schedules (Mode: {(apply ? "APPLY" : "DRY-RUN")}, BatchSize: {batchSize}, Checkpoint: {checkpoint?.ToString() ?? "None"}) ===");
+        await output.WriteLineAsync($"=== Backfill Reminder Schedules (Mode: {(apply ? "APPLY" : "DRY-RUN")}, BatchSize: {batchSize}, Phase: {phase ?? "all"}, Checkpoint: {afterItemId?.ToString() ?? "None"}) ===");
 
         if (batchSize <= 0) batchSize = 100;
+
+        if (afterItemId.HasValue && string.IsNullOrWhiteSpace(phase))
+        {
+            await output.WriteLineAsync("Error: Phase is required when afterItemId is provided.");
+            return 1;
+        }
 
         var services = new ServiceCollection();
         services.AddSingleton(dbOptions);
         services.AddScoped(sp => new RentalServiceDbContext(dbOptions));
+        services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
         services.AddScoped<IRentalReminderScheduleRepository, RentalReminderScheduleRepository>();
         services.AddSingleton(TimeProvider.System);
         services.AddLogging();
@@ -554,15 +574,37 @@ public static partial class Program
 
         var result = await backfillService.BackfillActiveItemsAsync(
             batchSize: batchSize,
-            startAfterItemId: checkpoint,
+            phase: phase,
+            afterItemId: afterItemId,
             apply: apply,
             onBatchCompleted: progress =>
             {
-                output.WriteLine($"Batch {progress.BatchNumber}: Handover created: {progress.HandoverCreated}, Return created: {progress.ReturnCreated}, Checkpoint: {progress.LastProcessedItemId}");
+                if (apply)
+                {
+                    output.WriteLine($"Batch {progress.BatchNumber}: Handover created: {progress.HandoverCreated}, Return created: {progress.ReturnCreated}, Phase: {progress.Phase}, Checkpoint: {progress.LastProcessedItemId}");
+                    output.WriteLine($"  Resume command: {progress.ResumeCommand}");
+                }
+                else
+                {
+                    output.WriteLine($"[DRY-RUN] Batch {progress.BatchNumber} [{progress.Phase}]: Handover candidates: {progress.HandoverCreated}, Return candidates: {progress.ReturnCreated}, Cursor: {progress.LastProcessedItemId}");
+                }
             },
             cancellationToken: cancellationToken);
 
-        await output.WriteLineAsync($"Backfill completed: {result.HandoverSchedulesCreated} Handover schedule(s), {result.ReturnSchedulesCreated} Return schedule(s) created across {result.TotalBatches} batch(es). Final Checkpoint: {result.LastProcessedItemId?.ToString() ?? "None"}.");
+        if (!result.Succeeded)
+        {
+            await output.WriteLineAsync($"Backfill failed: {result.ErrorMessage}. Previous checkpoint: {result.LastProcessedItemId?.ToString() ?? "None"}.");
+            return 1;
+        }
+
+        if (apply)
+        {
+            await output.WriteLineAsync($"Backfill completed: {result.HandoverSchedulesCreated} Handover schedule(s), {result.ReturnSchedulesCreated} Return schedule(s) created across {result.TotalBatches} batch(es). Final Checkpoint: {result.LastProcessedItemId?.ToString() ?? "None"}.");
+        }
+        else
+        {
+            await output.WriteLineAsync($"Backfill completed (DRY-RUN): {result.HandoverSchedulesCreated} Handover schedule(s), {result.ReturnSchedulesCreated} Return schedule(s) would be created across {result.TotalBatches} batch(es). Final Cursor: {result.LastProcessedItemId?.ToString() ?? "None"}.");
+        }
 
         return 0;
     }

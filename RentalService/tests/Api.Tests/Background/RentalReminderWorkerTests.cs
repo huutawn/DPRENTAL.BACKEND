@@ -291,7 +291,8 @@ public sealed class RentalReminderWorkerTests
             var updatedSchedule = await db.RentalReminderSchedules.FirstAsync();
             Assert.Null(updatedSchedule.LeasedBy);
             Assert.Null(updatedSchedule.LastNotifiedDate);
-            Assert.Equal(originalTrigger, updatedSchedule.NextTriggerAt);
+            Assert.Equal(0, updatedSchedule.RemainingUnitCount);
+            Assert.Null(updatedSchedule.NextTriggerAt);
         }
     }
 
@@ -594,5 +595,108 @@ public sealed class RentalReminderWorkerTests
             Assert.True(claim.LeaseExpiry > now);
             Assert.Equal(claim.LeaseExpiry, claim.LeasedUntil);
         }
+    }
+
+    [Fact]
+    public async Task RentalReminderWorker_LoopRecovery_WhenClaimThrowsTwice_RecoversAndContinues()
+    {
+        int claimAttempts = 0;
+        var tcsSuccess = new TaskCompletionSource<bool>();
+
+        var repoMock = new Mock<IRentalReminderScheduleRepository>();
+        repoMock.Setup(r => r.ClaimDueBatchAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns<string, TimeSpan, int, CancellationToken>((workerId, leaseDuration, batchSize, ct) =>
+            {
+                claimAttempts++;
+                if (claimAttempts <= 2)
+                {
+                    throw new InvalidOperationException($"Simulated transient DB error attempt {claimAttempts}");
+                }
+                tcsSuccess.TrySetResult(true);
+                return Task.FromResult<IReadOnlyList<ReminderClaimDescriptor>>(Array.Empty<ReminderClaimDescriptor>());
+            });
+
+        var services = new ServiceCollection();
+        services.AddSingleton(repoMock.Object);
+        var sp = services.BuildServiceProvider();
+
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(s => s.CreateScope()).Returns(() =>
+        {
+            var scopeMock = new Mock<IServiceScope>();
+            scopeMock.Setup(s => s.ServiceProvider).Returns(sp);
+            return scopeMock.Object;
+        });
+
+        var options = Options.Create(new RentalReminderOptions
+        {
+            BatchSize = 10,
+            ScanIntervalSeconds = 1,
+            MinClaimFailureBackoffSeconds = 0,
+            MaxClaimFailureBackoffSeconds = 1
+        });
+        var worker = new RentalReminderWorker(
+            scopeFactoryMock.Object,
+            options,
+            NullLogger<RentalReminderWorker>.Instance);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await worker.StartAsync(cts.Token);
+
+        // Wait for attempt 3 to be reached
+        var finished = await Task.WhenAny(tcsSuccess.Task, Task.Delay(2000, cts.Token));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.True(tcsSuccess.Task.IsCompletedSuccessfully, $"Expected worker to recover after 2 failures and execute attempt 3, but only reached {claimAttempts} attempts.");
+        Assert.True(claimAttempts >= 3, $"Expected at least 3 attempts, got {claimAttempts}");
+    }
+
+    [Fact]
+    public async Task RentalReminderWorker_WhenOneOrderFails_DoesNotBlockOtherOrdersInBatch()
+    {
+        Guid order1Id = Guid.NewGuid();
+        Guid order2Id = Guid.NewGuid();
+        Guid item1Id = Guid.NewGuid();
+        Guid item2Id = Guid.NewGuid();
+
+        var desc1 = new ReminderClaimDescriptor(Guid.NewGuid(), order1Id, item1Id, RentalReminderScheduleType.Handover, Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(1));
+        var desc2 = new ReminderClaimDescriptor(Guid.NewGuid(), order2Id, item2Id, RentalReminderScheduleType.Handover, Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(1));
+
+        var repoMock = new Mock<IRentalReminderScheduleRepository>();
+        repoMock.Setup(r => r.ClaimDueBatchAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ReminderClaimDescriptor> { desc1, desc2 });
+
+        var processorMock = new Mock<IRentalReminderBatchProcessor>();
+        // Order 1 throws unhandled exception
+        processorMock.Setup(p => p.ProcessOrderReminderGroupAsync(order1Id, It.IsAny<IReadOnlyList<ReminderClaimDescriptor>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Order 1 failed unexpectedly"));
+        // Order 2 succeeds
+        processorMock.Setup(p => p.ProcessOrderReminderGroupAsync(order2Id, It.IsAny<IReadOnlyList<ReminderClaimDescriptor>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessOrderGroupResult(1, 1, 0, 0));
+
+        var services = new ServiceCollection();
+        services.AddSingleton(repoMock.Object);
+        services.AddSingleton(processorMock.Object);
+        var sp = services.BuildServiceProvider();
+
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(s => s.CreateScope()).Returns(() =>
+        {
+            var scopeMock = new Mock<IServiceScope>();
+            scopeMock.Setup(s => s.ServiceProvider).Returns(sp);
+            return scopeMock.Object;
+        });
+
+        var worker = new RentalReminderWorker(
+            scopeFactoryMock.Object,
+            Options.Create(new RentalReminderOptions { BatchSize = 10 }),
+            NullLogger<RentalReminderWorker>.Instance);
+
+        var result = await worker.ProcessBatchAsync(CancellationToken.None);
+
+        Assert.Equal(2, result.Claimed);
+        Assert.Equal(2, result.Processed);
+        Assert.Equal(1, result.NoticesSent);
+        Assert.Equal(1, result.Failed);
     }
 }

@@ -95,6 +95,19 @@ public class RentalReminderSchedule
     {
         RemainingUnitCount = Math.Max(0, units);
         NextTriggerAt = nextTriggerAt;
+        LeasedBy = null;
+        LeaseToken = null;
+        LeasedUntil = null;
+        UpdatedAt = now;
+    }
+
+    public void Pause(DateTimeOffset now)
+    {
+        RemainingUnitCount = 0;
+        NextTriggerAt = null;
+        LeasedBy = null;
+        LeaseToken = null;
+        LeasedUntil = null;
         UpdatedAt = now;
     }
 
@@ -144,10 +157,7 @@ public class RentalReminderSchedule
         LeasedBy = null;
         LeaseToken = null;
         LeasedUntil = null;
-        if (nextTriggerAt.HasValue)
-        {
-            NextTriggerAt = nextTriggerAt.Value;
-        }
+        NextTriggerAt = nextTriggerAt;
         UpdatedAt = now;
     }
 

@@ -32,6 +32,13 @@ public static class RentalReminderPolicy
     public static DateTimeOffset VietnamAt8Am(DateOnly date) =>
         new(date.Year, date.Month, date.Day, 8, 0, 0, VietnamOffset);
 
+    public static DateTimeOffset GetNextVietnam8Am(DateTimeOffset now)
+    {
+        DateOnly todayVn = ToVietnamDate(now);
+        DateTimeOffset today8Am = VietnamAt8Am(todayVn);
+        return now < today8Am ? today8Am : VietnamAt8Am(todayVn.AddDays(1));
+    }
+
     public static DateTimeOffset ActionDeadline(DateOnly targetDate)
     {
         DateOnly nextDay = targetDate.AddDays(1);

@@ -19,6 +19,10 @@ public interface IRentalReminderScheduleRepository
         IEnumerable<Guid> scheduleIds,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyDictionary<Guid, ReminderScheduleStateProjection>> GetScheduleStatesAsync(
+        IEnumerable<Guid> scheduleIds,
+        CancellationToken cancellationToken = default);
+
     Task<bool> AdvanceScheduleWithLeaseCheckAsync(
         Guid scheduleId,
         Guid leaseToken,
@@ -40,6 +44,12 @@ public interface IRentalReminderScheduleRepository
         Guid scheduleId,
         Guid leaseToken,
         DateTimeOffset? postponeTriggerTo,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> PauseScheduleWithLeaseCheckAsync(
+        Guid scheduleId,
+        Guid leaseToken,
         DateTimeOffset now,
         CancellationToken cancellationToken = default);
 

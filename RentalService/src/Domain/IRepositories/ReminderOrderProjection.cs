@@ -17,5 +17,7 @@ public sealed record ReminderItemProjection(
     DateOnly ExpectedStartDate,
     DateOnly ExpectedEndDate,
     int TotalQuantity,
-    int ActiveRemainingUnits,
-    bool HandoverInProgress);
+    bool HandoverInProgress,
+    IReadOnlyList<Guid> AllAssignmentIds,
+    IReadOnlyList<Guid> ReturnedAssignmentIds,
+    IReadOnlyList<Guid> ActiveReturnRequestedAssignmentIds);

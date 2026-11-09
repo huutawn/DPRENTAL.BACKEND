@@ -332,7 +332,7 @@ public sealed partial class ReturnService(
             }
             else
             {
-                int remainingActive = Dprental.RentalService.Domain.Policies.RentalReturnActiveUnitsCalculator.Calculate(item);
+                int remainingActive = Dprental.RentalService.Application.Policies.RentalReturnActiveUnitsCalculator.Calculate(item);
                 await reminderSchedules.OnReturnUnitsChangedAsync(item.Id, remainingActive, item.ExpectedEndDate, now, cancellationToken);
             }
         }
