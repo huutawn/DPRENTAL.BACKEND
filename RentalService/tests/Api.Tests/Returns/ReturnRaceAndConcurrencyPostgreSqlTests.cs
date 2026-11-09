@@ -70,7 +70,7 @@ public sealed class ReturnRaceAndConcurrencyPostgreSqlTests : IAsyncLifetime
             new RentalOrderRepository(db),
             new PostgresOrderLockManager(settings, NullLogger<PostgresOrderLockManager>.Instance),
             db,
-            Mock.Of<Application.Clients.IRentalMediaClient>(),
+            ReturnRequestMediaStub.ForRenter(db),
             _clock,
             events,
             settings,
@@ -346,7 +346,7 @@ public sealed class ReturnRaceAndConcurrencyPostgreSqlTests : IAsyncLifetime
         {
             var service2 = CreateService(db2);
             var renterCaller = RentalCallerContext.ForUser(order.RenterId);
-            var newReq = new CreateReturnRequest(Now, "New request after reject", [new ReturnRequestUnitDto(u1.Id, [])]);
+            var newReq = new CreateReturnRequest(Now, "New request after reject", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
             var newReqResult = await service2.CreateReturnRequestAsync(item.Id, renterCaller, newReq, "new-req-after-reject-key");
             Assert.True(newReqResult.IsSuccess);
         }

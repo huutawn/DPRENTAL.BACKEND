@@ -94,7 +94,7 @@ public sealed partial class ReturnService
         {
             // Chạy validator/policy của bước hiện tại; chỉ chuyển sang bước sau khi kết quả hợp lệ.
             var evidence = await RentalEvidenceValidator.ValidateAndVerifyEvidenceAsync(
-                unit.MediaIds, order.RenterId, mediaClient, ct: cancellationToken);
+                unit.MediaIds, order.RenterId, mediaClient, isRequired: true, ct: cancellationToken);
             // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
             if (evidence.IsFailure) return evidence.Error;
         }

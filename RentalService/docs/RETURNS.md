@@ -112,6 +112,7 @@ The partial return flow allows renters to declare their intention to return spec
 - **Renter Return Request**: `POST /api/v1/rental/items/{itemId}/return-requests`
   - Header `Idempotency-Key` (1–64 characters).
   - Body contains `actualReturnAt`, optional `note`, and `units`: list of `rentalUnitAssignmentId` and `mediaIds`.
+  - Each requested unit requires 1–10 distinct, private, ready media IDs uploaded by the renter. The handover evidence remains mandatory; supplier confirmation of a normal return does not require another photo.
   - Response: `ReturnRequestResponse` containing `returnRequestId`, `itemId`, `actualReturnAt`, `note`, `submittedAt`, and `units` (`rentalUnitAssignmentId`, `mediaIds`, `closedAt`).
   - At creation time, `closedAt` is always `null`.
 - **Supplier SubOrder Detail**: `GET /api/v1/rental/supplier/sub-orders/{subOrderId}`
