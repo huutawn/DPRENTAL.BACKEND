@@ -134,7 +134,7 @@ public sealed class RentalReminderBenchmarkPostgreSqlTests : IClassFixture<Remin
 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
-            SELECT 
+            SELECT
                 COUNT(*) AS total,
                 COUNT(*) FILTER (WHERE next_trigger_at > NOW()) AS future_count,
                 COUNT(*) FILTER (WHERE next_trigger_at <= NOW() AND (leased_until IS NULL OR leased_until <= NOW()) AND (next_retry_at IS NULL OR next_retry_at <= NOW())) AS due_count,
