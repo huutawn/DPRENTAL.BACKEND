@@ -29,6 +29,7 @@ public static class ExpectedErrorFilterExtensions
                 ErrorType.Conflict => StatusCodes.Status409Conflict,
                 ErrorType.PreconditionFailed => StatusCodes.Status412PreconditionFailed,
                 ErrorType.PreconditionRequired => StatusCodes.Status428PreconditionRequired,
+                ErrorType.BadGateway => StatusCodes.Status502BadGateway,
                 _ => StatusCodes.Status500InternalServerError,
             },
             title: error.Code,

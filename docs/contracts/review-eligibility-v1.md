@@ -60,10 +60,10 @@ Chuỗi trạng thái trả về trong trường `status` phải khớp chính x
 | :--- | :--- | :--- | :--- |
 | **`200 OK` (Khớp snapshot)** | `200 OK` / `201 Created` | - | Tiếp tục kiểm tra điều kiện nghiệp vụ (`status == Completed` và `completedAt != null`) |
 | **`401 Unauthorized`** | `502 Bad Gateway` | `RENTAL_SERVICE_AUTHENTICATION_FAILED` | Lỗi cấu hình credential giữa hai service; ghi log Critical (không log key) |
-| **`404 Not Found`** | `404 Not Found` | `RENTAL_ITEM_NOT_FOUND` | Mục thuê không tồn tại hoặc không thuộc đơn hàng chỉ định |
+| **`404 Not Found` (Mã nghiệp vụ: `RENTAL_ITEM_NOT_FOUND`)** | `404 Not Found` | `RENTAL_ITEM_NOT_FOUND` | Mục thuê không tồn tại hoặc không thuộc đơn hàng chỉ định |
+| **`404 Not Found` (Chung / Thiếu route)** | `502 Bad Gateway` | `RENTAL_SERVICE_INVALID_RESPONSE` | Endpoint snapshot/reconciliation không tồn tại tại RentalService |
 | **Timeout / `504`** | `504 Gateway Timeout` | `RENTAL_SERVICE_TIMEOUT` | Cuộc gọi HTTP vượt quá timeout 5 giây |
-| **`500/502/503` / Invalid JSON**| `502 Bad Gateway` | `RENTAL_SERVICE_UNAVAILABLE` hoặc `RENTAL_SERVICE_INVALID_RESPONSE` | Dịch vụ Rental gặp sự cố hoặc trả payload sai schema |
-
+| **`500/502/503` / Invalid JSON / Schema mismatch** | `502 Bad Gateway` | `RENTAL_SERVICE_UNAVAILABLE` hoặc `RENTAL_SERVICE_INVALID_RESPONSE` | Dịch vụ Rental gặp sự cố hoặc trả payload sai schema / thiếu ID bắt buộc |
 ---
 
 ## 2. Tiêu chuẩn Hoàn tất Nghiệp vụ của RentalService (`completedAt`)

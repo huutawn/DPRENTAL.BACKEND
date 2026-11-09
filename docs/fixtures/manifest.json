@@ -104,6 +104,12 @@
           "description": "RentalService từ chối X-Api-Key do sai cấu hình."
         },
         {
+          "file": "errors/502-rental-service-invalid-response.json",
+          "status": 502,
+          "code": "RENTAL_SERVICE_INVALID_RESPONSE",
+          "description": "RentalService trả về 404 chung do thiếu route hoặc dữ liệu không đúng schema."
+        },
+        {
           "file": "errors/504-rental-timeout.json",
           "status": 504,
           "code": "RENTAL_SERVICE_TIMEOUT",

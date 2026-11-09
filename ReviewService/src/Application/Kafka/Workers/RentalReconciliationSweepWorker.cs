@@ -120,7 +120,7 @@ public sealed class RentalReconciliationSweepWorker : BackgroundService
             var batchResult = await rentalClient.GetReconciliationBatchAsync(cursor, limit: 100, cancellationToken);
             if (batchResult.IsFailure)
             {
-                _logger?.LogError("Thất bại khi lấy lô đối soát với cursor {Cursor}: {Error}",
+                _logger?.LogError("Thất bại khi lấy lô đối soát với cursor {Cursor}: {Error}. Giữ checkpoint để retry và ghi nhận vòng quét thất bại.",
                     cursor, batchResult.Error.Message);
                 break;
             }
@@ -154,8 +154,16 @@ public sealed class RentalReconciliationSweepWorker : BackgroundService
             cursor = batch.NextCursor;
         }
 
-        _logger?.LogInformation("Hoàn tất chu kỳ sweep {SweepId}. Tổng số mục đã xử lý: {Count}.",
-            sweepId, totalProcessed);
+        if (checkpoint.IsCompleted)
+        {
+            _logger?.LogInformation("Hoàn tất chu kỳ sweep {SweepId}. Tổng số mục đã xử lý: {Count}.",
+                sweepId, totalProcessed);
+        }
+        else
+        {
+            _logger?.LogWarning("Chu kỳ sweep {SweepId} chưa hoàn tất (thất bại hoặc bị gián đoạn). Giữ checkpoint tại cursor '{Cursor}'. Tổng số mục đã xử lý: {Count}.",
+                sweepId, cursor, totalProcessed);
+        }
 
         return totalProcessed;
     }

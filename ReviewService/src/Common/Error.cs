@@ -13,7 +13,8 @@ public enum ErrorType
     Unprocessable = 6,
     Failure = 7,
     PreconditionFailed = 8,
-    PreconditionRequired = 9
+    PreconditionRequired = 9,
+    BadGateway = 10
 }
 
 [SuppressMessage("Naming", "CA1716:Identifiers should not match keywords", Justification = "Consumed only from C#.")]
@@ -50,5 +51,8 @@ public sealed record Error(string Code, string Message, ErrorType Type = ErrorTy
 
     public static Error PreconditionRequired(string code, string message) =>
         new(code, message, ErrorType.PreconditionRequired);
+
+    public static Error BadGateway(string code, string message) =>
+        new(code, message, ErrorType.BadGateway);
 }
 
