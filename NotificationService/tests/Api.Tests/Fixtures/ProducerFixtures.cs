@@ -219,7 +219,16 @@ public static class ProducerFixtures
         string reminderType,
         string reminderDate = "2026-11-09",
         int remainingUnitCount = 1,
-        long orderVersion = 3) => $$"""
+        long orderVersion = 3,
+        string? targetDate = null)
+    {
+        var effectiveTargetDate = targetDate ?? (reminderType is "HandoverOverdue" or "ReturnOverdue"
+            ? (DateOnly.TryParseExact(reminderDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var rd)
+                ? rd.AddDays(-1).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+                : reminderDate)
+            : reminderDate);
+
+        return $$"""
     {
       "messageId": "{{messageId}}",
       "messageType": "RentalReminderDue",
@@ -237,13 +246,14 @@ public static class ProducerFixtures
         "renterId": "{{renterId}}",
         "reminderType": "{{reminderType}}",
         "reminderDate": "{{reminderDate}}",
-        "targetDate": "{{reminderDate}}",
+        "targetDate": "{{effectiveTargetDate}}",
         "actionDeadline": "2026-11-10T00:00:00.0000000+00:00",
         "remainingUnitCount": {{remainingUnitCount}},
         "orderVersion": {{orderVersion}}
       }
     }
     """;
+    }
 
     public static string ReturnConfirmationOverdue(
         Guid messageId,

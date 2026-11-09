@@ -241,18 +241,20 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                             DeepLinkUrl: "/own/orders",
                             ActionUrl: "/own/orders"));
 
-                        if (renterId.HasValue && renterId.Value != Guid.Empty)
+                        if (!renterId.HasValue || renterId.Value == Guid.Empty)
                         {
-                            results.Add(new ResolvedRecipient(
-                                RecipientUserId: renterId.Value,
-                                RecipientRole: "Renter",
-                                NotificationType: "HANDOVER_OVERDUE_RENTER",
-                                Category: "HANDOVER",
-                                Severity: "INFO",
-                                IsActionable: false,
-                                DeepLinkUrl: $"/orders/{orderId}",
-                                ActionUrl: null));
+                            return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                                Error.Validation("MISSING_RECIPIENT", "RentalReminderDue HandoverOverdue yêu cầu renterId hợp lệ."));
                         }
+                        results.Add(new ResolvedRecipient(
+                            RecipientUserId: renterId.Value,
+                            RecipientRole: "Renter",
+                            NotificationType: "HANDOVER_OVERDUE_RENTER",
+                            Category: "HANDOVER",
+                            Severity: "INFO",
+                            IsActionable: false,
+                            DeepLinkUrl: $"/orders/{orderId}",
+                            ActionUrl: null));
                         break;
 
                     case "ReturnReminder":
@@ -288,18 +290,20 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                             DeepLinkUrl: "/own/orders",
                             ActionUrl: "/own/orders"));
 
-                        if (renterId.HasValue && renterId.Value != Guid.Empty)
+                        if (!renterId.HasValue || renterId.Value == Guid.Empty)
                         {
-                            results.Add(new ResolvedRecipient(
-                                RecipientUserId: renterId.Value,
-                                RecipientRole: "Renter",
-                                NotificationType: "RETURN_OVERDUE_RENTER",
-                                Category: "RETURN",
-                                Severity: "ACTION_REQUIRED",
-                                IsActionable: true,
-                                DeepLinkUrl: $"/orders/{orderId}",
-                                ActionUrl: $"/orders/{orderId}"));
+                            return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                                Error.Validation("MISSING_RECIPIENT", "RentalReminderDue ReturnOverdue yêu cầu renterId hợp lệ."));
                         }
+                        results.Add(new ResolvedRecipient(
+                            RecipientUserId: renterId.Value,
+                            RecipientRole: "Renter",
+                            NotificationType: "RETURN_OVERDUE_RENTER",
+                            Category: "RETURN",
+                            Severity: "ACTION_REQUIRED",
+                            IsActionable: true,
+                            DeepLinkUrl: $"/orders/{orderId}",
+                            ActionUrl: $"/orders/{orderId}"));
                         break;
 
                     default:

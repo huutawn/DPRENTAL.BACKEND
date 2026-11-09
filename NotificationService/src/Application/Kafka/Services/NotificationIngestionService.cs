@@ -244,6 +244,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
 
                         await _unitOfWork.SaveChangesAsync(cancellationToken);
                         await transaction.CommitAsync(cancellationToken);
+                        NotificationMetrics.IngestionCounter.Add(1, new KeyValuePair<string, object?>("status", "processed"));
                         return IngestionOutcome.Processed;
                     }
                     else if (remDate > todayVn)
@@ -257,10 +258,14 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                 }
             }
 
-            if (string.Equals(intent.EventType, "RentalItemHandoverCompleted", StringComparison.OrdinalIgnoreCase) && intent.RentalItemId.HasValue)
+            if (string.Equals(intent.EventType, "RentalItemHandoverCompleted", StringComparison.OrdinalIgnoreCase))
             {
-                var hoSuppressed = await _notificationRepo.DismissHandoverActionsForRentalItemAsync(intent.RentalItemId.Value, cancellationToken);
-                suppressedCtaNotifications.AddRange(hoSuppressed);
+                var targetItemId = intent.RentalItemId ?? (intent.WatermarkScope == NotificationWatermarkScope.RentalItem ? intent.WatermarkId : null);
+                if (targetItemId.HasValue)
+                {
+                    var hoSuppressed = await _notificationRepo.DismissHandoverActionsForRentalItemAsync(targetItemId.Value, cancellationToken);
+                    suppressedCtaNotifications.AddRange(hoSuppressed);
+                }
             }
 
             AggregateStateProjection? currentAggregateState = null;
@@ -464,7 +469,7 @@ public sealed class NotificationIngestionService : INotificationIngestionService
                 }
                 else if (intent.WatermarkScope == NotificationWatermarkScope.RentalItem)
                 {
-                    var itemGuid = intent.RentalItemId ?? (Guid.TryParse(intent.ResourceId, out var parsedId) ? parsedId : (Guid?)null);
+                    var itemGuid = intent.RentalItemId ?? (intent.WatermarkScope == NotificationWatermarkScope.RentalItem ? intent.WatermarkId : null);
                     if (itemGuid.HasValue)
                     {
                         var suppressed = await _notificationRepo.SuppressPendingActionsForRentalItemAsync(itemGuid.Value, cancellationToken);

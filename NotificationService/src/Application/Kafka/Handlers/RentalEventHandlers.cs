@@ -587,7 +587,8 @@ public sealed class RentalItemHandoverCompletedHandler : IKafkaEventHandler
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: null,
-            RenderData: renderData));
+            RenderData: renderData,
+            RentalItemId: itemId));
     }
 }
 
@@ -642,7 +643,8 @@ public sealed class RentalHandoverOverdueHandler : IKafkaEventHandler
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: null,
-            RenderData: renderData));
+            RenderData: renderData,
+            RentalItemId: itemId));
     }
 }
 
@@ -657,7 +659,7 @@ public sealed class RentalReminderDueHandler : IKafkaEventHandler
             guidFields: ["rentalOrderId", "orderId", "supplierId", "renterId", "userId", "rentalItemId", "itemId"],
             numberFields: ["orderVersion", "version", "remainingUnitCount"],
             utcTimestampFields: ["actionDeadline"],
-            stringFields: ["reminderType", "reminderDate"]);
+            stringFields: ["reminderType", "reminderDate", "targetDate"]);
         if (validation.IsFailure)
         {
             return Result.Failure<NotificationEventIntent>(validation.Error);
@@ -683,26 +685,62 @@ public sealed class RentalReminderDueHandler : IKafkaEventHandler
             return Result.Failure<NotificationEventIntent>(Error.Validation("INVALID_REMINDER_TYPE", $"Loại nhắc '{reminderType}' không được hỗ trợ."));
         }
 
-        var reminderDate = payload.GetStringFromAny("reminderDate") ?? string.Empty;
-        if (!DateOnly.TryParseExact(reminderDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsedReminderDate))
+        // Strictly validate recipient IDs per reminder contract
+        switch (reminderType)
+        {
+            case "HandoverReminder":
+                if (!supplierId.HasValue || supplierId.Value == Guid.Empty)
+                {
+                    return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_SUPPLIER_ID", "supplierId không thể để trống cho HandoverReminder."));
+                }
+                break;
+            case "ReturnReminder":
+                if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                {
+                    return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_RENTER_ID", "renterId không thể để trống cho ReturnReminder."));
+                }
+                break;
+            case "HandoverOverdue":
+                if (!supplierId.HasValue || supplierId.Value == Guid.Empty)
+                {
+                    return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_SUPPLIER_ID", "supplierId không thể để trống cho HandoverOverdue."));
+                }
+                if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                {
+                    return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_RENTER_ID", "renterId không thể để trống cho HandoverOverdue."));
+                }
+                break;
+            case "ReturnOverdue":
+                if (!supplierId.HasValue || supplierId.Value == Guid.Empty)
+                {
+                    return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_SUPPLIER_ID", "supplierId không thể để trống cho ReturnOverdue."));
+                }
+                if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                {
+                    return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_RENTER_ID", "renterId không thể để trống cho ReturnOverdue."));
+                }
+                break;
+        }
+
+        var reminderDate = payload.GetStringFromAny("reminderDate");
+        if (string.IsNullOrWhiteSpace(reminderDate) || !DateOnly.TryParseExact(reminderDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsedReminderDate))
         {
             return Result.Failure<NotificationEventIntent>(Error.Validation("INVALID_REMINDER_DATE", "reminderDate phải theo định dạng yyyy-MM-dd."));
         }
 
-        var targetDate = payload.GetStringFromAny("targetDate") ?? reminderDate;
-        if (!DateOnly.TryParseExact(targetDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsedTargetDate))
+        var targetDate = payload.GetStringFromAny("targetDate");
+        if (string.IsNullOrWhiteSpace(targetDate) || !DateOnly.TryParseExact(targetDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsedTargetDate))
         {
             return Result.Failure<NotificationEventIntent>(Error.Validation("INVALID_TARGET_DATE", "targetDate phải theo định dạng yyyy-MM-dd."));
         }
 
-        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
-        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderVersion = payload.GetInt64FromAny(0, "orderVersion", "version");
         if (orderVersion <= 0)
         {
             return Result.Failure<NotificationEventIntent>(Error.Validation("INVALID_ORDER_VERSION", "orderVersion phải lớn hơn 0."));
         }
 
-        var remainingUnitCount = (int)payload.GetInt64FromAny(1, "remainingUnitCount");
+        var remainingUnitCount = (int)payload.GetInt64FromAny(0, "remainingUnitCount");
         if (remainingUnitCount <= 0)
         {
             return Result.Failure<NotificationEventIntent>(Error.Validation("INVALID_REMAINING_UNITS", "remainingUnitCount phải lớn hơn 0."));
@@ -716,14 +754,14 @@ public sealed class RentalReminderDueHandler : IKafkaEventHandler
                 return Result.Failure<NotificationEventIntent>(Error.Validation("REMINDER_DATE_OUT_OF_WINDOW", $"Ngày nhắc {reminderDate} không thuộc cửa sổ D-3..D của ngày đích {targetDate}."));
             }
         }
-        else // Overdue
+        else // HandoverOverdue or ReturnOverdue
         {
             if (diff < 1 || diff > 30)
             {
                 return Result.Failure<NotificationEventIntent>(Error.Validation("OVERDUE_DATE_OUT_OF_WINDOW", $"Ngày quá hạn {reminderDate} không thuộc khoảng D+1..D+30 của ngày đích {targetDate}."));
             }
         }
-
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
         var actionDeadline = payload.GetStringFromAny("actionDeadline");
         var stableBusinessKey = $"{itemId.Value:D}:{reminderType}:{reminderDate}";
 
@@ -987,7 +1025,8 @@ public sealed class RentalItemConfirmedHandler : IKafkaEventHandler
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: null,
-            RenderData: renderData));
+            RenderData: renderData,
+            RentalItemId: itemId));
     }
 }
 
@@ -1050,7 +1089,8 @@ public sealed class RentalItemRejectedHandler : IKafkaEventHandler
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: null,
-            RenderData: renderData));
+            RenderData: renderData,
+            RentalItemId: itemId));
     }
 }
 
@@ -1310,7 +1350,8 @@ public sealed class RentalItemExpiredHandler : IKafkaEventHandler
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: null,
-            RenderData: renderData));
+            RenderData: renderData,
+            RentalItemId: itemId));
     }
 }
 
@@ -1362,7 +1403,8 @@ public sealed class RentalItemCancelledHandler : IKafkaEventHandler
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: null,
-            RenderData: renderData));
+            RenderData: renderData,
+            RentalItemId: itemId));
     }
 }
 
@@ -1463,6 +1505,7 @@ public sealed class RentalItemCompletedHandler : IKafkaEventHandler
             RenterId: renterId,
             SupplierId: supplierId,
             ReturnRequestId: null,
-            RenderData: renderData));
+            RenderData: renderData,
+            RentalItemId: itemId));
     }
 }
