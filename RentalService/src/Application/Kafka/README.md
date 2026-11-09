@@ -364,8 +364,8 @@ Khi bật (`Enabled = true`), nếu thiếu `BootstrapServers` hoặc các thôn
     "DeliveryTimeoutSeconds": 10,
     "LeaseDurationSeconds": 30,
     "MaxBatchPerRound": 50,
-    "OutboxPollingIntervalSeconds": 15,
-    "InboxPollingIntervalSeconds": 15
+    "OutboxPollingIntervalSeconds": 1,
+    "InboxPollingIntervalSeconds": 1
   }
 }
 ```

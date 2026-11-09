@@ -44,7 +44,7 @@ public sealed class OutboxPublisherWorker : BackgroundService
         }
 
         var pollingInterval = TimeSpan.FromSeconds(Math.Max(1, _options.OutboxPollingIntervalSeconds));
-        _logger.LogInformation("OutboxPublisherWorker started with polling interval {Interval}s", pollingInterval.TotalSeconds);
+        _logger.LogInformation("OutboxPublisherWorker started with idle delay {Interval}s", pollingInterval.TotalSeconds);
 
         try
         {
@@ -59,7 +59,11 @@ public sealed class OutboxPublisherWorker : BackgroundService
         {
             try
             {
-                await ProcessBatchAsync(stoppingToken);
+                // Vừa xử lý được bản tin thì có thể vẫn còn việc: chạy vòng tiếp ngay, chỉ nghỉ khi rảnh.
+                if (await ProcessBatchAsync(stoppingToken) > 0)
+                {
+                    continue;
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
