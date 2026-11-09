@@ -53,6 +53,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
     private readonly IRentalEventProducer _rentalEvents;
     private readonly IOrderHubNotifier? _notifier;
     private readonly IRenterBankAccountRepository? _bankAccounts;
+    private readonly Dprental.RentalService.Application.IServices.Reminders.IRentalReminderScheduleService? _reminderSchedules;
     // Khởi tạo các dependency và cấu hình dùng cho service; kiểm tra dependency bắt buộc ngay khi dựng đối tượng.
     public RentalOperationExecutor(
         IRentalOrderRepository orderRepository,
@@ -70,7 +71,8 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
         TimeProvider? timeProvider = null,
         IRentalEventProducer? rentalEvents = null,
         IOrderHubNotifier? notifier = null,
-        IRenterBankAccountRepository? bankAccounts = null)
+        IRenterBankAccountRepository? bankAccounts = null,
+        Dprental.RentalService.Application.IServices.Reminders.IRentalReminderScheduleService? reminderSchedules = null)
     {
         // Kiểm tra tham số bắt buộc ở đầu hàm để không dùng một dependency/request rỗng trong các bước sau.
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
@@ -92,6 +94,7 @@ public sealed partial class RentalOperationExecutor : IRentalOperationExecutor
             _timeProvider);
         _notifier = notifier;
         _bankAccounts = bankAccounts;
+        _reminderSchedules = reminderSchedules;
     }
 
     // Khởi tạo các dependency và cấu hình dùng cho service; kiểm tra dependency bắt buộc ngay khi dựng đối tượng.

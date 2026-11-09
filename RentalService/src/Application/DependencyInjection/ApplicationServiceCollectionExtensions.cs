@@ -126,6 +126,13 @@ public static class ApplicationServiceCollectionExtensions
 
         // Dịch vụ tích hợp ReviewService (snapshot và đối soát)
         services.AddScoped<Dprental.RentalService.Application.IServices.ReviewIntegration.IRentalReviewIntegrationService, Dprental.RentalService.Application.Services.ReviewIntegration.RentalReviewIntegrationService>();
+        // Dịch vụ quản lý vòng đời lịch nhắc nhở bàn giao, trả máy và cảnh báo quá hạn.
+        services.AddScoped<Dprental.RentalService.Application.IServices.Reminders.IRentalReminderScheduleService, Dprental.RentalService.Application.Services.Reminders.RentalReminderScheduleService>();
+        services.AddScoped<Dprental.RentalService.Application.IServices.Reminders.IRentalReminderBatchProcessor, Dprental.RentalService.Application.Services.Reminders.RentalReminderBatchProcessor>();
+        services.AddScoped<Dprental.RentalService.Application.IServices.Reminders.IRentalReminderBackfillService, Dprental.RentalService.Application.Services.Reminders.RentalReminderBackfillService>();
+        services.AddOptions<Dprental.RentalService.Application.Options.RentalReminderOptions>()
+            .BindConfiguration(Dprental.RentalService.Application.Options.RentalReminderOptions.SectionName);
+        services.AddHostedService<RentalReminderWorker>();
 
         // Đăng ký pipeline Kafka: options, producers, dispatcher và ba worker Inbox/Outbox/broker.
         services.AddKafka(configuration ?? new ConfigurationBuilder().Build());

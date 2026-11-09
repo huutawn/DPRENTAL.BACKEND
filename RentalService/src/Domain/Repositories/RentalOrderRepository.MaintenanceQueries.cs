@@ -64,10 +64,7 @@ public sealed partial class RentalOrderRepository
         return await _dbContext.RentalItems
             .AsNoTracking()
             .Where(i => i.Status == RentalItemStatus.AwaitingHandover
-                     && i.ExpectedStartDate < todayInVietnam
-                     && (i.ExpectedStartDate < autoExpireStartBefore ||
-                         !i.RentalOrder!.OperationReceipts.Any(r =>
-                             r.Action == "HandoverOverdueNotice" && r.TargetItemId == i.Id)))
+                     && i.ExpectedStartDate < autoExpireStartBefore)
             .GroupBy(i => i.RentalOrderId)
             .OrderBy(g => g.Min(i => i.ExpectedStartDate))
             .Select(g => g.Key)

@@ -131,6 +131,12 @@ public sealed partial class ReturnService
         order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id, key, RequestReturnAction,
             fingerprint, true, null, null, now, targetItemId: itemId, payloadJson: payload,
             apiResponseJson: JsonSerializer.Serialize(response)));
+
+        if (reminderSchedules != null)
+        {
+            int remainingActive = Dprental.RentalService.Domain.Policies.RentalReturnActiveUnitsCalculator.Calculate(item);
+            await reminderSchedules.OnReturnUnitsChangedAsync(item.Id, remainingActive, item.ExpectedEndDate, now, cancellationToken);
+        }
         // Thực hiện lời gọi có thể phát sinh exception; nhánh catch phía dưới quyết định trả lỗi, retry hoặc chuyển tiếp exception.
         try
         {

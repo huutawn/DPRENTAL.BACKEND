@@ -638,4 +638,30 @@ public sealed class RentalEventProducer : IRentalEventProducer
             aggregateId, payload.RequestedAt, correlationId, causationId, payload);
         return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
     }
+
+    public async Task<Result<ProducerEnqueueResult>> EnqueueRentalReminderDueAsync(
+        RentalReminderDuePayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RentalItemId == Guid.Empty ||
+            payload.SupplierId == Guid.Empty || payload.RenterId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(payload.ReminderType) || payload.RemainingUnitCount <= 0 ||
+            payload.OrderVersion <= 0)
+            return Error.Validation("INVALID_PAYLOAD", "RentalReminderDue payload is incomplete or invalid.");
+
+        string aggregateId = payload.RentalOrderId.ToString("D");
+        string logicalEntityId = $"{payload.RentalItemId:D}:{payload.ReminderType}:{payload.ReminderDate:yyyy-MM-dd}";
+        Guid messageId = OutboxMessageIdGenerator.ComputeDeterministicId(
+            KafkaContractSpec.Producers.RentalService,
+            KafkaContractSpec.EventTypes.RentalReminderDue,
+            logicalEntityId);
+        DateTimeOffset occurredAt = _timeProvider.GetUtcNow();
+        var envelope = new KafkaMessageEnvelope<RentalReminderDuePayload>(
+            messageId, KafkaContractSpec.EventTypes.RentalReminderDue,
+            KafkaContractSpec.CurrentEnvelopeVersion, KafkaContractSpec.Producers.RentalService,
+            aggregateId, occurredAt, correlationId, causationId, payload);
+        return await _outboxWriter.EnqueueAsync(_kafkaOptions.RentalEventsTopic, aggregateId, envelope, cancellationToken);
+    }
 }

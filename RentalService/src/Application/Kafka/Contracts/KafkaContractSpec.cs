@@ -52,6 +52,7 @@ public static class KafkaContractSpec
         public const string RentalItemPaid = "RentalItemPaid";
         public const string RentalItemCompleted = "RentalItemCompleted";
         public const string RentalDeductionDisputeResolved = "RentalDeductionDisputeResolved";
+        public const string RentalReminderDue = "RentalReminderDue";
     }
 
     public static class CommandTypes

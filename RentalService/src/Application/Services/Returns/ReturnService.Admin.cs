@@ -341,6 +341,12 @@ public sealed partial class ReturnService
             returnReq.AddResolution(resolution);
             order.RecordReadModelUpdate(now);
 
+            if (reminderSchedules != null)
+            {
+                int remainingActive = Dprental.RentalService.Domain.Policies.RentalReturnActiveUnitsCalculator.Calculate(item);
+                await reminderSchedules.OnReturnUnitsChangedAsync(item.Id, remainingActive, item.ExpectedEndDate, now, cancellationToken);
+            }
+
             // Dùng policy/mapper hiện có để dựng dữ liệu response nhất quán với các điểm đọc khác của cùng nghiệp vụ.
             var response = OrderQueryMapper.ToReturnRequests(item, now, includeAdminNotes: true)
                 .First(r => r.ReturnRequestId == returnRequestId);

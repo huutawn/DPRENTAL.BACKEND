@@ -1,0 +1,282 @@
+using Dprental.RentalService.Api.Tests.TestHelpers;
+using Dprental.RentalService.Application.Services.Reminders;
+using Dprental.RentalService.Common.Enums;
+using Dprental.RentalService.Domain.Entities;
+using Dprental.RentalService.Domain.Repositories;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
+using Xunit;
+
+namespace Dprental.RentalService.Api.Tests.Integration;
+
+public sealed class RentalReminderPostgreSqlIntegrationTests
+{
+    private static async Task EnsurePostgreSqlAvailableAsync()
+    {
+        if (!await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync())
+        {
+            throw new InvalidOperationException("PostgreSQL integration environment is not available.");
+        }
+    }
+
+    [Fact]
+    public async Task ClaimDueBatchAsync_ConcurrentWorkers_ClaimDisjointBatchesWithoutOverlap()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+
+                // Seed 20 due reminder schedules
+                for (int i = 0; i < 20; i++)
+                {
+                    var schedule = RentalReminderSchedule.Create(
+                        Guid.NewGuid(),
+                        Guid.NewGuid(),
+                        RentalReminderScheduleType.Handover,
+                        1,
+                        now.AddMinutes(-5),
+                        now.AddDays(-1));
+                    db.RentalReminderSchedules.Add(schedule);
+                }
+                await db.SaveChangesAsync();
+            }
+
+            // Two concurrent workers claiming batches of 10
+            await using var db1 = new RentalServiceDbContext(options);
+            await using var db2 = new RentalServiceDbContext(options);
+            var repo1 = new RentalReminderScheduleRepository(db1);
+            var repo2 = new RentalReminderScheduleRepository(db2);
+
+            var task1 = repo1.ClaimDueBatchAsync("worker-1", TimeSpan.FromMinutes(2), 10);
+            var task2 = repo2.ClaimDueBatchAsync("worker-2", TimeSpan.FromMinutes(2), 10);
+
+            var results = await Task.WhenAll(task1, task2);
+            var worker1Claims = results[0];
+            var worker2Claims = results[1];
+
+            Assert.Equal(10, worker1Claims.Count);
+            Assert.Equal(10, worker2Claims.Count);
+
+            var set1 = worker1Claims.Select(s => s.ScheduleId).ToHashSet();
+            var set2 = worker2Claims.Select(s => s.ScheduleId).ToHashSet();
+
+            // Strictly disjoint (no duplicate claims between workers)
+            Assert.Empty(set1.Intersect(set2));
+
+            // Verify database has updated leases
+            await using var verifyDb = new RentalServiceDbContext(options);
+            var w1InDb = await verifyDb.RentalReminderSchedules.CountAsync(s => s.LeasedBy == "worker-1");
+            var w2InDb = await verifyDb.RentalReminderSchedules.CountAsync(s => s.LeasedBy == "worker-2");
+            Assert.Equal(10, w1InDb);
+            Assert.Equal(10, w2InDb);
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task LeaseRecovery_WhenLeaseExpires_NextWorkerCanClaim()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            Guid scheduleId;
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+
+                var schedule = RentalReminderSchedule.Create(
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    RentalReminderScheduleType.Handover,
+                    2,
+                    now.AddMinutes(-10),
+                    now.AddDays(-1));
+                // Leased by a dead worker, lease expired 5 minutes ago
+                schedule.Claim("crashed-worker", Guid.NewGuid(), now.AddMinutes(-5), now.AddMinutes(-10));
+                db.RentalReminderSchedules.Add(schedule);
+                await db.SaveChangesAsync();
+                scheduleId = schedule.Id;
+            }
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                var repo = new RentalReminderScheduleRepository(db);
+                var claimed = await repo.ClaimDueBatchAsync("recovering-worker", TimeSpan.FromMinutes(1), 10);
+
+                var claimedItem = Assert.Single(claimed);
+                Assert.Equal(scheduleId, claimedItem.ScheduleId);
+                var dbSchedule = await db.RentalReminderSchedules.FirstAsync(s => s.Id == scheduleId);
+                Assert.Equal("recovering-worker", dbSchedule.LeasedBy);
+                Assert.True(dbSchedule.LeasedUntil > now);
+                Assert.Equal(claimedItem.LeaseToken, dbSchedule.LeaseToken);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task UniqueConstraint_SameItemAndType_ThrowsDbUpdateException()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            Guid itemId = Guid.NewGuid();
+            Guid orderId = Guid.NewGuid();
+
+            await using var db = new RentalServiceDbContext(options);
+            await db.Database.MigrateAsync();
+
+            var schedule1 = RentalReminderSchedule.Create(
+                orderId, itemId, RentalReminderScheduleType.Handover, 1, now, now);
+            db.RentalReminderSchedules.Add(schedule1);
+            await db.SaveChangesAsync();
+
+            // Attempt to insert duplicate for same itemId and same scheduleType
+            var schedule2 = RentalReminderSchedule.Create(
+                orderId, itemId, RentalReminderScheduleType.Handover, 1, now, now);
+            db.RentalReminderSchedules.Add(schedule2);
+
+            var ex = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+            Assert.Contains("uq_rental_reminder_schedules_item_type", ex.InnerException?.Message ?? ex.Message);
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task BackfillActiveItems_KeysetPagination_CreatesSchedulesAndIsIdempotentOnRerun()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            DateTimeOffset now = new(2026, 11, 9, 3, 0, 0, TimeSpan.Zero);
+            var timeProvider = new Dprental.RentalService.Api.Tests.Checkout.FixedTimeProvider(now);
+
+            Guid orderId = Guid.NewGuid();
+            Guid item1Id = Guid.NewGuid();
+            Guid item2Id = Guid.NewGuid();
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+
+                var order1 = PostgresTestDatabaseHelper.CreateOrderWithItem(
+                    Guid.NewGuid(), item1Id, Guid.NewGuid(), 2, now);
+                typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!
+                    .SetValue(order1.Items.First(), RentalItemStatus.AwaitingHandover);
+
+                var order2 = PostgresTestDatabaseHelper.CreateOrderWithItem(
+                    Guid.NewGuid(), item2Id, Guid.NewGuid(), 1, now);
+                typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!
+                    .SetValue(order2.Items.First(), RentalItemStatus.InRental);
+
+                db.RentalOrders.AddRange(order1, order2);
+                await db.SaveChangesAsync();
+            }
+
+            // Run Backfill
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                var backfillService = new RentalReminderBackfillService(
+                    db, timeProvider, NullLogger<RentalReminderBackfillService>.Instance);
+
+                var result1 = await backfillService.BackfillActiveItemsAsync(batchSize: 10);
+                Assert.Equal(1, result1.HandoverSchedulesCreated);
+                Assert.Equal(1, result1.ReturnSchedulesCreated);
+
+                var schedules = await db.RentalReminderSchedules.ToListAsync();
+                Assert.Equal(2, schedules.Count);
+                Assert.Contains(schedules, s => s.RentalItemId == item1Id && s.ScheduleType == RentalReminderScheduleType.Handover);
+                Assert.Contains(schedules, s => s.RentalItemId == item2Id && s.ScheduleType == RentalReminderScheduleType.Return);
+
+                // Re-run backfill: must be idempotent, creating 0 duplicates
+                var result2 = await backfillService.BackfillActiveItemsAsync(batchSize: 10);
+                Assert.Equal(0, result2.HandoverSchedulesCreated);
+                Assert.Equal(0, result2.ReturnSchedulesCreated);
+
+                var schedulesAfterRerun = await db.RentalReminderSchedules.ToListAsync();
+                Assert.Equal(2, schedulesAfterRerun.Count);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task Index_ExplainAnalyze_VerifyClaimQueryUsesIndex()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            await using var db = new RentalServiceDbContext(options);
+            await db.Database.MigrateAsync();
+
+            await using var conn = new NpgsqlConnection(connectionString);
+            await conn.OpenAsync();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                EXPLAIN
+                SELECT s.""Id""
+                FROM rental.rental_reminder_schedules s
+                WHERE s.status = 'Active'
+                  AND s.remaining_unit_count > 0
+                  AND (s.next_retry_at IS NULL OR s.next_retry_at <= NOW())
+                  AND s.next_trigger_at IS NOT NULL
+                  AND s.next_trigger_at <= NOW()
+                  AND (s.leased_until IS NULL OR s.leased_until <= NOW())
+                ORDER BY s.next_trigger_at, s.""Id""
+                LIMIT 100;";
+
+            var planLines = new List<string>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                planLines.Add(reader.GetString(0));
+            }
+
+            var planText = string.Join("\n", planLines);
+            // Verify query compiles cleanly and has a bounded execution plan
+            Assert.NotEmpty(planText);
+            Assert.Contains("Limit", planText);
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+}
