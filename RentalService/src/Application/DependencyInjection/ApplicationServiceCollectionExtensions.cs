@@ -124,6 +124,9 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IRefundCompletedConsumer, RefundCompletedConsumer>();
         services.AddScoped<IRentalSettledConsumer, RentalSettledConsumer>();
 
+        // Dịch vụ tích hợp ReviewService (snapshot và đối soát)
+        services.AddScoped<Dprental.RentalService.Application.IServices.ReviewIntegration.IRentalReviewIntegrationService, Dprental.RentalService.Application.Services.ReviewIntegration.RentalReviewIntegrationService>();
+
         // Đăng ký pipeline Kafka: options, producers, dispatcher và ba worker Inbox/Outbox/broker.
         services.AddKafka(configuration ?? new ConfigurationBuilder().Build());
 

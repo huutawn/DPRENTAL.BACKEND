@@ -403,6 +403,8 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
                     b.Property<decimal>("DailyRateSnapshot")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
@@ -536,6 +538,8 @@ namespace RentalService.Domain.Migrations
                     b.HasIndex("RentalSubOrderId");
 
                     b.HasIndex("Status");
+
+                    b.HasIndex("Status", "CompletedAt", "Id");
 
                     b.HasIndex("SupplierConfirmationDeadline");
 

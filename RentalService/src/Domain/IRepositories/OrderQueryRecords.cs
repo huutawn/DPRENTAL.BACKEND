@@ -152,3 +152,23 @@ public sealed record AdminReturnRequestRecord(
     DateTimeOffset ConfirmationDeadlineAt,
     IReadOnlyList<AdminReturnRequestUnitRecord> Units,
     IReadOnlyList<Guid> DisputedAssignmentIds);
+
+/// <summary>
+/// Projection snapshot mục thuê phục vụ kiểm tra điều kiện đánh giá.
+/// </summary>
+public sealed record RentalItemReviewSnapshotRecord(
+    Guid OrderId,
+    Guid ItemId,
+    Guid RenterId,
+    Guid SupplierId,
+    Guid EquipmentListingId,
+    RentalItemStatus Status,
+    DateTimeOffset? CompletedAt,
+    long OrderVersion);
+
+/// <summary>
+/// Một trang dữ liệu đối soát mục thuê phục vụ ReviewService theo keyset pagination.
+/// </summary>
+public sealed record RentalReviewReconciliationPageRecord(
+    IReadOnlyList<RentalItemReviewSnapshotRecord> Items,
+    bool HasMore);

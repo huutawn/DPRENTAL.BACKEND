@@ -10,6 +10,7 @@ public sealed class FakeRentalEventProducer : IRentalEventProducer
     public List<RentalItemReturnedPayload> ReturnedEvents { get; } = [];
     public List<RentalItemCompletedPayload> CompletedEvents { get; } = [];
     public List<ReturnConfirmationOverduePayload> ReturnConfirmationOverdueEvents { get; } = [];
+    public Func<RentalItemCompletedPayload, Result<ProducerEnqueueResult>>? CompletedHandler { get; set; }
     public Task<Result<ProducerEnqueueResult>> EnqueueDomainEventAsync<TPayload>(string messageType,
         string logicalEntityId, string aggregateId, DateTimeOffset occurredAt, TPayload payload,
         string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
@@ -38,6 +39,7 @@ public sealed class FakeRentalEventProducer : IRentalEventProducer
     public Task<Result<ProducerEnqueueResult>> EnqueueRentalItemCompletedAsync(
         RentalItemCompletedPayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default)
     {
+        if (CompletedHandler != null) return Task.FromResult(CompletedHandler(payload));
         CompletedEvents.Add(payload);
         return Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "RentalItemCompleted", "topic", "key")));
     }
