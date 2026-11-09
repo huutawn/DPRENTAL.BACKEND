@@ -70,7 +70,7 @@ public sealed class ReturnRequestConcurrencyAndReplayTests : IAsyncLifetime
             new RentalOrderRepository(db),
             new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
             db,
-            media ?? Mock.Of<IRentalMediaClient>(),
+            media ?? ReturnRequestMediaStub.ForRenter(db),
             _clock,
             new RentalEventProducer(new KafkaOutboxWriter(outbox), Options.Create(new KafkaOptions
             {
@@ -100,7 +100,7 @@ public sealed class ReturnRequestConcurrencyAndReplayTests : IAsyncLifetime
         var service = Service(db);
         var caller = RentalCallerContext.ForUser(order.RenterId);
 
-        var request = new CreateReturnRequest(Now.AddHours(-2), "Initial request", [new ReturnRequestUnitDto(u1.Id, [])]);
+        var request = new CreateReturnRequest(Now.AddHours(-2), "Initial request", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
         var first = await service.CreateReturnRequestAsync(item.Id, caller, request, "idemp-key-1");
         Assert.True(first.IsSuccess);
 
@@ -129,9 +129,10 @@ public sealed class ReturnRequestConcurrencyAndReplayTests : IAsyncLifetime
         var u2 = item.UnitAssignments.ElementAt(1);
         Guid m1 = Guid.NewGuid();
         Guid m2 = Guid.NewGuid();
+        Guid m3 = Guid.NewGuid();
 
         var media = new Mock<IRentalMediaClient>();
-        foreach (var m in new[] { m1, m2 })
+        foreach (var m in new[] { m1, m2, m3 })
         {
             media.Setup(c => c.VerifyMediaAsync(m, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Result.Success(new MediaVerifyDto(m, order.RenterId.ToString(), "Ready")));
@@ -146,7 +147,7 @@ public sealed class ReturnRequestConcurrencyAndReplayTests : IAsyncLifetime
         // Original: u1 then u2, m1 then m2, UTC instant 08:00:00Z
         var dtUtc = new DateTimeOffset(2026, 10, 28, 6, 0, 0, TimeSpan.Zero);
         var original = new CreateReturnRequest(dtUtc, "Normalize",
-            [new ReturnRequestUnitDto(u1.Id, [m1, m2]), new ReturnRequestUnitDto(u2.Id, [])]);
+            [new ReturnRequestUnitDto(u1.Id, [m1, m2]), new ReturnRequestUnitDto(u2.Id, [m3])]);
 
         var first = await service.CreateReturnRequestAsync(item.Id, caller, original, "norm-key");
         Assert.True(first.IsSuccess);
@@ -154,7 +155,7 @@ public sealed class ReturnRequestConcurrencyAndReplayTests : IAsyncLifetime
         // Replay: u2 then u1, m2 then m1, +07:00 timezone (13:00:00+07:00 == 06:00:00Z)
         var dtOffset = new DateTimeOffset(2026, 10, 28, 13, 0, 0, TimeSpan.FromHours(7));
         var reordered = new CreateReturnRequest(dtOffset, "Normalize",
-            [new ReturnRequestUnitDto(u2.Id, []), new ReturnRequestUnitDto(u1.Id, [m2, m1])]);
+            [new ReturnRequestUnitDto(u2.Id, [m3]), new ReturnRequestUnitDto(u1.Id, [m2, m1])]);
 
         var replay = await service.CreateReturnRequestAsync(item.Id, caller, reordered, "norm-key");
         Assert.True(replay.IsSuccess);
@@ -168,7 +169,7 @@ public sealed class ReturnRequestConcurrencyAndReplayTests : IAsyncLifetime
         var u1 = item.UnitAssignments.First();
 
         var caller = RentalCallerContext.ForUser(order.RenterId);
-        var request = new CreateReturnRequest(Now.AddHours(-1), "Concurrent same key", [new ReturnRequestUnitDto(u1.Id, [])]);
+        var request = new CreateReturnRequest(Now.AddHours(-1), "Concurrent same key", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
 
         // Launch 2 concurrent calls with same key
         var task1 = Task.Run(async () =>
@@ -200,8 +201,8 @@ public sealed class ReturnRequestConcurrencyAndReplayTests : IAsyncLifetime
         var u1 = item.UnitAssignments.First();
 
         var caller = RentalCallerContext.ForUser(order.RenterId);
-        var req1 = new CreateReturnRequest(Now.AddHours(-1), "Req 1", [new ReturnRequestUnitDto(u1.Id, [])]);
-        var req2 = new CreateReturnRequest(Now.AddHours(-1), "Req 2", [new ReturnRequestUnitDto(u1.Id, [])]);
+        var req1 = new CreateReturnRequest(Now.AddHours(-1), "Req 1", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
+        var req2 = new CreateReturnRequest(Now.AddHours(-1), "Req 2", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
 
         var task1 = Task.Run(async () =>
         {
@@ -253,7 +254,7 @@ public sealed class ReturnRequestConcurrencyAndReplayTests : IAsyncLifetime
         {
             var service2 = Service(db2);
             var renterCaller = RentalCallerContext.ForUser(order.RenterId);
-            var renterReq = new CreateReturnRequest(Now.AddHours(-1), null, [new ReturnRequestUnitDto(u1.Id, [])]);
+            var renterReq = new CreateReturnRequest(Now.AddHours(-1), null, [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
 
             var renterResult = await service2.CreateReturnRequestAsync(item.Id, renterCaller, renterReq, "renter-req-confirmed-unit");
             Assert.True(renterResult.IsFailure);
@@ -265,7 +266,7 @@ public sealed class ReturnRequestConcurrencyAndReplayTests : IAsyncLifetime
         {
             var service3 = Service(db3);
             var renterCaller = RentalCallerContext.ForUser(order.RenterId);
-            var renterReq2 = new CreateReturnRequest(Now.AddHours(-1), null, [new ReturnRequestUnitDto(u2.Id, [])]);
+            var renterReq2 = new CreateReturnRequest(Now.AddHours(-1), null, [new ReturnRequestUnitDto(u2.Id, [Guid.NewGuid()])]);
 
             var renterResult2 = await service3.CreateReturnRequestAsync(item.Id, renterCaller, renterReq2, "renter-req-u2");
             Assert.True(renterResult2.IsSuccess);
@@ -298,11 +299,13 @@ public sealed class ReturnRequestConcurrencyAndReplayTests : IAsyncLifetime
             services.RemoveAll<IUnitOfWork>();
             services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
             services.AddSingleton<TimeProvider>(_clock);
+            services.RemoveAll<IRentalMediaClient>();
+            services.AddSingleton(ReturnRequestMediaStub.ForRenter(order.RenterId));
         }));
 
         using var client = factory.CreateClient();
         string route = $"/api/v1/rental/items/{item.Id}/return-requests";
-        var requestPayload = new CreateReturnRequest(Now.AddHours(-1), "API test note", [new ReturnRequestUnitDto(u1.Id, [])]);
+        var requestPayload = new CreateReturnRequest(Now.AddHours(-1), "API test note", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
 
         // 1. Anonymous request (no api key or auth)
         client.DefaultRequestHeaders.Remove("X-Api-Key");

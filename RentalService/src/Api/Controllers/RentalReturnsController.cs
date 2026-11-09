@@ -12,7 +12,7 @@ namespace Dprental.RentalService.Api.Controllers;
 [Route("items/{itemId:guid}")]
 public sealed class RentalReturnsController(IReturnService returns, IRentalCallerContext caller) : ControllerBase
 {
-    /// <summary>Người thuê khai báo trả một hoặc nhiều máy; chưa xác nhận thu hồi hoặc giải phóng Inventory.</summary>
+    /// <summary>Người thuê khai báo trả máy, kèm ít nhất một ảnh bằng chứng cho mỗi máy; chưa xác nhận thu hồi hoặc giải phóng Inventory.</summary>
     [HttpPost("return-requests")]
     [ProducesResponseType(typeof(ReturnRequestResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]

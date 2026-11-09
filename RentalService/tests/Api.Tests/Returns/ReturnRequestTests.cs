@@ -71,7 +71,7 @@ public sealed class ReturnRequestTests : IAsyncLifetime
             new RentalOrderRepository(db),
             new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
             db,
-            media ?? Mock.Of<IRentalMediaClient>(),
+            media ?? ReturnRequestMediaStub.ForRenter(db),
             _clock,
             new RentalEventProducer(new KafkaOutboxWriter(outbox), Options.Create(new KafkaOptions
             {
@@ -160,9 +160,9 @@ public sealed class ReturnRequestTests : IAsyncLifetime
             Now.AddHours(-2),
             "Returning all 3 machines",
             [
-                new ReturnRequestUnitDto(u1.Id, []),
-                new ReturnRequestUnitDto(u2.Id, []),
-                new ReturnRequestUnitDto(u3.Id, [])
+                new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()]),
+                new ReturnRequestUnitDto(u2.Id, [Guid.NewGuid()]),
+                new ReturnRequestUnitDto(u3.Id, [Guid.NewGuid()])
             ]);
 
         var result = await service.CreateReturnRequestAsync(item.Id, caller, request, "key-all-3");
@@ -179,6 +179,32 @@ public sealed class ReturnRequestTests : IAsyncLifetime
         Assert.Single(reloadedItem.ReturnRequests);
         Assert.Equal(3, reloadedItem.ReturnRequests.Single().Units.Count);
         Assert.All(reloadedItem.ReturnRequests.Single().Units, u => Assert.Null(u.ClosedAt));
+    }
+
+    [Fact]
+    public async Task MissingEvidenceForOneUnit_RejectsEntireReturnRequest()
+    {
+        var (order, item) = await SeedOrderAsync(2);
+        var assignments = item.UnitAssignments.ToArray();
+        Guid mediaId = Guid.NewGuid();
+        var media = CreateMediaMock(mediaId, order.RenterId);
+
+        await using var db = NewDb();
+        var service = Service(db, media.Object);
+        var request = new CreateReturnRequest(Now.AddHours(-1), null,
+        [
+            new ReturnRequestUnitDto(assignments[0].Id, [mediaId]),
+            new ReturnRequestUnitDto(assignments[1].Id, [])
+        ]);
+
+        var result = await service.CreateReturnRequestAsync(item.Id,
+            RentalCallerContext.ForUser(order.RenterId), request, "missing-return-evidence");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MediaContractSpec.ErrorCodes.InvalidMediaId, result.Error.Code);
+        await using var verifyDb = NewDb();
+        Assert.Empty(await verifyDb.ReturnRequests.ToListAsync());
+        Assert.Empty(await verifyDb.ReturnRequestUnits.ToListAsync());
     }
 
     [Theory]
@@ -204,7 +230,7 @@ public sealed class ReturnRequestTests : IAsyncLifetime
 
         await using var db = NewDb();
         var service = Service(db);
-        var request = new CreateReturnRequest(Now.AddHours(-1), null, [new ReturnRequestUnitDto(u1.Id, [])]);
+        var request = new CreateReturnRequest(Now.AddHours(-1), null, [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
 
         var result = await service.CreateReturnRequestAsync(item.Id, caller, request, "auth-key");
 
@@ -273,7 +299,7 @@ public sealed class ReturnRequestTests : IAsyncLifetime
         await using var db = NewDb();
         var service = Service(db);
         var caller = RentalCallerContext.ForUser(order.RenterId);
-        var request = new CreateReturnRequest(returnTime, null, [new ReturnRequestUnitDto(assignmentId, [])]);
+        var request = new CreateReturnRequest(returnTime, null, [new ReturnRequestUnitDto(assignmentId, [Guid.NewGuid()])]);
 
         var result = await service.CreateReturnRequestAsync(item.Id, caller, request, $"val-key-{scenario}");
 
@@ -316,12 +342,12 @@ public sealed class ReturnRequestTests : IAsyncLifetime
         var caller = RentalCallerContext.ForUser(order.RenterId);
 
         // 1. First request for u1 succeeds
-        var req1 = new CreateReturnRequest(Now.AddHours(-1), "Req 1", [new ReturnRequestUnitDto(u1.Id, [])]);
+        var req1 = new CreateReturnRequest(Now.AddHours(-1), "Req 1", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
         var res1 = await service.CreateReturnRequestAsync(item.Id, caller, req1, "open-key-1");
         Assert.True(res1.IsSuccess);
 
         // 2. Second request with different key targeting u1 returns 409 RETURN_REQUEST_ALREADY_OPEN
-        var req2 = new CreateReturnRequest(Now.AddHours(-1), "Req 2", [new ReturnRequestUnitDto(u1.Id, [])]);
+        var req2 = new CreateReturnRequest(Now.AddHours(-1), "Req 2", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
         var res2 = await service.CreateReturnRequestAsync(item.Id, caller, req2, "open-key-2");
         Assert.True(res2.IsFailure);
         Assert.Equal("RETURN_REQUEST_ALREADY_OPEN", res2.Error.Code);
@@ -329,7 +355,7 @@ public sealed class ReturnRequestTests : IAsyncLifetime
 
         // 3. Batch with u1 (already open) and u2 (valid) fails entirely without saving u2
         var reqBatch = new CreateReturnRequest(Now.AddHours(-1), "Batch",
-            [new ReturnRequestUnitDto(u1.Id, []), new ReturnRequestUnitDto(u2.Id, [])]);
+            [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()]), new ReturnRequestUnitDto(u2.Id, [Guid.NewGuid()])]);
         var resBatch = await service.CreateReturnRequestAsync(item.Id, caller, reqBatch, "open-key-3");
         Assert.True(resBatch.IsFailure);
         Assert.Equal("RETURN_REQUEST_ALREADY_OPEN", resBatch.Error.Code);
@@ -459,7 +485,7 @@ public sealed class ReturnRequestTests : IAsyncLifetime
 
         string key = "valid-key";
         string? note = null;
-        List<ReturnRequestUnitDto>? units = [new ReturnRequestUnitDto(u1.Id, [])];
+        List<ReturnRequestUnitDto>? units = [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])];
 
         switch (scenario)
         {
@@ -467,8 +493,8 @@ public sealed class ReturnRequestTests : IAsyncLifetime
             case "tooLongKey": key = new string('x', 65); break;
             case "nullUnits": units = null; break;
             case "emptyUnits": units = []; break;
-            case "duplicateUnitsInRequest": units = [new ReturnRequestUnitDto(u1.Id, []), new ReturnRequestUnitDto(u1.Id, [])]; break;
-            case "emptyUnitAssignmentGuid": units = [new ReturnRequestUnitDto(Guid.Empty, [])]; break;
+            case "duplicateUnitsInRequest": units = [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()]), new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]; break;
+            case "emptyUnitAssignmentGuid": units = [new ReturnRequestUnitDto(Guid.Empty, [Guid.NewGuid()])]; break;
             case "nullMediaList": units = [new ReturnRequestUnitDto(u1.Id, null)]; break;
             case "noteTooLong": note = new string('A', 2001); break;
         }

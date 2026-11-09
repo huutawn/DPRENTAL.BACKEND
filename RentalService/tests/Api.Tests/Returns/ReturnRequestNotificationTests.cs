@@ -65,7 +65,7 @@ public sealed class ReturnRequestNotificationTests : IAsyncLifetime
             new RentalOrderRepository(db),
             new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
             db,
-            Mock.Of<IRentalMediaClient>(),
+            ReturnRequestMediaStub.ForRenter(db),
             _clock,
             new RentalEventProducer(new KafkaOutboxWriter(outbox), Options.Create(new KafkaOptions
             {
@@ -113,7 +113,7 @@ public sealed class ReturnRequestNotificationTests : IAsyncLifetime
         var caller = RentalCallerContext.ForUser(order.RenterId);
 
         var request = new CreateReturnRequest(Now.AddHours(-1), "Notification test note",
-            [new ReturnRequestUnitDto(u1.Id, [])]);
+            [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
 
         var result = await service.CreateReturnRequestAsync(item.Id, caller, request, "op-notify-1");
 
@@ -147,7 +147,7 @@ public sealed class ReturnRequestNotificationTests : IAsyncLifetime
         await using var db1 = NewDb();
         var service1 = Service(db1, notifier: notifierMock.Object);
         var caller = RentalCallerContext.ForUser(order.RenterId);
-        var request = new CreateReturnRequest(Now.AddHours(-1), "Replay note", [new ReturnRequestUnitDto(u1.Id, [])]);
+        var request = new CreateReturnRequest(Now.AddHours(-1), "Replay note", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
 
         var initialResp = await service1.CreateReturnRequestAsync(item.Id, caller, request, "op-notify-replay");
         Assert.True(initialResp.IsSuccess);
@@ -195,7 +195,7 @@ public sealed class ReturnRequestNotificationTests : IAsyncLifetime
         await using var db = NewDb();
         var service = Service(db, notifier: notifierMock.Object);
         var caller = RentalCallerContext.ForUser(order.RenterId);
-        var request = new CreateReturnRequest(Now.AddHours(-1), "Failure note", [new ReturnRequestUnitDto(u1.Id, [])]);
+        var request = new CreateReturnRequest(Now.AddHours(-1), "Failure note", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]);
 
         // Creating return request still succeeds!
         var result = await service.CreateReturnRequestAsync(item.Id, caller, request, "op-notify-err");
