@@ -40,7 +40,7 @@ public sealed class InboxProcessingWorker : BackgroundService
             return;
         }
 
-        _logger.LogInformation("InboxProcessingWorker started with polling interval {Interval}s", _pollingInterval.TotalSeconds);
+        _logger.LogInformation("InboxProcessingWorker started with idle delay {Interval}s", _pollingInterval.TotalSeconds);
 
         try
         {
@@ -55,7 +55,11 @@ public sealed class InboxProcessingWorker : BackgroundService
         {
             try
             {
-                await ProcessBatchAsync(stoppingToken);
+                // Vừa xử lý được bản tin thì có thể vẫn còn việc: chạy vòng tiếp ngay, chỉ nghỉ khi rảnh.
+                if (await ProcessBatchAsync(stoppingToken) > 0)
+                {
+                    continue;
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

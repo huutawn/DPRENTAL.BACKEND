@@ -205,6 +205,8 @@ public sealed class PaymentWorkflowIntegrationTests
         // Verify Outbox message emitted
         var outboxMessages = await db.RentalOutboxMessages.ToListAsync();
         Assert.Contains(outboxMessages, m => m.MessageType == "ExtendHold");
+        Assert.DoesNotContain(outboxMessages,
+            m => m.MessageType == KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested);
 
         // Verify Inbox message recorded
         var inboxMessage = await db.RentalInboxMessages.FirstOrDefaultAsync(m => m.MessageId == envelope.MessageId);

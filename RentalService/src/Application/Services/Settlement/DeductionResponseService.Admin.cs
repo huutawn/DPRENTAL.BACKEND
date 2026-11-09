@@ -1,4 +1,5 @@
 using Dprental.RentalService.Application.Hubs;
+#pragma warning disable CA1848
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -6,9 +7,12 @@ using Dprental.RentalService.Application.DTOs.Settlement;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
+using Microsoft.Extensions.Logging;
 
 namespace Dprental.RentalService.Application.Services.Settlement;
 
@@ -93,12 +97,27 @@ public sealed partial class DeductionResponseService
             payloadJson: payload, apiResponseJson: JsonSerializer.Serialize(response)));
         RentalOrderStatusPolicy.Apply(order, now, key);
         order.RecordReadModelUpdate(now);
-        await orders.UpdateAsync(order, cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+        await using (var transaction = await unitOfWork.BeginTransactionAsync(cancellationToken))
+        {
+            var eventPayload = new RentalDeductionDisputeResolvedPayload(
+                proposal.Dispute!.Id, proposal.Id, order.Id, item.Id, order.RenterId,
+                item.SupplierId, decision, request.FinalDeductionAmount, now, order.Version);
+            var enqueued = await rentalEvents.EnqueueDomainEventAsync(
+                KafkaContractSpec.EventTypes.RentalDeductionDisputeResolved,
+                proposal.Dispute.Id.ToString("D"), order.Id.ToString("D"), now,
+                eventPayload, cancellationToken: cancellationToken);
+            if (enqueued.IsFailure) return enqueued.Error;
+
+            await orders.UpdateAsync(order, cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         // Chỉ gửi thông báo realtime khi service có notifier được cấu hình; không tạo một đường lưu nghiệp vụ khác.
         if (notifier != null)
         {
+            try
+            {
             // Gửi tín hiệu thay đổi tới các bên liên quan bằng ID/version, để client tải lại dữ liệu đã lưu.
             await notifier.NotifyRenterOrderChangedAsync(
                 order.RenterId,
@@ -126,6 +145,11 @@ public sealed partial class DeductionResponseService
                         OrderChangeTypes.SettlementChanged,
                         now),
                     cancellationToken);
+            }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "SignalR notification failed after dispute resolution was committed for item {ItemId}", itemId);
             }
         }
         return response;

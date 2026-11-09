@@ -382,7 +382,8 @@ public sealed class RentalEventProducer : IRentalEventProducer
         CancellationToken cancellationToken = default)
     {
         if (payload is null || payload.RentalOrderId == Guid.Empty || payload.RenterId == Guid.Empty ||
-            payload.CancelledAt == default || string.IsNullOrWhiteSpace(payload.Reason) || payload.OrderVersion <= 0)
+            payload.CancelledAt == default || string.IsNullOrWhiteSpace(payload.Reason) ||
+            string.IsNullOrWhiteSpace(payload.OrderCode) || payload.OrderVersion <= 0)
             return Error.Validation("INVALID_PAYLOAD", "RentalOrderCancelled payload is incomplete or invalid.");
 
         string aggregateId = payload.RentalOrderId.ToString("D");

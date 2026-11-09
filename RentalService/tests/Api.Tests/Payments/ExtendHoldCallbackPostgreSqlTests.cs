@@ -280,6 +280,11 @@ public sealed class ExtendHoldCallbackPostgreSqlTests
                 // Verify outbox has only ONE RentalOrderPaid (from initial payment, NOT duplicated by callback)
                 var outboxes = await freshDb.RentalOutboxMessages.ToListAsync();
                 Assert.Single(outboxes, m => m.MessageType == KafkaContractSpec.EventTypes.RentalOrderPaid);
+                var supplierMessage = Assert.Single(outboxes,
+                    m => m.MessageType == KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested);
+                using var supplierEnvelope = JsonDocument.Parse(supplierMessage.Payload);
+                Assert.Equal(finalOrder.OrderCode,
+                    supplierEnvelope.RootElement.GetProperty("payload").GetProperty("orderCode").GetString());
             }
         }
         finally
@@ -372,6 +377,9 @@ public sealed class ExtendHoldCallbackPostgreSqlTests
                 Assert.Equal(versionAfterPaid, order.Version);
                 Assert.Equal(RentalOperationReceipt.StatusSucceeded, order.OperationReceipts.Single(r => r.OperationId == opKey1).Status);
                 Assert.Equal(RentalOperationReceipt.StatusPending, order.OperationReceipts.Single(r => r.OperationId == opKey2).Status);
+                Assert.Empty(await verifyMidDb.RentalOutboxMessages
+                    .Where(m => m.MessageType == KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested)
+                    .ToListAsync());
             }
 
             // Reply 2 for Item 2 (FINAL REPLY)
@@ -406,6 +414,7 @@ public sealed class ExtendHoldCallbackPostgreSqlTests
 
                 var outboxes = await finalDb.RentalOutboxMessages.ToListAsync();
                 Assert.Single(outboxes, m => m.MessageType == KafkaContractSpec.EventTypes.RentalOrderPaid);
+                Assert.Equal(2, outboxes.Count(m => m.MessageType == KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested));
             }
         }
         finally
