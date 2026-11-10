@@ -262,7 +262,11 @@ public sealed class ReviewRepository : IReviewRepository
 
         var distribution = new Dictionary<int, int>
         {
-            [1] = 0, [2] = 0, [3] = 0, [4] = 0, [5] = 0
+            [1] = 0,
+            [2] = 0,
+            [3] = 0,
+            [4] = 0,
+            [5] = 0
         };
 
         var ratingGroups = await query
@@ -289,5 +293,25 @@ public sealed class ReviewRepository : IReviewRepository
             : Math.Round((double)totalSum / totalCount, 1, MidpointRounding.AwayFromZero);
 
         return (totalCount, averageRating, distribution);
+    }
+
+    public async Task<IReadOnlyList<ActorReviewSummary>> GetActorReviewsByItemIdsAsync(
+        Guid authorId,
+        IEnumerable<Guid> itemIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(itemIds);
+
+        var idList = itemIds.Distinct().ToList();
+        if (idList.Count == 0 || authorId == Guid.Empty)
+        {
+            return Array.Empty<ActorReviewSummary>();
+        }
+
+        return await _dbContext.Reviews
+            .AsNoTracking()
+            .Where(r => r.AuthorId == authorId && idList.Contains(r.ItemId))
+            .Select(r => new ActorReviewSummary(r.Id, r.OrderId, r.ItemId))
+            .ToListAsync(cancellationToken);
     }
 }

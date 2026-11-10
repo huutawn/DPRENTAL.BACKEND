@@ -96,4 +96,17 @@ public interface IReviewRepository
     Task<(int TotalCount, double? AverageRating, Dictionary<int, int> Distribution)> GetRenterReputationAsync(
         Guid renterId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách đánh giá của chính tác giả theo danh sách itemId (bỏ qua điều kiện public visibility, chỉ chiếu các trường cần thiết).
+    /// </summary>
+    Task<IReadOnlyList<ActorReviewSummary>> GetActorReviewsByItemIdsAsync(
+        Guid authorId,
+        IEnumerable<Guid> itemIds,
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// DTO rút gọn đại diện cho đánh giá do tác giả tạo phục vụ kiểm tra trạng thái đánh giá theo lô.
+/// </summary>
+public sealed record ActorReviewSummary(Guid ReviewId, Guid OrderId, Guid ItemId);

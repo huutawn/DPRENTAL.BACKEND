@@ -80,4 +80,12 @@ public interface IReviewQueryService
     Task<Result<RenterReputationResponse>> GetRenterReputationAsync(
         Guid renterId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Kiểm tra trạng thái đánh giá theo lô cho danh sách mục thuê (POST /api/v1/reviews/status/batch).
+    /// </summary>
+    Task<Result<BatchReviewStatusResponse>> GetBatchReviewStatusAsync(
+        Guid actorId,
+        BatchReviewStatusRequest request,
+        CancellationToken cancellationToken = default);
 }

@@ -337,6 +337,37 @@ public sealed class ReviewsController : ControllerBase
     }
 
     /// <summary>
+    /// Kiểm tra trạng thái đánh giá theo lô cho danh sách mục thuê (POST /api/v1/reviews/status/batch).
+    /// </summary>
+    /// <param name="request">Danh sách các cặp định danh đơn hàng và mục thuê (tối đa 100 mục).</param>
+    /// <param name="cancellationToken">Token hủy thao tác.</param>
+    /// <returns>200 OK danh sách trạng thái đánh giá theo đúng thứ tự yêu cầu, hoặc ProblemDetails nếu lỗi.</returns>
+    [HttpPost("status/batch")]
+    public async Task<IActionResult> GetBatchReviewStatus(
+        [FromBody] BatchReviewStatusRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!_callerContext.IsAuthenticated)
+        {
+            return this.ToProblem(Error.Unauthorized("UNAUTHORIZED", "Người dùng chưa được xác thực."));
+        }
+
+        if (!_callerContext.ActorId.HasValue || _callerContext.ActorId.Value == Guid.Empty)
+        {
+            return this.ToProblem(Error.Unauthorized("UNAUTHORIZED", "Mã người dùng không hợp lệ."));
+        }
+
+        var result = await _queryService.GetBatchReviewStatusAsync(
+            _callerContext.ActorId.Value,
+            request,
+            cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : this.ToProblem(result.Error);
+    }
+
+    /// <summary>
     /// Đọc danh sách đánh giá nhận được (GET /api/v1/reviews/my/received).
     /// </summary>
     [HttpGet("my/received")]
