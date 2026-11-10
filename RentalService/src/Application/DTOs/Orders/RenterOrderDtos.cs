@@ -178,6 +178,7 @@ public sealed record OrderSettlementResponse(
 /// <param name="Settlement">Quyết toán tiền cọc, rỗng khi chưa trả đủ máy.</param>
 /// <param name="Units">Danh sách máy cụ thể của dòng kèm trạng thái yêu cầu trả.</param>
 /// <param name="ReturnRequests">Danh sách các yêu cầu trả thiết bị đã gửi.</param>
+/// <param name="ReviewStatus">Trạng thái đánh giá của dòng thiết bị.</param>
 public sealed record RenterOrderItemResponse(
     string Name,
     int Quantity,
@@ -200,8 +201,39 @@ public sealed record RenterOrderItemResponse(
     IReadOnlyList<OrderReturnResponse> Returns,
     OrderSettlementResponse? Settlement,
     IReadOnlyList<RenterUnitResponse> Units,
-    IReadOnlyList<ReturnRequestResponse> ReturnRequests)
+    IReadOnlyList<ReturnRequestResponse> ReturnRequests,
+    ReviewStatusDto ReviewStatus)
 {
+    public RenterOrderItemResponse(
+        string name,
+        int quantity,
+        DateOnly startDate,
+        DateOnly endDate,
+        Guid rentalItemId,
+        Guid equipmentListingId,
+        RentalItemStatus status,
+        OrderListingSnapshotResponse listing,
+        int rentalDays,
+        decimal dailyRate,
+        decimal depositPerUnit,
+        decimal rentalAmount,
+        decimal depositAmount,
+        DateTimeOffset? supplierConfirmationDeadline,
+        DateTimeOffset? supplierDecisionAt,
+        string? rejectReason,
+        OrderItemRefundResponse refund,
+        OrderHandoverResponse? handover,
+        IReadOnlyList<OrderReturnResponse> returns,
+        OrderSettlementResponse? settlement,
+        IReadOnlyList<RenterUnitResponse> units,
+        IReadOnlyList<ReturnRequestResponse> returnRequests)
+        : this(name, quantity, startDate, endDate, rentalItemId, equipmentListingId, status, listing,
+               rentalDays, dailyRate, depositPerUnit, rentalAmount, depositAmount,
+               supplierConfirmationDeadline, supplierDecisionAt, rejectReason, refund, handover, returns, settlement,
+               units, returnRequests, ReviewStatusDto.Unknown)
+    {
+    }
+
     public RenterOrderItemResponse(
         string name,
         int quantity,
@@ -226,7 +258,7 @@ public sealed record RenterOrderItemResponse(
         : this(name, quantity, startDate, endDate, rentalItemId, equipmentListingId, status, listing,
                rentalDays, dailyRate, depositPerUnit, rentalAmount, depositAmount,
                supplierConfirmationDeadline, supplierDecisionAt, rejectReason, refund, handover, returns, settlement,
-               [], [])
+               [], [], ReviewStatusDto.Unknown)
     {
     }
 }

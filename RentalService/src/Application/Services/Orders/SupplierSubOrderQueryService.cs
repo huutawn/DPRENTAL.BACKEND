@@ -13,8 +13,14 @@ namespace Dprental.RentalService.Application.Services.Orders;
 /// <summary>
 /// Nhà cung cấp được định danh bằng JWT sub, giống luồng nhận/từ chối dòng thuê; chỉ thấy đơn con có SupplierId của mình.
 /// </summary>
-public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) : ISupplierSubOrderQueryService
+public sealed class SupplierSubOrderQueryService(
+    IRentalOrderRepository orders,
+    IOrderReviewStatusEnricher reviewEnricher) : ISupplierSubOrderQueryService
 {
+    public SupplierSubOrderQueryService(IRentalOrderRepository orders)
+        : this(orders, DefaultOrderReviewStatusEnricher.Instance)
+    {
+    }
     // Chỉ đọc suborder thuộc người dùng supplier và đã thanh toán hợp lệ; chuẩn hóa status/phân trang trước truy vấn.
     public async Task<Result<PagedResponse<SupplierSubOrderSummaryResponse>>> GetMySubOrdersAsync(
         int page,
@@ -90,11 +96,14 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
             return OrderQueryErrors.SubOrderNotFound;
         }
 
+        var pairs = subOrder.Items.Select(i => (order.Id, i.Id));
+        var reviewStatuses = await reviewEnricher.FetchReviewStatusesAsync(pairs, cancellationToken);
+
         // Dựng các dòng thuộc đúng suborder supplier đã được phép đọc, gồm snapshot và mapping unit cần cho bàn giao/trả.
         List<SupplierOrderItemResponse> items = subOrder.Items
             .OrderBy(i => i.ExpectedStartDate)
             .ThenBy(i => i.Id)
-            .Select(ToItem)
+            .Select(i => ToItem(i, reviewStatuses.GetValueOrDefault((order.Id, i.Id), ReviewStatusDto.Unknown)))
             .ToList();
         decimal rental = subOrder.Items.Sum(i => i.RentalAmount);
         decimal deposit = subOrder.Items.Sum(i => i.DepositAmount);
@@ -116,7 +125,7 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
     }
 
     // Chiếu item cho supplier gồm mapping unit và bằng chứng cần bàn giao/trả máy, dùng snapshot thương mại đã chốt.
-    private static SupplierOrderItemResponse ToItem(RentalItem item)
+    private static SupplierOrderItemResponse ToItem(RentalItem item, ReviewStatusDto reviewStatus)
     {
         // Dùng policy/mapper hiện có để dựng dữ liệu response nhất quán với các điểm đọc khác của cùng nghiệp vụ.
         OrderItemResponse basics = OrderQueryMapper.ToItem(item, isSupplier: true);
@@ -144,6 +153,7 @@ public sealed class SupplierSubOrderQueryService(IRentalOrderRepository orders) 
                 .Select(u => new SupplierUnitResponse(u.Id, u.AssetId, u.Status, u.ReturnCondition))
                 .ToList(),
             OrderQueryMapper.ToReturnRequests(item),
-            basics.PickupLocation);
+            basics.PickupLocation,
+            reviewStatus);
     }
 }

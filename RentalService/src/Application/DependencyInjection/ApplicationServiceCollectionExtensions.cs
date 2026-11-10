@@ -26,10 +26,10 @@ using Dprental.RentalService.Application.Services.Refunds;
 using Dprental.RentalService.Application.Services.Calendar;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Application.Services.Checkout;
+using Dprental.RentalService.Application.Services.Orders;
 using Dprental.RentalService.Application.Services.Expiry;
 using Dprental.RentalService.Application.Services.Integration;
 using Dprental.RentalService.Application.Services.Operations;
-using Dprental.RentalService.Application.Services.Orders;
 using Dprental.RentalService.Application.Services.Payments;
 using Dprental.RentalService.Application.Services.Returns;
 using Dprental.RentalService.Application.Services.SupplierDecision;
@@ -74,6 +74,9 @@ public static class ApplicationServiceCollectionExtensions
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IAuthRentalClient, HttpAuthRentalClient>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        services.AddHttpClient<IReviewRentalClient, HttpReviewRentalClient>()
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        services.AddScoped<IOrderReviewStatusEnricher, OrderReviewStatusEnricher>();
 
         // Checkout chia thành chuẩn bị, điều phối, ghi đơn và tạo hóa đơn.
         services.AddScoped<ICheckoutPreparationService, CheckoutPreparationService>();

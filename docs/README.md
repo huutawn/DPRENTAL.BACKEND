@@ -1,9 +1,15 @@
 # Tài liệu RentalService
 
+## Đọc source và tích hợp backend
+
+- [Luồng nghiệp vụ theo từng chức năng Rental](rental-business-flows.md)
+- [Bản đồ source, nghiệp vụ, Kafka và SignalR](rental-source-walkthrough.md)
+
 ## Tài liệu tích hợp Frontend
 
 - [Luồng bàn giao, trả thiết bị, bất đồng và bộ kịch bản mock FE (Task 1–4)](rental-handover-return-fe-guide.md)
 - [SignalR realtime và resync](rental-realtime-client-integration.md)
+- [Tích hợp reviewStatus vào API đơn hàng cho FE](rental-order-review-status-integration.md)
 
 ## Ranh giới các lớp
 

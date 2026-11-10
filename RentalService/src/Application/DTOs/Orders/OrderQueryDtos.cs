@@ -66,6 +66,7 @@ public sealed record OrderItemResponse(
 /// <param name="StartDate">Ngày đầu tiên dùng máy.</param>
 /// <param name="EndDate">Ngày cuối cùng dùng máy (có tính), giống cách giỏ hàng hiển thị.</param>
 /// <param name="Status">Trạng thái dòng thiết bị.</param>
+/// <param name="ReviewStatus">Trạng thái đánh giá của dòng thiết bị.</param>
 public sealed record OrderSummaryItemResponse(
     Guid RentalItemId,
     Guid EquipmentListingId,
@@ -79,7 +80,28 @@ public sealed record OrderSummaryItemResponse(
     decimal DepositAmount,
     DateOnly StartDate,
     DateOnly EndDate,
-    RentalItemStatus Status);
+    RentalItemStatus Status,
+    ReviewStatusDto ReviewStatus)
+{
+    public OrderSummaryItemResponse(
+        Guid rentalItemId,
+        Guid equipmentListingId,
+        Guid supplierId,
+        string name,
+        Guid? thumbnailMediaId,
+        int quantity,
+        int rentalDays,
+        decimal dailyRate,
+        decimal rentalAmount,
+        decimal depositAmount,
+        DateOnly startDate,
+        DateOnly endDate,
+        RentalItemStatus status)
+        : this(rentalItemId, equipmentListingId, supplierId, name, thumbnailMediaId, quantity, rentalDays,
+               dailyRate, rentalAmount, depositAmount, startDate, endDate, status, ReviewStatusDto.Unknown)
+    {
+    }
+}
 
 /// <summary>
 /// Một đơn trong danh sách đơn của người thuê.
