@@ -54,7 +54,7 @@ public sealed class RentalReminderBackfillService : IRentalReminderBackfillServi
         int totalBatches = 0;
 
         bool runHandover = normalizedPhase is null or "handover";
-        bool runReturn = normalizedPhase is null or "return";
+        bool runReturn = true;
 
         Guid? handoverAfterId = normalizedPhase == "handover" ? afterItemId : null;
         Guid? returnAfterId = normalizedPhase == "return" ? afterItemId : null;
@@ -197,12 +197,10 @@ public sealed class RentalReminderBackfillService : IRentalReminderBackfillServi
                 onBatchCompleted?.Invoke(new BackfillProgress("handover", totalBatches, batchHandoverCreated, 0, lastCommittedItemId.Value, resumeCmd));
             }
 
-            // Kết thúc handover: chuyển sang return với cursor rỗng nếu chạy tự động cả hai phase
-            if (normalizedPhase is null)
-            {
-                returnAfterId = null;
-                lastCommittedItemId = null;
-            }
+            // Kết thúc handover thành công: tự động chuyển sang return từ đầu với cursor rỗng
+            currentPhase = "return";
+            returnAfterId = null;
+            lastCommittedItemId = null;
         }
 
         // 2. Return phase for InRental items

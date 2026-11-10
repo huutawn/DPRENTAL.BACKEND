@@ -290,9 +290,28 @@ public sealed class RentalReminderBenchmarkPostgreSqlTests : IClassFixture<Remin
         await conn.OpenAsync();
 
         // Log environment specs
-        _output.WriteLine($"[Environment] ProcessorCount: {Environment.ProcessorCount}, OS: {Environment.OSVersion}, .NET: {Environment.Version}");
+        await using (var envCmd = conn.CreateCommand())
+        {
+            envCmd.CommandText = @"
+                SELECT
+                    version(),
+                    current_setting('shared_buffers'),
+                    current_setting('effective_cache_size'),
+                    current_setting('work_mem'),
+                    current_setting('maintenance_work_mem');";
+            await using var envReader = await envCmd.ExecuteReaderAsync();
+            if (await envReader.ReadAsync())
+            {
+                _output.WriteLine($"[PostgreSQL Environment] Version: {envReader.GetString(0)}");
+                _output.WriteLine($"[PostgreSQL Environment] shared_buffers: {envReader.GetString(1)}, effective_cache_size: {envReader.GetString(2)}, work_mem: {envReader.GetString(3)}, maintenance_work_mem: {envReader.GetString(4)}");
+            }
+        }
+        _output.WriteLine($"[Host Environment] ProcessorCount: {Environment.ProcessorCount}, OS: {Environment.OSVersion}, .NET: {Environment.Version}");
 
         var options = PostgresTestDatabaseHelper.CreateOptions(_fixture.ConnectionString);
+
+        // Reset to Distribution 1 before running
+        await ResetToDistribution1Async(conn);
 
         // 1. DISTRIBUTION 1: 99% future, 1% mixed
         _output.WriteLine("==================================================");
@@ -307,15 +326,18 @@ public sealed class RentalReminderBenchmarkPostgreSqlTests : IClassFixture<Remin
         await using (var setupCmd = conn.CreateCommand())
         {
             setupCmd.CommandTimeout = 120;
-            // Set 25,000 items due, but 24,000 of them leased for 10 minutes
+            // Set 25,000 items due, ordered deterministically by "Id":
+            // Adverse ordering: First 24,000 items have next_trigger_at = NOW() - 2 hours (earlier, so evaluated first!) and leased
+            // Available 1,000 items have next_trigger_at = NOW() - 1 hour and unleased
             setupCmd.CommandText = @"
                 WITH sample_rows AS (
-                    SELECT ""Id"", row_number() over () as rn
+                    SELECT ""Id"", row_number() over (ORDER BY ""Id"") as rn
                     FROM rental.rental_reminder_schedules
+                    ORDER BY ""Id""
                     LIMIT 25000
                 )
                 UPDATE rental.rental_reminder_schedules s
-                SET next_trigger_at = NOW() - interval '30 minutes',
+                SET next_trigger_at = CASE WHEN sr.rn <= 24000 THEN NOW() - interval '2 hours' ELSE NOW() - interval '1 hour' END,
                     leased_until = CASE WHEN sr.rn <= 24000 THEN NOW() + interval '10 minutes' ELSE NULL END,
                     leased_by = CASE WHEN sr.rn <= 24000 THEN 'leased-worker' ELSE NULL END,
                     lease_token = CASE WHEN sr.rn <= 24000 THEN gen_random_uuid() ELSE NULL END,
@@ -336,15 +358,17 @@ public sealed class RentalReminderBenchmarkPostgreSqlTests : IClassFixture<Remin
         await using (var setupCmd = conn.CreateCommand())
         {
             setupCmd.CommandTimeout = 120;
-            // Set 25,000 items due, but 24,000 of them retry-delayed for 30 minutes
+            // Adverse ordering: First 24,000 items have next_trigger_at = NOW() - 2 hours and retry-delayed
+            // Available 1,000 items have next_trigger_at = NOW() - 1 hour and no retry
             setupCmd.CommandText = @"
                 WITH sample_rows AS (
-                    SELECT ""Id"", row_number() over () as rn
+                    SELECT ""Id"", row_number() over (ORDER BY ""Id"") as rn
                     FROM rental.rental_reminder_schedules
+                    ORDER BY ""Id""
                     LIMIT 25000
                 )
                 UPDATE rental.rental_reminder_schedules s
-                SET next_trigger_at = NOW() - interval '30 minutes',
+                SET next_trigger_at = CASE WHEN sr.rn <= 24000 THEN NOW() - interval '2 hours' ELSE NOW() - interval '1 hour' END,
                     leased_until = NULL,
                     leased_by = NULL,
                     lease_token = NULL,
@@ -360,30 +384,53 @@ public sealed class RentalReminderBenchmarkPostgreSqlTests : IClassFixture<Remin
         await RunDistributionBenchmarkAsync(conn, options, "Distribution 3 (Many Due, Mostly Delayed)");
 
         // Clean up: reset sample rows back to future so fixture remains stable
-        await using (var cleanupCmd = conn.CreateCommand())
-        {
-            cleanupCmd.CommandTimeout = 120;
-            cleanupCmd.CommandText = @"
-                WITH sample_rows AS (
-                    SELECT ""Id""
-                    FROM rental.rental_reminder_schedules
-                    WHERE next_trigger_at <= NOW()
-                    OFFSET 10000
-                )
-                UPDATE rental.rental_reminder_schedules s
-                SET next_trigger_at = NOW() + interval '5 days',
-                    leased_until = NULL,
-                    leased_by = NULL,
-                    lease_token = NULL,
-                    next_retry_at = NULL,
-                    retry_count = 0,
-                    status = 'Active',
-                    remaining_unit_count = 1
-                FROM sample_rows sr
-                WHERE s.""Id"" = sr.""Id"";
-                ANALYZE rental.rental_reminder_schedules;";
-            await cleanupCmd.ExecuteNonQueryAsync();
-        }
+        await ResetToDistribution1Async(conn);
+    }
+
+    private static async Task ResetToDistribution1Async(NpgsqlConnection conn)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandTimeout = 120;
+        cmd.CommandText = @"
+            WITH sample_rows AS (
+                SELECT ""Id"", row_number() over (ORDER BY ""Id"") as rn
+                FROM rental.rental_reminder_schedules
+                ORDER BY ""Id""
+                LIMIT 25000
+            )
+            UPDATE rental.rental_reminder_schedules s
+            SET next_trigger_at = CASE
+                    WHEN sr.rn <= 7000 THEN NOW() - interval '1 hour'
+                    WHEN sr.rn <= 9000 THEN NOW() - interval '1 hour'
+                    WHEN sr.rn <= 10000 THEN NOW() - interval '1 hour'
+                    ELSE NOW() + ((sr.rn % 30 + 1) * interval '1 day')
+                END,
+                leased_until = CASE
+                    WHEN sr.rn > 7000 AND sr.rn <= 9000 THEN NOW() + interval '5 minutes'
+                    ELSE NULL
+                END,
+                leased_by = CASE
+                    WHEN sr.rn > 7000 AND sr.rn <= 9000 THEN 'leased-worker'
+                    ELSE NULL
+                END,
+                lease_token = CASE
+                    WHEN sr.rn > 7000 AND sr.rn <= 9000 THEN gen_random_uuid()
+                    ELSE NULL
+                END,
+                retry_count = CASE
+                    WHEN sr.rn > 9000 AND sr.rn <= 10000 THEN 1
+                    ELSE 0
+                END,
+                next_retry_at = CASE
+                    WHEN sr.rn > 9000 AND sr.rn <= 10000 THEN NOW() + interval '30 minutes'
+                    ELSE NULL
+                END,
+                status = 'Active',
+                remaining_unit_count = 1
+            FROM sample_rows sr
+            WHERE s.""Id"" = sr.""Id"";
+            ANALYZE rental.rental_reminder_schedules;";
+        await cmd.ExecuteNonQueryAsync();
     }
 
     private async Task RunDistributionBenchmarkAsync(
@@ -391,102 +438,143 @@ public sealed class RentalReminderBenchmarkPostgreSqlTests : IClassFixture<Remin
         DbContextOptions<RentalServiceDbContext> options,
         string distributionName)
     {
-        // EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
-        await using var explainCmd = conn.CreateCommand();
-        explainCmd.CommandTimeout = 60;
-        explainCmd.CommandText = @"
-            EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
-            WITH candidate AS (
-                SELECT s.""Id""
-                FROM rental.rental_reminder_schedules s
-                WHERE s.status = 'Active'
-                  AND s.remaining_unit_count > 0
-                  AND (s.next_retry_at IS NULL OR s.next_retry_at <= NOW())
-                  AND s.next_trigger_at IS NOT NULL
-                  AND s.next_trigger_at <= NOW()
-                  AND (s.leased_until IS NULL OR s.leased_until <= NOW())
-                ORDER BY s.next_trigger_at, s.""Id""
-                LIMIT 100
-                FOR UPDATE SKIP LOCKED
-            )
-            UPDATE rental.rental_reminder_schedules u
-            SET leased_by = 'bench-worker',
-                lease_token = gen_random_uuid(),
-                leased_until = NOW() + (60 * interval '1 second'),
-                updated_at = NOW()
-            FROM candidate
-            WHERE u.""Id"" = candidate.""Id""
-            RETURNING u.*;";
-
-        // Execute EXPLAIN
+        // 1. EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) executed inside a transaction and rolled back
         string jsonPlan;
-        await using (var reader = await explainCmd.ExecuteReaderAsync())
+        await using (var tx = await conn.BeginTransactionAsync())
         {
-            Assert.True(await reader.ReadAsync());
-            jsonPlan = reader.GetString(0);
+            await using var explainCmd = conn.CreateCommand();
+            explainCmd.Transaction = tx;
+            explainCmd.CommandTimeout = 60;
+            explainCmd.CommandText = @"
+                EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+                WITH candidate AS (
+                    SELECT s.""Id""
+                    FROM rental.rental_reminder_schedules s
+                    WHERE s.status = 'Active'
+                      AND s.remaining_unit_count > 0
+                      AND (s.next_retry_at IS NULL OR s.next_retry_at <= NOW())
+                      AND s.next_trigger_at IS NOT NULL
+                      AND s.next_trigger_at <= NOW()
+                      AND (s.leased_until IS NULL OR s.leased_until <= NOW())
+                    ORDER BY s.next_trigger_at, s.""Id""
+                    LIMIT 100
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE rental.rental_reminder_schedules u
+                SET leased_by = 'bench-worker',
+                    lease_token = gen_random_uuid(),
+                    leased_until = NOW() + (60 * interval '1 second'),
+                    updated_at = NOW()
+                FROM candidate
+                WHERE u.""Id"" = candidate.""Id""
+                RETURNING u.*;";
+
+            await using (var reader = await explainCmd.ExecuteReaderAsync())
+            {
+                Assert.True(await reader.ReadAsync());
+                jsonPlan = reader.GetString(0);
+            }
+            await tx.RollbackAsync();
         }
 
-        // Parse JSON root plan metrics
-        using var doc = System.Text.Json.JsonDocument.Parse(jsonPlan);
-        var root = doc.RootElement[0];
-        double planningTimeMs = root.GetProperty("Planning Time").GetDouble();
-        double executionTimeMs = root.GetProperty("Execution Time").GetDouble();
-        var planNode = root.GetProperty("Plan");
+        // Parse using recursive ExecutionPlanParser
+        var report = ExecutionPlanParser.ParseJsonPlan(jsonPlan);
+        _output.WriteLine($"[{distributionName}] Planning: {report.PlanningTimeMs:F3} ms, Execution: {report.ExecutionTimeMs:F3} ms");
+        _output.WriteLine($"[{distributionName}] Derived Rows Removed by Filter: {report.TotalRowsRemovedDerived} (Rows Removed by Filter multiplied by Actual Loops, derived from EXPLAIN)");
+        _output.WriteLine($"[{distributionName}] Root Buffers: Hit={report.RootSharedHitBlocks}, Read={report.RootSharedReadBlocks} (8KB blocks)");
+        _output.WriteLine($"[{distributionName}] Raw JSON Plan:\n{jsonPlan}");
 
-        long sharedHitBlocks = planNode.TryGetProperty("Shared Hit Blocks", out var shb) ? shb.GetInt64() : 0;
-        long sharedReadBlocks = planNode.TryGetProperty("Shared Read Blocks", out var srb) ? srb.GetInt64() : 0;
-        long rowsRemoved = 0;
-        if (planNode.TryGetProperty("Plans", out var subPlans))
+        string safeDistName = Regex.Replace(distributionName, @"[^a-zA-Z0-9_\-]", "_");
+        string planDir = Path.Combine(Directory.GetCurrentDirectory(), "benchmark_plans");
+        try
         {
-            foreach (var sp in subPlans.EnumerateArray())
+            Directory.CreateDirectory(planDir);
+            File.WriteAllText(Path.Combine(planDir, $"{safeDistName}.json"), jsonPlan);
+        }
+        catch { }
+
+        // 2. Measure 1 Worker claim: 5 warmups, 30 measured runs
+        await using var dbBench = new RentalServiceDbContext(options);
+        var repo = new RentalReminderScheduleRepository(dbBench);
+
+        // 5 Warmup runs
+        for (int w = 0; w < 5; w++)
+        {
+            var warmupClaimed = await repo.ClaimDueBatchAsync("warmup-worker", TimeSpan.FromSeconds(30), 100);
+            if (warmupClaimed.Count > 0)
             {
-                if (sp.TryGetProperty("Rows Removed by Filter", out var rrf)) rowsRemoved += rrf.GetInt64();
-                if (sp.TryGetProperty("Plans", out var innerPlans))
-                {
-                    foreach (var ip in innerPlans.EnumerateArray())
-                    {
-                        if (ip.TryGetProperty("Rows Removed by Filter", out var irrf)) rowsRemoved += irrf.GetInt64();
-                    }
-                }
+                var ids = warmupClaimed.Select(c => c.ScheduleId).ToArray();
+                await dbBench.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE rental.rental_reminder_schedules SET leased_until = NULL, leased_by = NULL, lease_token = NULL WHERE \"Id\" = ANY({ids});");
             }
         }
 
-        _output.WriteLine($"[{distributionName}] Planning: {planningTimeMs:F3} ms, Execution: {executionTimeMs:F3} ms");
-        _output.WriteLine($"[{distributionName}] Rows Removed By Filter: {rowsRemoved}");
-        _output.WriteLine($"[{distributionName}] Root Buffers: Hit={sharedHitBlocks}, Read={sharedReadBlocks} (8KB blocks)");
+        // 30 Measured runs
+        var latencies = new List<double>(30);
+        int totalClaimed = 0;
+        int nonFullBatches = 0;
+        var swTotal = Stopwatch.StartNew();
 
-        // Competing Workers Benchmark: 1 worker vs 2 competing workers
-        await using (var db1 = new RentalServiceDbContext(options))
-        await using (var db2 = new RentalServiceDbContext(options))
+        for (int r = 0; r < 30; r++)
         {
-            var repo1 = new RentalReminderScheduleRepository(db1);
-            var repo2 = new RentalReminderScheduleRepository(db2);
+            var sw = Stopwatch.StartNew();
+            var claimed = await repo.ClaimDueBatchAsync($"bench-worker-{r}", TimeSpan.FromSeconds(30), 100);
+            sw.Stop();
 
-            // 1 worker single claim
-            var swSingle = Stopwatch.StartNew();
-            var singleClaimed = await repo1.ClaimDueBatchAsync("single-worker", TimeSpan.FromMinutes(2), 100);
-            swSingle.Stop();
-            double singleThroughput = singleClaimed.Count / Math.Max(0.001, swSingle.Elapsed.TotalSeconds);
-            _output.WriteLine($"[{distributionName}] 1 Worker: Claimed {singleClaimed.Count} rows in {swSingle.ElapsedMilliseconds} ms ({singleThroughput:F0} rows/s)");
+            latencies.Add(sw.Elapsed.TotalMilliseconds);
+            totalClaimed += claimed.Count;
+            if (claimed.Count < 100) nonFullBatches++;
 
-            // 2 competing workers simultaneous claim
-            var swComp = Stopwatch.StartNew();
-            var task1 = repo1.ClaimDueBatchAsync("competing-worker-A", TimeSpan.FromMinutes(2), 100);
-            var task2 = repo2.ClaimDueBatchAsync("competing-worker-B", TimeSpan.FromMinutes(2), 100);
-            var results = await Task.WhenAll(task1, task2);
-            swComp.Stop();
+            // Reset claimed rows to maintain identical initial state for next run
+            if (claimed.Count > 0)
+            {
+                var ids = claimed.Select(c => c.ScheduleId).ToArray();
+                await dbBench.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE rental.rental_reminder_schedules SET leased_until = NULL, leased_by = NULL, lease_token = NULL WHERE \"Id\" = ANY({ids});");
+            }
+        }
+        swTotal.Stop();
 
-            var w1 = results[0];
-            var w2 = results[1];
-            int totalCompClaimed = w1.Count + w2.Count;
-            double compThroughput = totalCompClaimed / Math.Max(0.001, swComp.Elapsed.TotalSeconds);
+        latencies.Sort();
+        double median = latencies[15];
+        double p95 = latencies[28];
+        double claimRate = totalClaimed / Math.Max(0.001, swTotal.Elapsed.TotalSeconds);
 
-            _output.WriteLine($"[{distributionName}] 2 Competing Workers: WorkerA={w1.Count}, WorkerB={w2.Count}, Total={totalCompClaimed} in {swComp.ElapsedMilliseconds} ms ({compThroughput:F0} rows/s)");
+        _output.WriteLine($"[{distributionName}] 1 Worker (30 runs): Median={median:F2} ms, p95={p95:F2} ms, TotalClaimed={totalClaimed}, NonFullBatches={nonFullBatches}, Rate={claimRate:F0} repository claim rows/second");
 
-            // Assert strictly disjoint (no duplicate leases across competing workers)
-            var setA = w1.Select(s => s.ScheduleId).ToHashSet();
-            var setB = w2.Select(s => s.ScheduleId).ToHashSet();
-            Assert.Empty(setA.Intersect(setB));
+        // Assert p95 under 50ms SLA
+        Assert.True(p95 < 50.0, $"p95 latency ({p95} ms) exceeded 50 ms SLA");
+
+        // 3. Measure 2 Competing Workers
+        await using var db1 = new RentalServiceDbContext(options);
+        await using var db2 = new RentalServiceDbContext(options);
+        var repo1 = new RentalReminderScheduleRepository(db1);
+        var repo2 = new RentalReminderScheduleRepository(db2);
+
+        var swComp = Stopwatch.StartNew();
+        var task1 = repo1.ClaimDueBatchAsync("competing-worker-A", TimeSpan.FromMinutes(2), 100);
+        var task2 = repo2.ClaimDueBatchAsync("competing-worker-B", TimeSpan.FromMinutes(2), 100);
+        var results = await Task.WhenAll(task1, task2);
+        swComp.Stop();
+
+        var w1 = results[0];
+        var w2 = results[1];
+        int compTotal = w1.Count + w2.Count;
+        double compRate = compTotal / Math.Max(0.001, swComp.Elapsed.TotalSeconds);
+
+        _output.WriteLine($"[{distributionName}] 2 Competing Workers: WorkerA={w1.Count}, WorkerB={w2.Count}, Total={compTotal} in {swComp.ElapsedMilliseconds} ms ({compRate:F0} repository claim rows/second)");
+
+        // Disjoint verification
+        var setA = w1.Select(s => s.ScheduleId).ToHashSet();
+        var setB = w2.Select(s => s.ScheduleId).ToHashSet();
+        Assert.Empty(setA.Intersect(setB));
+
+        // Reset leases for competing workers
+        var allCompIds = w1.Concat(w2).Select(s => s.ScheduleId).ToArray();
+        if (allCompIds.Length > 0)
+        {
+            await db1.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE rental.rental_reminder_schedules SET leased_until = NULL, leased_by = NULL, lease_token = NULL WHERE \"Id\" = ANY({allCompIds});");
         }
     }
 

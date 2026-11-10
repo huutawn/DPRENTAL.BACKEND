@@ -1,4 +1,6 @@
 using Dprental.RentalService.Api.Tests.TestHelpers;
+using Dprental.RentalService.Api.Tests.Checkout;
+using Dprental.RentalService.Api.Tests.Orders;
 using Dprental.RentalService.Application.IServices.Reminders;
 using Dprental.RentalService.Application.Kafka.Configuration;
 using Dprental.RentalService.Application.Kafka.Events;
@@ -861,5 +863,483 @@ public sealed class RentalReminderPostgreSqlIntegrationTests
         {
             await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
         }
+    }
+
+    [Fact]
+    public async Task RollbackAtomicity_WhenGroupHasThreeSchedulesAndSecondLosesLease_RollsBackAllAndReplacesProvisionalOutcomesCleanly()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            DateTimeOffset now = new(2026, 11, 9, 2, 0, 0, TimeSpan.Zero); // 09:00 VN
+            var timeProvider = new FixedTimeProvider(now);
+
+            Guid orderId = Guid.NewGuid();
+            Guid item1Id = Guid.NewGuid();
+            Guid item2Id = Guid.NewGuid();
+            Guid item3Id = Guid.NewGuid();
+            Guid s1Id, s2Id, s3Id;
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+
+                DateOnly startDate = DateOnly.FromDateTime(now.DateTime);
+                DateOnly endDate = DateOnly.FromDateTime(now.AddDays(5).DateTime);
+
+                var order = PostgresTestDatabaseHelper.CreateOrderWithMultipleItems(
+                    orderId,
+                    now,
+                    (item1Id, Guid.NewGuid(), 1, startDate, endDate),
+                    (item2Id, Guid.NewGuid(), 1, startDate, endDate),
+                    (item3Id, Guid.NewGuid(), 1, startDate, endDate));
+
+                foreach (var item in order.Items)
+                {
+                    typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!
+                        .SetValue(item, RentalItemStatus.AwaitingHandover);
+                }
+
+                db.RentalOrders.Add(order);
+
+                var s1 = RentalReminderSchedule.Create(orderId, item1Id, RentalReminderScheduleType.Handover, 1, now.AddMinutes(-5), now.AddDays(-1));
+                var s2 = RentalReminderSchedule.Create(orderId, item2Id, RentalReminderScheduleType.Handover, 1, now.AddMinutes(-4), now.AddDays(-1));
+                var s3 = RentalReminderSchedule.Create(orderId, item3Id, RentalReminderScheduleType.Handover, 1, now.AddMinutes(-3), now.AddDays(-1));
+                db.RentalReminderSchedules.AddRange(s1, s2, s3);
+
+                await db.SaveChangesAsync();
+                s1Id = s1.Id;
+                s2Id = s2.Id;
+                s3Id = s3.Id;
+            }
+
+            // Worker 1 claims all 3 schedules
+            IReadOnlyList<ReminderClaimDescriptor> claims;
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                var repo = new RentalReminderScheduleRepository(db);
+                claims = await repo.ClaimDueBatchAsync("worker-1", TimeSpan.FromMinutes(2), 10);
+                Assert.Equal(3, claims.Count);
+            }
+
+            var desc1 = claims.First(c => c.ScheduleId == s1Id);
+            var desc2 = claims.First(c => c.ScheduleId == s2Id);
+            var desc3 = claims.First(c => c.ScheduleId == s3Id);
+
+            // Worker B steals lease for Schedule 2 in DB before worker 1 executes advance
+            // Create stale descriptor for desc2
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                var realRepo = new RentalReminderScheduleRepository(db);
+                var repo = new FencingFailingScheduleRepository(realRepo, s2Id);
+                var outboxRepo = new OutboxRepository(db);
+                var outboxWriter = new KafkaOutboxWriter(outboxRepo);
+                var kafkaOptions = Microsoft.Extensions.Options.Options.Create(new KafkaOptions { RentalEventsTopic = "rental.events.v1" });
+                var producer = new RentalEventProducer(outboxWriter, kafkaOptions, timeProvider);
+                var lockManager = new FakeOrderLockManager();
+
+                var processor = new RentalReminderBatchProcessor(
+                    repo,
+                    lockManager,
+                    producer,
+                    unitOfWork: db,
+                    timeProvider: timeProvider,
+                    logger: NullLogger<RentalReminderBatchProcessor>.Instance);
+
+                // Pass [desc1, desc2, desc3]
+                var result = await processor.ProcessOrderReminderGroupAsync(orderId, [desc1, desc2, desc3]);
+
+                // Fencing failure on schedule 2 rolled back entire group!
+                // NoticesSent and Completed must be 0
+                Assert.Equal(0, result.NoticesSent);
+                Assert.Equal(0, result.Completed);
+                Assert.Equal(3, result.ItemResults.Count);
+
+                var r1 = result.ItemResults.First(r => r.ScheduleId == s1Id);
+                var r2 = result.ItemResults.First(r => r.ScheduleId == s2Id);
+                var r3 = result.ItemResults.First(r => r.ScheduleId == s3Id);
+
+                // Schedule 2 caused fencing failure -> LeaseLost
+                Assert.Equal(ReminderItemProcessOutcome.LeaseLost, r2.Outcome);
+                // Schedule 1 was provisional succeeded but rolled back -> RetryableFailure
+                Assert.Equal(ReminderItemProcessOutcome.RetryableFailure, r1.Outcome);
+                // Schedule 3 was not yet processed -> RetryableFailure
+                Assert.Equal(ReminderItemProcessOutcome.RetryableFailure, r3.Outcome);
+            }
+
+            // Verify DB state: zero outbox messages, s1 was NOT advanced
+            await using (var verifyDb = new RentalServiceDbContext(options))
+            {
+                var outboxCount = await verifyDb.RentalOutboxMessages.CountAsync();
+                Assert.Equal(0, outboxCount);
+
+                var dbS1 = await verifyDb.RentalReminderSchedules.FirstAsync(s => s.Id == s1Id);
+                Assert.Null(dbS1.LastNotifiedDate);
+                Assert.Null(dbS1.LastNotifiedAt);
+
+                // Simulate competing worker stealing lease for s1 while rollback was in-flight
+                var stolenToken = Guid.NewGuid();
+                await verifyDb.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE rental.rental_reminder_schedules SET leased_by = 'competing-worker', lease_token = {stolenToken}, leased_until = {now.AddMinutes(10)} WHERE \"Id\" = {s1Id};");
+            }
+
+            // Retry scope in a fresh context:
+            // s2 caused fencing failure -> outcome is LeaseLost, no retry is attempted
+            // s1 was rolled back -> worker attempts retry, but lease token is now lost -> MUST reject overwrite!
+            // s3 was not processed -> worker attempts retry with still-valid token -> succeeds!
+            await using (var retryDb = new RentalServiceDbContext(options))
+            {
+                var repo = new RentalReminderScheduleRepository(retryDb);
+
+                // Attempt retry for s1 with stolen token: MUST fail and NOT overwrite token
+                bool s1RetryRecorded = await repo.FailScheduleWithLeaseCheckAsync(desc1.ScheduleId, desc1.LeaseToken, now.AddMinutes(5), now);
+                Assert.False(s1RetryRecorded);
+
+                // Attempt retry for s3 with valid token: succeeds
+                bool s3RetryRecorded = await repo.FailScheduleWithLeaseCheckAsync(desc3.ScheduleId, desc3.LeaseToken, now.AddMinutes(5), now);
+                Assert.True(s3RetryRecorded);
+            }
+
+            // Verify in DB that s1's stolen token was NOT overwritten
+            await using (var finalDb = new RentalServiceDbContext(options))
+            {
+                var finalS1 = await finalDb.RentalReminderSchedules.FirstAsync(s => s.Id == s1Id);
+                Assert.Equal("competing-worker", finalS1.LeasedBy);
+                Assert.NotEqual(desc1.LeaseToken, finalS1.LeaseToken);
+                Assert.Equal(0, finalS1.RetryCount);
+
+                var finalS3 = await finalDb.RentalReminderSchedules.FirstAsync(s => s.Id == s3Id);
+                Assert.Equal(1, finalS3.RetryCount);
+                Assert.Null(finalS3.LeasedBy);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task CommitSuccess_WhenAllThreeSchedulesSucceed_ResultMatchesDatabaseState()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            DateTimeOffset now = new(2026, 11, 9, 2, 0, 0, TimeSpan.Zero); // 09:00 VN
+            var timeProvider = new FixedTimeProvider(now);
+
+            Guid orderId = Guid.NewGuid();
+            Guid item1Id = Guid.NewGuid();
+            Guid item2Id = Guid.NewGuid();
+            Guid item3Id = Guid.NewGuid();
+            Guid s1Id, s2Id, s3Id;
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+
+                DateOnly startDate = DateOnly.FromDateTime(now.DateTime);
+                DateOnly futureStartDate = DateOnly.FromDateTime(now.AddDays(5).DateTime);
+                DateOnly expiredEndDate = DateOnly.FromDateTime(now.AddDays(-35).DateTime);
+
+                var order = PostgresTestDatabaseHelper.CreateOrderWithMultipleItems(
+                    orderId,
+                    now,
+                    (item1Id, Guid.NewGuid(), 1, startDate, startDate.AddDays(3)),
+                    (item2Id, Guid.NewGuid(), 1, expiredEndDate.AddDays(-5), expiredEndDate),
+                    (item3Id, Guid.NewGuid(), 1, futureStartDate, futureStartDate.AddDays(3)));
+
+                typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(order.Items.First(i => i.Id == item1Id), RentalItemStatus.AwaitingHandover);
+                typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(order.Items.First(i => i.Id == item2Id), RentalItemStatus.InRental);
+                typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(order.Items.First(i => i.Id == item3Id), RentalItemStatus.AwaitingHandover);
+
+                db.RentalOrders.Add(order);
+
+                // s1: SendToday
+                var s1 = RentalReminderSchedule.Create(orderId, item1Id, RentalReminderScheduleType.Handover, 1, now.AddMinutes(-5), now.AddDays(-1));
+                // s2: WindowExpired
+                var s2 = RentalReminderSchedule.Create(orderId, item2Id, RentalReminderScheduleType.Return, 1, now.AddMinutes(-4), now.AddDays(-35));
+                // s3: Reschedule
+                var s3 = RentalReminderSchedule.Create(orderId, item3Id, RentalReminderScheduleType.Handover, 1, now.AddMinutes(-3), now.AddDays(-1));
+
+                db.RentalReminderSchedules.AddRange(s1, s2, s3);
+                await db.SaveChangesAsync();
+                s1Id = s1.Id;
+                s2Id = s2.Id;
+                s3Id = s3.Id;
+            }
+
+            IReadOnlyList<ReminderClaimDescriptor> claims;
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                var repo = new RentalReminderScheduleRepository(db);
+                claims = await repo.ClaimDueBatchAsync("commit-worker", TimeSpan.FromMinutes(2), 10);
+                Assert.Equal(3, claims.Count);
+            }
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                var repo = new RentalReminderScheduleRepository(db);
+                var outboxRepo = new OutboxRepository(db);
+                var outboxWriter = new KafkaOutboxWriter(outboxRepo);
+                var kafkaOptions = Microsoft.Extensions.Options.Options.Create(new KafkaOptions { RentalEventsTopic = "rental.events.v1" });
+                var producer = new RentalEventProducer(outboxWriter, kafkaOptions, timeProvider);
+                var lockManager = new FakeOrderLockManager();
+
+                var processor = new RentalReminderBatchProcessor(
+                    repo,
+                    lockManager,
+                    producer,
+                    unitOfWork: db,
+                    timeProvider: timeProvider,
+                    logger: NullLogger<RentalReminderBatchProcessor>.Instance);
+
+                var result = await processor.ProcessOrderReminderGroupAsync(orderId, claims);
+
+                // Commit success: figures match exactly
+                Assert.Equal(3, result.Processed);
+                Assert.Equal(1, result.NoticesSent);
+                Assert.Equal(1, result.Completed);
+                Assert.Equal(0, result.Failed);
+                Assert.Equal(3, result.ItemResults.Count);
+
+                var r1 = result.ItemResults.First(r => r.ScheduleId == s1Id);
+                var r2 = result.ItemResults.First(r => r.ScheduleId == s2Id);
+                var r3 = result.ItemResults.First(r => r.ScheduleId == s3Id);
+
+                Assert.Equal(ReminderItemProcessOutcome.Succeeded, r1.Outcome);
+                Assert.Equal(ReminderItemProcessOutcome.Succeeded, r2.Outcome);
+                Assert.Equal(ReminderItemProcessOutcome.Deferred, r3.Outcome);
+            }
+
+            // Verify DB matches exactly:
+            await using (var verifyDb = new RentalServiceDbContext(options))
+            {
+                var outbox = await verifyDb.RentalOutboxMessages.ToListAsync();
+                Assert.Single(outbox);
+
+                var dbS1 = await verifyDb.RentalReminderSchedules.FirstAsync(s => s.Id == s1Id);
+                Assert.NotNull(dbS1.LastNotifiedDate);
+
+                var dbS2 = await verifyDb.RentalReminderSchedules.FirstAsync(s => s.Id == s2Id);
+                Assert.Equal(RentalReminderScheduleStatus.Completed, dbS2.Status);
+
+                var dbS3 = await verifyDb.RentalReminderSchedules.FirstAsync(s => s.Id == s3Id);
+                Assert.Equal(RentalReminderScheduleStatus.Active, dbS3.Status);
+                Assert.Null(dbS3.LeasedBy);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task CommitFailure_WhenCommitThrows_RollsBackAllAndPublishesNoSuccess()
+    {
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            DateTimeOffset now = new(2026, 11, 9, 2, 0, 0, TimeSpan.Zero); // 09:00 VN
+            var timeProvider = new FixedTimeProvider(now);
+
+            Guid orderId = Guid.NewGuid();
+            Guid item1Id = Guid.NewGuid();
+            Guid item2Id = Guid.NewGuid();
+            Guid item3Id = Guid.NewGuid();
+            Guid s1Id, s2Id, s3Id;
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+
+                DateOnly startDate = DateOnly.FromDateTime(now.DateTime);
+
+                var order = PostgresTestDatabaseHelper.CreateOrderWithMultipleItems(
+                    orderId,
+                    now,
+                    (item1Id, Guid.NewGuid(), 1, startDate, startDate.AddDays(3)),
+                    (item2Id, Guid.NewGuid(), 1, startDate, startDate.AddDays(3)),
+                    (item3Id, Guid.NewGuid(), 1, startDate, startDate.AddDays(3)));
+
+                foreach (var item in order.Items)
+                {
+                    typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(item, RentalItemStatus.AwaitingHandover);
+                }
+
+                db.RentalOrders.Add(order);
+
+                var s1 = RentalReminderSchedule.Create(orderId, item1Id, RentalReminderScheduleType.Handover, 1, now.AddMinutes(-5), now.AddDays(-1));
+                var s2 = RentalReminderSchedule.Create(orderId, item2Id, RentalReminderScheduleType.Handover, 1, now.AddMinutes(-4), now.AddDays(-1));
+                var s3 = RentalReminderSchedule.Create(orderId, item3Id, RentalReminderScheduleType.Handover, 1, now.AddMinutes(-3), now.AddDays(-1));
+
+                db.RentalReminderSchedules.AddRange(s1, s2, s3);
+                await db.SaveChangesAsync();
+                s1Id = s1.Id;
+                s2Id = s2.Id;
+                s3Id = s3.Id;
+            }
+
+            IReadOnlyList<ReminderClaimDescriptor> claims;
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                var repo = new RentalReminderScheduleRepository(db);
+                claims = await repo.ClaimDueBatchAsync("failing-commit-worker", TimeSpan.FromMinutes(2), 10);
+                Assert.Equal(3, claims.Count);
+            }
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                var repo = new RentalReminderScheduleRepository(db);
+                var outboxRepo = new OutboxRepository(db);
+                var outboxWriter = new KafkaOutboxWriter(outboxRepo);
+                var kafkaOptions = Microsoft.Extensions.Options.Options.Create(new KafkaOptions { RentalEventsTopic = "rental.events.v1" });
+                var producer = new RentalEventProducer(outboxWriter, kafkaOptions, timeProvider);
+                var lockManager = new FakeOrderLockManager();
+
+                var failingUnitOfWork = new FailingCommitUnitOfWork(db);
+
+                var processor = new RentalReminderBatchProcessor(
+                    repo,
+                    lockManager,
+                    producer,
+                    unitOfWork: failingUnitOfWork,
+                    timeProvider: timeProvider,
+                    logger: NullLogger<RentalReminderBatchProcessor>.Instance);
+
+                var result = await processor.ProcessOrderReminderGroupAsync(orderId, claims);
+
+                // Commit failure: must roll back all, noticesSent = 0, completed = 0, no success published
+                Assert.Equal(3, result.Processed);
+                Assert.Equal(0, result.NoticesSent);
+                Assert.Equal(0, result.Completed);
+                Assert.Equal(3, result.Failed);
+
+                Assert.All(result.ItemResults, r => Assert.Equal(ReminderItemProcessOutcome.RetryableFailure, r.Outcome));
+            }
+
+            // Verify DB state: zero outbox messages, no schedules advanced
+            await using (var verifyDb = new RentalServiceDbContext(options))
+            {
+                var outboxCount = await verifyDb.RentalOutboxMessages.CountAsync();
+                Assert.Equal(0, outboxCount);
+
+                var dbS1 = await verifyDb.RentalReminderSchedules.FirstAsync(s => s.Id == s1Id);
+                Assert.Null(dbS1.LastNotifiedDate);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    private sealed class FailingCommitUnitOfWork : IUnitOfWork
+    {
+        private readonly RentalServiceDbContext _inner;
+        public FailingCommitUnitOfWork(RentalServiceDbContext inner) => _inner = inner;
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => _inner.SaveChangesAsync(cancellationToken);
+        public void DiscardChanges() => _inner.DiscardChanges();
+        public async Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+        {
+            var tx = await _inner.BeginTransactionAsync(cancellationToken);
+            return new FailingTransaction(tx);
+        }
+
+        private sealed class FailingTransaction : IUnitOfWorkTransaction
+        {
+            private readonly IUnitOfWorkTransaction _innerTx;
+            public FailingTransaction(IUnitOfWorkTransaction innerTx) => _innerTx = innerTx;
+            public Task CommitAsync(CancellationToken cancellationToken = default) => throw new InvalidOperationException("Simulated database commit failure");
+            public Task RollbackAsync(CancellationToken cancellationToken = default) => _innerTx.RollbackAsync(cancellationToken);
+            public ValueTask DisposeAsync() => _innerTx.DisposeAsync();
+        }
+    }
+
+    private sealed class FencingFailingScheduleRepository : IRentalReminderScheduleRepository
+    {
+        private readonly IRentalReminderScheduleRepository _inner;
+        private readonly Guid _failingScheduleId;
+
+        public FencingFailingScheduleRepository(IRentalReminderScheduleRepository inner, Guid failingScheduleId)
+        {
+            _inner = inner;
+            _failingScheduleId = failingScheduleId;
+        }
+
+        public Task<bool> AdvanceScheduleWithLeaseCheckAsync(
+            Guid scheduleId, Guid leaseToken, DateOnly notifiedDate, DateTimeOffset firedAt,
+            DateTimeOffset? nextTriggerAt, bool isOverdue, bool markCompleted, CancellationToken cancellationToken = default)
+        {
+            if (scheduleId == _failingScheduleId)
+            {
+                return Task.FromResult(false);
+            }
+            return _inner.AdvanceScheduleWithLeaseCheckAsync(scheduleId, leaseToken, notifiedDate, firedAt, nextTriggerAt, isOverdue, markCompleted, cancellationToken);
+        }
+
+        public Task<IReadOnlyList<ReminderClaimDescriptor>> ClaimDueBatchAsync(string workerId, TimeSpan leaseDuration, int batchSize, CancellationToken cancellationToken = default)
+            => _inner.ClaimDueBatchAsync(workerId, leaseDuration, batchSize, cancellationToken);
+
+        public Task<ReminderOrderProjection?> GetOrderReminderProjectionAsync(Guid orderId, CancellationToken cancellationToken = default)
+            => _inner.GetOrderReminderProjectionAsync(orderId, cancellationToken);
+
+        public Task<IReadOnlyList<Guid>> LockSchedulesForUpdateAsync(IEnumerable<Guid> scheduleIds, CancellationToken cancellationToken = default)
+            => _inner.LockSchedulesForUpdateAsync(scheduleIds, cancellationToken);
+
+        public Task<IReadOnlyDictionary<Guid, ReminderScheduleStateProjection>> GetScheduleStatesAsync(IEnumerable<Guid> scheduleIds, CancellationToken cancellationToken = default)
+            => _inner.GetScheduleStatesAsync(scheduleIds, cancellationToken);
+
+        public Task<bool> FailScheduleWithLeaseCheckAsync(Guid scheduleId, Guid leaseToken, DateTimeOffset nextRetryAt, DateTimeOffset now, CancellationToken cancellationToken = default)
+            => _inner.FailScheduleWithLeaseCheckAsync(scheduleId, leaseToken, nextRetryAt, now, cancellationToken);
+
+        public Task<bool> ReleaseLeaseWithTokenAsync(Guid scheduleId, Guid leaseToken, DateTimeOffset? postponeTriggerTo, DateTimeOffset now, CancellationToken cancellationToken = default)
+            => _inner.ReleaseLeaseWithTokenAsync(scheduleId, leaseToken, postponeTriggerTo, now, cancellationToken);
+
+        public Task<bool> PauseScheduleWithLeaseCheckAsync(Guid scheduleId, Guid leaseToken, DateTimeOffset now, CancellationToken cancellationToken = default)
+            => _inner.PauseScheduleWithLeaseCheckAsync(scheduleId, leaseToken, now, cancellationToken);
+
+        public Task<bool> CompleteScheduleWithLeaseCheckAsync(Guid scheduleId, Guid leaseToken, DateTimeOffset now, CancellationToken cancellationToken = default)
+            => _inner.CompleteScheduleWithLeaseCheckAsync(scheduleId, leaseToken, now, cancellationToken);
+
+        public Task<RentalReminderSchedule?> GetByItemAndTypeAsync(Guid rentalItemId, RentalReminderScheduleType scheduleType, CancellationToken cancellationToken = default)
+            => _inner.GetByItemAndTypeAsync(rentalItemId, scheduleType, cancellationToken);
+
+        public Task<IReadOnlyList<RentalReminderSchedule>> GetByOrderIdAsync(Guid orderId, CancellationToken cancellationToken = default)
+            => _inner.GetByOrderIdAsync(orderId, cancellationToken);
+
+        public Task<IReadOnlyList<RentalReminderSchedule>> GetByItemIdAsync(Guid itemId, CancellationToken cancellationToken = default)
+            => _inner.GetByItemIdAsync(itemId, cancellationToken);
+
+        public Task AddAsync(RentalReminderSchedule schedule, CancellationToken cancellationToken = default)
+            => _inner.AddAsync(schedule, cancellationToken);
+
+        public Task UpdateAsync(RentalReminderSchedule schedule, CancellationToken cancellationToken = default)
+            => _inner.UpdateAsync(schedule, cancellationToken);
+
+        public Task UpdateRangeAsync(IEnumerable<RentalReminderSchedule> schedules, CancellationToken cancellationToken = default)
+            => _inner.UpdateRangeAsync(schedules, cancellationToken);
+
+        public Task<IReadOnlyList<RentalReminderSchedule>> GetActiveSchedulesPagedAsync(Guid? afterId, int pageSize, CancellationToken cancellationToken = default)
+            => _inner.GetActiveSchedulesPagedAsync(afterId, pageSize, cancellationToken);
+
+        public Task<IReadOnlyList<ReminderBackfillCandidate>> GetHandoverBackfillCandidatesAsync(Guid? afterItemId, int batchSize, CancellationToken cancellationToken = default)
+            => _inner.GetHandoverBackfillCandidatesAsync(afterItemId, batchSize, cancellationToken);
+
+        public Task<IReadOnlyList<ReminderBackfillCandidate>> GetReturnBackfillCandidatesAsync(Guid? afterItemId, int batchSize, CancellationToken cancellationToken = default)
+            => _inner.GetReturnBackfillCandidatesAsync(afterItemId, batchSize, cancellationToken);
+
+        public Task<bool> TryCreateScheduleIfMissingAsync(RentalReminderSchedule schedule, CancellationToken cancellationToken = default)
+            => _inner.TryCreateScheduleIfMissingAsync(schedule, cancellationToken);
     }
 }

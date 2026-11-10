@@ -175,4 +175,51 @@ public static class PostgresTestDatabaseHelper
             createdAt,
             [itemDto]).Value;
     }
+
+    public static RentalOrder CreateOrderWithMultipleItems(
+        Guid orderId,
+        DateTimeOffset createdAt,
+        params (Guid itemId, Guid supplierId, int quantity, DateOnly startDate, DateOnly endDate)[] itemSpecs)
+    {
+        var itemDtos = itemSpecs.Select(spec =>
+        {
+            var assignments = Enumerable.Range(0, spec.quantity)
+                .Select(_ => new InitialRentalUnitAssignmentDto(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()))
+                .ToList();
+
+            return new InitialRentalItemDto(
+                spec.itemId,
+                Guid.NewGuid(),
+                spec.supplierId,
+                spec.quantity,
+                spec.startDate,
+                spec.endDate,
+                "Camera Equipment",
+                "Professional Camera Kit",
+                "District 1, HCMC",
+                200_000m,
+                500_000m,
+                $"group-{spec.itemId:N}",
+                assignments,
+                TestListingSnapshots.Default);
+        }).ToList();
+
+        return RentalOrder.Create(
+            orderId,
+            $"ORD-{orderId.ToString("N")[..8]}",
+            Guid.NewGuid(),
+            "VND",
+            "Pickup",
+            "Customer A",
+            "0909123456",
+            "123 Nguyen Hue",
+            "Call before delivery",
+            "bank-ref-001",
+            "v1.0",
+            "terms-doc-001",
+            "sha256-hash-001",
+            $"op-create-{orderId:N}",
+            createdAt,
+            itemDtos).Value;
+    }
 }

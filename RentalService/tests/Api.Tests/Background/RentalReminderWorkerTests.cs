@@ -4,6 +4,7 @@ using Dprental.RentalService.Application.Kafka.Configuration;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Api.Tests.Orders;
+using Dprental.RentalService.Api.Tests.Checkout;
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using Dprental.RentalService.Application.Background;
 using Dprental.RentalService.Application.Kafka.Events;
@@ -698,5 +699,256 @@ public sealed class RentalReminderWorkerTests
         Assert.Equal(2, result.Processed);
         Assert.Equal(1, result.NoticesSent);
         Assert.Equal(1, result.Failed);
+    }
+
+    [Fact]
+    public async Task ProcessOrderReminderGroupAsync_WhenItemPastD30WithEmptyAssignments_CompletesScheduleWithoutPermanentFailureOrRetry()
+    {
+        var now = new DateTimeOffset(2026, 11, 9, 9, 0, 0, VnOffset);
+        var timeProvider = new FixedTimeProvider(now);
+
+        Guid orderId = Guid.NewGuid();
+        Guid itemId = Guid.NewGuid();
+        Guid scheduleId;
+
+        // Target end date is 31 days ago (WindowExpired)
+        DateOnly expiredEndDate = DateOnly.FromDateTime(now.AddDays(-31).DateTime);
+
+        await using (var db = CreateDbContext())
+        {
+            var order = OrderTestData.Paid(
+                OrderTestData.Order(_renterId, "DH-2026-REM-EXPIRED", now.AddDays(-60),
+                    OrderTestData.Line(_supplierId, "Máy khoan", "Khoan", "Bosch", 1, 1000m, 5000m)),
+                now.AddDays(-60));
+            typeof(RentalOrder).GetProperty(nameof(RentalOrder.Id))!.SetValue(order, orderId);
+            var item = order.Items.First();
+            typeof(RentalItem).GetProperty(nameof(RentalItem.Id))!.SetValue(item, itemId);
+            typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(item, RentalItemStatus.InRental);
+            typeof(RentalItem).GetProperty(nameof(RentalItem.ExpectedEndDate))!.SetValue(item, expiredEndDate);
+
+            // Clear assignments to simulate corrupted / missing assignment data
+            typeof(RentalItem).GetField("_unitAssignments", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .SetValue(item, new List<RentalUnitAssignment>());
+
+            db.RentalOrders.Add(order);
+
+            var schedule = RentalReminderSchedule.Create(
+                orderId, itemId, RentalReminderScheduleType.Return, 1, now.AddMinutes(-5), now.AddDays(-31));
+            db.RentalReminderSchedules.Add(schedule);
+            await db.SaveChangesAsync();
+            scheduleId = schedule.Id;
+        }
+
+        await using (var db = CreateDbContext())
+        {
+            var repo = new RentalReminderScheduleRepository(db);
+            var lockManager = new FakeOrderLockManager();
+            var producer = new FakeRentalEventProducer();
+            var processor = new RentalReminderBatchProcessor(
+                repo,
+                lockManager,
+                producer,
+                unitOfWork: db,
+                timeProvider: timeProvider,
+                logger: NullLogger<RentalReminderBatchProcessor>.Instance);
+
+            var claims = await repo.ClaimDueBatchAsync("test-worker", TimeSpan.FromMinutes(2), 10);
+            var descriptor = Assert.Single(claims);
+
+            var result = await processor.ProcessOrderReminderGroupAsync(orderId, [descriptor]);
+
+            // Must complete schedule because it is WindowExpired!
+            // Must NOT fail with PermanentFailure!
+            Assert.Equal(1, result.Completed);
+            Assert.Equal(0, result.Failed);
+            Assert.Equal(0, result.NoticesSent);
+            Assert.Equal(ReminderItemProcessOutcome.Succeeded, result.ItemResults[0].Outcome);
+
+            var updatedSchedule = await db.RentalReminderSchedules.FirstAsync(s => s.Id == scheduleId);
+            Assert.Equal(RentalReminderScheduleStatus.Completed, updatedSchedule.Status);
+            Assert.Null(updatedSchedule.NextTriggerAt);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessOrderReminderGroupAsync_WhenItemAtD30After8AmWithValidAssignments_SendsFinalNoticeAndMarksCompleted()
+    {
+        var now = new DateTimeOffset(2026, 11, 9, 9, 0, 0, VnOffset);
+        var timeProvider = new FixedTimeProvider(now);
+
+        Guid orderId = Guid.NewGuid();
+        Guid itemId = Guid.NewGuid();
+        Guid scheduleId;
+
+        // Target end date is exactly 30 days ago (D+30)
+        DateOnly targetEndDate = DateOnly.FromDateTime(now.AddDays(-30).DateTime);
+
+        await using (var db = CreateDbContext())
+        {
+            var order = OrderTestData.Paid(
+                OrderTestData.Order(_renterId, "DH-2026-REM-D30", now.AddDays(-60),
+                    OrderTestData.Line(_supplierId, "Máy chiếu", "Chiếu", "Sony", 1, 2000m, 10000m)),
+                now.AddDays(-60));
+            typeof(RentalOrder).GetProperty(nameof(RentalOrder.Id))!.SetValue(order, orderId);
+            var item = order.Items.First();
+            typeof(RentalItem).GetProperty(nameof(RentalItem.Id))!.SetValue(item, itemId);
+            typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(item, RentalItemStatus.InRental);
+            typeof(RentalItem).GetProperty(nameof(RentalItem.ExpectedEndDate))!.SetValue(item, targetEndDate);
+
+            db.RentalOrders.Add(order);
+
+            var schedule = RentalReminderSchedule.Create(
+                orderId, itemId, RentalReminderScheduleType.Return, 1, now.AddMinutes(-5), now.AddDays(-30));
+            db.RentalReminderSchedules.Add(schedule);
+            await db.SaveChangesAsync();
+            scheduleId = schedule.Id;
+        }
+
+        await using (var db = CreateDbContext())
+        {
+            var repo = new RentalReminderScheduleRepository(db);
+            var lockManager = new FakeOrderLockManager();
+            var producer = new FakeRentalEventProducer();
+            var processor = new RentalReminderBatchProcessor(
+                repo,
+                lockManager,
+                producer,
+                unitOfWork: db,
+                timeProvider: timeProvider,
+                logger: NullLogger<RentalReminderBatchProcessor>.Instance);
+
+            var claims = await repo.ClaimDueBatchAsync("test-worker", TimeSpan.FromMinutes(2), 10);
+            var descriptor = Assert.Single(claims);
+
+            var result = await processor.ProcessOrderReminderGroupAsync(orderId, [descriptor]);
+
+            // D+30 must send final notification AND complete after send
+            Assert.Equal(1, result.NoticesSent);
+            Assert.Equal(1, result.Completed);
+            Assert.Equal(0, result.Failed);
+            Assert.Equal(ReminderItemProcessOutcome.Succeeded, result.ItemResults[0].Outcome);
+
+            var updatedSchedule = await db.RentalReminderSchedules.FirstAsync(s => s.Id == scheduleId);
+            Assert.Equal(RentalReminderScheduleStatus.Completed, updatedSchedule.Status);
+            Assert.NotNull(updatedSchedule.LastNotifiedDate);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessOrderReminderGroupAsync_WhenItemAtD29WithCorruptedAssignments_RecordsPermanentFailure()
+    {
+        var now = new DateTimeOffset(2026, 11, 9, 9, 0, 0, VnOffset);
+        var timeProvider = new FixedTimeProvider(now);
+
+        Guid orderId = Guid.NewGuid();
+        Guid itemId = Guid.NewGuid();
+        Guid scheduleId;
+
+        // Target end date is 29 days ago (within window, SendToday)
+        DateOnly targetEndDate = DateOnly.FromDateTime(now.AddDays(-29).DateTime);
+
+        await using (var db = CreateDbContext())
+        {
+            var order = OrderTestData.Paid(
+                OrderTestData.Order(_renterId, "DH-2026-REM-D29", now.AddDays(-60),
+                    OrderTestData.Line(_supplierId, "Flycam", "Drone", "DJI", 1, 3000m, 15000m)),
+                now.AddDays(-60));
+            typeof(RentalOrder).GetProperty(nameof(RentalOrder.Id))!.SetValue(order, orderId);
+            var item = order.Items.First();
+            typeof(RentalItem).GetProperty(nameof(RentalItem.Id))!.SetValue(item, itemId);
+            typeof(RentalItem).GetProperty(nameof(RentalItem.Status))!.SetValue(item, RentalItemStatus.InRental);
+            typeof(RentalItem).GetProperty(nameof(RentalItem.ExpectedEndDate))!.SetValue(item, targetEndDate);
+
+            // Corrupted empty assignments
+            typeof(RentalItem).GetField("_unitAssignments", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .SetValue(item, new List<RentalUnitAssignment>());
+
+            db.RentalOrders.Add(order);
+
+            var schedule = RentalReminderSchedule.Create(
+                orderId, itemId, RentalReminderScheduleType.Return, 1, now.AddMinutes(-5), now.AddDays(-29));
+            db.RentalReminderSchedules.Add(schedule);
+            await db.SaveChangesAsync();
+            scheduleId = schedule.Id;
+        }
+
+        await using (var db = CreateDbContext())
+        {
+            var repo = new RentalReminderScheduleRepository(db);
+            var lockManager = new FakeOrderLockManager();
+            var producer = new FakeRentalEventProducer();
+            var processor = new RentalReminderBatchProcessor(
+                repo,
+                lockManager,
+                producer,
+                unitOfWork: db,
+                timeProvider: timeProvider,
+                logger: NullLogger<RentalReminderBatchProcessor>.Instance);
+
+            var claims = await repo.ClaimDueBatchAsync("test-worker", TimeSpan.FromMinutes(2), 10);
+            var descriptor = Assert.Single(claims);
+
+            var result = await processor.ProcessOrderReminderGroupAsync(orderId, [descriptor]);
+
+            // D+29 with corrupted assignments must result in PermanentFailure, not completed
+            Assert.Equal(0, result.NoticesSent);
+            Assert.Equal(0, result.Completed);
+            Assert.Equal(1, result.Failed);
+            Assert.Equal(ReminderItemProcessOutcome.PermanentFailure, result.ItemResults[0].Outcome);
+
+            var updatedSchedule = await db.RentalReminderSchedules.FirstAsync(s => s.Id == scheduleId);
+            Assert.Equal(RentalReminderScheduleStatus.Active, updatedSchedule.Status);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessOrderReminderGroupAsync_WhenCompleteFailsDueToLostLease_DoesNotIncrementCompleted()
+    {
+        var now = new DateTimeOffset(2026, 11, 9, 9, 0, 0, VnOffset);
+        var timeProvider = new FixedTimeProvider(now);
+
+        Guid orderId = Guid.NewGuid();
+        Guid itemId = Guid.NewGuid();
+
+        // Expired date
+        DateOnly expiredEndDate = DateOnly.FromDateTime(now.AddDays(-35).DateTime);
+
+        var mockRepo = new Mock<IRentalReminderScheduleRepository>();
+        var desc = new ReminderClaimDescriptor(Guid.NewGuid(), orderId, itemId, RentalReminderScheduleType.Return, Guid.NewGuid(), now.AddMinutes(2));
+
+        var item = new ReminderItemProjection(itemId, Guid.NewGuid(), RentalItemStatus.InRental, expiredEndDate.AddDays(-5), expiredEndDate, 1, false, [], [], []);
+        var order = new ReminderOrderProjection(orderId, RentalOrderStatus.Paid, "ORD-LOST-LEASE", Guid.NewGuid(), 1, [item]);
+
+        mockRepo.Setup(r => r.LockSchedulesForUpdateAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([desc.ScheduleId]);
+        mockRepo.Setup(r => r.GetScheduleStatesAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<Guid, ReminderScheduleStateProjection>
+            {
+                [desc.ScheduleId] = new ReminderScheduleStateProjection(desc.ScheduleId, RentalReminderScheduleStatus.Active, null, 0, 0, 1, desc.LeaseToken, desc.LeasedUntil)
+            });
+        mockRepo.Setup(r => r.GetOrderReminderProjectionAsync(orderId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(order);
+        // Simulate lease lost during completion!
+        mockRepo.Setup(r => r.CompleteScheduleWithLeaseCheckAsync(desc.ScheduleId, desc.LeaseToken, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var mockUnitOfWork = new Mock<IUnitOfWork>();
+        var mockTx = new Mock<IUnitOfWorkTransaction>();
+        mockUnitOfWork.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(mockTx.Object);
+
+        var processor = new RentalReminderBatchProcessor(
+            mockRepo.Object,
+            new FakeOrderLockManager(),
+            new FakeRentalEventProducer(),
+            unitOfWork: mockUnitOfWork.Object,
+            timeProvider: timeProvider,
+            logger: NullLogger<RentalReminderBatchProcessor>.Instance);
+
+        var result = await processor.ProcessOrderReminderGroupAsync(orderId, [desc]);
+
+        // Complete failed because lease was lost -> Completed must be 0!
+        Assert.Equal(0, result.Completed);
+        Assert.Equal(0, result.NoticesSent);
+        Assert.Equal(ReminderItemProcessOutcome.LeaseLost, result.ItemResults[0].Outcome);
     }
 }

@@ -160,6 +160,12 @@ public static partial class Program
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- reconcile-refund-confirmations [--apply]");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- replay-outbox --message-id <Guid>");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- backfill-reminders [--apply] [--batch-size N] [--phase <handover|return>] [--after-item-id <guid>]");
+        Console.WriteLine();
+        Console.WriteLine("Options for backfill-reminders:");
+        Console.WriteLine("  --apply              Persist reminder schedules to the database (default: dry-run).");
+        Console.WriteLine("  --batch-size, -b     Candidate batch size per page (default: 100).");
+        Console.WriteLine("  --phase              Starting phase ('handover' or 'return'). Handover automatically proceeds to return upon completion.");
+        Console.WriteLine("  --after-item-id      Keyset cursor to resume after a specific item ID within the starting phase.");
     }
 
     public static async Task<int> RunBackfillAsync(
@@ -593,7 +599,10 @@ public static partial class Program
 
         if (!result.Succeeded)
         {
-            await output.WriteLineAsync($"Backfill failed: {result.ErrorMessage}. Previous checkpoint: {result.LastProcessedItemId?.ToString() ?? "None"}.");
+            string resumeSuggestion = result.LastProcessedItemId.HasValue
+                ? $" Resume command: dotnet run --project RentalService/src/Maintenance -- backfill-reminders {(apply ? "--apply " : "")}--batch-size {batchSize} --phase {result.LastPhase} --after-item-id {result.LastProcessedItemId.Value}"
+                : $" Resume command: dotnet run --project RentalService/src/Maintenance -- backfill-reminders {(apply ? "--apply " : "")}--batch-size {batchSize} --phase {result.LastPhase}";
+            await output.WriteLineAsync($"Backfill failed: {result.ErrorMessage}. Previous checkpoint: {result.LastProcessedItemId?.ToString() ?? "None"}.{resumeSuggestion}");
             return 1;
         }
 
