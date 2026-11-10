@@ -20,7 +20,9 @@ public sealed class RentalRefundRepository(RentalServiceDbContext dbContext) : I
                 && (receipt.Action == RequestRefundAction || receipt.Action == RentalItem.SettleRentalAction)
             join item in dbContext.RentalItems.AsNoTracking() on receipt.TargetItemId equals (Guid?)item.Id
             where receipt.Action == RequestRefundAction
-                || item.DepositAmount - (item.FinalDeductionAmount ?? 0m) > 0m
+                || (item.Status != Common.Enums.RentalItemStatus.Disputed
+                    && item.FinalDeductionAmount != null
+                    && item.DepositAmount - item.FinalDeductionAmount.Value > 0m)
             join confirmation in dbContext.RentalRefundConfirmations.AsNoTracking()
                 on item.Id equals confirmation.RentalItemId into confirmations
             from confirmation in confirmations.DefaultIfEmpty()
@@ -81,7 +83,8 @@ public sealed class RentalRefundRepository(RentalServiceDbContext dbContext) : I
             .Where(i => (!after.HasValue || i.Id.CompareTo(after.Value) > 0) &&
                 dbContext.RentalOperationReceipts.Any(r => r.TargetItemId == i.Id &&
                     (r.Action == RequestRefundAction || (r.Action == RentalItem.SettleRentalAction &&
-                        i.DepositAmount - (i.FinalDeductionAmount ?? 0m) > 0m))) &&
+                        i.Status != Common.Enums.RentalItemStatus.Disputed && i.FinalDeductionAmount != null &&
+                        i.DepositAmount - i.FinalDeductionAmount.Value > 0m))) &&
                 (!dbContext.RentalRefundConfirmations.Any(c => c.RentalItemId == i.Id) ||
                  (i.Status == Common.Enums.RentalItemStatus.PendingSettlement && i.FinancialClosureConfirmedAt == null) ||
                  dbContext.RentalOperationReceipts.Any(r => r.TargetItemId == i.Id &&

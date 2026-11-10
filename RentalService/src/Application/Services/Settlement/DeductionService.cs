@@ -64,6 +64,7 @@ public sealed class DeductionService(
             ItemId = itemId,
             SupplierId = supplierId,
             Assessments = request.Assessments.OrderBy(a => a.AssetId),
+            request.ClaimedDamageAmount,
             DamageDescription = request.DamageDescription?.Trim(),
             EvidenceMediaIds = request.EvidenceMediaIds.OrderBy(x => x)
         });
@@ -103,14 +104,18 @@ public sealed class DeductionService(
         // tránh nhận đề xuất đã quá hạn trong lúc chờ service bên ngoài.
         now = clock.GetUtcNow();
         var submitted = item.SubmitDeduction(supplierId, amount,
-            request.DamageDescription!, request.EvidenceMediaIds, affectedAssetIds, now);
+            request.DamageDescription!, request.EvidenceMediaIds, affectedAssetIds, now,
+            request.ClaimedDamageAmount);
         // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (submitted.IsFailure) return submitted.Error;
         var proposal = submitted.Value;
         var response = new SubmitDeductionResponse(proposal.Id, proposal.TotalProposedAmount,
-            proposal.SubmittedAt, proposal.RenterResponseDeadline, item.Id, item.Status.ToString());
+            proposal.SubmittedAt, proposal.RenterResponseDeadline, item.Id, item.Status.ToString())
+        {
+            ClaimedDamageAmount = proposal.ClaimedDamageAmount
+        };
         order.AddStateTransition(new RentalStateTransition(Guid.NewGuid(), order.Id, item.Id,
-            RentalItemStatus.PendingSettlement.ToString(), RentalItemStatus.PendingSettlement.ToString(),
+            RentalItemStatus.PendingSettlement.ToString(), item.Status.ToString(),
             "SubmitDeduction", supplierId, ActorRole.Supplier, "Supplier submitted damage deduction proposal",
             now, key));
         order.AddOperationReceipt(new RentalOperationReceipt(Guid.NewGuid(), order.Id, key,

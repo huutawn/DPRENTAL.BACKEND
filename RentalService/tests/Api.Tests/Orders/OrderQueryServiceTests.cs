@@ -327,7 +327,7 @@ public sealed class OrderQueryServiceTests
         Assert.Equal(OrderTestData.Now.AddDays(8), settlement.DeductionDeadline);
         Assert.Equal(DeductionProposalStatus.Submitted, settlement.DeductionStatus);
         Assert.Equal(1_500_000m, settlement.ProposedDeductionAmount);
-        Assert.Equal(OrderTestData.Now.AddDays(9), settlement.RenterResponseDeadline);
+        Assert.Equal(OrderTestData.Now.AddDays(8), settlement.RenterResponseDeadline);
         Assert.Null(settlement.FinalDeductionAmount);
         Assert.Null(settlement.DepositRefundAmount);
         Assert.Null(settlement.SettledAt);

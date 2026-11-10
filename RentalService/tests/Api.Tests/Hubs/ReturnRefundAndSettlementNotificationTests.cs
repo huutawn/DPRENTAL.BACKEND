@@ -268,7 +268,7 @@ public sealed class ReturnRefundAndSettlementNotificationTests
         var responseService = new DeductionResponseService(
             orders, lockManager, db, mockMedia.Object, timeProvider,
             new ConfigurationBuilder().Build(), NullLogger<DeductionResponseService>.Instance,
-            Mock.Of<Dprental.RentalService.Application.Kafka.Producers.IRentalEventProducer>(), notifier);
+            notifier);
 
         var caller = OrderTestData.User(renterId);
 

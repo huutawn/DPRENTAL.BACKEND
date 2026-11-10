@@ -1,4 +1,4 @@
-# DPRental — Project Guide & MVP Domain Invariants
+﻿# DPRental — Project Guide & MVP Domain Invariants
 
 > **Mục đích của tài liệu này**
 >
@@ -716,32 +716,29 @@ Không được để physical asset trở lại available trong khi renter chư
 
 # 15. Deposit Settlement MVP
 
-Nếu damage:
+Mốc bắt đầu là thời điểm server ghi nhận nhà cung cấp đã nhận đủ máy trong RentalItem.
 
 ```text
-Supplier submits deduction proposal
+Nhà cung cấp nhận máy và ghi nhận tình trạng
         ↓
-Renter ACCEPT / DISPUTE
+Trong 48 giờ: nhà cung cấp đề nghị khấu trừ ≤ cọc; người thuê đồng ý hoặc tranh chấp
         ↓
-Admin resolves dispute if needed
+Nếu tranh chấp: nhà cung cấp có thể giảm đề nghị, người thuê đồng ý đến mốc 60 giờ
         ↓
-Payment settlement
+Chưa thống nhất: giữ cọc đến mốc 7 ngày
         ↓
-COMPLETED
+Rental chốt tối đa mức nhà cung cấp đã đề nghị; phần còn lại hoàn người thuê
+        ↓
+Payment quyết toán và xử lý chuyển tiền; Rental hoàn tất sau xác nhận tài chính
 ```
 
-MVP rule:
-
-- supplier có 48h gửi deduction;
-- quá hạn → deduction = 0;
-- renter có 48h phản hồi;
-- quá hạn → coi như đồng ý;
-- deduction không vượt deposit;
-- Admin decision là final trong hệ thống.
-
-Rental tính và lưu quyết định nghiệp vụ.
-
-Payment thực hiện dòng tiền.
+- Không có đề nghị trong 48 giờ: khấu trừ 0.
+- Người thuê im lặng đến mốc 48 giờ: chấp nhận mức nhà cung cấp đề nghị.
+- Trong tranh chấp, mức mới của nhà cung cấp chỉ được giảm và không vượt đề nghị ban đầu.
+- Admin được xem hồ sơ và xác nhận thao tác hoàn tiền thủ công; Admin không chốt số khấu trừ.
+- Hết 7 ngày mà hai bên chưa thống nhất: Rental chỉ chốt số tiền tối đa bằng đề nghị gần nhất của nhà cung cấp. Phần cọc dư là khoản phải hoàn; hai bên tự xử lý yêu cầu ngoài số này.
+- Mốc thời gian lấy từ cấu hình `Rental:Deduction:WindowHours`, `DisputeExtensionHours`, `OverCapHoldDays`.
+- Rental lưu quyết định nghiệp vụ; Payment ghi nhận quyết toán và nghĩa vụ chuyển tiền. Việc Rental chốt số không có nghĩa tiền đã được chuyển.
 
 ---
 

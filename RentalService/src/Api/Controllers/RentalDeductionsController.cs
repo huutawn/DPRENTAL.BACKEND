@@ -41,6 +41,19 @@ public sealed class RentalDeductionsController(IDeductionService deductions,
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
+    /// <summary>Nhà cung cấp đưa mức khấu trừ thấp hơn để người thuê có thể đồng ý trong cửa sổ tranh chấp.</summary>
+    [HttpPost("dispute/offer")]
+    [ProducesResponseType(typeof(OfferDisputeAmountResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> OfferDisputeAmount(Guid itemId,
+        [FromBody] OfferDisputeAmountRequest request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var result = await responses.OfferDisputeAmountAsync(itemId, caller, request,
+            idempotencyKey ?? string.Empty, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
     /// <summary>Quản trị viên xem đề nghị khấu trừ, khiếu nại và bằng chứng thu hồi của từng máy.</summary>
     [HttpGet("dispute")]
     [ProducesResponseType(typeof(DisputeDetailDto), StatusCodes.Status200OK)]
@@ -51,15 +64,4 @@ public sealed class RentalDeductionsController(IDeductionService deductions,
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
-    /// <summary>Quản trị viên chốt số tiền khấu trừ sau khi người thuê khiếu nại.</summary>
-    [HttpPost("dispute/resolution")]
-    [ProducesResponseType(typeof(ResolveDisputeResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> Resolve(Guid itemId, [FromBody] ResolveDisputeRequest request,
-        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey, CancellationToken cancellationToken)
-    {
-        var result = await responses.ResolveDisputeAsync(itemId, caller, request,
-            idempotencyKey ?? string.Empty, cancellationToken);
-        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
-    }
 }

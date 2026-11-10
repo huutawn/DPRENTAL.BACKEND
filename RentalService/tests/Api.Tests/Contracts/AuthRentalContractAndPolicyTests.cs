@@ -200,23 +200,23 @@ public sealed class AuthRentalContractAndPolicyTests
     }
 
     [Fact]
-    public void AuthorizeDisputeResolution_StrictlyRestrictedToAdmins()
+    public void AuthorizeDisputeQuery_StrictlyRestrictedToAdmins()
     {
         // 1. Normal user -> AdminOnly
         IRentalCallerContext normalUser = CreateUserCaller(Guid.NewGuid());
-        Result normalRes = RentalAuthorizationPolicy.AuthorizeDisputeResolution(normalUser);
+        Result normalRes = RentalAuthorizationPolicy.AuthorizeDisputeQuery(normalUser);
         Assert.True(normalRes.IsFailure);
         Assert.Equal("Dispute.AdminOnly", normalRes.Error.Code);
 
         // 2. Service token -> ServiceTokenNotAllowed
         IRentalCallerContext service = CreateServiceCaller();
-        Result serviceRes = RentalAuthorizationPolicy.AuthorizeDisputeResolution(service);
+        Result serviceRes = RentalAuthorizationPolicy.AuthorizeDisputeQuery(service);
         Assert.True(serviceRes.IsFailure);
         Assert.Equal("Auth.ServiceTokenNotAllowed", serviceRes.Error.Code);
 
         // 3. Platform Admin -> Success
         IRentalCallerContext platformAdmin = CreateUserCaller(Guid.NewGuid(), roles: ["admin_platform"]);
-        Assert.True(RentalAuthorizationPolicy.AuthorizeDisputeResolution(platformAdmin).IsSuccess);
+        Assert.True(RentalAuthorizationPolicy.AuthorizeDisputeQuery(platformAdmin).IsSuccess);
     }
 
     [Fact]

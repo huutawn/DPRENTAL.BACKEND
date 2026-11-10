@@ -99,6 +99,7 @@ internal static class OrderQueryMapper
         bool canSeeRealAddress = isSupplier || item.Status is Dprental.RentalService.Common.Enums.RentalItemStatus.AwaitingHandover
             or Dprental.RentalService.Common.Enums.RentalItemStatus.InRental
             or Dprental.RentalService.Common.Enums.RentalItemStatus.PendingSettlement
+            or Dprental.RentalService.Common.Enums.RentalItemStatus.Disputed
             or Dprental.RentalService.Common.Enums.RentalItemStatus.Completed;
 
         // Chỉ đưa điểm nhận máy thật vào response khi điều kiện hiển thị cho vai trò/trạng thái hiện tại cho phép.
@@ -185,7 +186,12 @@ internal static class OrderQueryMapper
                 u.Id,
                 u.Status,
                 openUnits.Contains(u.Id),
-                ReturnEligibilityPolicy.CanRequestReturn(item, u, openUnits)))
+                ReturnEligibilityPolicy.CanRequestReturn(item, u, openUnits))
+            {
+                IsAffectedByDeduction = item.DeductionProposal is { } proposal &&
+                    u.DeductionProposalId == proposal.Id,
+                DeductionReason = u.DeductionReason
+            })
             .ToList();
     }
 
@@ -280,7 +286,7 @@ internal static class OrderQueryMapper
 
         // Lấy đề xuất khấu trừ để dựng tiến độ/phản hồi; đề xuất và số khấu trừ cuối là hai mốc dữ liệu khác nhau.
         DeductionProposal? proposal = item.DeductionProposal;
-        return new OrderSettlementResponse(
+        var settlement = new OrderSettlementResponse(
             item.ReturnsCompletedAt,
             item.DeductionDeadline,
             proposal?.Status,
@@ -289,6 +295,29 @@ internal static class OrderQueryMapper
             item.FinalDeductionAmount,
             item.FinalDeductionAmount is { } deduction ? item.DepositAmount - deduction : null,
             item.FinancialClosureConfirmedAt);
+        decimal? percent = item.FinalDeductionAmount is { } final && item.DepositAmount > 0m
+            ? decimal.Round(final * 100m / item.DepositAmount, 2)
+            : null;
+        var dispute = proposal?.Dispute;
+        string? source = proposal?.Status switch
+        {
+            DeductionProposalStatus.AcceptedByTimeout => "RENTER_RESPONSE_TIMEOUT",
+            DeductionProposalStatus.Accepted => "RENTER_ACCEPTED",
+            DeductionProposalStatus.Resolved when dispute?.ResolvedById is null => "DISPUTE_HOLD_TIMEOUT",
+            DeductionProposalStatus.Resolved when dispute?.ResolvedById == item.RentalOrder?.RenterId
+                => "RENTER_ACCEPTED_SUPPLIER_OFFER",
+            DeductionProposalStatus.Resolved => "LEGACY_ADMIN_DECISION",
+            _ => null
+        };
+        return settlement with
+        {
+            CurrentSupplierOfferAmount = dispute?.SupplierOfferAmount ?? proposal?.TotalProposedAmount,
+            DeductionPercent = percent,
+            DeductionReason = percent is { } rate && rate > 0m
+                ? $"Hoàn cọc, khấu trừ do thiệt hại thiết bị {rate}%"
+                : null,
+            FinalizationSource = source
+        };
     }
 
     /// <summary>Khoản hoàn của từng dòng trong đơn đã nạp, theo <see cref="RentalRefundPolicy"/>.</summary>

@@ -91,9 +91,7 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         new RentalOrderRepository(db),
         new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
         db, Mock.Of<IRentalMediaClient>(), _clock, Configuration(),
-        NullLogger<DeductionResponseService>.Instance,
-        new RentalEventProducer(new KafkaOutboxWriter(new OutboxRepository(db)),
-            Options.Create(new KafkaOptions())));
+        NullLogger<DeductionResponseService>.Instance);
 
     private static Mock<IRentalMediaClient> ReadyMedia(Guid mediaId, Guid uploader)
     {
@@ -129,135 +127,21 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         return item;
     }
 
-    [Theory]
-    [InlineData(0, "Rejected")]
-    [InlineData(20_000, "Partial")]
-    [InlineData(150_000, "UpheldInFull")]
-    public async Task AdminResolution_PostgreSql_CommitsDecisionAndOutboxOnce(
-        int finalAmount, string expectedDecision)
-    {
-        var item = await SeedDisputedAsync();
-
-        var admin = RentalCallerContext.FromClaimsPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim("sub", Guid.NewGuid().ToString()), new Claim("r", "adm")], "test")));
-        var request = new ResolveDisputeRequest(finalAmount, "Admin reviewed damage evidence", null);
-        await using (var db = NewDb())
-        {
-            var service = ResponseService(db);
-            var resolved = await service.ResolveDisputeAsync(item.Id, admin, request, "resolution-key");
-            Assert.True(resolved.IsSuccess, resolved.Error.Message);
-            var replay = await service.ResolveDisputeAsync(item.Id, admin, request, "resolution-key");
-            Assert.True(replay.IsSuccess, replay.Error.Message);
-        }
-
-        await using var check = NewDb();
-        var savedItem = await check.RentalItems.AsNoTracking().SingleAsync(i => i.Id == item.Id);
-        Assert.Equal(finalAmount, savedItem.FinalDeductionAmount);
-        Assert.Equal(1, await check.RentalOperationReceipts.AsNoTracking()
-            .CountAsync(r => r.Action == "AdminResolveDispute"));
-        var message = Assert.Single(await check.RentalOutboxMessages.AsNoTracking()
-            .Where(m => m.MessageType == KafkaContractSpec.EventTypes.RentalDeductionDisputeResolved)
-            .ToListAsync());
-        Assert.Equal(KafkaContractSpec.Topics.RentalEvents, message.Topic);
-        using var json = JsonDocument.Parse(message.Payload);
-        var payload = json.RootElement.GetProperty("payload");
-        Assert.Equal(expectedDecision, payload.GetProperty("decision").GetString());
-        Assert.Equal(finalAmount, payload.GetProperty("finalDeductionAmount").GetDecimal());
-        var savedOrder = await check.RentalOrders.AsNoTracking().SingleAsync(o => o.Id == savedItem.RentalOrderId);
-        Assert.Equal(savedOrder.Version, payload.GetProperty("orderVersion").GetInt64());
-    }
-
     [Fact]
-    public async Task AdminResolution_PostgreSql_SaveFailureRollsBackDecisionAndOutbox()
+    public async Task DisputeHoldTimeout_PostgreSql_FinalizesProposedAmountOnce()
     {
         var item = await SeedDisputedAsync();
-
-        var failingOptions = new DbContextOptionsBuilder<RentalServiceDbContext>()
-            .UseNpgsql(_connection)
-            .AddInterceptors(new FailResolutionSaveInterceptor())
-            .Options;
-        await using (var failingDb = new RentalServiceDbContext(failingOptions))
-        {
-            var admin = RentalCallerContext.FromClaimsPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim("sub", Guid.NewGuid().ToString()), new Claim("r", "adm")], "test")));
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                ResponseService(failingDb).ResolveDisputeAsync(item.Id, admin,
-                    new ResolveDisputeRequest(20_000m, "Partial damage confirmed", null),
-                    "resolution-key"));
-        }
-
-        await using var check = NewDb();
-        var saved = await check.RentalItems.AsNoTracking().SingleAsync(i => i.Id == item.Id);
-        Assert.Null(saved.FinalDeductionAmount);
-        Assert.Equal(DeductionProposalStatus.Disputed,
-            (await check.DeductionProposals.AsNoTracking().SingleAsync()).Status);
-        Assert.Equal(0, await check.RentalOperationReceipts.AsNoTracking()
-            .CountAsync(r => r.Action == "AdminResolveDispute"));
-        Assert.Equal(0, await check.RentalOutboxMessages.AsNoTracking()
-            .CountAsync(m => m.MessageType == KafkaContractSpec.EventTypes.RentalDeductionDisputeResolved));
+        _clock.SetUtcNow(item.ReturnsCompletedAt!.Value.AddDays(7));
+        await using var db = NewDb();
+        var service = ResponseService(db);
+        Assert.Equal(1, await service.ProcessDisputeHoldTimeoutsAsync());
+        Assert.Equal(0, await service.ProcessDisputeHoldTimeoutsAsync());
+        var saved = (await new RentalOrderRepository(db).GetByItemIdWithDetailsAsync(item.Id))!
+            .Items.Single(i => i.Id == item.Id);
+        Assert.Equal(100_000m, saved.FinalDeductionAmount);
+        Assert.Equal(saved.DepositAmount - 100_000m, saved.DepositRefundAmount);
+        Assert.Equal(RentalItemStatus.PendingSettlement, saved.Status);
     }
-
-    private sealed class FailResolutionSaveInterceptor : SaveChangesInterceptor
-    {
-        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
-            DbContextEventData eventData, InterceptionResult<int> result,
-            CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Simulated failure after outbox enqueue");
-    }
-
-    [Fact]
-    public async Task AdminResolution_PostgreSql_KafkaFailureRetriesCommittedEvent()
-    {
-        var item = await SeedDisputedAsync();
-        var admin = RentalCallerContext.FromClaimsPrincipal(new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim("sub", Guid.NewGuid().ToString()), new Claim("r", "adm")], "test")));
-        await using (var db = NewDb())
-        {
-            var resolved = await ResponseService(db).ResolveDisputeAsync(item.Id, admin,
-                new ResolveDisputeRequest(20_000m, "Partial damage confirmed", null),
-                "resolution-key");
-            Assert.True(resolved.IsSuccess, resolved.Error.Message);
-        }
-
-        var transport = new Mock<IKafkaProducerTransport>();
-        transport.SetupSequence(t => t.ProduceAsync(It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new TimeoutException("broker timeout"))
-            .ReturnsAsync(new DeliveryResult<string, string>
-            {
-                Status = PersistenceStatus.Persisted
-            });
-        var services = new ServiceCollection();
-        services.AddScoped<RentalServiceDbContext>(_ => NewDb());
-        services.AddScoped<IOutboxRepository, OutboxRepository>();
-        using var provider = services.BuildServiceProvider();
-        var publisher = new OutboxPublisherWorker(provider.GetRequiredService<IServiceScopeFactory>(),
-            Options.Create(new KafkaOptions { Enabled = true, MaxBatchPerRound = 1 }),
-            NullLogger<OutboxPublisherWorker>.Instance, transport.Object);
-
-        Assert.Equal(0, await publisher.ProcessBatchAsync(CancellationToken.None));
-        await using (var check = NewDb())
-        {
-            var pending = await check.RentalOutboxMessages.AsNoTracking().SingleAsync(
-                m => m.MessageType == KafkaContractSpec.EventTypes.RentalDeductionDisputeResolved);
-            Assert.Equal("Pending", pending.Status);
-            Assert.Equal(1, pending.RetryCount);
-            Assert.Equal(20_000m, (await check.RentalItems.AsNoTracking()
-                .SingleAsync(i => i.Id == item.Id)).FinalDeductionAmount);
-            await check.RentalOutboxMessages
-                .Where(m => m.Id == pending.Id)
-                .ExecuteUpdateAsync(s => s.SetProperty(m => m.ScheduledAt,
-                    DateTimeOffset.UtcNow.AddSeconds(-1)));
-        }
-
-        Assert.Equal(1, await publisher.ProcessBatchAsync(CancellationToken.None));
-        await using var finalCheck = NewDb();
-        Assert.Equal("Published", (await finalCheck.RentalOutboxMessages.AsNoTracking()
-            .SingleAsync(m => m.MessageType == KafkaContractSpec.EventTypes.RentalDeductionDisputeResolved)).Status);
-        transport.Verify(t => t.ProduceAsync(KafkaContractSpec.Topics.RentalEvents,
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
-    }
-
     [Fact]
     public async Task ProposalPersistsAndReplaysWithoutExtendingDeadline()
     {
@@ -350,7 +234,7 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
         client.DefaultRequestHeaders.Add("X-Test-Renter-Id", Guid.NewGuid().ToString());
         using var foreign = await client.PostAsJsonAsync(route, request);
-        // Supplier khác nhận 404 như khi khoản thuê không tồn tại (IDOR).
+        // Supplier khÃ¡c nháº­n 404 nhÆ° khi khoáº£n thuÃª khÃ´ng tá»“n táº¡i (IDOR).
         Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
     }
 }

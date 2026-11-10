@@ -150,7 +150,13 @@ public sealed record OrderSettlementResponse(
     DateTimeOffset? RenterResponseDeadline,
     decimal? FinalDeductionAmount,
     decimal? DepositRefundAmount,
-    DateTimeOffset? SettledAt);
+    DateTimeOffset? SettledAt)
+{
+    public decimal? CurrentSupplierOfferAmount { get; init; }
+    public decimal? DeductionPercent { get; init; }
+    public string? DeductionReason { get; init; }
+    public string? FinalizationSource { get; init; }
+}
 
 /// <summary>
 /// Một dòng thiết bị trong đơn của người thuê. Giá và thông tin thiết bị là bản đã chụp lúc đặt hàng.
@@ -274,4 +280,8 @@ public sealed record RenterUnitResponse(
     Guid AssignmentId,
     RentalUnitAssignmentStatus Status,
     bool HasOpenReturnRequest,
-    bool CanRequestReturn);
+    bool CanRequestReturn)
+{
+    public bool IsAffectedByDeduction { get; init; }
+    public string? DeductionReason { get; init; }
+}

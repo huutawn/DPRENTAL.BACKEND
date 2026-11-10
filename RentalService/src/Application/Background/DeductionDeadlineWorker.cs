@@ -49,6 +49,7 @@ public sealed class DeductionDeadlineWorker : BackgroundService
         int count = await service.ProcessDeductionTimeoutsAsync(cancellationToken);
         var responses = scope.ServiceProvider.GetRequiredService<IDeductionResponseService>();
         count += await responses.ProcessRenterResponseTimeoutsAsync(cancellationToken);
+        count += await responses.ProcessDisputeHoldTimeoutsAsync(cancellationToken);
         count += await service.ScheduleReadySettlementsAsync(cancellationToken);
         if (count > 0) _logger.LogInformation("DeductionDeadlineWorker processed {Count} deadlines and settlement schedules", count);
         return count;

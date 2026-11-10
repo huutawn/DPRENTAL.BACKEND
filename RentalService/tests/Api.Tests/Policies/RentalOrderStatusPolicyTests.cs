@@ -92,6 +92,10 @@ public sealed class RentalOrderStatusPolicyTests
         // 4. Có active item PendingSettlement -> PendingSettlement
         var order4 = CreateOrderWithItemStatuses(RentalItemStatus.PendingSettlement, RentalItemStatus.Completed);
         Assert.Equal(RentalOrderStatus.PendingSettlement, RentalOrderStatusPolicy.CalculateCandidateStatus(order4.Items));
+        var disputedOrder = CreateOrderWithItemStatuses(RentalItemStatus.Disputed, RentalItemStatus.Completed);
+        Assert.Equal(RentalOrderStatus.PendingSettlement, RentalOrderStatusPolicy.CalculateCandidateStatus(disputedOrder.Items));
+        Assert.Equal(RentalItemStatus.Disputed,
+            SubOrderStatusPolicy.Summarize([RentalItemStatus.Disputed, RentalItemStatus.Completed]));
 
         // 5. Có active item và tất cả đã Completed -> Completed
         var order5 = CreateOrderWithItemStatuses(RentalItemStatus.Completed, RentalItemStatus.Completed);

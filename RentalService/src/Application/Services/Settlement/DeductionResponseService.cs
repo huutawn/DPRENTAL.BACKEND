@@ -31,7 +31,6 @@ public sealed partial class DeductionResponseService(
     TimeProvider timeProvider,
     IConfiguration configuration,
     ILogger<DeductionResponseService> logger,
-    Dprental.RentalService.Application.Kafka.Producers.IRentalEventProducer rentalEvents,
     IOrderHubNotifier? notifier = null) : IDeductionResponseService
 {
     private const string RespondAction = "RenterRespondDeduction";
@@ -122,7 +121,8 @@ public sealed partial class DeductionResponseService(
         if (request.Decision == RenterDeductionDecision.Accept)
         {
             // Ghi thay đổi của quyết định hiện tại vào aggregate; persistence và các xác nhận bên ngoài được xử lý ở các bước tiếp theo.
-            applied = item.AcceptDeductionByRenter(renterId, now, key);
+            applied = item.AcceptDeductionByRenter(renterId, now, key,
+                configuration.GetValue("Rental:Deduction:DisputeExtensionHours", 12));
         }
         else
         {

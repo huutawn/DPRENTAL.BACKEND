@@ -29,6 +29,9 @@ public class DeductionProposal
     [Precision(18, 2)]
     public decimal TotalProposedAmount { get; private set; }
 
+    [Precision(18, 2)]
+    public decimal? ClaimedDamageAmount { get; private set; }
+
     [Required]
     [MaxLength(2000)]
     public string DamageDescription { get; private set; } = string.Empty;
@@ -56,7 +59,8 @@ public class DeductionProposal
         DateTimeOffset renterResponseDeadline,
         decimal totalProposedAmount,
         string damageDescription,
-        IEnumerable<Guid> evidenceMediaIds)
+        IEnumerable<Guid> evidenceMediaIds,
+        decimal? claimedDamageAmount = null)
     {
         Id = id;
         RentalItemId = rentalItemId;
@@ -65,6 +69,7 @@ public class DeductionProposal
         SubmittedAt = submittedAt;
         RenterResponseDeadline = renterResponseDeadline;
         TotalProposedAmount = totalProposedAmount;
+        ClaimedDamageAmount = claimedDamageAmount;
         DamageDescription = damageDescription.Trim();
         _evidenceMediaIds.AddRange(evidenceMediaIds);
     }
@@ -99,6 +104,13 @@ public class DeductionProposal
         RespondedAt = openedAt;
         Dispute = new Dispute(disputeId, Id, renterId, openedAt, reason, mediaIds);
         return Dispute;
+    }
+
+    internal void OpenOverCapDispute(Guid supplierId, DateTimeOffset openedAt)
+    {
+        Status = DeductionProposalStatus.Disputed;
+        Dispute = new Dispute(Guid.NewGuid(), Id, supplierId, openedAt,
+            "Supplier-reported damage exceeds the rental deposit.", _evidenceMediaIds);
     }
 
     internal void ApplyResolution()
