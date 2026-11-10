@@ -411,6 +411,65 @@ public sealed class RealPostgreSqlAndKafkaIntegrationTests
         Assert.True(published);
     }
 
+    [Fact]
+    public async Task Postgres_BatchReviewStatus_QueriesProjectionsAndActorReviews_FilteredBoundedNoFullScan()
+    {
+        await using var db = new ReviewServiceDbContext(CreatePostgresOptions());
+        var projectionRepo = new ReviewProjectionRepository(db);
+        var reviewRepo = new ReviewRepository(db);
+
+        var actorId = Guid.NewGuid();
+        var otherActorId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var listingId = Guid.NewGuid();
+
+        var order1 = Guid.NewGuid();
+        var item1 = Guid.NewGuid();
+        var order2 = Guid.NewGuid();
+        var item2 = Guid.NewGuid();
+        var unrequestedItem = Guid.NewGuid();
+
+        var now = DateTimeOffset.UtcNow;
+
+        // Projections
+        var p1 = new ReviewProjection(Guid.NewGuid(), order1, item1, actorId, supplierId, listingId, now.AddDays(-2), now.AddDays(28), true, now.AddDays(-2));
+        var p2 = new ReviewProjection(Guid.NewGuid(), order2, item2, actorId, supplierId, listingId, now.AddDays(-1), now.AddDays(29), true, now.AddDays(-1));
+        var pUnrequested = new ReviewProjection(Guid.NewGuid(), Guid.NewGuid(), unrequestedItem, actorId, supplierId, listingId, now.AddDays(-1), now.AddDays(29), true, now.AddDays(-1));
+
+        await db.ReviewProjections.AddRangeAsync(p1, p2, pUnrequested);
+
+        // Reviews
+        var rActor = Review.Create(Guid.NewGuid(), order1, item1, ReviewDirection.renter_to_supplier_listing, actorId, supplierId, listingId, 5, "By actor", now, now.AddDays(7));
+        var rOther = Review.Create(Guid.NewGuid(), order2, item2, ReviewDirection.supplier_to_renter, otherActorId, actorId, listingId, 4, "By other", now, now.AddDays(7));
+
+        await db.Reviews.AddRangeAsync(rActor, rOther);
+        await db.SaveChangesAsync();
+
+        try
+        {
+            // Query projections by requested item IDs
+            var projections = await projectionRepo.GetByItemIdsAsync([item1, item2]);
+            Assert.Equal(2, projections.Count);
+            Assert.Contains(projections, p => p.ItemId == item1);
+            Assert.Contains(projections, p => p.ItemId == item2);
+            Assert.DoesNotContain(projections, p => p.ItemId == unrequestedItem);
+
+            // Query actor reviews by requested item IDs
+            var actorReviews = await reviewRepo.GetActorReviewsByItemIdsAsync(actorId, [item1, item2]);
+            Assert.Single(actorReviews);
+            Assert.Equal(rActor.Id, actorReviews[0].ReviewId);
+            Assert.Equal(item1, actorReviews[0].ItemId);
+            Assert.Equal(order1, actorReviews[0].OrderId);
+        }
+        finally
+        {
+            // Cleanup
+            db.Reviews.RemoveRange(rActor, rOther);
+            db.ReviewProjections.RemoveRange(p1, p2, pUnrequested);
+            await db.SaveChangesAsync();
+        }
+    }
+
     private sealed class SpyProducer : IKafkaProducer
     {
         private readonly bool _returnSuccess;

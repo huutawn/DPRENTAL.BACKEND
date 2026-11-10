@@ -354,4 +354,115 @@ public sealed class ReviewQueryService : IReviewQueryService
 
         return Result.Success(new RenterReputationResponse(renterId, avg, count, stringDistribution));
     }
+
+    /// <inheritdoc />
+    public async Task<Result<BatchReviewStatusResponse>> GetBatchReviewStatusAsync(
+        Guid actorId,
+        BatchReviewStatusRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (actorId == Guid.Empty)
+        {
+            return Result.Failure<BatchReviewStatusResponse>(
+                Error.Unauthorized("UNAUTHORIZED", "Xác thực không hợp lệ."));
+        }
+
+        if (request == null || request.Items == null || request.Items.Count == 0)
+        {
+            return Result.Failure<BatchReviewStatusResponse>(
+                Error.Validation("EMPTY_BATCH_ITEMS", "Danh sách mục kiểm tra trạng thái đánh giá không được để trống."));
+        }
+
+        if (request.Items.Count > 100)
+        {
+            return Result.Failure<BatchReviewStatusResponse>(
+                Error.Validation("BATCH_LIMIT_EXCEEDED", "Số lượng mục vượt quá giới hạn tối đa cho phép (100)."));
+        }
+
+        var seenPairs = new HashSet<(Guid OrderId, Guid ItemId)>();
+        foreach (var item in request.Items)
+        {
+            if (item.OrderId == Guid.Empty || item.ItemId == Guid.Empty)
+            {
+                return Result.Failure<BatchReviewStatusResponse>(
+                    Error.Validation("INVALID_IDENTIFIER", "Mã định danh orderId hoặc itemId không hợp lệ (Guid rỗng)."));
+            }
+
+            if (!seenPairs.Add((item.OrderId, item.ItemId)))
+            {
+                return Result.Failure<BatchReviewStatusResponse>(
+                    Error.Validation("DUPLICATE_BATCH_ITEM", $"Cặp orderId và itemId bị trùng lặp: ({item.OrderId}, {item.ItemId})."));
+            }
+        }
+
+        var nowUtc = _timeProvider.GetUtcNow();
+        var itemIds = request.Items.Select(i => i.ItemId).Distinct().ToList();
+
+        var projections = await _projectionRepository.GetByItemIdsAsync(itemIds, cancellationToken);
+        var projectionMap = projections.ToDictionary(p => p.ItemId);
+
+        var actorReviews = await _reviewRepository.GetActorReviewsByItemIdsAsync(actorId, itemIds, cancellationToken);
+        var reviewMap = actorReviews.ToLookup(r => (r.OrderId, r.ItemId));
+
+        var resultItems = new List<ReviewItemStatusResponse>(request.Items.Count);
+
+        foreach (var item in request.Items)
+        {
+            var actorReview = reviewMap[(item.OrderId, item.ItemId)].FirstOrDefault();
+            projectionMap.TryGetValue(item.ItemId, out var projection);
+
+            // 1. Có review do actor tạo cho đúng order/item: REVIEWED, kể cả đã rút hoặc bị admin ẩn; trả ID review của chính actor.
+            if (actorReview != null)
+            {
+                var deadlineAt = projection != null && projection.OrderId == item.OrderId ? projection.DeadlineAt : null;
+                resultItems.Add(new ReviewItemStatusResponse(
+                    item.OrderId,
+                    item.ItemId,
+                    new ReviewStatusDto(ReviewStatusState.Reviewed, actorReview.ReviewId, deadlineAt)));
+                continue;
+            }
+
+            // 2. Không có projection đáng tin cậy hoặc actor không phải participant: UNKNOWN, không lộ ID review hay deadline.
+            if (projection == null ||
+                projection.OrderId != item.OrderId ||
+                !projection.CompletedAt.HasValue ||
+                !projection.DeadlineAt.HasValue ||
+                (actorId != projection.RenterId && actorId != projection.SupplierId))
+            {
+                resultItems.Add(new ReviewItemStatusResponse(
+                    item.OrderId,
+                    item.ItemId,
+                    new ReviewStatusDto(ReviewStatusState.Unknown, null, null)));
+                continue;
+            }
+
+            // 3. Projection không đủ điều kiện hoặc actor trùng cả renter và supplier: NOT_ELIGIBLE.
+            if (!projection.IsEligible || projection.RenterId == projection.SupplierId)
+            {
+                resultItems.Add(new ReviewItemStatusResponse(
+                    item.OrderId,
+                    item.ItemId,
+                    new ReviewStatusDto(ReviewStatusState.NotEligible, null, null)));
+                continue;
+            }
+
+            // 4. Projection hợp lệ nhưng now >= deadlineAt: EXPIRED.
+            if (nowUtc >= projection.DeadlineAt.Value)
+            {
+                resultItems.Add(new ReviewItemStatusResponse(
+                    item.OrderId,
+                    item.ItemId,
+                    new ReviewStatusDto(ReviewStatusState.Expired, null, projection.DeadlineAt)));
+                continue;
+            }
+
+            // 5. Còn lại: AVAILABLE.
+            resultItems.Add(new ReviewItemStatusResponse(
+                item.OrderId,
+                item.ItemId,
+                new ReviewStatusDto(ReviewStatusState.Available, null, projection.DeadlineAt)));
+        }
+
+        return Result.Success(new BatchReviewStatusResponse(resultItems));
+    }
 }

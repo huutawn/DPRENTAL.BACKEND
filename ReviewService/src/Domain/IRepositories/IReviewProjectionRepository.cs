@@ -13,5 +13,12 @@ public interface IReviewProjectionRepository
 
     Task<ReviewProjection?> GetByItemIdAsync(Guid itemId, CancellationToken cancellationToken = default);
 
+
+    /// <summary>
+    /// Đọc danh sách bản ghi projection theo danh sách itemId (chỉ đọc AsNoTracking).
+    /// </summary>
+    Task<IReadOnlyList<ReviewProjection>> GetByItemIdsAsync(
+        IEnumerable<Guid> itemIds,
+        CancellationToken cancellationToken = default);
     Task UpsertAsync(ReviewProjection projection, CancellationToken cancellationToken = default);
 }

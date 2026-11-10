@@ -45,7 +45,7 @@ Tài liệu này đặc tả toàn bộ các endpoints, cấu trúc DTO theo cơ
 | **10**| **Báo cáo vi phạm** | `/api/v1/reviews/{reviewId}/reports` | `POST` | Bearer JWT (Người dùng bất kỳ) + `Idempotency-Key` | `201 Created` | `400`, `401`, `404`, `409` |
 | **11**| **Admin ẩn review** | `/api/v1/reviews/admin/{reviewId}/hide` | `POST` | Bearer JWT (`Admin` role) + `Idempotency-Key` + `If-Match` | `200 OK` | `400`, `401`, `403`, `404`, `409`, `412`, `428` |
 | **12**| **Admin khôi phục review** | `/api/v1/reviews/admin/{reviewId}/restore` | `POST` | Bearer JWT (`Admin` role) + `Idempotency-Key` + `If-Match` | `200 OK` | `400`, `401`, `403`, `404`, `409`, `412`, `428` |
-
+| **13**| **Kiểm tra trạng thái đánh giá theo lô** | `/api/v1/reviews/status/batch` | `POST` | Bearer JWT (Người dùng bất kỳ) | `200 OK` | `400`, `401`, `403` |
 ---
 
 ## 3. Chi tiết Hợp đồng từng Endpoint
@@ -298,6 +298,51 @@ Dựa trên bảng chiếu (`review_projections`) đã hydrate đầy đủ và 
   }
   ```
 
+
+### 3.9 `POST /api/v1/reviews/status/batch` (Kiểm tra trạng thái đánh giá theo lô)
+
+- **Mô tả:** Endpoint chỉ đọc cho phép client (hoặc RentalService enrichment) kiểm tra trạng thái đánh giá của danh sách mục thuê theo góc nhìn của người gọi hiện tại.
+- **Consumer chính thức:** `RentalService` (thực hiện enrichment qua `HttpReviewRentalClient`) và các client Frontend.
+- **Headers:**
+  - `Authorization: Bearer <JWT>` (Bắt buộc).
+  - Không cần `Idempotency-Key` (thao tác chỉ đọc).
+- **Request Body (`BatchReviewStatusRequest`):**
+  ```json
+  {
+    "items": [
+      {
+        "orderId": "6a2f9cc2-1367-44bd-b639-948e0ae13112",
+        "itemId": "f3f67188-5462-4072-be73-af5d16351df3"
+      }
+    ]
+  }
+  ```
+- **Quy tắc kiểm tra hợp lệ (Validation):**
+  - Tối đa 100 phần tử/request;
+  - Danh sách rỗng, UUID rỗng, cặp `(orderId, itemId)` trùng lặp hoặc vượt giới hạn 100 phần tử trả về `400 Bad Request` (ProblemDetails);
+  - Thiếu token trả về `401 Unauthorized`; Service token (`u = "svc"`) trả về `403 Forbidden`.
+- **Quyết định trạng thái nghiệp vụ (5 States):**
+  1. `REVIEWED`: Có review do chính actor tạo cho đúng order/item (kể cả đã rút hoặc bị admin ẩn); trả về ID review của chính actor. `deadlineAt` là thời hạn từ projection (nếu có) hoặc `null`.
+  2. `UNKNOWN`: Không có projection đáng tin cậy hoặc actor không phải bên tham gia (`renter` hoặc `supplier`); không lộ ID review hay deadline (`reviewId: null, deadlineAt: null`).
+  3. `NOT_ELIGIBLE`: Projection không đủ điều kiện (`isEligible = false`) hoặc actor trùng cả renter và supplier (`renterId == supplierId`); không lộ ID hay deadline.
+  4. `EXPIRED`: Projection hợp lệ nhưng thời điểm hiện tại `nowUtc >= deadlineAt`; `reviewId: null, deadlineAt: deadlineAt`.
+  5. `AVAILABLE`: Mục thuê đủ điều kiện đánh giá và còn trong thời hạn; `reviewId: null, deadlineAt: deadlineAt`.
+- **Response Body (`200 OK` - `BatchReviewStatusResponse`):**
+  ```json
+  {
+    "items": [
+      {
+        "orderId": "6a2f9cc2-1367-44bd-b639-948e0ae13112",
+        "itemId": "f3f67188-5462-4072-be73-af5d16351df3",
+        "reviewStatus": {
+          "state": "REVIEWED",
+          "reviewId": "8f731888-eb87-43cf-8a21-72946c87e6aa",
+          "deadlineAt": "2026-12-08T10:00:00.000Z"
+        }
+      }
+    ]
+  }
+  ```
 ---
 
 ## 4. Cơ chế Chống trùng lặp (Idempotency) và Khóa Lạc quan (Optimistic Concurrency)

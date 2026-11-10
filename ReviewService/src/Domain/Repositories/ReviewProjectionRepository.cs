@@ -58,6 +58,24 @@ public sealed class ReviewProjectionRepository : IReviewProjectionRepository
             .FirstOrDefaultAsync(p => p.ItemId == itemId, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<ReviewProjection>> GetByItemIdsAsync(
+        IEnumerable<Guid> itemIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(itemIds);
+
+        var idList = itemIds.Distinct().ToList();
+        if (idList.Count == 0)
+        {
+            return Array.Empty<ReviewProjection>();
+        }
+
+        return await _dbContext.ReviewProjections
+            .AsNoTracking()
+            .Where(p => idList.Contains(p.ItemId))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task UpsertAsync(ReviewProjection projection, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(projection);
