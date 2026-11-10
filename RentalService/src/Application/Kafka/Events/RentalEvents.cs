@@ -182,3 +182,16 @@ public sealed record RentalOrderCancelledPayload(
 public sealed record RentalOrderCompletedPayload(
     Guid RentalOrderId, Guid RenterId, DateTimeOffset CompletedAt,
     long OrderVersion = 1);
+
+public sealed record RentalReminderDuePayload(
+    Guid RentalOrderId,
+    Guid RentalItemId,
+    string OrderCode,
+    Guid RenterId,
+    Guid SupplierId,
+    string ReminderType,
+    DateOnly ReminderDate,
+    DateTimeOffset ActionDeadline,
+    int RemainingUnitCount,
+    DateOnly TargetDate,
+    long OrderVersion = 1);

@@ -769,7 +769,7 @@ public sealed class CheckoutServicePostgreSqlTests
         FixedTimeProvider clock = new(Now);
         RentalCheckoutOperationRepository operations = new(context);
         InventoryCommandProducer inventoryCommands = new(outbox, Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), clock);
-        CheckoutOrderWriter orderWriter = new(orders, carts, new PostgresOrderCodeGenerator(context), context, NullLogger<CheckoutOrderWriter>.Instance);
+        CheckoutOrderWriter orderWriter = new(orders, carts, new PostgresOrderCodeGenerator(context), new DamageLevelRepository(context), context, NullLogger<CheckoutOrderWriter>.Instance);
         RentalEventProducer rentalEvents = new(new KafkaOutboxWriter(outbox), Microsoft.Extensions.Options.Options.Create(new KafkaOptions { Enabled = true }), clock);
         CheckoutInvoiceIssuer invoiceIssuer = new(completion.Payment, orders, operations, context, clock, NullLogger<CheckoutInvoiceIssuer>.Instance);
 

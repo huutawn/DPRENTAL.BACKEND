@@ -47,6 +47,9 @@ builder.Services.AddOptions<RentalTermsOptions>()
 builder.Services.AddTransient<AuthTokenPropagationHandler>();
 builder.Services.AddHttpClient<IAuthRentalClient, HttpAuthRentalClient>()
     .AddHttpMessageHandler<AuthTokenPropagationHandler>();
+builder.Services.AddTransient<ReviewTokenPropagationHandler>();
+builder.Services.AddHttpClient<IReviewRentalClient, HttpReviewRentalClient>()
+    .AddHttpMessageHandler<ReviewTokenPropagationHandler>();
 builder.Services.AddScoped<ICurrentRenter, CurrentRenter>();
 builder.Services.AddAuthorization(options =>
 {
@@ -125,6 +128,12 @@ string? mediaUrl = builder.Configuration["Services:Media:BaseUrl"];
 if (!string.IsNullOrWhiteSpace(mediaUrl) && !Uri.TryCreate(mediaUrl, UriKind.Absolute, out _))
 {
     throw new InvalidOperationException("Services:Media:BaseUrl must be a valid absolute URL.");
+}
+
+string? reviewUrl = builder.Configuration["Services:Review:BaseUrl"];
+if (!string.IsNullOrWhiteSpace(reviewUrl) && (!Uri.TryCreate(reviewUrl, UriKind.Absolute, out var parsedReviewUri) || (parsedReviewUri.Scheme != Uri.UriSchemeHttp && parsedReviewUri.Scheme != Uri.UriSchemeHttps)))
+{
+    throw new InvalidOperationException("Services:Review:BaseUrl must be a valid absolute HTTP or HTTPS URL.");
 }
 
 var app = builder.Build();

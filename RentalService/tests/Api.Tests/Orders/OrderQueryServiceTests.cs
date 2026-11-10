@@ -111,6 +111,9 @@ public sealed class OrderQueryServiceTests
         Assert.True(firstItem.TryGetProperty("startDate", out _));
         Assert.True(firstItem.TryGetProperty("endDate", out _));
         Assert.True(firstItem.TryGetProperty("status", out _));
+        Assert.True(firstItem.TryGetProperty("reviewStatus", out JsonElement reviewStatusProp));
+        Assert.True(reviewStatusProp.TryGetProperty("state", out JsonElement reviewStateProp));
+        Assert.Equal("UNKNOWN", reviewStateProp.GetString());
         Assert.True(root.TryGetProperty("version", out JsonElement versionProp));
         Assert.Equal(_paidMixedOrder.Version, versionProp.GetInt64());
     }

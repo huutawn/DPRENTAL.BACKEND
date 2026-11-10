@@ -74,35 +74,17 @@ public sealed class HandoverOverdueTests
     }
 
     [Fact]
-    public async Task ProcessOrderAsync_WhenPastOverdueMilestone_EmitsNoticeOnce_AndSecondRunDoesNotEmitAgain()
+    public async Task ProcessOrderAsync_WhenBeforeExpiryMilestone_DoesNotAutoExpire()
     {
         await SeedAsync(RentalItemStatus.AwaitingHandover);
 
-        // Start is 2026-10-12, End is 2026-10-15.
-        // Clock is 2026-10-13 08:00 (past Start + 1, but before End + 1)
         await using var context = NewContext();
         var sp = CreateServiceProvider(context);
         var service = sp.GetRequiredService<IHandoverOverdueService>();
 
-        // First run: should send notice
-        var firstResult = await service.ProcessOrderAsync(_order.Id);
-        Assert.Equal(1, firstResult.ProcessedItems);
-        Assert.Equal(1, firstResult.NoticesSent);
-        Assert.Equal(0, firstResult.AutoExpired);
-
-        // Verify receipt and outbox
-        var receipt = await context.RentalOperationReceipts.SingleAsync(r => r.Action == "HandoverOverdueNotice");
-        Assert.Equal(_item.Id, receipt.TargetItemId);
-        Assert.Equal(RentalOperationReceipt.StatusSucceeded, receipt.Status);
-
-        var outbox = await context.RentalOutboxMessages.SingleAsync(m => m.MessageType == "RentalHandoverOverdue");
-        Assert.Equal(_order.Id.ToString("D"), outbox.PartitionKey);
-
-        // Second run: should NOT send again
-        var secondResult = await service.ProcessOrderAsync(_order.Id);
-        Assert.Equal(0, secondResult.ProcessedItems);
-        Assert.Equal(0, secondResult.NoticesSent);
-        Assert.Single(context.RentalOperationReceipts.Where(r => r.Action == "HandoverOverdueNotice"));
+        var result = await service.ProcessOrderAsync(_order.Id);
+        Assert.Equal(0, result.AutoExpired);
+        Assert.Equal(0, result.NoticesSent);
     }
 
     [Fact]
@@ -161,7 +143,7 @@ public sealed class HandoverOverdueTests
         Assert.Contains(_order.Id, await service.GetDueOrderIdsAsync(10));
         var result = await service.ProcessOrderAsync(_order.Id);
         Assert.Equal(1, result.AutoExpired);
-        Assert.Single(context.RentalOperationReceipts.Where(r => r.Action == "HandoverOverdueNotice"));
+        Assert.Empty(context.RentalOperationReceipts.Where(r => r.Action == "HandoverOverdueNotice"));
     }
 
     [Fact]
@@ -235,7 +217,7 @@ public sealed class HandoverOverdueTests
     public async Task Worker_ProcessBatchAsync_ScansAndProcessesOrders()
     {
         await SeedAsync(RentalItemStatus.AwaitingHandover);
-
+        _clock.UtcNow = new DateTimeOffset(2026, 10, 14, 0, 0, 0, TimeSpan.FromHours(7));
         await using var context = NewContext();
         var sp = CreateServiceProvider(context);
 
@@ -262,7 +244,8 @@ public sealed class HandoverOverdueTests
         var batchResult = await worker.ProcessBatchAsync(CancellationToken.None);
         Assert.Equal(1, batchResult.Orders);
         Assert.Equal(1, batchResult.ProcessedItems);
-        Assert.Equal(1, batchResult.NoticesSent);
+        Assert.Equal(1, batchResult.AutoExpired);
+        Assert.Equal(0, batchResult.NoticesSent);
         Assert.Equal(0, batchResult.Failed);
     }
 

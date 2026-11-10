@@ -27,6 +27,66 @@ namespace RentalService.Domain.Migrations
 
             modelBuilder.HasSequence("rental_outbox_sequence", "rental");
 
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.DamageLevel", b =>
+                {
+                    b.Property<int>("Level")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Percent")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Level");
+
+                    b.ToTable("damage_levels", "rental");
+
+                    b.HasData(
+                        new
+                        {
+                            Level = 0,
+                            Description = "Máy nguyên vẹn, không khấu trừ.",
+                            Name = "Không hư",
+                            Percent = 0
+                        },
+                        new
+                        {
+                            Level = 1,
+                            Description = "Hư hại nhẹ, không ảnh hưởng vận hành.",
+                            Name = "Nhẹ",
+                            Percent = 10
+                        },
+                        new
+                        {
+                            Level = 2,
+                            Description = "Hư hại vừa, cần sửa chữa.",
+                            Name = "Vừa",
+                            Percent = 30
+                        },
+                        new
+                        {
+                            Level = 3,
+                            Description = "Hư hại nặng, sửa chữa tốn kém.",
+                            Name = "Nặng",
+                            Percent = 50
+                        },
+                        new
+                        {
+                            Level = 4,
+                            Description = "Máy không còn sử dụng được.",
+                            Name = "Hỏng hoàn toàn",
+                            Percent = 100
+                        });
+                });
+
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.DeductionProposal", b =>
                 {
                     b.Property<Guid>("Id")
@@ -405,9 +465,13 @@ namespace RentalService.Domain.Migrations
 
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
+
                     b.Property<decimal>("DailyRateSnapshot")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("DamageLevelsSnapshot")
+                        .HasColumnType("jsonb");
 
                     b.Property<DateTimeOffset?>("DeductionDeadline")
                         .HasColumnType("timestamp with time zone");
@@ -539,13 +603,13 @@ namespace RentalService.Domain.Migrations
 
                     b.HasIndex("Status");
 
-                    b.HasIndex("Status", "CompletedAt", "Id");
-
                     b.HasIndex("SupplierConfirmationDeadline");
 
                     b.HasIndex("SupplierDecisionBy");
 
                     b.HasIndex("SupplierId");
+
+                    b.HasIndex("Status", "CompletedAt", "Id");
 
                     b.ToTable("rental_items", "rental");
                 });
@@ -901,6 +965,105 @@ namespace RentalService.Domain.Migrations
                     b.HasIndex("RentalOrderId");
 
                     b.ToTable("rental_refund_confirmations", "rental");
+                });
+
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalReminderSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<DateTimeOffset?>("LastNotifiedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_notified_at");
+
+                    b.Property<DateOnly?>("LastNotifiedDate")
+                        .HasColumnType("date")
+                        .HasColumnName("last_notified_date");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_token");
+
+                    b.Property<string>("LeasedBy")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("leased_by");
+
+                    b.Property<DateTimeOffset?>("LeasedUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("leased_until");
+
+                    b.Property<DateTimeOffset?>("NextRetryAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_retry_at");
+
+                    b.Property<DateTimeOffset?>("NextTriggerAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_trigger_at");
+
+                    b.Property<int>("OverdueDayCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("overdue_day_count");
+
+                    b.Property<int>("RemainingUnitCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1)
+                        .HasColumnName("remaining_unit_count");
+
+                    b.Property<Guid>("RentalItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("rental_item_id");
+
+                    b.Property<Guid>("RentalOrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("rental_order_id");
+
+                    b.Property<int>("RetryCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("retry_count");
+
+                    b.Property<string>("ScheduleType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("schedule_type");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RentalOrderId")
+                        .HasDatabaseName("ix_rental_reminder_schedules_order");
+
+                    b.HasIndex("RentalItemId", "ScheduleType")
+                        .IsUnique()
+                        .HasDatabaseName("uq_rental_reminder_schedules_item_type");
+
+                    b.HasIndex("Status", "NextTriggerAt", "Id")
+                        .HasDatabaseName("ix_rental_reminder_schedules_claim");
+
+                    b.ToTable("rental_reminder_schedules", "rental");
                 });
 
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.RentalStateTransition", b =>

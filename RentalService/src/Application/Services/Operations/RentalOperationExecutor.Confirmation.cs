@@ -253,6 +253,12 @@ public sealed partial class RentalOperationExecutor
                     cancellationToken: cancellationToken);
                 // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
                 if (published.IsFailure) return published.Error;
+
+                if (_reminderSchedules != null)
+                {
+                    await _reminderSchedules.EnsureHandoverScheduleCreatedAsync(
+                        order.Id, item.Id, item.ExpectedStartDate, item.Quantity, utcNow, cancellationToken);
+                }
             }
             else
             {

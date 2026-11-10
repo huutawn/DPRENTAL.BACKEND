@@ -136,4 +136,9 @@ public interface IRentalEventProducer
         string? correlationId = null,
         Guid? causationId = null,
         CancellationToken cancellationToken = default);
+    Task<Result<ProducerEnqueueResult>> EnqueueRentalReminderDueAsync(
+        RentalReminderDuePayload payload,
+        string? correlationId = null,
+        Guid? causationId = null,
+        CancellationToken cancellationToken = default);
 }

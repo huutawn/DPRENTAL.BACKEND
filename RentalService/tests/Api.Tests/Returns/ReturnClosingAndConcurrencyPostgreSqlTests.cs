@@ -80,7 +80,7 @@ public sealed class ReturnClosingAndConcurrencyPostgreSqlTests : IAsyncLifetime
             new RentalOrderRepository(db),
             new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
             db,
-            media ?? Mock.Of<IRentalMediaClient>(),
+            media ?? ReturnRequestMediaStub.ForRenter(db),
             _clock,
             new RentalEventProducer(new KafkaOutboxWriter(outbox), Options.Create(new KafkaOptions
             {
@@ -114,7 +114,7 @@ public sealed class ReturnClosingAndConcurrencyPostgreSqlTests : IAsyncLifetime
 
         // Renter creates return request for u1 and u2
         var createReq = new CreateReturnRequest(Now.AddHours(-1), "Returning 2 of 3 units",
-            [new ReturnRequestUnitDto(u1.Id, []), new ReturnRequestUnitDto(u2.Id, [])]);
+            [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()]), new ReturnRequestUnitDto(u2.Id, [Guid.NewGuid()])]);
         var reqResult = await service1.CreateReturnRequestAsync(item.Id, renterCaller, createReq, "op-req-part");
         Assert.True(reqResult.IsSuccess);
 
@@ -176,12 +176,12 @@ public sealed class ReturnClosingAndConcurrencyPostgreSqlTests : IAsyncLifetime
 
         // Request 1 for u1
         var req1 = await service1.CreateReturnRequestAsync(item.Id, renterCaller,
-            new CreateReturnRequest(Now.AddHours(-2), "Req 1", [new ReturnRequestUnitDto(u1.Id, [])]), "op-req-1");
+            new CreateReturnRequest(Now.AddHours(-2), "Req 1", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]), "op-req-1");
         Assert.True(req1.IsSuccess);
 
         // Request 2 for u2
         var req2 = await service1.CreateReturnRequestAsync(item.Id, renterCaller,
-            new CreateReturnRequest(Now.AddHours(-1), "Req 2", [new ReturnRequestUnitDto(u2.Id, [])]), "op-req-2");
+            new CreateReturnRequest(Now.AddHours(-1), "Req 2", [new ReturnRequestUnitDto(u2.Id, [Guid.NewGuid()])]), "op-req-2");
         Assert.True(req2.IsSuccess);
 
         // Supplier returns both u1 and u2 in one call
@@ -251,7 +251,7 @@ public sealed class ReturnClosingAndConcurrencyPostgreSqlTests : IAsyncLifetime
 
         // Create return request for u1
         var req = await service1.CreateReturnRequestAsync(item.Id, renterCaller,
-            new CreateReturnRequest(Now.AddHours(-1), "Req for u1", [new ReturnRequestUnitDto(u1.Id, [])]), "op-req-u1");
+            new CreateReturnRequest(Now.AddHours(-1), "Req for u1", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]), "op-req-u1");
         Assert.True(req.IsSuccess);
 
         // Setup failing inventory producer
@@ -292,7 +292,7 @@ public sealed class ReturnClosingAndConcurrencyPostgreSqlTests : IAsyncLifetime
         await using var db1 = NewDb();
         var service1 = Service(db1);
         await service1.CreateReturnRequestAsync(item.Id, RentalCallerContext.ForUser(order.RenterId),
-            new CreateReturnRequest(Now.AddHours(-1), "Req", [new ReturnRequestUnitDto(u1.Id, [])]), "op-req-rep");
+            new CreateReturnRequest(Now.AddHours(-1), "Req", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]), "op-req-rep");
 
         // Supplier return
         var closeTime = Now.AddMinutes(10);
@@ -345,7 +345,7 @@ public sealed class ReturnClosingAndConcurrencyPostgreSqlTests : IAsyncLifetime
             var service = Service(db);
             var caller = RentalCallerContext.ForUser(order.RenterId);
             return await service.CreateReturnRequestAsync(item.Id, caller,
-                new CreateReturnRequest(Now.AddHours(-1), "Concurrent request", [new ReturnRequestUnitDto(u1.Id, [])]),
+                new CreateReturnRequest(Now.AddHours(-1), "Concurrent request", [new ReturnRequestUnitDto(u1.Id, [Guid.NewGuid()])]),
                 "op-conc-renter");
         });
 
@@ -411,6 +411,8 @@ public sealed class ReturnClosingAndConcurrencyPostgreSqlTests : IAsyncLifetime
                 services.RemoveAll<IUnitOfWork>();
                 services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
                 services.AddSingleton<TimeProvider>(_clock);
+                services.RemoveAll<IRentalMediaClient>();
+                services.AddSingleton(ReturnRequestMediaStub.ForRenter(order.RenterId));
                 services.AddAuthentication("TestScheme")
                     .AddScheme<AuthenticationSchemeOptions, HeaderAuthHandler>("TestScheme", _ => { });
                 services.PostConfigure<AuthenticationOptions>(options =>
@@ -445,7 +447,16 @@ public sealed class ReturnClosingAndConcurrencyPostgreSqlTests : IAsyncLifetime
 
         // Step 3: POST return-requests
         var createRequestPayload = new CreateReturnRequest(Now.AddHours(-1), "E2E return request",
-            [new ReturnRequestUnitDto(chosenAssignmentId, [])]);
+            [new ReturnRequestUnitDto(chosenAssignmentId, [Guid.NewGuid()])]);
+        renterClient.DefaultRequestHeaders.Add("Idempotency-Key", "e2e-return-missing-evidence");
+        using var missingEvidenceResp = await renterClient.PostAsJsonAsync(
+            $"/api/v1/rental/items/{item.Id}/return-requests",
+            createRequestPayload with
+            {
+                Units = [new ReturnRequestUnitDto(chosenAssignmentId, [])]
+            });
+        Assert.Equal(HttpStatusCode.BadRequest, missingEvidenceResp.StatusCode);
+        renterClient.DefaultRequestHeaders.Remove("Idempotency-Key");
         renterClient.DefaultRequestHeaders.Add("Idempotency-Key", "e2e-return-req-key");
         using var postReqResp = await renterClient.PostAsJsonAsync(
             $"/api/v1/rental/items/{item.Id}/return-requests", createRequestPayload);

@@ -2,6 +2,7 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Checkout;
+using Dprental.RentalService.Application.DTOs.Settlement;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.IServices.Checkout;
 using Dprental.RentalService.Application.Policies;
@@ -30,6 +31,7 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
     private readonly IRentalOrderRepository _orders;
     private readonly IRentalCartRepository _carts;
     private readonly IOrderCodeGenerator _orderCodes;
+    private readonly IDamageLevelRepository _damageLevels;
     private readonly IUnitOfWork? _unitOfWork;
     private readonly ILogger<CheckoutOrderWriter> _logger;
 
@@ -38,12 +40,14 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         IRentalOrderRepository orders,
         IRentalCartRepository carts,
         IOrderCodeGenerator orderCodes,
+        IDamageLevelRepository damageLevels,
         ILogger<CheckoutOrderWriter> logger)
     {
         // Kiểm tra tham số bắt buộc ở đầu hàm để không dùng một dependency/request rỗng trong các bước sau.
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _carts = carts ?? throw new ArgumentNullException(nameof(carts));
         _orderCodes = orderCodes ?? throw new ArgumentNullException(nameof(orderCodes));
+        _damageLevels = damageLevels ?? throw new ArgumentNullException(nameof(damageLevels));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -52,6 +56,7 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         IRentalOrderRepository orders,
         IRentalCartRepository carts,
         IOrderCodeGenerator orderCodes,
+        IDamageLevelRepository damageLevels,
         IUnitOfWork unitOfWork,
         ILogger<CheckoutOrderWriter> logger)
     {
@@ -59,6 +64,7 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _carts = carts ?? throw new ArgumentNullException(nameof(carts));
         _orderCodes = orderCodes ?? throw new ArgumentNullException(nameof(orderCodes));
+        _damageLevels = damageLevels ?? throw new ArgumentNullException(nameof(damageLevels));
         _unitOfWork = unitOfWork;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -176,6 +182,13 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         if (order.IsFailure)
         {
             return await FailAsync(heldLines, order.Error);
+        }
+
+        // Đóng băng bảng mức hư hại vào từng item; đổi bảng sau không ảnh hưởng đơn đã checkout.
+        string damageLevelsSnapshot = DamageLevelSnapshot.Serialize(await _damageLevels.GetAllAsync(cancellationToken));
+        foreach (RentalItem item in order.Value.Items)
+        {
+            item.SetDamageLevelsSnapshot(damageLevelsSnapshot);
         }
 
         // Kiểm tra dữ liệu tùy chọn hoặc kết quả tra cứu trước khi dùng; xử lý riêng trường hợp không có giá trị.

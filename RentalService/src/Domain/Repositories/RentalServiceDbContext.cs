@@ -30,6 +30,7 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
     public DbSet<ReturnRequestResolutionUnit> ReturnRequestResolutionUnits => Set<ReturnRequestResolutionUnit>();
     public DbSet<DeductionProposal> DeductionProposals => Set<DeductionProposal>();
     public DbSet<Dispute> Disputes => Set<Dispute>();
+    public DbSet<DamageLevel> DamageLevels => Set<DamageLevel>();
     public DbSet<RentalOperationReceipt> RentalOperationReceipts => Set<RentalOperationReceipt>();
     public DbSet<RentalInboxMessage> RentalInboxMessages => Set<RentalInboxMessage>();
     public DbSet<RentalOutboxMessage> RentalOutboxMessages => Set<RentalOutboxMessage>();
@@ -37,6 +38,7 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
     public DbSet<RenterAddress> RenterAddresses => Set<RenterAddress>();
     public DbSet<RenterBankAccount> RenterBankAccounts => Set<RenterBankAccount>();
     public DbSet<RentalRefundConfirmation> RentalRefundConfirmations => Set<RentalRefundConfirmation>();
+    public DbSet<RentalReminderSchedule> RentalReminderSchedules => Set<RentalReminderSchedule>();
 
     public void DiscardChanges() => ChangeTracker.Clear();
 
@@ -169,6 +171,16 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
         });
 
         // RentalItem
+        modelBuilder.Entity<DamageLevel>(b =>
+        {
+            b.HasData(
+                new { Level = 0, Name = "Không hư", Description = "Máy nguyên vẹn, không khấu trừ.", Percent = 0 },
+                new { Level = 1, Name = "Nhẹ", Description = "Hư hại nhẹ, không ảnh hưởng vận hành.", Percent = 10 },
+                new { Level = 2, Name = "Vừa", Description = "Hư hại vừa, cần sửa chữa.", Percent = 30 },
+                new { Level = 3, Name = "Nặng", Description = "Hư hại nặng, sửa chữa tốn kém.", Percent = 50 },
+                new { Level = 4, Name = "Hỏng hoàn toàn", Description = "Máy không còn sử dụng được.", Percent = 100 });
+        });
+
         modelBuilder.Entity<RentalItem>(b =>
         {
             b.Property(i => i.DailyRateSnapshot)
@@ -373,6 +385,39 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
             b.Property(o => o.RequestFingerprint).HasMaxLength(64);
             b.HasIndex(o => o.RenterUserId);
             b.HasIndex(o => new { o.RenterUserId, o.Status });
+        });
+
+        modelBuilder.Entity<RentalReminderSchedule>(b =>
+        {
+            b.ToTable("rental_reminder_schedules", "rental");
+            b.HasKey(s => s.Id);
+            b.Property(s => s.Id).ValueGeneratedNever();
+            b.Property(s => s.RentalOrderId).HasColumnName("rental_order_id").IsRequired();
+            b.Property(s => s.RentalItemId).HasColumnName("rental_item_id").IsRequired();
+            b.Property(s => s.ScheduleType).HasColumnName("schedule_type").HasConversion<string>().HasMaxLength(32).IsRequired();
+            b.Property(s => s.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(32).IsRequired();
+            b.Property(s => s.NextTriggerAt).HasColumnName("next_trigger_at");
+            b.Property(s => s.LastNotifiedDate).HasColumnName("last_notified_date");
+            b.Property(s => s.LastNotifiedAt).HasColumnName("last_notified_at");
+            b.Property(s => s.OverdueDayCount).HasColumnName("overdue_day_count").IsRequired().HasDefaultValue(0);
+            b.Property(s => s.RemainingUnitCount).HasColumnName("remaining_unit_count").IsRequired().HasDefaultValue(1);
+            b.Property(s => s.LeasedUntil).HasColumnName("leased_until");
+            b.Property(s => s.LeasedBy).HasColumnName("leased_by").HasMaxLength(64);
+            b.Property(s => s.LeaseToken).HasColumnName("lease_token");
+            b.Property(s => s.RetryCount).HasColumnName("retry_count").IsRequired().HasDefaultValue(0);
+            b.Property(s => s.NextRetryAt).HasColumnName("next_retry_at");
+            b.Property(s => s.CreatedAt).HasColumnName("created_at").IsRequired().HasDefaultValueSql("NOW()");
+            b.Property(s => s.UpdatedAt).HasColumnName("updated_at").IsRequired().HasDefaultValueSql("NOW()");
+
+            b.HasIndex(s => new { s.RentalItemId, s.ScheduleType })
+                .IsUnique()
+                .HasDatabaseName("uq_rental_reminder_schedules_item_type");
+
+            b.HasIndex(s => new { s.Status, s.NextTriggerAt, s.Id })
+                .HasDatabaseName("ix_rental_reminder_schedules_claim");
+
+            b.HasIndex(s => s.RentalOrderId)
+                .HasDatabaseName("ix_rental_reminder_schedules_order");
         });
     }
 }

@@ -120,7 +120,11 @@ internal static class OrderQueryMapper
         .ToList();
 
     // Chiếu projection danh sách thành thông tin tóm tắt item, không tải lại aggregate chỉ để dựng response.
-    public static OrderSummaryItemResponse ToSummaryItem(OrderItemSummaryRecord item)
+    // Chiếu projection danh sách thành thông tin tóm tắt item (mặc định reviewStatus UNKNOWN).
+    public static OrderSummaryItemResponse ToSummaryItem(OrderItemSummaryRecord item) =>
+        ToSummaryItem(item, null);
+
+    public static OrderSummaryItemResponse ToSummaryItem(OrderItemSummaryRecord item, ReviewStatusDto? reviewStatus)
     {
         // Đổi khoảng ngày projection qua adapter dùng chung trước khi hiển thị dòng tóm tắt; không sửa dữ liệu ngày đã lưu.
         Result<(DateOnly StartDate, DateOnly EndDate)> dates =
@@ -141,7 +145,8 @@ internal static class OrderQueryMapper
             item.DepositAmount,
             item.StartDate,
             endDate,
-            item.Status);
+            item.Status,
+            reviewStatus ?? ReviewStatusDto.Unknown);
     }
 
     // Trả biên bản bàn giao nếu đã được chốt; chưa có record thì không suy diễn từ intent còn Pending.

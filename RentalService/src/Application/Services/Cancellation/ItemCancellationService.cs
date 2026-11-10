@@ -44,6 +44,7 @@ public sealed class ItemCancellationService : IItemCancellationService
     private readonly ILogger<ItemCancellationService> _logger;
     private readonly int _autoExpireGraceHours;
     private readonly IOrderHubNotifier? _notifier;
+    private readonly Dprental.RentalService.Application.IServices.Reminders.IRentalReminderScheduleService? _reminderSchedules;
     // Khởi tạo các dependency và cấu hình dùng cho service; kiểm tra dependency bắt buộc ngay khi dựng đối tượng.
     public ItemCancellationService(
         IRentalOrderRepository orderRepository,
@@ -55,7 +56,8 @@ public sealed class ItemCancellationService : IItemCancellationService
         ILogger<ItemCancellationService>? logger = null,
         IOptions<HandoverOverdueOptions>? handoverOptions = null,
         IRentalEventProducer? rentalEvents = null,
-        IOrderHubNotifier? notifier = null)
+        IOrderHubNotifier? notifier = null,
+        Dprental.RentalService.Application.IServices.Reminders.IRentalReminderScheduleService? reminderSchedules = null)
     {
         // Kiểm tra tham số bắt buộc ở đầu hàm để không dùng một dependency/request rỗng trong các bước sau.
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
@@ -71,6 +73,7 @@ public sealed class ItemCancellationService : IItemCancellationService
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ItemCancellationService>.Instance;
         _autoExpireGraceHours = (handoverOptions?.Value ?? new HandoverOverdueOptions()).AutoExpireGraceHours;
         _notifier = notifier;
+        _reminderSchedules = reminderSchedules;
     }
 
     // Hủy item chưa được bàn giao sau mốc cho phép; kiểm tra quyền/replay và intent bàn giao trước khi lên lịch release/refund.
@@ -260,6 +263,11 @@ public sealed class ItemCancellationService : IItemCancellationService
             // Tạo/lưu journal của thao tác để các lần retry và đối soát dùng cùng định danh, payload và kết quả.
             order.AddOperationReceipt(receipt);
             order.RecordReadModelUpdate(utcNow);
+
+            if (_reminderSchedules != null)
+            {
+                await _reminderSchedules.StopSchedulesForItemAsync(item.Id, utcNow, cancellationToken);
+            }
 
             // 12. Phát event RentalItemCancelled qua producer
             var itemCancelledRes = await _rentalEvents.EnqueueRentalItemCancelledAsync(
@@ -487,6 +495,11 @@ public sealed class ItemCancellationService : IItemCancellationService
             // Tạo/lưu journal của thao tác để các lần retry và đối soát dùng cùng định danh, payload và kết quả.
             order.AddOperationReceipt(receipt);
             order.RecordReadModelUpdate(utcNow);
+
+            if (_reminderSchedules != null)
+            {
+                await _reminderSchedules.StopSchedulesForItemAsync(item.Id, utcNow, cancellationToken);
+            }
 
             // Ghi event/command vào Outbox; enqueue thành công chỉ xác nhận đã lưu ý định gửi, chưa xác nhận service đích đã thực thi.
             var itemExpiredRes = await _rentalEvents.EnqueueRentalItemExpiredAsync(

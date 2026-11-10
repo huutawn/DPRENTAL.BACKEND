@@ -26,10 +26,10 @@ using Dprental.RentalService.Application.Services.Refunds;
 using Dprental.RentalService.Application.Services.Calendar;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Application.Services.Checkout;
+using Dprental.RentalService.Application.Services.Orders;
 using Dprental.RentalService.Application.Services.Expiry;
 using Dprental.RentalService.Application.Services.Integration;
 using Dprental.RentalService.Application.Services.Operations;
-using Dprental.RentalService.Application.Services.Orders;
 using Dprental.RentalService.Application.Services.Payments;
 using Dprental.RentalService.Application.Services.Returns;
 using Dprental.RentalService.Application.Services.SupplierDecision;
@@ -74,6 +74,9 @@ public static class ApplicationServiceCollectionExtensions
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IAuthRentalClient, HttpAuthRentalClient>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        services.AddHttpClient<IReviewRentalClient, HttpReviewRentalClient>()
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        services.AddScoped<IOrderReviewStatusEnricher, OrderReviewStatusEnricher>();
 
         // Checkout chia thành chuẩn bị, điều phối, ghi đơn và tạo hóa đơn.
         services.AddScoped<ICheckoutPreparationService, CheckoutPreparationService>();
@@ -126,6 +129,18 @@ public static class ApplicationServiceCollectionExtensions
 
         // Dịch vụ tích hợp ReviewService (snapshot và đối soát)
         services.AddScoped<Dprental.RentalService.Application.IServices.ReviewIntegration.IRentalReviewIntegrationService, Dprental.RentalService.Application.Services.ReviewIntegration.RentalReviewIntegrationService>();
+        // Dịch vụ quản lý vòng đời lịch nhắc nhở bàn giao, trả máy và cảnh báo quá hạn.
+        services.AddScoped<Dprental.RentalService.Application.IServices.Reminders.IRentalReminderScheduleService, Dprental.RentalService.Application.Services.Reminders.RentalReminderScheduleService>();
+        services.AddScoped<Dprental.RentalService.Application.IServices.Reminders.IRentalReminderBatchProcessor, Dprental.RentalService.Application.Services.Reminders.RentalReminderBatchProcessor>();
+        services.AddScoped<Dprental.RentalService.Application.IServices.Reminders.IRentalReminderBackfillService>(sp =>
+            new Dprental.RentalService.Application.Services.Reminders.RentalReminderBackfillService(
+                sp.GetRequiredService<IServiceScopeFactory>(),
+                sp.GetRequiredService<Dprental.RentalService.Domain.IRepositories.IOrderLockManager>(),
+                sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Dprental.RentalService.Application.Services.Reminders.RentalReminderBackfillService>>()));
+        services.AddOptions<Dprental.RentalService.Application.Options.RentalReminderOptions>()
+            .BindConfiguration(Dprental.RentalService.Application.Options.RentalReminderOptions.SectionName);
+        services.AddHostedService<RentalReminderWorker>();
 
         // Đăng ký pipeline Kafka: options, producers, dispatcher và ba worker Inbox/Outbox/broker.
         services.AddKafka(configuration ?? new ConfigurationBuilder().Build());
@@ -157,6 +172,7 @@ public static class ApplicationServiceCollectionExtensions
         // Đề xuất, phản hồi và giải quyết tranh chấp khấu trừ để lập lịch quyết toán.
         services.AddScoped<IDeductionService, DeductionService>();
         services.AddScoped<IDeductionResponseService, DeductionResponseService>();
+        services.AddScoped<IDamageLevelService, DamageLevelService>();
         // Worker lần lượt xử lý deadline khấu trừ và lập lịch quyết toán.
         services.AddHostedService<DeductionDeadlineWorker>();
         services.AddHostedService<RefundReconciliationWorker>();

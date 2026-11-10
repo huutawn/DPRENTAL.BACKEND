@@ -85,7 +85,7 @@ public sealed class AdminReturnRequestResolutionTests : IAsyncLifetime
             new RentalOrderRepository(db),
             new PostgresOrderLockManager(settings, NullLogger<PostgresOrderLockManager>.Instance),
             db,
-            media ?? Mock.Of<IRentalMediaClient>(),
+            media ?? ReturnRequestMediaStub.ForRenter(db),
             _clock,
             events,
             settings,
@@ -246,7 +246,7 @@ public sealed class AdminReturnRequestResolutionTests : IAsyncLifetime
         // CRITICAL CHECK: After rejection, unit does NOT block creating a new return request!
         var renterCaller = RentalCallerContext.ForUser(order.RenterId);
         var newReturnReq = new CreateReturnRequest(Now.AddMinutes(-5), "Second attempt to return",
-            [new ReturnRequestUnitDto(targetUnit.RentalUnitAssignmentId, [])]);
+            [new ReturnRequestUnitDto(targetUnit.RentalUnitAssignmentId, [Guid.NewGuid()])]);
 
         var newReqResult = await service.CreateReturnRequestAsync(item.Id, renterCaller, newReturnReq, "renter-new-req-after-reject");
         Assert.True(newReqResult.IsSuccess);
