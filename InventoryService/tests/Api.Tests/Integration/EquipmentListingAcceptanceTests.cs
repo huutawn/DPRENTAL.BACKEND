@@ -148,6 +148,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 1_000_000m,
             rentalRate = new { dailyRate = 500_000m, currency = "VND" }
         };
 
@@ -608,6 +609,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             specValues = new { sensor = "Full-Frame" },
             mediaIds = new[] { vid1, img1, img2 },
             thumbnailMediaId = img2,
+            depositAmount = 1_000_000m,
             rentalRate = new { dailyRate = 500_000m, currency = "VND" }
         };
 
@@ -690,6 +692,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             model = "FX3",
             serialNumber = "SN-BAD-YEAR",
             specValues = new { },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
         var missingYearResp = await client.PostAsync("api/v1/inventory/equipment-listings",
@@ -820,7 +823,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
     }
 
     [Fact]
-    public async Task CreateListing_DepositAmount_DefaultZero_AndCustomDeposit_Succeeds()
+    public async Task CreateListing_DepositAmount_OmittedRejected_AndCustomDeposit_Succeeds()
     {
         var (app, secFactory) = CreateFactory();
         await using var _ = app;
@@ -831,7 +834,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         var token = secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        // 1. Omitted depositAmount defaults to 0
+        // 1. Omitted depositAmount defaults to 0, which is not above the daily rate -> 400
         var payloadDefault = new
         {
             equipmentTypeId = Guid.NewGuid(),
@@ -846,11 +849,9 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         };
         var respDefault = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payloadDefault), Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.Created, respDefault.StatusCode);
-        var createdDefault = await respDefault.Content.ReadFromJsonAsync<EquipmentListingResponse>();
-        Assert.NotNull(createdDefault);
-        Assert.Equal(0m, createdDefault.DepositAmount);
-        Assert.Equal(1, createdDefault.TotalQuantity);
+        Assert.Equal(HttpStatusCode.BadRequest, respDefault.StatusCode);
+        var problemDefault = await respDefault.Content.ReadFromJsonAsync<ProblemDetails>();
+        Assert.Equal("DEPOSIT_NOT_GREATER_THAN_DAILY_RATE", problemDefault!.Title);
 
         // 2. Custom depositAmount 500,000 saves correctly
         var payloadCustom = new
@@ -863,7 +864,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
-            rentalRate = new { dailyRate = 500_000m, currency = "VND" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             depositAmount = 500_000m
         };
         var respCustom = await client.PostAsync("api/v1/inventory/equipment-listings",
@@ -944,7 +945,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
-            rentalRate = new { dailyRate = 500_000m, currency = "VND" },
+            rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             depositAmount = 500_000m
         };
         var createResp = await client.PostAsync("api/v1/inventory/equipment-listings",
@@ -966,12 +967,14 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         var patchedName = await patchNameResp.Content.ReadFromJsonAsync<EquipmentListingResponse>();
         Assert.Equal(500_000m, patchedName!.DepositAmount);
 
-        // 4. PATCH depositAmount = 0 -> depositAmount becomes 0
+        // 4. PATCH depositAmount = 0 (not above the 100,000 daily rate) -> 400, deposit unchanged
         var patchZeroResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
             new StringContent("{\"depositAmount\":0}", Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.OK, patchZeroResp.StatusCode);
-        var patchedZero = await patchZeroResp.Content.ReadFromJsonAsync<EquipmentListingResponse>();
-        Assert.Equal(0m, patchedZero!.DepositAmount);
+        Assert.Equal(HttpStatusCode.BadRequest, patchZeroResp.StatusCode);
+        var probZero = await patchZeroResp.Content.ReadFromJsonAsync<ProblemDetails>();
+        Assert.Equal("DEPOSIT_NOT_GREATER_THAN_DAILY_RATE", probZero!.Title);
+        var afterZero = await client.GetFromJsonAsync<EquipmentListingResponse>($"api/v1/inventory/equipment-listings/{listingId:D}");
+        Assert.Equal(500_000m, afterZero!.DepositAmount);
 
         // 5. PATCH depositAmount = 1,000,000 -> depositAmount becomes 1,000,000
         var patchNewResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
