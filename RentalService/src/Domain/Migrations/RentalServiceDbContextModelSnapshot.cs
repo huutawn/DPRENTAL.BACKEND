@@ -27,6 +27,66 @@ namespace RentalService.Domain.Migrations
 
             modelBuilder.HasSequence("rental_outbox_sequence", "rental");
 
+            modelBuilder.Entity("Dprental.RentalService.Domain.Entities.DamageLevel", b =>
+                {
+                    b.Property<int>("Level")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Percent")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Level");
+
+                    b.ToTable("damage_levels", "rental");
+
+                    b.HasData(
+                        new
+                        {
+                            Level = 0,
+                            Description = "Máy nguyên vẹn, không khấu trừ.",
+                            Name = "Không hư",
+                            Percent = 0
+                        },
+                        new
+                        {
+                            Level = 1,
+                            Description = "Hư hại nhẹ, không ảnh hưởng vận hành.",
+                            Name = "Nhẹ",
+                            Percent = 10
+                        },
+                        new
+                        {
+                            Level = 2,
+                            Description = "Hư hại vừa, cần sửa chữa.",
+                            Name = "Vừa",
+                            Percent = 30
+                        },
+                        new
+                        {
+                            Level = 3,
+                            Description = "Hư hại nặng, sửa chữa tốn kém.",
+                            Name = "Nặng",
+                            Percent = 50
+                        },
+                        new
+                        {
+                            Level = 4,
+                            Description = "Máy không còn sử dụng được.",
+                            Name = "Hỏng hoàn toàn",
+                            Percent = 100
+                        });
+                });
+
             modelBuilder.Entity("Dprental.RentalService.Domain.Entities.DeductionProposal", b =>
                 {
                     b.Property<Guid>("Id")
@@ -409,6 +469,9 @@ namespace RentalService.Domain.Migrations
                     b.Property<decimal>("DailyRateSnapshot")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("DamageLevelsSnapshot")
+                        .HasColumnType("jsonb");
 
                     b.Property<DateTimeOffset?>("DeductionDeadline")
                         .HasColumnType("timestamp with time zone");
