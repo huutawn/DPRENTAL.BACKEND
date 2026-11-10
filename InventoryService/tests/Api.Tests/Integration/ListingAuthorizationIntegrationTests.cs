@@ -167,6 +167,7 @@ public sealed class ListingAuthorizationIntegrationTests : IClassFixture<Postgre
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
         var createResp = await client.PostAsync("api/v1/inventory/equipment-listings",

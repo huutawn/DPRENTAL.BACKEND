@@ -7,13 +7,12 @@ namespace Dprental.InventoryService.Application.DTOs.Calendar;
 /// DTO phản hồi khi tạo khoảng chặn lịch thành công.
 /// </summary>
 public sealed record CalendarBlockResponse(
-    [property: JsonPropertyName("id")] Guid Id,
-    [property: JsonPropertyName("assetId")] Guid AssetId,
-    [property: JsonPropertyName("startDate")] DateOnly StartDate,
-    [property: JsonPropertyName("endDate")] DateOnly EndDate,
-    [property: JsonPropertyName("reason")]
+    Guid Id,
+    Guid AssetId,
+    DateOnly StartDate,
+    DateOnly EndDate,
     [property: JsonConverter(typeof(JsonStringEnumConverter<CalendarBlockReason>))]
     CalendarBlockReason Reason,
-    [property: JsonPropertyName("note")] string? Note,
-    [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt
+    string? Note,
+    DateTimeOffset CreatedAt
 );

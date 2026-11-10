@@ -1,4 +1,3 @@
-using System.Text.Json.Serialization;
 
 namespace Dprental.InventoryService.Application.DTOs.Availability;
 
@@ -6,6 +5,6 @@ namespace Dprental.InventoryService.Application.DTOs.Availability;
 /// Khoảng ngày bận của tài sản (inclusive).
 /// </summary>
 public sealed record BusyRangeDto(
-    [property: JsonPropertyName("startDate")] DateOnly StartDate,
-    [property: JsonPropertyName("endDate")] DateOnly EndDate
+    DateOnly StartDate,
+    DateOnly EndDate
 );

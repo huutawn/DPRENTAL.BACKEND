@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Text.Json.Serialization;
 
 namespace Dprental.InventoryService.Common;
 
@@ -60,9 +59,9 @@ public enum ErrorType
 /// Type trung lập độc lập với DTO Catalog và HTTP boundary.
 /// </summary>
 public sealed record ValidationError(
-    [property: JsonPropertyName("field")] string Field,
-    [property: JsonPropertyName("code")] string Code,
-    [property: JsonPropertyName("message")] string Message);
+    string Field,
+    string Code,
+    string Message);
 
 /// <summary>
 /// Đại diện cho một lỗi nghiệp vụ với mã lỗi, thông điệp, phân loại lỗi và danh sách lỗi validation tùy chọn.

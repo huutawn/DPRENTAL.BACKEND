@@ -305,7 +305,8 @@ public sealed class EquipmentListingServiceTests
             Description: "Mô tả máy quay",
             SchemaVersion: 1,
             MediaIds: [media2, media1],
-            ThumbnailMediaId: media1);
+            ThumbnailMediaId: media1,
+            DepositAmount: 1_000_000m);
 
         var result = await service.CreateListingAsync(request, caller);
 
@@ -429,7 +430,8 @@ public sealed class EquipmentListingServiceTests
 
         var listingId = Guid.NewGuid();
         var listing = EquipmentListing.Create(
-            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024).Value;
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024,
+            depositAmount: 500_000m).Value;
         _listingRepo.Add(listing);
 
         var newRates = new RentalRateDto(200_000m, 1_200_000m, 4_000_000m, "VND");
@@ -439,6 +441,28 @@ public sealed class EquipmentListingServiceTests
         Assert.Equal(200_000m, result.Value.DailyRate);
         Assert.Equal(1_200_000m, result.Value.WeeklyRate);
         Assert.Equal(4_000_000m, result.Value.MonthlyRate);
+    }
+
+    [Theory]
+    [InlineData(500_000)] // bằng cọc
+    [InlineData(600_000)] // vượt cọc
+    public async Task UpdateRentalRateAsync_DailyRateNotBelowDeposit_ReturnsDepositNotGreaterThanDailyRate(decimal newDailyRate)
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId);
+
+        var listingId = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2024,
+            depositAmount: 500_000m).Value;
+        _listingRepo.Add(listing);
+
+        var result = await service.UpdateRentalRateAsync(listingId, new RentalRateDto(newDailyRate, null, null, "VND"), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("DEPOSIT_NOT_GREATER_THAN_DAILY_RATE", result.Error.Code);
+        Assert.Equal(100_000m, _listingRepo.Store[listingId].DailyRate);
     }
     [Fact]
     public async Task ServicePrincipal_IsForbidden_OnAllListingServiceMethods()
@@ -678,23 +702,33 @@ public sealed class EquipmentListingServiceTests
     }
 
     [Fact]
-    public async Task CreateListingAsync_DepositAmount_DefaultZeroAndCustom_Succeeds()
+    public async Task CreateListingAsync_DepositAmount_MustExceedDailyRate()
     {
         var service = CreateService();
         var ownerId = Guid.NewGuid();
         var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
 
         using var specDoc = JsonDocument.Parse("{}");
-        // 1. Omitted depositAmount defaults to 0
+        // 1. Omitted depositAmount defaults to 0, not greater than the daily rate -> rejected
         var reqDefault = new CreateEquipmentListingRequest(
             Guid.NewGuid(), Guid.NewGuid(), "Camera A", "FX3", "SN-DEF-1",
             specDoc.RootElement.Clone(),
             new RentalRateDto(100_000m, null, null, "VND"),
             2024);
         var resDefault = await service.CreateListingAsync(reqDefault, caller);
-        Assert.True(resDefault.IsSuccess);
-        Assert.Equal(0m, resDefault.Value.DepositAmount);
-        Assert.Equal(1, resDefault.Value.TotalQuantity);
+        Assert.True(resDefault.IsFailure);
+        Assert.Equal("DEPOSIT_NOT_GREATER_THAN_DAILY_RATE", resDefault.Error.Code);
+
+        // 1b. Deposit equal to the daily rate -> rejected
+        var reqEqual = new CreateEquipmentListingRequest(
+            Guid.NewGuid(), Guid.NewGuid(), "Camera A2", "FX3", "SN-EQ-1",
+            specDoc.RootElement.Clone(),
+            new RentalRateDto(100_000m, null, null, "VND"),
+            2024,
+            DepositAmount: 100_000m);
+        var resEqual = await service.CreateListingAsync(reqEqual, caller);
+        Assert.True(resEqual.IsFailure);
+        Assert.Equal("DEPOSIT_NOT_GREATER_THAN_DAILY_RATE", resEqual.Error.Code);
 
         // 2. Custom depositAmount 500,000 saves correctly
         var reqCustom = new CreateEquipmentListingRequest(
@@ -762,14 +796,18 @@ public sealed class EquipmentListingServiceTests
         Assert.True(patchNewDeposit.IsSuccess);
         Assert.Equal(1_000_000m, patchNewDeposit.Value.DepositAmount);
 
-        // 3. Specified 0 removes deposit requirement
-        var patchZero = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+        // 3. Deposit must stay above the daily rate (100,000): 0 and the rate itself are rejected, value is kept
+        foreach (var notAboveRate in new[] { 0m, 100_000m })
         {
-            IsDepositAmountSpecified = true,
-            DepositAmount = 0m
-        }, caller);
-        Assert.True(patchZero.IsSuccess);
-        Assert.Equal(0m, patchZero.Value.DepositAmount);
+            var patchTooLow = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest
+            {
+                IsDepositAmountSpecified = true,
+                DepositAmount = notAboveRate
+            }, caller);
+            Assert.True(patchTooLow.IsFailure);
+            Assert.Equal("DEPOSIT_NOT_GREATER_THAN_DAILY_RATE", patchTooLow.Error.Code);
+        }
+        Assert.Equal(1_000_000m, _listingRepo.Store[listingId].DepositAmount);
 
         // 4. Specified null is rejected with INVALID_DEPOSIT_AMOUNT
         var patchNull = await service.PatchListingAsync(listingId, new PatchEquipmentListingRequest

@@ -71,6 +71,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -141,6 +142,7 @@ public sealed partial class CatalogHttpIntegrationTests
             model = "Sony FX3",
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             serialNumber = "FX3-SN-001",
             manufactureYear = 2024
@@ -215,6 +217,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -265,6 +268,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -341,6 +345,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -390,6 +395,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -473,6 +479,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" },
             mediaIds = new[] { thumbId },
             thumbnailMediaId = thumbId
@@ -624,6 +631,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -694,6 +702,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -757,6 +766,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -931,6 +941,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { key = "valA" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -944,6 +955,7 @@ public sealed partial class CatalogHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { key = "valB" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -987,6 +999,7 @@ public sealed partial class CatalogHttpIntegrationTests
             model = "Model",
             schemaVersion = 1,
             specValues = new { },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 

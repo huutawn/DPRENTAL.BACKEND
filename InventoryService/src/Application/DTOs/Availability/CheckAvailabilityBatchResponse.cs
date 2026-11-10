@@ -1,4 +1,3 @@
-using System.Text.Json.Serialization;
 
 namespace Dprental.InventoryService.Application.DTOs.Availability;
 
@@ -7,6 +6,6 @@ namespace Dprental.InventoryService.Application.DTOs.Availability;
 /// Chỉ chứa unavailableAssetIds và notFoundAssetIds theo hợp đồng MVP.
 /// </summary>
 public sealed record CheckAvailabilityBatchResponse(
-    [property: JsonPropertyName("unavailableAssetIds")] IReadOnlyList<Guid> UnavailableAssetIds,
-    [property: JsonPropertyName("notFoundAssetIds")] IReadOnlyList<Guid> NotFoundAssetIds
+    IReadOnlyList<Guid> UnavailableAssetIds,
+    IReadOnlyList<Guid> NotFoundAssetIds
 );

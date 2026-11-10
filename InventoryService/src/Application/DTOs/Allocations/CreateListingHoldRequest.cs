@@ -7,11 +7,11 @@ namespace Dprental.InventoryService.Application.DTOs.Allocations;
 /// </summary>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record CreateListingHoldRequest(
-    [property: JsonPropertyName("quantity")] int Quantity,
-    [property: JsonPropertyName("startDate")] DateOnly StartDate,
-    [property: JsonPropertyName("endDate")] DateOnly EndDate,
-    [property: JsonPropertyName("holdExpiresAt")] DateTimeOffset HoldExpiresAt,
-    [property: JsonPropertyName("sourceSystem")] string SourceSystem,
-    [property: JsonPropertyName("groupReference")] string GroupReference,
-    [property: JsonPropertyName("notes")] string? Notes = null
+    int Quantity,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    DateTimeOffset HoldExpiresAt,
+    string SourceSystem,
+    string GroupReference,
+    string? Notes = null
 );

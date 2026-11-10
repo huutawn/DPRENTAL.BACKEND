@@ -8,6 +8,6 @@ namespace Dprental.InventoryService.Application.DTOs.Assets;
 /// </summary>
 [JsonConverter(typeof(ToggleAcceptingBookingsRequestJsonConverter))]
 public sealed record ToggleAcceptingBookingsRequest(
-    [property: JsonPropertyName("acceptingBookings")] bool AcceptingBookings,
-    [property: JsonPropertyName("reason")] string? Reason = null
+    bool AcceptingBookings,
+    string? Reason = null
 );
