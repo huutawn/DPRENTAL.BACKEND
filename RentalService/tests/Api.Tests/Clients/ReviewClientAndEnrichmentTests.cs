@@ -235,7 +235,10 @@ public sealed class ReviewClientAndEnrichmentTests
                 }
             }
 
-            ReceivedRequests.Add(request);
+            lock (ReceivedRequests)
+            {
+                ReceivedRequests.Add(request);
+            }
 
             try
             {
@@ -623,8 +626,7 @@ public sealed class ReviewClientAndEnrichmentTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(2, spyClient.ReceivedRequests.Count);
-        Assert.Equal(100, spyClient.ReceivedRequests[0].Items.Count);
-        Assert.Equal(20, spyClient.ReceivedRequests[1].Items.Count);
+        Assert.Equal([20, 100], spyClient.ReceivedRequests.Select(request => request.Items.Count).OrderBy(count => count).ToArray());
     }
 
     [Fact]

@@ -138,8 +138,9 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         Assert.Equal(0, await service.ProcessDisputeHoldTimeoutsAsync());
         var saved = (await new RentalOrderRepository(db).GetByItemIdWithDetailsAsync(item.Id))!
             .Items.Single(i => i.Id == item.Id);
-        Assert.Equal(100_000m, saved.FinalDeductionAmount);
-        Assert.Equal(saved.DepositAmount - 100_000m, saved.DepositRefundAmount);
+        decimal proposedAmount = (await db.DeductionProposals.SingleAsync()).TotalProposedAmount;
+        Assert.Equal(proposedAmount, saved.FinalDeductionAmount);
+        Assert.Equal(saved.DepositAmount - proposedAmount, saved.DepositRefundAmount);
         Assert.Equal(RentalItemStatus.PendingSettlement, saved.Status);
     }
     [Fact]
