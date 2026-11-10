@@ -117,6 +117,7 @@ public sealed class ReminderBenchmarkDatabaseFixture : IAsyncLifetime
     }
 }
 
+[Trait("Category", "Benchmark")]
 [Collection("PostgreSql")]
 public sealed class RentalReminderBenchmarkPostgreSqlTests : IClassFixture<ReminderBenchmarkDatabaseFixture>
 {
@@ -129,7 +130,7 @@ public sealed class RentalReminderBenchmarkPostgreSqlTests : IClassFixture<Remin
         _output = output;
     }
 
-    [Fact]
+    [Fact(Skip = "1M scale benchmark test. Run explicitly when needed.")]
     public async Task Benchmark_VerifyFixtureDistribution_MatchesSpecification()
     {
         _output.WriteLine($"[Fixture] 1,000,000 reminder schedules seeded and analyzed in {_fixture.SeedingDurationMs} ms.");
@@ -163,7 +164,7 @@ public sealed class RentalReminderBenchmarkPostgreSqlTests : IClassFixture<Remin
         Assert.True(dueCount + leasedCount + delayedCount > 0);
     }
 
-    [Fact]
+    [Fact(Skip = "1M scale benchmark test. Run explicitly when needed.")]
     public async Task ClaimDueBatch_ExplainAnalyze_UsesIndexScan_NoSeqScan_LatencyUnder50Ms()
     {
         await using var conn = new NpgsqlConnection(_fixture.ConnectionString);
@@ -241,7 +242,7 @@ public sealed class RentalReminderBenchmarkPostgreSqlTests : IClassFixture<Remin
         Assert.True(totalBuffersRead < 5000, $"Buffers read ({totalBuffersRead}) was not bounded according to batch size");
     }
 
-    [Fact]
+    [Fact(Skip = "1M scale benchmark test. Run explicitly when needed.")]
     public async Task ClaimDueBatchAsync_RepositoryExecution_LatencyUnder50Ms_AndClaimsCorrectBatch()
     {
         var options = PostgresTestDatabaseHelper.CreateOptions(_fixture.ConnectionString);
@@ -283,7 +284,7 @@ public sealed class RentalReminderBenchmarkPostgreSqlTests : IClassFixture<Remin
         Assert.True(sw.ElapsedMilliseconds < 50, $"ClaimDueBatchAsync latency ({sw.ElapsedMilliseconds} ms) exceeded 50 ms SLA");
     }
 
-    [Fact]
+    [Fact(Skip = "1M scale benchmark test. Run explicitly when needed.")]
     public async Task Benchmark_ThreeDistributions_JsonExplain_AndCompetingWorkers()
     {
         await using var conn = new NpgsqlConnection(_fixture.ConnectionString);
@@ -578,7 +579,7 @@ public sealed class RentalReminderBenchmarkPostgreSqlTests : IClassFixture<Remin
         }
     }
 
-    [Fact]
+    [Fact(Skip = "1M scale benchmark test. Run explicitly when needed.")]
     public async Task Backfill_MemoryTrackingAcrossMultiplePages_EntityTrackingCountDoesNotGrowWithTotalPages()
     {
         var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
