@@ -52,6 +52,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
     private readonly ILogger<InventoryAllocationResultHandler> _logger;
     private readonly IRentalEventProducer? _rentalEvents;
     private readonly Clients.IPaymentRentalClient? _paymentClient;
+    private readonly Dprental.RentalService.Application.IServices.Reminders.IRentalReminderScheduleService? _reminderSchedules;
 
     public InventoryAllocationResultHandler(
         IRentalOrderRepository orderRepository,
@@ -63,7 +64,8 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         ICheckoutOrderWriter? orderWriter = null,
         ILogger<InventoryAllocationResultHandler>? logger = null,
         IRentalEventProducer? rentalEvents = null,
-        Clients.IPaymentRentalClient? paymentClient = null)
+        Clients.IPaymentRentalClient? paymentClient = null,
+        Dprental.RentalService.Application.IServices.Reminders.IRentalReminderScheduleService? reminderSchedules = null)
     {
         _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
@@ -75,6 +77,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<InventoryAllocationResultHandler>.Instance;
         _rentalEvents = rentalEvents;
         _paymentClient = paymentClient;
+        _reminderSchedules = reminderSchedules;
     }
 
     // Đối chiếu kết quả với tác vụ đã lưu rồi phân nhánh theo CommandType.
@@ -883,6 +886,12 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                     if (transaction != null) await transaction.RollbackAsync(cancellationToken);
                     _unitOfWork.DiscardChanges();
                     return published.Error;
+                }
+
+                if (_reminderSchedules != null)
+                {
+                    await _reminderSchedules.CompleteHandoverAndCreateReturnScheduleAsync(
+                        order.Id, handedOverItem.Id, handedOverItem.ExpectedEndDate, handedOverItem.Quantity, utcNow, cancellationToken);
                 }
             }
 

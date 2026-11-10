@@ -15,8 +15,14 @@ namespace Dprental.RentalService.Application.Services.Orders;
 /// Luồng đọc đơn renter: xác định caller → chuẩn hóa bộ lọc/phân trang → truy vấn theo quyền sở hữu → dựng response.
 /// Trạng thái và quyền thao tác trả cho giao diện là ảnh chụp tại lần đọc; lệnh thay đổi vẫn kiểm tra lại.
 /// </remarks>
-public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRenterOrderQueryService
+public sealed class RenterOrderQueryService(
+    IRentalOrderRepository orders,
+    IOrderReviewStatusEnricher reviewEnricher) : IRenterOrderQueryService
 {
+    public RenterOrderQueryService(IRentalOrderRepository orders)
+        : this(orders, DefaultOrderReviewStatusEnricher.Instance)
+    {
+    }
     // Lọc theo danh tính renter, trạng thái và refund; phân trang tại repository rồi ghép quyền hủy cùng tiến độ hoàn tiền.
     public async Task<Result<PagedResponse<RenterOrderSummaryResponse>>> GetMyOrdersAsync(
         int page,
@@ -60,6 +66,9 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             normalizedPageSize,
             cancellationToken);
 
+        var pairs = records.Items.SelectMany(r => r.Items.Select(i => (r.OrderId, i.RentalItemId)));
+        var reviewStatuses = await reviewEnricher.FetchReviewStatusesAsync(pairs, cancellationToken);
+
         // Dựng danh sách renter từ projection đã lọc sở hữu; ghép tiến độ refund và quyền hủy bằng cùng policy của lệnh.
         List<RenterOrderSummaryResponse> items = records.Items
             .Select(r => new RenterOrderSummaryResponse(
@@ -74,13 +83,14 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
                 r.SubOrderCount,
                 r.PaymentDeadline,
                 r.CreatedAt,
-                r.Items.Select(OrderQueryMapper.ToSummaryItem).ToList(),
+                r.Items.Select(i => OrderQueryMapper.ToSummaryItem(
+                    i,
+                    reviewStatuses.GetValueOrDefault((r.OrderId, i.RentalItemId), ReviewStatusDto.Unknown))).ToList(),
                 r.Version,
                 OrderQueryMapper.ToRefundProgress(r.RefundCount, r.PendingRefundCount),
                 r.RefundedAmount,
                 RenterOrderCancellationPolicy.CanCancel(r.Status, r.Items.Select(i => i.Status))))
             .ToList();
-
         return OrderQueryMapper.ToPage(items, normalizedPage, normalizedPageSize, records.TotalCount);
     }
 
@@ -117,10 +127,13 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
         // Dùng policy/mapper hiện có để dựng dữ liệu response nhất quán với các điểm đọc khác của cùng nghiệp vụ.
         Dictionary<Guid, RentalRefundLine> refundLines = OrderQueryMapper.RefundLinesByItem(order);
 
+        var pairs = order.SubOrders.SelectMany(s => s.Items.Select(i => (order.Id, i.Id)));
+        var reviewStatuses = await reviewEnricher.FetchReviewStatusesAsync(pairs, cancellationToken);
+
         // Sắp đơn con theo mã và dựng chi tiết cho renter; số tiền tổng order được cộng từ đúng tập đơn con này.
         List<RenterSubOrderResponse> subOrders = order.SubOrders
             .OrderBy(s => s.SubOrderCode, StringComparer.Ordinal)
-            .Select(s => ToSubOrder(s, refundLines))
+            .Select(s => ToSubOrder(s, refundLines, order.Id, reviewStatuses))
             .ToList();
         decimal totalRental = subOrders.Sum(s => s.TotalRentalAmount);
         decimal totalDeposit = subOrders.Sum(s => s.TotalDepositAmount);
@@ -148,13 +161,17 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
     }
 
     // Tổng hợp tiền và trạng thái từ các item thuộc một supplier, đồng thời giữ thứ tự hiển thị ổn định.
-    private static RenterSubOrderResponse ToSubOrder(RentalSubOrder subOrder, Dictionary<Guid, RentalRefundLine> refundLines)
+    private static RenterSubOrderResponse ToSubOrder(
+        RentalSubOrder subOrder,
+        Dictionary<Guid, RentalRefundLine> refundLines,
+        Guid orderId,
+        IReadOnlyDictionary<(Guid OrderId, Guid ItemId), ReviewStatusDto> reviewStatuses)
     {
         // Sắp item theo ngày/ID trong đơn con để các lần tải lại giữ thứ tự ổn định và ghép refund theo đúng item.
         List<RenterOrderItemResponse> items = subOrder.Items
             .OrderBy(i => i.ExpectedStartDate)
             .ThenBy(i => i.Id)
-            .Select(i => ToItem(i, refundLines.GetValueOrDefault(i.Id)))
+            .Select(i => ToItem(i, refundLines.GetValueOrDefault(i.Id), reviewStatuses.GetValueOrDefault((orderId, i.Id), ReviewStatusDto.Unknown)))
             .ToList();
         decimal rental = subOrder.Items.Sum(i => i.RentalAmount);
         decimal deposit = subOrder.Items.Sum(i => i.DepositAmount);
@@ -171,7 +188,7 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
     }
 
     // Dựng chi tiết item cho renter bằng snapshot thương mại và các mapper handover/return/settlement dùng chung.
-    private static RenterOrderItemResponse ToItem(RentalItem item, RentalRefundLine? refundLine)
+    private static RenterOrderItemResponse ToItem(RentalItem item, RentalRefundLine? refundLine, ReviewStatusDto reviewStatus)
     {
         // Dùng policy/mapper hiện có để dựng dữ liệu response nhất quán với các điểm đọc khác của cùng nghiệp vụ.
         OrderItemResponse basics = OrderQueryMapper.ToItem(item);
@@ -208,7 +225,8 @@ public sealed class RenterOrderQueryService(IRentalOrderRepository orders) : IRe
             OrderQueryMapper.ToReturns(item),
             OrderQueryMapper.ToSettlement(item),
             OrderQueryMapper.ToRenterUnits(item),
-            OrderQueryMapper.ToReturnRequests(item));
+            OrderQueryMapper.ToReturnRequests(item),
+            reviewStatus);
     }
 
     /// <summary>REFUNDED: mọi khoản đã chuyển khoản; PENDING: còn khoản chờ hoàn; rỗng là không lọc. NONE hay giá trị lạ là lỗi.</summary>

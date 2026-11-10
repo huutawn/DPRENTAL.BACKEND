@@ -105,4 +105,13 @@ public sealed class FakeRentalEventProducer : IRentalEventProducer
     public Task<Result<ProducerEnqueueResult>> EnqueueLatePaymentRefundRequestedAsync(
         LatePaymentRefundRequestedPayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
         Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "LatePaymentRefundRequested", "topic", "key")));
+
+    public List<RentalReminderDuePayload> ReminderDueEvents { get; } = [];
+
+    public Task<Result<ProducerEnqueueResult>> EnqueueRentalReminderDueAsync(
+        RentalReminderDuePayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default)
+    {
+        ReminderDueEvents.Add(payload);
+        return Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, "RentalReminderDue", "topic", "key")));
+    }
 }

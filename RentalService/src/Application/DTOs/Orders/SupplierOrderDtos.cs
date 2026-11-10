@@ -39,6 +39,7 @@ public sealed record SupplierUnitResponse(
 /// <param name="Units">Các máy cụ thể đã gán cho dòng.</param>
 /// <param name="ReturnRequests">Danh sách các yêu cầu trả thiết bị trên dòng của nhà cung cấp.</param>
 /// <param name="PickupLocation">Địa chỉ kho nhận máy.</param>
+/// <param name="ReviewStatus">Trạng thái đánh giá của dòng thiết bị.</param>
 public sealed record SupplierOrderItemResponse(
     string Name,
     int Quantity,
@@ -59,8 +60,37 @@ public sealed record SupplierOrderItemResponse(
     OrderSettlementResponse? Settlement,
     IReadOnlyList<SupplierUnitResponse> Units,
     IReadOnlyList<ReturnRequestResponse> ReturnRequests,
-    string? PickupLocation = null)
+    string? PickupLocation,
+    ReviewStatusDto ReviewStatus)
 {
+    public SupplierOrderItemResponse(
+        string name,
+        int quantity,
+        DateOnly startDate,
+        DateOnly endDate,
+        Guid rentalItemId,
+        Guid equipmentListingId,
+        RentalItemStatus status,
+        int rentalDays,
+        decimal dailyRate,
+        decimal depositPerUnit,
+        decimal rentalAmount,
+        decimal depositAmount,
+        DateTimeOffset? supplierConfirmationDeadline,
+        DateTimeOffset? supplierDecisionAt,
+        OrderHandoverResponse? handover,
+        IReadOnlyList<OrderReturnResponse> returns,
+        OrderSettlementResponse? settlement,
+        IReadOnlyList<SupplierUnitResponse> units,
+        IReadOnlyList<ReturnRequestResponse> returnRequests,
+        string? pickupLocation = null)
+        : this(name, quantity, startDate, endDate, rentalItemId, equipmentListingId, status,
+               rentalDays, dailyRate, depositPerUnit, rentalAmount, depositAmount,
+               supplierConfirmationDeadline, supplierDecisionAt, handover, returns, settlement,
+               units, returnRequests, pickupLocation, ReviewStatusDto.Unknown)
+    {
+    }
+
     public SupplierOrderItemResponse(
         string name,
         int quantity,
@@ -84,7 +114,7 @@ public sealed record SupplierOrderItemResponse(
         : this(name, quantity, startDate, endDate, rentalItemId, equipmentListingId, status,
                rentalDays, dailyRate, depositPerUnit, rentalAmount, depositAmount,
                supplierConfirmationDeadline, supplierDecisionAt, handover, returns, settlement,
-               units, [], pickupLocation)
+               units, [], pickupLocation, ReviewStatusDto.Unknown)
     {
     }
 }

@@ -118,34 +118,34 @@ public sealed partial class DeductionResponseService
         {
             try
             {
-            // Gửi tín hiệu thay đổi tới các bên liên quan bằng ID/version, để client tải lại dữ liệu đã lưu.
-            await notifier.NotifyRenterOrderChangedAsync(
-                order.RenterId,
-                new RenterOrderChangedNotification(
-                    Guid.NewGuid(),
-                    order.Id,
-                    order.Version,
-                    OrderChangeTypes.SettlementChanged,
-                    now),
-                cancellationToken);
-
-            // Tìm đúng phần tử trong aggregate/tập đã tải theo ID; không dùng phần tử khác khi đối tượng cần xử lý không có.
-            var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
-            // Kiểm tra dữ liệu tùy chọn hoặc kết quả tra cứu trước khi dùng; xử lý riêng trường hợp không có giá trị.
-            if (subOrder != null)
-            {
                 // Gửi tín hiệu thay đổi tới các bên liên quan bằng ID/version, để client tải lại dữ liệu đã lưu.
-                await notifier.NotifySupplierSubOrderChangedAsync(
-                    item.SupplierId,
-                    new SupplierSubOrderChangedNotification(
+                await notifier.NotifyRenterOrderChangedAsync(
+                    order.RenterId,
+                    new RenterOrderChangedNotification(
                         Guid.NewGuid(),
                         order.Id,
-                        subOrder.Id,
                         order.Version,
                         OrderChangeTypes.SettlementChanged,
                         now),
                     cancellationToken);
-            }
+
+                // Tìm đúng phần tử trong aggregate/tập đã tải theo ID; không dùng phần tử khác khi đối tượng cần xử lý không có.
+                var subOrder = order.SubOrders.FirstOrDefault(s => s.SupplierId == item.SupplierId);
+                // Kiểm tra dữ liệu tùy chọn hoặc kết quả tra cứu trước khi dùng; xử lý riêng trường hợp không có giá trị.
+                if (subOrder != null)
+                {
+                    // Gửi tín hiệu thay đổi tới các bên liên quan bằng ID/version, để client tải lại dữ liệu đã lưu.
+                    await notifier.NotifySupplierSubOrderChangedAsync(
+                        item.SupplierId,
+                        new SupplierSubOrderChangedNotification(
+                            Guid.NewGuid(),
+                            order.Id,
+                            subOrder.Id,
+                            order.Version,
+                            OrderChangeTypes.SettlementChanged,
+                            now),
+                        cancellationToken);
+                }
             }
             catch (Exception ex)
             {

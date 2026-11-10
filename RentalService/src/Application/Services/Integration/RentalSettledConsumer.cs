@@ -18,7 +18,8 @@ namespace Dprental.RentalService.Application.Services.Integration;
 /// </remarks>
 public sealed class RentalSettledConsumer(
     IRentalEventProducer eventProducer,
-    TimeProvider timeProvider) : IRentalSettledConsumer
+    TimeProvider timeProvider,
+    Dprental.RentalService.Application.IServices.Reminders.IRentalReminderScheduleService? reminderSchedules = null) : IRentalSettledConsumer
 {
     // Chỉ hoàn tất item khi Inventory đã xác nhận đóng và event Payment khớp journal; phát event hoàn tất đúng lúc state thay đổi.
     public async Task<Result<bool>> ApplyRentalSettledStagedAsync(
@@ -99,6 +100,10 @@ public sealed class RentalSettledConsumer(
         // Chọn nhánh theo trạng thái đã ghi nhận; không áp lại quyết định của luồng này cho tài nguyên ở trạng thái khác.
         if (!wasCompleted && isNowCompleted)
         {
+            if (reminderSchedules != null)
+            {
+                await reminderSchedules.StopSchedulesForItemAsync(item.Id, item.CompletedAt ?? now, cancellationToken);
+            }
             // Ghi event/command vào Outbox; enqueue thành công chỉ xác nhận đã lưu ý định gửi, chưa xác nhận service đích đã thực thi.
             if (!item.CompletedAt.HasValue)
             {

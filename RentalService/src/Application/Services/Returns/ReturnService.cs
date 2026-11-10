@@ -39,7 +39,8 @@ public sealed partial class ReturnService(
     IConfiguration configuration,
     IInventoryCommandProducer inventoryCommands,
     IOrderHubNotifier? notifier = null,
-    ILogger<ReturnService>? logger = null) : IReturnService
+    ILogger<ReturnService>? logger = null,
+    Dprental.RentalService.Application.IServices.Reminders.IRentalReminderScheduleService? reminderSchedules = null) : IReturnService
 {
 
     // Supplier ghi biên bản nhận lại các unit; fingerprint chuẩn hóa thứ tự để nhận biết retry cùng nội dung.
@@ -322,6 +323,19 @@ public sealed partial class ReturnService(
             Guid.NewGuid(), order.Id, idempotencyKey, operationAction,
             fingerprint, true, null, null, now, targetItemId: item.Id,
             payloadJson: payloadJson, apiResponseJson: apiResponseJson));
+
+        if (reminderSchedules != null)
+        {
+            if (item.AreAllUnitsReturned)
+            {
+                await reminderSchedules.StopSchedulesForItemAsync(item.Id, now, cancellationToken);
+            }
+            else
+            {
+                int remainingActive = Dprental.RentalService.Application.Policies.RentalReturnActiveUnitsCalculator.Calculate(item);
+                await reminderSchedules.OnReturnUnitsChangedAsync(item.Id, remainingActive, item.ExpectedEndDate, now, cancellationToken);
+            }
+        }
 
         // Media đã được kiểm tra trước khi mở transaction. Từ đây lưu đồng thời biên bản,
         // receipt, command ApplyReturnedUnits và event RentalUnitsReturned; lỗi enqueue phải rollback tất cả.

@@ -460,6 +460,11 @@ public sealed partial class RentalOperationExecutor
             RentalOrderStatusPolicy.Apply(order, utcNow, normalizedKey);
         }
 
+        if (_reminderSchedules != null)
+        {
+            await _reminderSchedules.StopSchedulesForItemAsync(item.Id, utcNow, cancellationToken);
+        }
+
         // Dựng response quyết định supplier từ dữ liệu đã áp dụng để lưu/đáp lại đúng kết quả của thao tác.
         var response = BuildSupplierResponse(order, item);
         string apiResponseJson = JsonSerializer.Serialize(response, JsonOptions);

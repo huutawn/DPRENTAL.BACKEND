@@ -2,6 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.IServices.Reminders;
+using Dprental.RentalService.Application.Services.Reminders;
+using Dprental.RentalService.Domain.IRepositories;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Repositories;
@@ -89,6 +92,47 @@ public static partial class Program
 
             return await RunReplayAsync(optionsBuilder.Options, messageId);
         }
+        else if (command is "backfill-reminders" or "backfill-reminder-schedules")
+        {
+            int batchSize = 100;
+            string? phase = null;
+            Guid? afterItemId = null;
+
+            for (int i = 1; i < args.Length; i++)
+            {
+                if ((args[i] == "--batch-size" || args[i] == "-b") && i + 1 < args.Length && int.TryParse(args[i + 1], out int bs))
+                {
+                    batchSize = bs;
+                    i++;
+                }
+                else if (args[i] == "--phase" && i + 1 < args.Length)
+                {
+                    phase = args[i + 1];
+                    i++;
+                }
+                else if (args[i] == "--after-item-id" && i + 1 < args.Length && Guid.TryParse(args[i + 1], out var aid))
+                {
+                    afterItemId = aid;
+                    i++;
+                }
+            }
+
+            if (afterItemId.HasValue && string.IsNullOrWhiteSpace(phase))
+            {
+                Console.Error.WriteLine("Error: --phase <handover|return> is required when --after-item-id is provided.");
+                return 1;
+            }
+
+            try
+            {
+                return await RunReminderBackfillAsync(optionsBuilder.Options, apply, batchSize, phase, afterItemId);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Reminder backfill failed: {ex.Message}");
+                return 1;
+            }
+        }
         else
         {
             Console.Error.WriteLine($"Unknown command '{args[0]}'.");
@@ -115,6 +159,13 @@ public static partial class Program
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- reconcile-return-requests [--apply]");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- reconcile-refund-confirmations [--apply]");
         Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- replay-outbox --message-id <Guid>");
+        Console.WriteLine("  dotnet run --project RentalService/src/Maintenance -- backfill-reminders [--apply] [--batch-size N] [--phase <handover|return>] [--after-item-id <guid>]");
+        Console.WriteLine();
+        Console.WriteLine("Options for backfill-reminders:");
+        Console.WriteLine("  --apply              Persist reminder schedules to the database (default: dry-run).");
+        Console.WriteLine("  --batch-size, -b     Candidate batch size per page (default: 100).");
+        Console.WriteLine("  --phase              Starting phase ('handover' or 'return'). Handover automatically proceeds to return upon completion.");
+        Console.WriteLine("  --after-item-id      Keyset cursor to resume after a specific item ID within the starting phase.");
     }
 
     public static async Task<int> RunBackfillAsync(
@@ -468,5 +519,117 @@ public static partial class Program
 
         await output.WriteLineAsync($"Reconciliation complete. Total updated: {totalUpdated} unit(s).");
         return totalUpdated;
+    }
+
+    public static async Task<int> RunReminderBackfillAsync(
+        DbContextOptions<RentalServiceDbContext> dbOptions,
+        bool apply,
+        int batchSize = 100,
+        string? phase = null,
+        Guid? afterItemId = null,
+        TextWriter? output = null,
+        CancellationToken cancellationToken = default)
+    {
+        output ??= Console.Out;
+        await output.WriteLineAsync($"=== Backfill Reminder Schedules (Mode: {(apply ? "APPLY" : "DRY-RUN")}, BatchSize: {batchSize}, Phase: {phase ?? "all"}, Checkpoint: {afterItemId?.ToString() ?? "None"}) ===");
+
+        if (batchSize <= 0) batchSize = 100;
+
+        if (afterItemId.HasValue && string.IsNullOrWhiteSpace(phase))
+        {
+            await output.WriteLineAsync("Error: Phase is required when afterItemId is provided.");
+            return 1;
+        }
+
+        var services = new ServiceCollection();
+        services.AddSingleton(dbOptions);
+        services.AddScoped(sp => new RentalServiceDbContext(dbOptions));
+        services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<RentalServiceDbContext>());
+        services.AddScoped<IRentalReminderScheduleRepository, RentalReminderScheduleRepository>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddLogging();
+
+        await using (var testDb = new RentalServiceDbContext(dbOptions))
+        {
+            if (testDb.Database.IsNpgsql())
+            {
+                string connString = testDb.Database.GetConnectionString() ?? "";
+                var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:Postgres"] = connString
+                }).Build();
+                services.AddSingleton<IConfiguration>(config);
+                services.AddSingleton<IOrderLockManager, PostgresOrderLockManager>();
+            }
+            else
+            {
+                services.AddSingleton<IOrderLockManager, NoOpOrderLockManager>();
+            }
+        }
+
+        services.AddScoped<IRentalReminderBackfillService>(sp =>
+            new RentalReminderBackfillService(
+                sp.GetRequiredService<IServiceScopeFactory>(),
+                sp.GetRequiredService<IOrderLockManager>(),
+                sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RentalReminderBackfillService>>()));
+        await using var provider = services.BuildServiceProvider();
+
+        using var scope = provider.CreateScope();
+        var backfillService = scope.ServiceProvider.GetRequiredService<IRentalReminderBackfillService>();
+
+        var result = await backfillService.BackfillActiveItemsAsync(
+            batchSize: batchSize,
+            phase: phase,
+            afterItemId: afterItemId,
+            apply: apply,
+            onBatchCompleted: progress =>
+            {
+                if (apply)
+                {
+                    output.WriteLine($"Batch {progress.BatchNumber}: Handover created: {progress.HandoverCreated}, Return created: {progress.ReturnCreated}, Phase: {progress.Phase}, Checkpoint: {progress.LastProcessedItemId}");
+                    output.WriteLine($"  Resume command: {progress.ResumeCommand}");
+                }
+                else
+                {
+                    output.WriteLine($"[DRY-RUN] Batch {progress.BatchNumber} [{progress.Phase}]: Handover candidates: {progress.HandoverCreated}, Return candidates: {progress.ReturnCreated}, Cursor: {progress.LastProcessedItemId}");
+                }
+            },
+            cancellationToken: cancellationToken);
+
+        if (!result.Succeeded)
+        {
+            string resumeSuggestion = result.LastProcessedItemId.HasValue
+                ? $" Resume command: dotnet run --project RentalService/src/Maintenance -- backfill-reminders {(apply ? "--apply " : "")}--batch-size {batchSize} --phase {result.LastPhase} --after-item-id {result.LastProcessedItemId.Value}"
+                : $" Resume command: dotnet run --project RentalService/src/Maintenance -- backfill-reminders {(apply ? "--apply " : "")}--batch-size {batchSize} --phase {result.LastPhase}";
+            await output.WriteLineAsync($"Backfill failed: {result.ErrorMessage}. Previous checkpoint: {result.LastProcessedItemId?.ToString() ?? "None"}.{resumeSuggestion}");
+            return 1;
+        }
+
+        if (apply)
+        {
+            await output.WriteLineAsync($"Backfill completed: {result.HandoverSchedulesCreated} Handover schedule(s), {result.ReturnSchedulesCreated} Return schedule(s) created across {result.TotalBatches} batch(es). Final Checkpoint: {result.LastProcessedItemId?.ToString() ?? "None"}.");
+        }
+        else
+        {
+            await output.WriteLineAsync($"Backfill completed (DRY-RUN): {result.HandoverSchedulesCreated} Handover schedule(s), {result.ReturnSchedulesCreated} Return schedule(s) would be created across {result.TotalBatches} batch(es). Final Cursor: {result.LastProcessedItemId?.ToString() ?? "None"}.");
+        }
+
+        return 0;
+    }
+
+    private sealed class NoOpOrderLockManager : IOrderLockManager
+    {
+        private sealed class Releaser : IAsyncDisposable
+        {
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+        private static readonly IAsyncDisposable SharedReleaser = new Releaser();
+
+        public Task<IAsyncDisposable> AcquireOrderLockAsync(Guid orderId, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(SharedReleaser);
+
+        public Task<IAsyncDisposable> AcquireRenterLockAsync(Guid renterUserId, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(SharedReleaser);
     }
 }
