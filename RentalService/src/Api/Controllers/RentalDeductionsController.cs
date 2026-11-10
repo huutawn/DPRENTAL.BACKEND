@@ -44,6 +44,7 @@ public sealed class RentalDeductionsController(IDeductionService deductions,
     /// <summary>Nhà cung cấp đưa mức khấu trừ thấp hơn để người thuê có thể đồng ý trong cửa sổ tranh chấp.</summary>
     [HttpPost("dispute/offer")]
     [ProducesResponseType(typeof(OfferDisputeAmountResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> OfferDisputeAmount(Guid itemId,
         [FromBody] OfferDisputeAmountRequest request,
         [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
