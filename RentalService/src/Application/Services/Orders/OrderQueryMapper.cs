@@ -113,6 +113,34 @@ internal static class OrderQueryMapper
             pickupLocation);
     }
 
+    /// <summary>Thông tin listing đã chụp lúc đặt hàng, dùng chung cho chi tiết renter và supplier.</summary>
+    public static OrderListingSnapshotResponse ToListingSnapshot(RentalItem item, bool isSupplier = false) => new(
+        item.ListingDescriptionSnapshot,
+        item.ThumbnailMediaIdSnapshot,
+        item.EquipmentTypeNameSnapshot,
+        item.BrandNameSnapshot,
+        item.ModelSnapshot,
+        ToSpecValues(item.SpecValuesSnapshot),
+        ToItem(item, isSupplier).PickupLocation,
+        item.EquipmentTypeId,
+        item.BrandId,
+        item.SpecSchemaVersionSnapshot);
+
+    private static JsonElement? ToSpecValues(string? specValuesJson)
+    {
+        if (string.IsNullOrWhiteSpace(specValuesJson)) return null;
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(specValuesJson);
+            return document.RootElement.ValueKind == JsonValueKind.Object ? document.RootElement.Clone() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Các dòng theo thứ tự ngày giao rồi mã dòng, để kết quả ổn định giữa các lần gọi.</summary>
     public static List<OrderItemResponse> ToItems(IEnumerable<RentalItem> items, bool isSupplier = false) => items
         .OrderBy(i => i.ExpectedStartDate)

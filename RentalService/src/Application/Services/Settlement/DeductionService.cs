@@ -10,6 +10,9 @@ using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
 using Dprental.RentalService.Domain.Entities;
@@ -24,7 +27,8 @@ namespace Dprental.RentalService.Application.Services.Settlement;
 /// </remarks>
 public sealed class DeductionService(
     IRentalOrderRepository orders, IOrderLockManager locks, IUnitOfWork unitOfWork,
-    IRentalMediaClient media, TimeProvider clock, IOrderHubNotifier? notifier = null) : IDeductionService
+    IRentalMediaClient media, TimeProvider clock, IRentalEventProducer eventProducer,
+    IOrderHubNotifier? notifier = null) : IDeductionService
 {
     // Supplier gửi đề xuất khấu trừ sau kiểm tra sở hữu, replay, hạn và Media; lưu đề xuất/receipt trước khi thông báo.
     public async Task<Result<SubmitDeductionResponse>> SubmitAsync(
@@ -123,8 +127,27 @@ public sealed class DeductionService(
             payloadJson: payload, apiResponseJson: JsonSerializer.Serialize(response)));
         RentalOrderStatusPolicy.Apply(order, now, key);
         order.RecordReadModelUpdate(now);
+        await using var transaction = await unitOfWork.BeginTransactionAsync(cancellationToken);
         await orders.UpdateAsync(order, cancellationToken);
+        if (item.Status == RentalItemStatus.Disputed)
+        {
+            var dispute = proposal.Dispute!;
+            var enqueued = await eventProducer.EnqueueDomainEventAsync(
+                KafkaContractSpec.EventTypes.RentalDeductionDisputeOpened,
+                dispute.Id.ToString("D"), order.Id.ToString("D"), dispute.OpenedAt,
+                new RentalDeductionDisputeOpenedPayload(
+                    order.Id, item.Id, proposal.Id, dispute.Id, order.RenterId,
+                    item.SupplierId, item.DepositAmount, proposal.TotalProposedAmount,
+                    dispute.OpenedAt, order.Version),
+                cancellationToken: cancellationToken);
+            if (enqueued.IsFailure)
+            {
+                unitOfWork.DiscardChanges();
+                return enqueued.Error;
+            }
+        }
         await unitOfWork.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         // Chỉ gửi thông báo realtime khi service có notifier được cấu hình; không tạo một đường lưu nghiệp vụ khác.
         if (notifier != null)

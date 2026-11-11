@@ -82,16 +82,18 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
     private static IReadOnlyList<DamageAssessment> Assess(RentalItem item, int level) =>
         [new DamageAssessment(item.UnitAssignments.Single().AssetId, level)];
 
-    private DeductionService Service(RentalServiceDbContext db, IRentalMediaClient media) => new(
+    private DeductionService Service(RentalServiceDbContext db, IRentalMediaClient media,
+        IRentalEventProducer? events = null) => new(
         new RentalOrderRepository(db),
         new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
-        db, media, _clock);
+        db, media, _clock, events ?? new FakeRentalEventProducer());
 
-    private DeductionResponseService ResponseService(RentalServiceDbContext db) => new(
+    private DeductionResponseService ResponseService(RentalServiceDbContext db,
+        IRentalEventProducer? events = null) => new(
         new RentalOrderRepository(db),
         new PostgresOrderLockManager(Configuration(), NullLogger<PostgresOrderLockManager>.Instance),
         db, Mock.Of<IRentalMediaClient>(), _clock, Configuration(),
-        NullLogger<DeductionResponseService>.Instance);
+        NullLogger<DeductionResponseService>.Instance, events ?? new FakeRentalEventProducer());
 
     private static Mock<IRentalMediaClient> ReadyMedia(Guid mediaId, Guid uploader)
     {
@@ -125,6 +127,64 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         }
 
         return item;
+    }
+
+    [Fact]
+    public async Task RenterDispute_WritesEventAndStateTogether_AndReplayDoesNotDuplicateOutbox()
+    {
+        var item = await SeedDamagedAsync();
+        var evidenceId = Guid.NewGuid();
+        await using (var db = NewDb())
+        {
+            var submitted = await Service(db, ReadyMedia(evidenceId, item.SupplierId).Object)
+                .SubmitAsync(item.Id, Caller(item.SupplierId),
+                    new SubmitDeductionRequest(Assess(item, 2), "Repair", [evidenceId]), "proposal-event-key");
+            Assert.True(submitted.IsSuccess, submitted.Error.Message);
+        }
+
+        await using (var db = NewDb())
+        {
+            var producer = new RentalEventProducer(
+                new KafkaOutboxWriter(new OutboxRepository(db)),
+                Options.Create(PaymentPublicationProofTestFixture.Configure(new KafkaOptions())), _clock);
+            var service = ResponseService(db, producer);
+            var request = new RespondDeductionRequest(RenterDeductionDecision.Dispute, "Disagree", null);
+            var first = await service.RespondAsync(item.Id, Caller(item.RentalOrder!.RenterId),
+                request, "dispute-event-key");
+            Assert.True(first.IsSuccess, $"{first.Error.Code}: {first.Error.Message}");
+            Assert.True((await service.RespondAsync(item.Id, Caller(item.RentalOrder.RenterId),
+                request, "dispute-event-key")).IsSuccess);
+        }
+
+        await using var verify = NewDb();
+        var message = await verify.RentalOutboxMessages.SingleAsync(
+            x => x.MessageType == KafkaContractSpec.EventTypes.RentalDeductionDisputeOpened);
+        using var document = JsonDocument.Parse(message.Payload);
+        var payload = document.RootElement.GetProperty("payload");
+        Assert.Equal(item.Id, payload.GetProperty("rentalItemId").GetGuid());
+        Assert.Equal(item.RentalOrder!.RenterId, payload.GetProperty("renterId").GetGuid());
+        Assert.True(payload.GetProperty("orderVersion").GetInt64() > 0);
+        var persisted = (await new RentalOrderRepository(verify).GetByItemIdWithDetailsAsync(item.Id))!;
+        Assert.Equal(RentalItemStatus.Disputed, persisted.Items.Single(x => x.Id == item.Id).Status);
+    }
+
+    [Fact]
+    public async Task SupplierOverCapClaim_EmitsAdminDisputeEvent()
+    {
+        var item = await SeedDamagedAsync();
+        var mediaId = Guid.NewGuid();
+        var events = new FakeRentalEventProducer();
+        await using var db = NewDb();
+        var submitted = await Service(db, ReadyMedia(mediaId, item.SupplierId).Object, events)
+            .SubmitAsync(item.Id, Caller(item.SupplierId),
+                new SubmitDeductionRequest(Assess(item, 2), "Repair", [mediaId],
+                    item.DepositAmount + 1m), "over-cap-event-key");
+        Assert.True(submitted.IsSuccess, submitted.Error.Message);
+        var saved = (await new RentalOrderRepository(db).GetByItemIdWithDetailsAsync(item.Id))!
+            .Items.Single(x => x.Id == item.Id);
+        Assert.Equal(RentalItemStatus.Disputed, saved.Status);
+        Assert.Equal(saved.DeductionProposal!.Dispute!.Id,
+            Assert.Single(events.DisputeOpenedEvents).DisputeId);
     }
 
     [Fact]

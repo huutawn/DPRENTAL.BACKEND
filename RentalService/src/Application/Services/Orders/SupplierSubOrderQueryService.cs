@@ -124,6 +124,45 @@ public sealed class SupplierSubOrderQueryService(
             order.Version);
     }
 
+    public async Task<Result<SupplierUnitDetailResponse>> GetMyUnitAsync(
+        Guid subOrderId,
+        Guid itemId,
+        Guid assignmentId,
+        IRentalCallerContext caller,
+        CancellationToken cancellationToken = default)
+    {
+        Result<Guid> supplier = OrderQueryMapper.RequirePersonalCaller(caller);
+        if (supplier.IsFailure) return supplier.Error;
+
+        RentalSubOrder? subOrder = await orders.GetPaidSubOrderForSupplierAsync(
+            subOrderId, supplier.Value, cancellationToken);
+        RentalItem? item = subOrder?.Items.FirstOrDefault(i => i.Id == itemId);
+        RentalUnitAssignment? unit = item?.UnitAssignments.FirstOrDefault(u => u.Id == assignmentId);
+        if (unit is null || item is null) return OrderQueryErrors.SubOrderNotFound;
+
+        IReadOnlyList<SupplierUnitReturnEvidenceResponse> renterEvidence =
+            OrderQueryMapper.ToReturnRequests(item)
+                .SelectMany(request => request.Units
+                    .Where(requestUnit => requestUnit.RentalUnitAssignmentId == assignmentId)
+                    .Select(requestUnit => new SupplierUnitReturnEvidenceResponse(
+                        request.ReturnRequestId,
+                        request.ActualReturnAt,
+                        request.SubmittedAt,
+                        request.Note,
+                        requestUnit.MediaIds,
+                        requestUnit.Status)))
+                .ToList();
+
+        return new SupplierUnitDetailResponse(
+            item.Id,
+            item.EquipmentListingId,
+            item.ListingTitleSnapshot,
+            item.Status,
+            OrderQueryMapper.ToListingSnapshot(item, isSupplier: true),
+            ToUnit(unit),
+            renterEvidence);
+    }
+
     // Chiếu item cho supplier gồm mapping unit và bằng chứng cần bàn giao/trả máy, dùng snapshot thương mại đã chốt.
     private static SupplierOrderItemResponse ToItem(RentalItem item, ReviewStatusDto reviewStatus)
     {
@@ -150,10 +189,23 @@ public sealed class SupplierSubOrderQueryService(
             OrderQueryMapper.ToSettlement(item),
             item.UnitAssignments
                 .OrderBy(u => u.Id)
-                .Select(u => new SupplierUnitResponse(u.Id, u.AssetId, u.Status, u.ReturnCondition))
+                .Select(ToUnit)
                 .ToList(),
             OrderQueryMapper.ToReturnRequests(item),
             basics.PickupLocation,
-            reviewStatus);
+            reviewStatus)
+        {
+            ThumbnailMediaId = item.ThumbnailMediaIdSnapshot
+        };
     }
+
+    private static SupplierUnitResponse ToUnit(RentalUnitAssignment unit) => new(
+        unit.Id, unit.AssetId, unit.Status, unit.ReturnCondition)
+    {
+        HandoverCondition = unit.HandoverCondition,
+        HandoverNote = unit.HandoverNote,
+        HandoverMediaIds = unit.HandoverMediaIds.ToList(),
+        ReturnNote = unit.ReturnNote,
+        ReturnMediaIds = unit.ReturnMediaIds.ToList()
+    };
 }

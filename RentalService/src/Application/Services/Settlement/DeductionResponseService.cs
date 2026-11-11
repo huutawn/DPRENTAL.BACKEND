@@ -10,6 +10,9 @@ using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Application.Services.Operations;
 using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Application.Policies;
+using Dprental.RentalService.Application.Kafka.Contracts;
+using Dprental.RentalService.Application.Kafka.Events;
+using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
 using Dprental.RentalService.Domain.Errors;
@@ -31,6 +34,7 @@ public sealed partial class DeductionResponseService(
     TimeProvider timeProvider,
     IConfiguration configuration,
     ILogger<DeductionResponseService> logger,
+    IRentalEventProducer eventProducer,
     IOrderHubNotifier? notifier = null) : IDeductionResponseService
 {
     private const string RespondAction = "RenterRespondDeduction";
@@ -156,9 +160,28 @@ public sealed partial class DeductionResponseService(
         // Gửi thông báo theo chính sách bắt lỗi của luồng; đây là bước sau thay đổi nghiệp vụ, không phải bằng chứng provider đã xử lý.
         try
         {
+            await using var transaction = await unitOfWork.BeginTransactionAsync(cancellationToken);
             // Đăng ký thay đổi aggregate với repository trước khi lưu; không truy cập DbContext trực tiếp từ service.
             await orders.UpdateAsync(order, cancellationToken);
+            if (request.Decision == RenterDeductionDecision.Dispute)
+            {
+                var dispute = proposal.Dispute!;
+                var enqueued = await eventProducer.EnqueueDomainEventAsync(
+                    KafkaContractSpec.EventTypes.RentalDeductionDisputeOpened,
+                    dispute.Id.ToString("D"), order.Id.ToString("D"), dispute.OpenedAt,
+                    new RentalDeductionDisputeOpenedPayload(
+                        order.Id, item.Id, proposal.Id, dispute.Id, order.RenterId,
+                        item.SupplierId, item.DepositAmount, proposal.TotalProposedAmount,
+                        dispute.OpenedAt, order.Version),
+                    cancellationToken: cancellationToken);
+                if (enqueued.IsFailure)
+                {
+                    unitOfWork.DiscardChanges();
+                    return enqueued.Error;
+                }
+            }
             await unitOfWork.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
 
             // Chỉ gửi thông báo realtime khi service có notifier được cấu hình; không tạo một đường lưu nghiệp vụ khác.
             if (notifier != null)

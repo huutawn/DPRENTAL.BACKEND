@@ -75,6 +75,20 @@ public sealed class SupplierSubOrdersController(
         return result.IsSuccess ? Ok(result.Value) : this.ToProblem(result.Error);
     }
 
+    /// <summary>Chi tiết một máy thuộc đơn con của nhà cung cấp, kèm ảnh người thuê gửi lúc trả.</summary>
+    [HttpGet("{subOrderId:guid}/items/{itemId:guid}/units/{assignmentId:guid}")]
+    [ProducesResponseType(typeof(SupplierUnitDetailResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMyUnit(
+        Guid subOrderId, Guid itemId, Guid assignmentId, CancellationToken cancellationToken)
+    {
+        Result<SupplierUnitDetailResponse> result =
+            await subOrders.GetMyUnitAsync(subOrderId, itemId, assignmentId, callerContext, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : this.ToProblem(result.Error);
+    }
+
     /// <summary>
     /// Supplier nhận cả đơn con.
     /// </summary>

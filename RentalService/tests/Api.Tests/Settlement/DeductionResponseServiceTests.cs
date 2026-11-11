@@ -55,10 +55,18 @@ public sealed class DeductionResponseServiceTests
         await using var db = NewDb();
         var order = SeedProposed(db);
         var item = order.Items.Single();
-        var service = NewService(db);
+        var events = new FakeRentalEventProducer();
+        var service = NewService(db, eventProducer: events);
         Assert.True((await service.RespondAsync(item.Id, Caller(order.RenterId),
             new RespondDeductionRequest(RenterDeductionDecision.Dispute, "Disagree", null),
             "dispute-key")).IsSuccess);
+        var opened = Assert.Single(events.DisputeOpenedEvents);
+        Assert.Equal(item.DeductionProposal!.Dispute!.Id, opened.DisputeId);
+        Assert.Equal(order.RenterId, opened.RenterId);
+        Assert.True((await service.RespondAsync(item.Id, Caller(order.RenterId),
+            new RespondDeductionRequest(RenterDeductionDecision.Dispute, "Disagree", null),
+            "dispute-key")).IsSuccess);
+        Assert.Single(events.DisputeOpenedEvents);
         var request = new OfferDisputeAmountRequest(50_000m);
         Assert.True((await service.OfferDisputeAmountAsync(item.Id, Caller(Guid.NewGuid()),
             request, "foreign-offer")).IsFailure);
@@ -172,7 +180,7 @@ public sealed class DeductionResponseServiceTests
         typeof(RentalOrder).GetProperty(nameof(RentalOrder.PaymentRef))!.SetValue(order, "payment-1");
         await db.SaveChangesAsync();
         var service = new DeductionService(new RentalOrderRepository(db), NewLocks(), db,
-            Mock.Of<IRentalMediaClient>(), new FakeTimeProvider(Now.AddHours(2)));
+            Mock.Of<IRentalMediaClient>(), new FakeTimeProvider(Now.AddHours(2)), new FakeRentalEventProducer());
 
         Assert.Equal(1, await service.ScheduleReadySettlementsAsync());
         Assert.Equal(0, await service.ScheduleReadySettlementsAsync());
@@ -199,12 +207,13 @@ public sealed class DeductionResponseServiceTests
     }
 
     private static DeductionResponseService NewService(
-        RentalServiceDbContext db, DateTimeOffset? now = null, IOrderHubNotifier? notifier = null)
+        RentalServiceDbContext db, DateTimeOffset? now = null, IOrderHubNotifier? notifier = null,
+        FakeRentalEventProducer? eventProducer = null)
     {
         return new DeductionResponseService(new RentalOrderRepository(db), NewLocks(), db,
             Mock.Of<IRentalMediaClient>(), new FakeTimeProvider(now ?? Now.AddHours(1)),
             new ConfigurationBuilder().Build(), NullLogger<DeductionResponseService>.Instance,
-            notifier);
+            eventProducer ?? new FakeRentalEventProducer(), notifier);
     }
 
     private static IOrderLockManager NewLocks()

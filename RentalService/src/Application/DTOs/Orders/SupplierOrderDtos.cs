@@ -13,7 +13,33 @@ public sealed record SupplierUnitResponse(
     Guid AssignmentId,
     Guid AssetId,
     RentalUnitAssignmentStatus Status,
-    UnitCondition? ReturnCondition);
+    UnitCondition? ReturnCondition)
+{
+    public UnitCondition? HandoverCondition { get; init; }
+    public string? HandoverNote { get; init; }
+    public IReadOnlyList<Guid> HandoverMediaIds { get; init; } = [];
+    public string? ReturnNote { get; init; }
+    public IReadOnlyList<Guid> ReturnMediaIds { get; init; } = [];
+}
+
+/// <summary>Bằng chứng người thuê gửi cho đúng một máy trong một yêu cầu trả.</summary>
+public sealed record SupplierUnitReturnEvidenceResponse(
+    Guid ReturnRequestId,
+    DateTimeOffset ActualReturnAt,
+    DateTimeOffset SubmittedAt,
+    string? Note,
+    IReadOnlyList<Guid> MediaIds,
+    ReturnRequestUnitStatus Status);
+
+/// <summary>Chi tiết một máy trong đơn con của nhà cung cấp, gồm ảnh và tình trạng ở từng bước.</summary>
+public sealed record SupplierUnitDetailResponse(
+    Guid RentalItemId,
+    Guid EquipmentListingId,
+    string Name,
+    RentalItemStatus ItemStatus,
+    OrderListingSnapshotResponse Listing,
+    SupplierUnitResponse Unit,
+    IReadOnlyList<SupplierUnitReturnEvidenceResponse> RenterReturnEvidence);
 
 /// <summary>
 /// Một dòng thiết bị trong đơn con của nhà cung cấp. Giá là bản đã chụp lúc đặt hàng.
@@ -63,6 +89,9 @@ public sealed record SupplierOrderItemResponse(
     string? PickupLocation,
     ReviewStatusDto ReviewStatus)
 {
+    /// <summary>Ảnh đại diện của listing tại thời điểm đặt hàng; dùng làm ảnh thiết bị ban đầu.</summary>
+    public Guid? ThumbnailMediaId { get; init; }
+
     public SupplierOrderItemResponse(
         string name,
         int quantity,
