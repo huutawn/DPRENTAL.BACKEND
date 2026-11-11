@@ -29,8 +29,10 @@ public static class RentalReminderPolicy
     public static TimeOnly ToVietnamTime(DateTimeOffset instant) =>
         TimeOnly.FromDateTime(instant.ToOffset(VietnamOffset).DateTime);
 
+    // Mốc này được lưu vào cột timestamptz (NextTriggerAt); Npgsql chỉ ghi DateTimeOffset có offset 0,
+    // nên trả cùng thời điểm 08:00 giờ VN nhưng biểu diễn ở UTC.
     public static DateTimeOffset VietnamAt8Am(DateOnly date) =>
-        new(date.Year, date.Month, date.Day, 8, 0, 0, VietnamOffset);
+        new DateTimeOffset(date.Year, date.Month, date.Day, 8, 0, 0, VietnamOffset).ToUniversalTime();
 
     public static DateTimeOffset GetNextVietnam8Am(DateTimeOffset now)
     {
