@@ -55,6 +55,13 @@ public static class ApplicationServiceCollectionExtensions
 {
     public static IServiceCollection AddRentalServiceApplication(this IServiceCollection services, IConfiguration? configuration = null)
     {
+        int windowHours = configuration?.GetValue<int?>("Rental:Deduction:WindowHours") ?? 48;
+        int extensionHours = configuration?.GetValue<int?>("Rental:Deduction:DisputeExtensionHours") ?? 12;
+        int holdDays = configuration?.GetValue<int?>("Rental:Deduction:OverCapHoldDays") ?? 7;
+        if (windowHours is < 1 or > 168 || extensionHours is < 0 or > 72 ||
+            holdDays is < 1 or > 365 || holdDays * 24 <= windowHours + extensionHours)
+            throw new InvalidOperationException("Rental:Deduction window, extension and hold configuration is invalid.");
+
         // Giỏ: evaluator dùng chung quy tắc, use case ghi và read model đọc.
         services.AddScoped<RentalCartItemEvaluator>();
         services.AddScoped<RentalCartUseCases>();

@@ -207,7 +207,8 @@ public sealed class ReturnRefundAndSettlementNotificationTests
         mockMedia.Setup(m => m.GetMetadataAsync(mediaId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new MediaMetadataDto(mediaId, "Private", "Ready")));
 
-        var deductionService = new DeductionService(orders, lockManager, db, mockMedia.Object, timeProvider, notifier);
+        var deductionService = new DeductionService(orders, lockManager, db, mockMedia.Object, timeProvider,
+            new FakeRentalEventProducer(), notifier);
         var caller = OrderTestData.User(supplierA);
 
         var request = new SubmitDeductionRequest(
@@ -268,7 +269,7 @@ public sealed class ReturnRefundAndSettlementNotificationTests
         var responseService = new DeductionResponseService(
             orders, lockManager, db, mockMedia.Object, timeProvider,
             new ConfigurationBuilder().Build(), NullLogger<DeductionResponseService>.Instance,
-            Mock.Of<Dprental.RentalService.Application.Kafka.Producers.IRentalEventProducer>(), notifier);
+            new FakeRentalEventProducer(), notifier);
 
         var caller = OrderTestData.User(renterId);
 
@@ -315,7 +316,8 @@ public sealed class ReturnRefundAndSettlementNotificationTests
         await orders.CreateAsync(order);
         await db.SaveChangesAsync();
 
-        var deductionService = new DeductionService(orders, lockManager, db, new Mock<IRentalMediaClient>().Object, timeProvider, notifier);
+        var deductionService = new DeductionService(orders, lockManager, db, new Mock<IRentalMediaClient>().Object,
+            timeProvider, new FakeRentalEventProducer(), notifier);
 
         // ScheduleSettlement creates an internal pending receipt for background workers
         var res = await deductionService.ScheduleSettlementAsync(itemA.Id);

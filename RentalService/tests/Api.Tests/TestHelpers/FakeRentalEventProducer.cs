@@ -9,12 +9,20 @@ public sealed class FakeRentalEventProducer : IRentalEventProducer
 {
     public List<RentalItemReturnedPayload> ReturnedEvents { get; } = [];
     public List<RentalItemCompletedPayload> CompletedEvents { get; } = [];
+    public List<RentalDeductionDisputeOpenedPayload> DisputeOpenedEvents { get; } = [];
+    public List<RentalDepositSettlementCompletedPayload> DepositSettlementEvents { get; } = [];
     public List<ReturnConfirmationOverduePayload> ReturnConfirmationOverdueEvents { get; } = [];
     public Func<RentalItemCompletedPayload, Result<ProducerEnqueueResult>>? CompletedHandler { get; set; }
     public Task<Result<ProducerEnqueueResult>> EnqueueDomainEventAsync<TPayload>(string messageType,
         string logicalEntityId, string aggregateId, DateTimeOffset occurredAt, TPayload payload,
-        string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, messageType, "topic", aggregateId)));
+        string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default)
+    {
+        if (payload is RentalDeductionDisputeOpenedPayload dispute)
+            DisputeOpenedEvents.Add(dispute);
+        if (payload is RentalDepositSettlementCompletedPayload settlement)
+            DepositSettlementEvents.Add(settlement);
+        return Task.FromResult(Result.Success(new ProducerEnqueueResult(Guid.NewGuid(), false, messageType, "topic", aggregateId)));
+    }
 
     public Task<Result<ProducerEnqueueResult>> EnqueueRentalOrderCreatedAsync(
         RentalOrderCreatedPayload payload, string? correlationId = null, Guid? causationId = null, CancellationToken cancellationToken = default) =>

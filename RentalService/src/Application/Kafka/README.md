@@ -300,6 +300,30 @@ Trước khi producer mới được triển khai, các consumer (Recommendation
 ```
 
 #### `RentalItemCompleted` & `RentalOrderCompleted`
+
+`RentalDeductionDisputeOpened` và `RentalDepositSettlementCompleted` cũng được phát trên
+`rental.events.v1`. Cả hai dùng `aggregateId = rentalOrderId` và `messageId` ổn định
+theo loại event + ID tranh chấp hoặc item để consumer có thể bỏ qua bản tin lặp.
+
+- `RentalDeductionDisputeOpened`: phát khi item mới vào `Disputed` (renter phản đối
+  hoặc NCC khai thiệt hại vượt cọc). Payload gồm `rentalOrderId`, `rentalItemId`,
+  `deductionProposalId`, `disputeId`, `renterId`, `supplierId`, `depositAmount`,
+  `proposedDeductionAmount`, `openedAt`, `orderVersion`. Notification tự tra người
+  nhận có quyền Admin; event không có nghĩa Admin được chốt mức khấu trừ.
+- `RentalDepositSettlementCompleted`: chỉ phát khi Rental đã xử lý xác nhận
+  `RentalSettled` từ Payment và item chuyển sang `Completed`, với item có cọc.
+  Payload gồm `rentalOrderId`, `orderCode`, `rentalItemId`, `renterId`,
+  `settlementRef`, `depositAmount`, `finalDeductionAmount`,
+  `depositRefundAmount`, `deductionReason`, `finalizationSource`,
+  `completedAt`, `orderVersion`. `finalizationSource` là
+  `RENTER_ACCEPTED`, `RENTER_RESPONSE_TIMEOUT`,
+  `RENTER_ACCEPTED_SUPPLIER_OFFER`, `DISPUTE_HOLD_TIMEOUT` hoặc
+  `NO_DEDUCTION`. Nếu toàn bộ cọc bị trừ, `depositRefundAmount` bằng 0.
+
+Notification cần tránh gửi hai thông báo hoàn cọc trùng nhau nếu đồng thời nhận
+`RefundCompletedFinancial` từ Payment. Client đọc chi tiết đơn để xem chứng cứ;
+không đưa ảnh, số tài khoản hay lý do tranh chấp vào Kafka event.
+
 ```json
 {
   "messageId": "990e8400-e29b-41d4-a716-446655440004",

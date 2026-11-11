@@ -10,5 +10,6 @@ public enum RentalItemStatus
     Completed = 5,
     Rejected = 6,
     Expired = 7,
-    Cancelled = 8
+    Cancelled = 8,
+    Disputed = 9
 }

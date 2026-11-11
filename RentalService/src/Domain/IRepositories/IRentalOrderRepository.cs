@@ -69,6 +69,10 @@ public interface IRentalOrderRepository
     Task<IReadOnlyList<Guid>> GetDisputedItemIdsAsync(
         int skip, int take, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<Guid>> GetDisputeHoldTimeoutItemIdsAsync(
+        DateTimeOffset returnCutoff, int batchSize, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+
     Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(
         int batchSize, CancellationToken cancellationToken = default);
 

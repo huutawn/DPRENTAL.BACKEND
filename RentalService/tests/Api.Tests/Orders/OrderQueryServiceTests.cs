@@ -327,7 +327,7 @@ public sealed class OrderQueryServiceTests
         Assert.Equal(OrderTestData.Now.AddDays(8), settlement.DeductionDeadline);
         Assert.Equal(DeductionProposalStatus.Submitted, settlement.DeductionStatus);
         Assert.Equal(1_500_000m, settlement.ProposedDeductionAmount);
-        Assert.Equal(OrderTestData.Now.AddDays(9), settlement.RenterResponseDeadline);
+        Assert.Equal(OrderTestData.Now.AddDays(8), settlement.RenterResponseDeadline);
         Assert.Null(settlement.FinalDeductionAmount);
         Assert.Null(settlement.DepositRefundAmount);
         Assert.Null(settlement.SettledAt);
@@ -493,6 +493,7 @@ public sealed class OrderQueryServiceTests
         Assert.True(result.IsSuccess);
         SupplierOrderItemResponse line = Assert.Single(result.Value.Items);
         Assert.Equal(mixers.Id, line.RentalItemId);
+        Assert.Equal(mixers.ThumbnailMediaIdSnapshot, line.ThumbnailMediaId);
         Assert.Equal(RentalItemStatus.PendingSettlement, line.Status);
         Assert.Equal(400_000m, line.DailyRate);
         Assert.Equal(3_000_000m, line.DepositPerUnit);
@@ -505,12 +506,89 @@ public sealed class OrderQueryServiceTests
         Assert.Equal(1_500_000m, line.Settlement!.ProposedDeductionAmount);
 
         // Nhà cung cấp cần assignmentId để ghi nhận trả máy và assetId để đề xuất khấu trừ.
-        Assert.Equal(
-            assigned.Select(u => new SupplierUnitResponse(u.Id, u.AssetId, u.Status, u.ReturnCondition)),
-            line.Units);
+        Assert.Equal(assigned.Select(u => u.Id), line.Units.Select(u => u.AssignmentId));
+        foreach (var unit in line.Units)
+        {
+            var source = assigned.Single(u => u.Id == unit.AssignmentId);
+            Assert.Equal(source.AssetId, unit.AssetId);
+            Assert.Equal(source.Status, unit.Status);
+            Assert.Equal(source.ReturnCondition, unit.ReturnCondition);
+            Assert.Equal(source.HandoverCondition, unit.HandoverCondition);
+            Assert.Equal(source.HandoverNote, unit.HandoverNote);
+            Assert.Equal(source.HandoverMediaIds, unit.HandoverMediaIds);
+            Assert.Equal(source.ReturnNote, unit.ReturnNote);
+            Assert.Equal(source.ReturnMediaIds, unit.ReturnMediaIds);
+        }
         Assert.Equal(
             [UnitCondition.Normal, UnitCondition.Damaged],
             line.Units.Select(u => u.ReturnCondition!.Value).Order());
+
+        RentalUnitAssignment damaged = assigned.Single(u => u.ReturnCondition == UnitCondition.Damaged);
+        Result<SupplierUnitDetailResponse> detail = await SupplierService().GetMyUnitAsync(
+            order.SubOrders.Single(s => s.SupplierId == _cuong).Id,
+            mixers.Id, damaged.Id, OrderTestData.User(_cuong));
+        Assert.True(detail.IsSuccess);
+        Assert.Equal(UnitCondition.Damaged, detail.Value.Unit.ReturnCondition);
+        Assert.Equal(damaged.ReturnMediaIds, detail.Value.Unit.ReturnMediaIds);
+    }
+
+    [Fact]
+    public async Task Supplier_UnitDetail_ShowsSelectedMachineAndOnlyItsRenterPhotos()
+    {
+        DateTimeOffset now = OrderTestData.Now;
+        RentalOrder order = OrderTestData.Paid(
+            OrderTestData.Order(_an, "DH-2026-000011", now,
+                OrderTestData.Line(_cuong, "Máy trộn bê tông 350L", "Máy trộn", "Hòa Phát", 2, 400_000m, 3_000_000m)),
+            now.AddMinutes(5));
+        RentalItem item = Assert.Single(order.Items);
+        item.ApplySupplierAccept(_cuong, now.AddHours(1), "CONF-1", "accept-unit-detail");
+        OrderTestData.HandOver(item, now.AddDays(3));
+
+        RentalUnitAssignment[] units = item.UnitAssignments.OrderBy(u => u.Id).ToArray();
+        Guid handoverPhoto = Guid.NewGuid();
+        units[0].RecordHandover(item.HandoverRecord!.Id, UnitCondition.Normal, "Máy nguyên vẹn", [handoverPhoto]);
+        Guid renterPhoto = Guid.NewGuid();
+        Guid requestId = Guid.NewGuid();
+        item.AddReturnRequest(new ReturnRequest(
+            requestId, item.Id, now.AddDays(6), "Khách gửi ảnh máy", _an, now.AddDays(6),
+            [new ReturnRequestUnit(Guid.NewGuid(), requestId, units[0].Id, [renterPhoto])]));
+
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            context.RentalOrders.Add(order);
+            await context.SaveChangesAsync();
+        }
+
+        Guid subOrderId = Assert.Single(order.SubOrders).Id;
+        Result<SupplierUnitDetailResponse> result = await SupplierService().GetMyUnitAsync(
+            subOrderId, item.Id, units[0].Id, OrderTestData.User(_cuong));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(item.ThumbnailMediaIdSnapshot, result.Value.Listing.ThumbnailMediaId);
+        Assert.Equal("Hòa Phát", result.Value.Listing.BrandName);
+        Assert.Equal(units[0].AssetId, result.Value.Unit.AssetId);
+        Assert.Equal([handoverPhoto], result.Value.Unit.HandoverMediaIds);
+        SupplierUnitReturnEvidenceResponse evidence = Assert.Single(result.Value.RenterReturnEvidence);
+        Assert.Equal(requestId, evidence.ReturnRequestId);
+        Assert.Equal([renterPhoto], evidence.MediaIds);
+        Assert.Equal(ReturnRequestUnitStatus.PendingSupplierConfirmation, evidence.Status);
+
+        Result<SupplierUnitDetailResponse> otherUnit = await SupplierService().GetMyUnitAsync(
+            subOrderId, item.Id, units[1].Id, OrderTestData.User(_cuong));
+        Assert.True(otherUnit.IsSuccess);
+        Assert.Empty(otherUnit.Value.RenterReturnEvidence);
+
+        Result<SupplierUnitDetailResponse> otherSupplier = await SupplierService().GetMyUnitAsync(
+            subOrderId, item.Id, units[0].Id, OrderTestData.User(_binh));
+        Assert.Equal("SubOrder.NotFound", otherSupplier.Error.Code);
+
+        Result<SupplierUnitDetailResponse> wrongUnit = await SupplierService().GetMyUnitAsync(
+            subOrderId, item.Id, Guid.NewGuid(), OrderTestData.User(_cuong));
+        Assert.Equal("SubOrder.NotFound", wrongUnit.Error.Code);
+
+        Result<SupplierUnitDetailResponse> wrongItem = await SupplierService().GetMyUnitAsync(
+            subOrderId, Guid.NewGuid(), units[0].Id, OrderTestData.User(_cuong));
+        Assert.Equal("SubOrder.NotFound", wrongItem.Error.Code);
     }
 
     [Fact]

@@ -164,6 +164,32 @@ public sealed record RentalItemCompletedPayload(
     long OrderVersion,
     [property: JsonConverter(typeof(UtcIsoDateTimeOffsetConverter))] DateTimeOffset CompletedAt);
 
+public sealed record RentalDeductionDisputeOpenedPayload(
+    Guid RentalOrderId,
+    Guid RentalItemId,
+    Guid DeductionProposalId,
+    Guid DisputeId,
+    Guid RenterId,
+    Guid SupplierId,
+    decimal DepositAmount,
+    decimal ProposedDeductionAmount,
+    DateTimeOffset OpenedAt,
+    long OrderVersion);
+
+public sealed record RentalDepositSettlementCompletedPayload(
+    Guid RentalOrderId,
+    string OrderCode,
+    Guid RentalItemId,
+    Guid RenterId,
+    string SettlementRef,
+    decimal DepositAmount,
+    decimal FinalDeductionAmount,
+    decimal DepositRefundAmount,
+    string? DeductionReason,
+    string FinalizationSource,
+    DateTimeOffset CompletedAt,
+    long OrderVersion);
+
 public sealed record RentalItemHandoverCompletedPayload(
     Guid RentalOrderId, Guid RentalItemId, Guid RenterId, Guid SupplierId,
     Guid EquipmentListingId, int Quantity, Guid HandoverRecordId,

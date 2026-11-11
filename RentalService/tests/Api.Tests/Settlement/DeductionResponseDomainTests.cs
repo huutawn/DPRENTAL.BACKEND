@@ -46,19 +46,21 @@ public sealed class DeductionResponseDomainTests
     }
 
     [Fact]
-    public void DisputeKeepsAmountOpen_UntilAdminRecordsFinalDecision()
+    public void DisputeKeepsAmountOpen_UntilRenterAcceptsSupplierOffer()
     {
         var (_, item, renterId, amount) = Proposed();
         Assert.True(item.DisputeDeductionByRenter(renterId, "Too high", [], Now.AddHours(1), "dispute").IsSuccess);
+        Assert.Equal(RentalItemStatus.Disputed, item.Status);
         Assert.Null(item.FinalDeductionAmount);
         Assert.False(item.TryAutoAcceptDeduction(Now.AddDays(3), "timeout"));
-        Assert.True(item.ResolveDeductionDispute(Guid.NewGuid(), amount + 1, "Upheld", [],
-            Now.AddHours(2), "resolve-invalid").IsFailure);
-        Guid admin = Guid.NewGuid();
-        Assert.True(item.ResolveDeductionDispute(admin, amount / 2, "Partial damage", [],
-            Now.AddHours(2), "resolve").IsSuccess);
+        Assert.False(item.IsReadyForSettlement);
+        Assert.True(item.OfferDisputeAmountBySupplier(item.SupplierId, amount + 1,
+            Now.AddHours(2), 12, "offer-invalid").IsFailure);
+        Assert.True(item.OfferDisputeAmountBySupplier(item.SupplierId, amount / 2,
+            Now.AddHours(2), 12, "offer").IsSuccess);
+        Assert.True(item.AcceptDeductionByRenter(renterId, Now.AddHours(2), "accept", 12).IsSuccess);
         Assert.Equal(amount / 2, item.FinalDeductionAmount);
-        Assert.Equal(admin, item.DeductionProposal!.Dispute!.ResolvedById);
+        Assert.Equal(renterId, item.DeductionProposal!.Dispute!.ResolvedById);
         Assert.Equal(DisputeStatus.Resolved, item.DeductionProposal.Dispute.Status);
         Assert.Equal(RentalItemStatus.PendingSettlement, item.Status);
     }
