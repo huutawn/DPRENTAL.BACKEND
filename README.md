@@ -172,3 +172,7 @@ docker build -t mediaservice:runtime -f Dockerfile .
 Container runtime chạy non-root user `$APP_UID`, mở cổng `8080` và tích hợp healthcheck qua `/health/ready`.
 
 Chi tiết kiến trúc và xử lý sự cố xem thêm tại [docs/README.md](docs/README.md).
+
+## Review video uploads
+
+The existing upload pipeline accepts MP4 (`video/mp4`) and WebM (`video/webm`) up to 20 MiB per file. Signature detection validates MP4 brands or the WebM EBML DocType before accepting the declared MIME. Images retain the 10 MiB limit and PDF retains the 20 MiB limit. ReviewService independently controls review attachment ownership, visibility and attachment counts.
