@@ -9,7 +9,7 @@ public static class MediaFilePolicy
     public static long? MaxSizeBytesFor(string? contentType) => contentType?.Trim().ToLowerInvariant() switch
     {
         "image/jpeg" or "image/png" or "image/webp" => TenMegabytes,
-        "application/pdf" => TwentyMegabytes,
+        "application/pdf" or "video/mp4" or "video/webm" => TwentyMegabytes,
         _ => null
     };
 

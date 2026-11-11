@@ -191,3 +191,6 @@ Xem [hướng dẫn vận hành và recovery](docs/SELF_HOSTED_DEPLOYMENT.md) v�
 ```bash
 python3 -m unittest discover -s scripts/tests -p 'test_deploy*.py' -v
 ```
+## Review video uploads
+
+The existing upload pipeline accepts MP4 (`video/mp4`) and WebM (`video/webm`) up to 20 MiB per file. Signature detection validates MP4 brands or the WebM EBML DocType before accepting the declared MIME. Images retain the 10 MiB limit and PDF retains the 20 MiB limit. ReviewService independently controls review attachment ownership, visibility and attachment counts.
