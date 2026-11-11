@@ -20,9 +20,9 @@ public interface IReviewMediaService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gỡ media khỏi đánh giá.
+    /// Gỡ media khỏi đánh giá. Trả về phiên bản đánh giá mới.
     /// </summary>
-    Task<Result> DetachMediaAsync(
+    Task<Result<long>> DetachMediaAsync(
         Guid reviewId,
         Guid actorId,
         Guid mediaId,
@@ -35,6 +35,14 @@ public interface IReviewMediaService
     Task<Result<Dprental.ReviewService.Application.DTOs.Media.MediaAccessDto>> GetMediaPrivateAccessAsync(
         Guid reviewId,
         Guid mediaId,
+        ReviewActorContext actor,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lấy danh sách media đính kèm thuộc đánh giá (sau khi kiểm tra visibility).
+    /// </summary>
+    Task<Result<IReadOnlyList<ReviewMediaResponse>>> GetReviewMediaListAsync(
+        Guid reviewId,
         ReviewActorContext actor,
         CancellationToken cancellationToken = default);
 }

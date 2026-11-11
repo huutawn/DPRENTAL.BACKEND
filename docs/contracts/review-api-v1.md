@@ -449,3 +449,9 @@ Dựa trên bảng chiếu (`review_projections`) đã hydrate đầy đủ và 
   "code": "RENTAL_SERVICE_TIMEOUT"
 }
 ```
+
+## Media attachments
+
+`POST /api/v1/reviews/{reviewId}/media` accepts `mediaId` and an optional compatibility `mediaType`. MIME and ownership are verified with MediaService; client MIME is not authoritative. Supported types are JPEG, PNG, WebP, MP4 and WebM. Each review supports at most five attachments, including at most one video. MediaService limits images to 10 MiB and videos to 20 MiB.
+
+Attach returns 201 with the new review ETag and `version` in the media response. Detach returns 204 with the current review ETag. Both require `If-Match`; competing updates return 412. `GET /api/v1/reviews/{reviewId}/media` returns attachments after checking review visibility. Hidden or withdrawn review media is restricted to the author and administrators. Media responses use `Cache-Control: private, no-store`.

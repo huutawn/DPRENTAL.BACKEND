@@ -314,12 +314,14 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
 
         // 1. Đính kèm ảnh
         var mediaId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(mediaId, renterId, "Ready", "image/jpeg");
         var attachBody = new AttachMediaRequest(mediaId, "image/jpeg");
         using var attachReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
             attachBody, GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
         using var attachRes = await _client.SendAsync(attachReq);
 
         Assert.Equal(HttpStatusCode.Created, attachRes.StatusCode);
+        Assert.Equal("\"2\"", attachRes.Headers.ETag?.Tag);
         var mediaRes = JsonSerializer.Deserialize<ReviewMediaResponse>(await attachRes.Content.ReadAsStringAsync(), JsonOptions);
         Assert.NotNull(mediaRes);
         Assert.Equal(mediaId, mediaRes.MediaId);
@@ -330,6 +332,7 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
         using var detachRes = await _client.SendAsync(detachReq);
 
         Assert.Equal(HttpStatusCode.NoContent, detachRes.StatusCode);
+        Assert.Equal("\"3\"", detachRes.Headers.ETag?.Tag);
     }
     [Fact]
     public async Task Phase6_ReportPrivateReview_ByThirdParty_Returns404NotFound_NoExistenceLeak()
@@ -573,7 +576,7 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
     }
 
     [Fact]
-    public async Task Phase7_AttachMedia_WhenNotReadyOrNotImage_ReturnsExpectedErrors()
+    public async Task Phase7_AttachMedia_WhenNotReadyOrUnsupported_ReturnsExpectedErrors()
     {
         var renterId = Guid.NewGuid();
         var supplierId = Guid.NewGuid();
@@ -597,14 +600,73 @@ public sealed class AdvancedPhasesAcceptanceTests : IClassFixture<ReviewTestFixt
         var notReadyRes = await _client.SendAsync(notReadyReq);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, notReadyRes.StatusCode);
 
-        // 2. Media not an image -> 400 BadRequest
+        // 2. Client MIME cannot disguise an unsupported verified file -> 400 BadRequest
         var pdfMediaId = Guid.NewGuid();
         _fixture.MediaClient.RegisterMedia(pdfMediaId, renterId, "Ready", "application/pdf");
 
         using var pdfReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
-            new AttachMediaRequest(pdfMediaId, "application/pdf"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+            new AttachMediaRequest(pdfMediaId, "image/jpeg"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
         var pdfRes = await _client.SendAsync(pdfReq);
         Assert.Equal(HttpStatusCode.BadRequest, pdfRes.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("video/mp4")]
+    [InlineData("video/webm")]
+    public async Task Phase7_AttachMedia_Video_SucceedsAndEnforcesOneVideoLimit(string videoMime)
+    {
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+
+        _fixture.RentalClient.SetSnapshot(new RentalItemReviewSnapshotDto(
+            orderId, itemId, renterId, supplierId, Guid.NewGuid(), "Completed", _fixture.CurrentTime.AddDays(-1), 1));
+
+        using var postReq = CreateRequest(HttpMethod.Post, "/api/v1/reviews",
+            new CreateReviewRequest(orderId, itemId, 5, "Review with video"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"));
+        var postRes = await _client.SendAsync(postReq);
+        var detail = JsonSerializer.Deserialize<ReviewDetailResponse>(await postRes.Content.ReadAsStringAsync(), JsonOptions)!;
+
+        // 1. Attach 1st video (mp4) -> 201 Created
+        var video1Id = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(video1Id, renterId, "Ready", videoMime);
+
+        using var video1Req = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(video1Id, "image/jpeg"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"1\"");
+        using var video1Res = await _client.SendAsync(video1Req);
+        Assert.Equal(HttpStatusCode.Created, video1Res.StatusCode);
+        Assert.Equal("\"2\"", video1Res.Headers.ETag?.Tag);
+
+        // 2. Attach 2nd video (webm) -> 400 BadRequest (MAX_VIDEO_EXCEEDED)
+        var video2Id = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(video2Id, renterId, "Ready", "video/webm");
+
+        using var video2Req = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(video2Id, "video/webm"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"2\"");
+        using var video2Res = await _client.SendAsync(video2Req);
+        Assert.Equal(HttpStatusCode.BadRequest, video2Res.StatusCode);
+
+        // 3. Attach image after video -> 201 Created (total 2 attachments)
+        var imageId = Guid.NewGuid();
+        _fixture.MediaClient.RegisterMedia(imageId, renterId, "Ready", "image/png");
+
+        using var imageReq = CreateRequest(HttpMethod.Post, $"/api/v1/reviews/{detail.ReviewId}/media",
+            new AttachMediaRequest(imageId, "image/png"), GenerateJwt(renterId), Guid.NewGuid().ToString("N"), ifMatch: "\"2\"");
+        using var imageRes = await _client.SendAsync(imageReq);
+        Assert.Equal(HttpStatusCode.Created, imageRes.StatusCode);
+        Assert.Equal("\"3\"", imageRes.Headers.ETag?.Tag);
+
+        // 4. GET /api/v1/reviews/{reviewId}/media returns list of attachments
+        using var getMediaReq = CreateRequest(HttpMethod.Get, $"/api/v1/reviews/{detail.ReviewId}/media",
+            token: GenerateJwt(renterId));
+        using var getMediaRes = await _client.SendAsync(getMediaReq);
+        Assert.Equal(HttpStatusCode.OK, getMediaRes.StatusCode);
+        var mediaList = JsonSerializer.Deserialize<List<ReviewMediaResponse>>(await getMediaRes.Content.ReadAsStringAsync(), JsonOptions);
+        Assert.NotNull(mediaList);
+        Assert.Equal(2, mediaList.Count);
+        Assert.Contains(mediaList, m => m.MediaId == video1Id && m.MediaType == videoMime);
+        Assert.Contains(mediaList, m => m.MediaId == imageId && m.MediaType == "image/png");
     }
 
     #endregion
