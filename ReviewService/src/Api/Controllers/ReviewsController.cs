@@ -124,6 +124,7 @@ public sealed class ReviewsController : ControllerBase
         }
 
         Response.Headers.ETag = $"\"{result.Value.Version}\"";
+        Response.Headers.CacheControl = "private, no-store";
         return Ok(result.Value);
     }
 
@@ -175,6 +176,7 @@ public sealed class ReviewsController : ControllerBase
         }
 
         Response.Headers.ETag = $"\"{result.Value.Version}\"";
+        Response.Headers.CacheControl = "private, no-store";
         return Ok(result.Value);
     }
 
@@ -210,6 +212,7 @@ public sealed class ReviewsController : ControllerBase
         }
 
         Response.Headers.ETag = $"\"{result.Value.Version}\"";
+        Response.Headers.CacheControl = "private, no-store";
         return Ok(result.Value);
     }
 
@@ -454,6 +457,28 @@ public sealed class ReviewsController : ControllerBase
     }
 
     /// <summary>
+    /// Đọc danh sách tệp media đính kèm của một đánh giá (GET /api/v1/reviews/{reviewId}/media).
+    /// </summary>
+    [HttpGet("{reviewId:guid}/media")]
+    public async Task<IActionResult> GetReviewMedia(
+        [FromRoute] Guid reviewId,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _mediaService.GetReviewMediaListAsync(
+            reviewId,
+            _callerContext.ToActorContext(),
+            cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        Response.Headers.CacheControl = "private, no-store";
+        return Ok(result.Value);
+    }
+
+    /// <summary>
     /// Đính kèm media vào đánh giá (POST /api/v1/reviews/{reviewId}/media).
     /// </summary>
     [HttpPost("{reviewId:guid}/media")]
@@ -482,9 +507,14 @@ public sealed class ReviewsController : ControllerBase
             ifMatch ?? string.Empty,
             cancellationToken);
 
-        return result.IsSuccess
-            ? StatusCode(StatusCodes.Status201Created, result.Value)
-            : this.ToProblem(result.Error);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        Response.Headers.ETag = $"\"{result.Value.Version}\"";
+        Response.Headers.CacheControl = "private, no-store";
+        return StatusCode(StatusCodes.Status201Created, result.Value);
     }
 
     /// <summary>
@@ -515,9 +545,14 @@ public sealed class ReviewsController : ControllerBase
             ifMatch ?? string.Empty,
             cancellationToken);
 
-        return result.IsSuccess
-            ? NoContent()
-            : this.ToProblem(result.Error);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        Response.Headers.ETag = $"\"{result.Value}\"";
+        Response.Headers.CacheControl = "private, no-store";
+        return NoContent();
     }
 
     /// <summary>
@@ -535,8 +570,12 @@ public sealed class ReviewsController : ControllerBase
             _callerContext.ToActorContext(),
             cancellationToken);
 
-        return result.IsSuccess
-            ? Ok(result.Value)
-            : this.ToProblem(result.Error);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        Response.Headers.CacheControl = "private, no-store";
+        return Ok(result.Value);
     }
 }

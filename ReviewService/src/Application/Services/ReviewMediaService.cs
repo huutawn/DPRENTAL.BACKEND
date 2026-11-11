@@ -6,6 +6,7 @@ using Dprental.ReviewService.Common;
 using Dprental.ReviewService.Common.Enums;
 using Dprental.ReviewService.Domain.Entities;
 using Dprental.ReviewService.Domain.IRepositories;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Dprental.ReviewService.Application.Services;
@@ -74,57 +75,61 @@ public sealed class ReviewMediaService : IReviewMediaService
             return Result.Failure<ReviewMediaResponse>(ifMatchError!);
         }
 
-        if (!string.IsNullOrWhiteSpace(mediaType) &&
-            !mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        if (_mediaClient == null)
         {
             return Result.Failure<ReviewMediaResponse>(
-                Error.Validation("INVALID_MEDIA_TYPE", "Chỉ chấp nhận đính kèm tệp hình ảnh vào đánh giá."));
+                Error.Failure("MEDIA_SERVICE_UNAVAILABLE", "Dịch vụ Media chưa được cấu hình hoặc không khả dụng."));
         }
 
-        if (_mediaClient != null)
+        var verifyResult = await _mediaClient.VerifyMediaAsync(mediaId, cancellationToken);
+        if (verifyResult.IsFailure)
         {
-            var verifyResult = await _mediaClient.VerifyMediaAsync(mediaId, cancellationToken);
-            if (verifyResult.IsFailure)
-            {
-                return Result.Failure<ReviewMediaResponse>(verifyResult.Error);
-            }
-
-            if (verifyResult.Value.UploadedByUserId != Guid.Empty && verifyResult.Value.UploadedByUserId != actorId)
-            {
-                return Result.Failure<ReviewMediaResponse>(
-                    Error.Forbidden("MEDIA_OWNERSHIP_MISMATCH", "Bạn không phải là người tải lên tệp media này."));
-            }
-
-            if (!string.Equals(verifyResult.Value.Status, "Ready", StringComparison.OrdinalIgnoreCase))
-            {
-                return Result.Failure<ReviewMediaResponse>(
-                    Error.Unprocessable("MEDIA_NOT_READY", "Tệp media chưa ở trạng thái sẵn sàng để đính kèm."));
-            }
-
-            if (string.IsNullOrWhiteSpace(verifyResult.Value.ContentType) ||
-                !verifyResult.Value.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
-            {
-                return Result.Failure<ReviewMediaResponse>(
-                    Error.Validation("INVALID_MEDIA_TYPE", "Chỉ chấp nhận đính kèm tệp hình ảnh vào đánh giá."));
-            }
+            return Result.Failure<ReviewMediaResponse>(verifyResult.Error);
         }
 
-        int mediaCount = await _mediaRepository.CountByReviewIdAsync(reviewId, cancellationToken);
-        if (mediaCount >= 5)
+        if (verifyResult.Value.UploadedByUserId == Guid.Empty || verifyResult.Value.UploadedByUserId != actorId)
         {
             return Result.Failure<ReviewMediaResponse>(
-                Error.Validation("MAX_MEDIA_EXCEEDED", "Mỗi đánh giá chỉ được đính kèm tối đa 5 hình ảnh."));
+                Error.Forbidden("MEDIA_OWNERSHIP_MISMATCH", "Bạn không phải là người tải lên tệp media này."));
         }
 
-        var existing = await _mediaRepository.GetByReviewAndMediaIdAsync(reviewId, mediaId, cancellationToken);
-        if (existing != null)
+        if (!string.Equals(verifyResult.Value.Status, "Ready", StringComparison.OrdinalIgnoreCase))
+        {
+            return Result.Failure<ReviewMediaResponse>(
+                Error.Unprocessable("MEDIA_NOT_READY", "Tệp media chưa ở trạng thái sẵn sàng để đính kèm."));
+        }
+
+        string verifiedMime = verifyResult.Value.ContentType?.Trim().ToLowerInvariant() ?? string.Empty;
+        bool isSupportedImage = verifiedMime is "image/jpeg" or "image/png" or "image/webp";
+        bool isSupportedVideo = verifiedMime is "video/mp4" or "video/webm";
+
+        if (!isSupportedImage && !isSupportedVideo)
+        {
+            return Result.Failure<ReviewMediaResponse>(
+                Error.Validation("INVALID_MEDIA_TYPE", "Chỉ chấp nhận đính kèm tệp hình ảnh (JPEG, PNG, WebP) hoặc video (MP4, WebM) vào đánh giá."));
+        }
+
+        var currentAttachments = await _mediaRepository.GetByReviewIdAsync(reviewId, cancellationToken);
+        if (currentAttachments.Count >= 5)
+        {
+            return Result.Failure<ReviewMediaResponse>(
+                Error.Validation("MAX_MEDIA_EXCEEDED", "Mỗi đánh giá chỉ được đính kèm tối đa 5 tệp media."));
+        }
+
+        if (currentAttachments.Any(m => m.MediaId == mediaId))
         {
             return Result.Failure<ReviewMediaResponse>(
                 Error.Conflict("MEDIA_ALREADY_ATTACHED", "Media này đã được đính kèm vào đánh giá."));
         }
 
+        if (isSupportedVideo && currentAttachments.Any(m => IsVideoMediaType(m.MediaType)))
+        {
+            return Result.Failure<ReviewMediaResponse>(
+                Error.Validation("MAX_VIDEO_EXCEEDED", "Mỗi đánh giá chỉ được đính kèm tối đa 1 video."));
+        }
+
         var now = _timeProvider.GetUtcNow();
-        var media = new ReviewMedia(Guid.NewGuid(), reviewId, mediaId, mediaType ?? "image", now);
+        var media = new ReviewMedia(Guid.NewGuid(), reviewId, mediaId, verifiedMime, now);
         review.Version++;
 
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
@@ -148,6 +153,13 @@ public sealed class ReviewMediaService : IReviewMediaService
             await _unitOfWork.CommitAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _unitOfWork.DiscardChanges();
+            return Result.Failure<ReviewMediaResponse>(
+                Error.PreconditionFailed("ETAG_PRECONDITION_FAILED", "Phiên bản đánh giá đã thay đổi bởi một thao tác khác."));
+        }
         catch (Exception ex)
         {
             await tx.RollbackAsync(cancellationToken);
@@ -156,11 +168,11 @@ public sealed class ReviewMediaService : IReviewMediaService
             throw;
         }
 
-        return Result.Success(new ReviewMediaResponse(media.Id, media.ReviewId, media.MediaId, media.MediaType, media.CreatedAt));
+        return Result.Success(new ReviewMediaResponse(media.Id, media.ReviewId, media.MediaId, media.MediaType, media.CreatedAt, review.Version));
     }
 
     /// <inheritdoc />
-    public async Task<Result> DetachMediaAsync(
+    public async Task<Result<long>> DetachMediaAsync(
         Guid reviewId,
         Guid actorId,
         Guid mediaId,
@@ -170,17 +182,17 @@ public sealed class ReviewMediaService : IReviewMediaService
         var review = await _reviewRepository.GetByIdAsync(reviewId, cancellationToken);
         if (review == null)
         {
-            return Result.Failure(Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
+            return Result.Failure<long>(Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
         }
 
         if (review.AuthorId != actorId)
         {
-            return Result.Failure(Error.Forbidden("FORBIDDEN", "Chỉ tác giả mới có quyền gỡ media khỏi đánh giá."));
+            return Result.Failure<long>(Error.Forbidden("FORBIDDEN", "Chỉ tác giả mới có quyền gỡ media khỏi đánh giá."));
         }
 
         if (!ParseIfMatch(ifMatch, review.Version, out var ifMatchError))
         {
-            return Result.Failure(ifMatchError!);
+            return Result.Failure<long>(ifMatchError!);
         }
 
         var media = await _mediaRepository.GetByReviewAndMediaIdAsync(reviewId, mediaId, cancellationToken);
@@ -209,6 +221,13 @@ public sealed class ReviewMediaService : IReviewMediaService
                 await _unitOfWork.CommitAsync(cancellationToken);
                 await tx.CommitAsync(cancellationToken);
             }
+            catch (DbUpdateConcurrencyException)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _unitOfWork.DiscardChanges();
+                return Result.Failure<long>(
+                    Error.PreconditionFailed("ETAG_PRECONDITION_FAILED", "Phiên bản đánh giá đã thay đổi bởi một thao tác khác."));
+            }
             catch (Exception ex)
             {
                 await tx.RollbackAsync(cancellationToken);
@@ -217,7 +236,28 @@ public sealed class ReviewMediaService : IReviewMediaService
                 throw;
             }
         }
-        return Result.Success();
+
+        return Result.Success(review.Version);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<IReadOnlyList<ReviewMediaResponse>>> GetReviewMediaListAsync(
+        Guid reviewId,
+        ReviewActorContext actor,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+
+        var review = await _reviewRepository.GetByIdAsync(reviewId, cancellationToken);
+        if (review == null || !CanReadReview(review, actor))
+        {
+            return Result.Failure<IReadOnlyList<ReviewMediaResponse>>(
+                Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
+        }
+
+        var list = await _mediaRepository.GetByReviewIdAsync(reviewId, cancellationToken);
+        var responses = list.Select(m => new ReviewMediaResponse(m.Id, m.ReviewId, m.MediaId, m.MediaType, m.CreatedAt, review.Version)).ToList();
+        return Result.Success<IReadOnlyList<ReviewMediaResponse>>(responses);
     }
 
     /// <inheritdoc />
@@ -230,37 +270,12 @@ public sealed class ReviewMediaService : IReviewMediaService
         ArgumentNullException.ThrowIfNull(actor);
 
         var review = await _reviewRepository.GetByIdAsync(reviewId, cancellationToken);
-        if (review == null)
+        if (review == null || !CanReadReview(review, actor))
         {
             return Result.Failure<MediaAccessDto>(
                 Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
         }
-        // Kiểm tra quyền riêng tư của review:
-        // Nếu review bị Hidden hoặc Withdrawn, chỉ Tác giả (Author) hoặc Quản trị viên (Admin) mới có quyền truy cập media URL.
-        bool isAuthor = actor.ActorId == review.AuthorId;
-        bool isAuthorOrAdmin = isAuthor || actor.IsAdmin;
-        bool isHiddenOrWithdrawn = review.ModerationState == ModerationState.Hidden ||
-                                   review.AuthorState == AuthorState.Withdrawn;
 
-        if (isHiddenOrWithdrawn)
-        {
-            if (!isAuthorOrAdmin)
-            {
-                return Result.Failure<MediaAccessDto>(
-                    Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
-            }
-        }
-        else
-        {
-            bool isPublic = review.Direction == ReviewDirection.renter_to_supplier_listing;
-            bool isParticipant = isAuthor || actor.ActorId == review.SubjectId;
-
-            if (!isPublic && !isParticipant && !actor.IsAdmin)
-            {
-                return Result.Failure<MediaAccessDto>(
-                    Error.NotFound("REVIEW_NOT_FOUND", "Không tìm thấy đánh giá."));
-            }
-        }
         var media = await _mediaRepository.GetByReviewAndMediaIdAsync(reviewId, mediaId, cancellationToken);
         if (media == null)
         {
@@ -276,6 +291,28 @@ public sealed class ReviewMediaService : IReviewMediaService
 
         return await _mediaClient.CreatePrivateReadAccessAsync(mediaId, cancellationToken);
     }
+
+    private static bool CanReadReview(Review review, ReviewActorContext actor)
+    {
+        bool isAuthor = actor.ActorId == review.AuthorId;
+        bool isAuthorOrAdmin = isAuthor || actor.IsAdmin;
+        bool isHiddenOrWithdrawn = review.ModerationState == ModerationState.Hidden ||
+                                   review.AuthorState == AuthorState.Withdrawn;
+
+        if (isHiddenOrWithdrawn)
+        {
+            return isAuthorOrAdmin;
+        }
+
+        bool isPublic = review.Direction == ReviewDirection.renter_to_supplier_listing;
+        bool isParticipant = isAuthor || actor.ActorId == review.SubjectId;
+
+        return isPublic || isParticipant || actor.IsAdmin;
+    }
+
+    private static bool IsVideoMediaType(string? mediaType) =>
+        mediaType is "video/mp4" or "video/webm" ||
+        (mediaType != null && mediaType.StartsWith("video/", StringComparison.OrdinalIgnoreCase));
 
     private static bool ParseIfMatch(string? ifMatch, long currentVersion, out Error? error)
     {

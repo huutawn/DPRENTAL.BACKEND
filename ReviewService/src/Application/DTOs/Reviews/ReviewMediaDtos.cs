@@ -7,4 +7,5 @@ public sealed record ReviewMediaResponse(
     Guid ReviewId,
     Guid MediaId,
     string MediaType,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    long Version = 0);
