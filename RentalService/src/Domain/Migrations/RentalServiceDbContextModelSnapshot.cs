@@ -476,6 +476,10 @@ namespace RentalService.Domain.Migrations
                     b.Property<DateTimeOffset?>("DeductionDeadline")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<decimal>("DeliveryFee")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
                     b.Property<decimal>("DepositAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
@@ -551,6 +555,10 @@ namespace RentalService.Domain.Migrations
 
                     b.Property<Guid>("RentalSubOrderId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal>("ReturnFee")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<DateTimeOffset?>("ReturnsCompletedAt")
                         .HasColumnType("timestamp with time zone");
@@ -745,6 +753,10 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<decimal>("DeliveryFee")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
                     b.Property<string>("DeliveryMethod")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -753,6 +765,9 @@ namespace RentalService.Domain.Migrations
                     b.Property<string>("DeliveryNote")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("DeliverySnapshotJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<string>("InvoiceRef")
                         .HasMaxLength(256)
@@ -793,6 +808,15 @@ namespace RentalService.Domain.Migrations
 
                     b.Property<Guid>("RenterId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal>("ReturnFee")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("ReturnMethod")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");

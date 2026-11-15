@@ -683,7 +683,7 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
             var existingRefund = order.OperationReceipts.FirstOrDefault(r => r.OperationId == refundKey);
             if (existingRefund == null && !string.IsNullOrWhiteSpace(order.InvoiceRef) && !string.IsNullOrWhiteSpace(order.PaymentRef))
             {
-                var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
+                var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount, item.DeliveryFee, item.ReturnFee) };
                 var refundReq = new RequestRefundRequest(order.Id, order.InvoiceRef, order.PaymentRef, refundItems, errorMessage, refundKey, RentalRefundKinds.CancellationRefund);
                 var refundReceipt = new RentalOperationReceipt(
                     Guid.NewGuid(), order.Id, refundKey, "RequestRefund",

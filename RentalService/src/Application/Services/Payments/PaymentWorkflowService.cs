@@ -442,7 +442,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
             if (existingRefund == null)
             {
                 // Dựng request/command từ snapshot và định danh của luồng hiện tại để gửi đúng tác vụ sang service sở hữu.
-                var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
+                var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount, item.DeliveryFee, item.ReturnFee) };
                 string refundKind = payload.PaidAt >= order.PaymentDeadline
                     ? RentalRefundKinds.LatePaymentRefund
                     : RentalRefundKinds.CancellationRefund;
@@ -463,7 +463,7 @@ public sealed class PaymentWorkflowService : IPaymentWorkflowService
                     order.Id,
                     refundKey,
                     "RequestRefund",
-                    RentalOperationExecutor.ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount}"),
+                    RentalOperationExecutor.ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount + item.DeliveryFee + item.ReturnFee}"),
                     isSuccess: false,
                     errorCode: null,
                     errorMessage: null,

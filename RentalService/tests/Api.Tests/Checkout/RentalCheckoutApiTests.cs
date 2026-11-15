@@ -384,6 +384,76 @@ public sealed class RentalCheckoutApiTests
         Assert.Equal(initialPaymentRequests, factory.Payment.InvoiceRequests.Count);
     }
 
+    [Fact]
+    public async Task Preview_PostCheckoutPreview_Returns200_WithoutCreatingHoldOrOrder()
+    {
+        using CheckoutApiFactory factory = new();
+        using HttpClient client = factory.CreateRenterClient();
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/rental/checkout/preview", factory.Request());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        JsonElement preview = await ReadAsync(response);
+        Assert.Equal(Total, preview.GetProperty("totalRentalAmount").GetDecimal());
+        Assert.Equal(0m, preview.GetProperty("totalDepositAmount").GetDecimal());
+        Assert.Equal(0m, preview.GetProperty("deliveryFee").GetDecimal());
+        Assert.Equal(0m, preview.GetProperty("returnFee").GetDecimal());
+        Assert.Equal(Total, preview.GetProperty("totalAmount").GetDecimal());
+        Assert.Equal("VND", preview.GetProperty("currency").GetString());
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        RentalServiceDbContext context = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+        Assert.Empty(context.RentalOrders);
+        Assert.Empty(context.RentalOutboxMessages);
+        Assert.Empty(factory.Inventory.HoldRequests);
+    }
+
+    [Fact]
+    public async Task Submit_MultiSupplierCart_Returns400_CHECKOUT_MULTI_SUPPLIER_FORBIDDEN()
+    {
+        using CheckoutApiFactory factory = new();
+        using HttpClient client = factory.CreateRenterClient("key-multi-sup");
+
+        Guid secondSupplier = Guid.NewGuid();
+        Guid item2 = factory.AddCartItem(secondSupplier, 400_000m, new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 14));
+
+        CheckoutRequest req = factory.Request(Total + 1_200_000m) with
+        {
+            CartItemIds = [factory.CartItemId, item2]
+        };
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(Route, req);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        JsonElement problem = await ReadAsync(response);
+        Assert.Equal("CHECKOUT_MULTI_SUPPLIER_FORBIDDEN", problem.GetProperty("title").GetString());
+        Assert.Empty(factory.Inventory.HoldRequests);
+    }
+
+    [Fact]
+    public async Task Submit_DifferingRentalPeriods_Returns400_CHECKOUT_MULTI_PERIOD_FORBIDDEN()
+    {
+        using CheckoutApiFactory factory = new();
+        using HttpClient client = factory.CreateRenterClient("key-diff-period");
+
+        var initialReq = factory.Request();
+        Guid sameSupplier = factory.SupplierId;
+        Guid item2 = factory.AddCartItem(sameSupplier, 400_000m, new DateOnly(2026, 10, 20), new DateOnly(2026, 10, 22));
+
+        CheckoutRequest req = initialReq with
+        {
+            CartItemIds = [factory.CartItemId, item2]
+        };
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(Route, req);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        JsonElement problem = await ReadAsync(response);
+        Assert.Equal("CHECKOUT_MULTI_PERIOD_FORBIDDEN", problem.GetProperty("title").GetString());
+        Assert.Empty(factory.Inventory.HoldRequests);
+    }
+
 
     private static async Task<JsonElement> ReadAsync(HttpResponseMessage response) =>
         JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
@@ -396,6 +466,8 @@ public sealed class RentalCheckoutApiTests
         private bool _seeded;
 
         public Guid RenterId { get; } = Guid.NewGuid();
+
+        public Guid SupplierId { get; private set; }
 
         public Guid CartItemId { get; private set; }
 
@@ -495,11 +567,11 @@ public sealed class RentalCheckoutApiTests
 
             _seeded = true;
 
-            Guid supplierId = Guid.NewGuid();
+            SupplierId = Guid.NewGuid();
 
             RentalCart cart = RentalCart.Create(Guid.NewGuid(), RenterId, Now).Value;
             CartItemId = cart.AddItem(
-                Guid.NewGuid(), _listingId, supplierId, 2, new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 14), Now).Value.Id;
+                Guid.NewGuid(), _listingId, SupplierId, 2, new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 14), Now).Value.Id;
 
             using IServiceScope scope = Services.CreateScope();
             RentalServiceDbContext context = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
@@ -507,8 +579,26 @@ public sealed class RentalCheckoutApiTests
             context.SaveChanges();
 
             _listings.Listings[_listingId] = TestListings.Create(
-                _listingId, supplierId, "Sony A7 IV", 500_000m, thumbnailMediaId: Guid.NewGuid());
+                _listingId, SupplierId, "Sony A7 IV", 500_000m, thumbnailMediaId: Guid.NewGuid());
             _listings.AvailableQuantities[_listingId] = 10;
+        }
+
+        public Guid AddCartItem(Guid supplierId, decimal dailyRate, DateOnly start, DateOnly end)
+        {
+            EnsureSeeded();
+            Guid listingId = Guid.NewGuid();
+            _listings.Listings[listingId] = TestListings.Create(
+                listingId, supplierId, "Additional Item", dailyRate, thumbnailMediaId: Guid.NewGuid());
+            _listings.AvailableQuantities[listingId] = 10;
+
+            using IServiceScope scope = Services.CreateScope();
+            RentalServiceDbContext context = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            RentalCart cart = context.RentalCarts.Include(c => c.Items).Single(c => c.RenterId == RenterId);
+            Guid newItemId = Guid.NewGuid();
+            var itemResult = cart.AddItem(newItemId, listingId, supplierId, 1, start, end, Now);
+            context.RentalCartItems.Add(itemResult.Value);
+            context.SaveChanges();
+            return newItemId;
         }
     }
 

@@ -205,4 +205,124 @@ public sealed class CheckoutRequestValidatorTests
 
         Assert.Contains(CheckoutRequestValidator.Validate(request), e => e.Field == "refundAccountId" && e.Code == "INVALID_FORMAT");
     }
+
+    [Fact]
+    public void Validate_PickupDeliveryMethod_AcceptsWithoutAddressDetailOrProvince()
+    {
+        CheckoutRequest request = ValidRequest() with
+        {
+            DeliveryMethod = "Pickup",
+            Delivery = new(null, null, "Nguyễn Văn B", "0901234567", "Tự tới lấy"),
+        };
+
+        Assert.Empty(CheckoutRequestValidator.Validate(request));
+    }
+
+    [Fact]
+    public void Validate_PickupDeliveryMethod_RejectsInvalidRecipientPhone()
+    {
+        CheckoutRequest request = ValidRequest() with
+        {
+            DeliveryMethod = "Pickup",
+            Delivery = new(null, null, "Nguyễn Văn B", "invalid-phone", "Tự tới lấy"),
+        };
+
+        Assert.Contains(CheckoutRequestValidator.Validate(request), e => e.Field == "delivery.recipientPhone");
+    }
+
+    [Fact]
+    public void Validate_RejectsPlaceholderRecipientNameAndPhone()
+    {
+        CheckoutRequest reqName = ValidRequest() with
+        {
+            Delivery = ValidRequest().Delivery! with { RecipientName = "Người thuê" }
+        };
+        Assert.Contains(CheckoutRequestValidator.Validate(reqName), e => e.Field == "delivery.recipientName" && e.Code == "INVALID_FORMAT");
+
+        CheckoutRequest reqPhone = ValidRequest() with
+        {
+            Delivery = ValidRequest().Delivery! with { RecipientPhone = "0900000000" }
+        };
+        Assert.Contains(CheckoutRequestValidator.Validate(reqPhone), e => e.Field == "delivery.recipientPhone" && e.Code == "INVALID_FORMAT");
+    }
+
+    [Theory]
+    [InlineData("0900000000")]
+    [InlineData("+84900000000")]
+    [InlineData("0000000000")]
+    [InlineData("+84000000000")]
+    [InlineData("0111111111")]
+    [InlineData("0999999999")]
+    public void Validate_RejectsPlaceholderRecipientPhone(string placeholderPhone)
+    {
+        CheckoutRequest request = ValidRequest();
+        request = request with { Delivery = request.Delivery! with { RecipientPhone = placeholderPhone } };
+
+        IReadOnlyList<CheckoutFieldError> errors = CheckoutRequestValidator.Validate(request);
+        Assert.Contains(errors, e => e.Field == "delivery.recipientPhone" && e.Code == "INVALID_FORMAT");
+    }
+
+    [Theory]
+    [InlineData("Người thuê")]
+    [InlineData("nguoi thue")]
+    [InlineData("NGUOI THUE")]
+    [InlineData("NGƯỜI THUÊ")]
+    [InlineData("Người Nhận")]
+    [InlineData("nguoi nhan")]
+    [InlineData("Khách hàng")]
+    [InlineData("khach hang")]
+    [InlineData("  Người nhận  ")]
+    [InlineData("  nguoi   thue  ")]
+    public void Validate_RejectsPlaceholderRecipientName(string placeholderName)
+    {
+        CheckoutRequest request = ValidRequest();
+        request = request with { Delivery = request.Delivery! with { RecipientName = placeholderName } };
+
+        IReadOnlyList<CheckoutFieldError> errors = CheckoutRequestValidator.Validate(request);
+        Assert.Contains(errors, e => e.Field == "delivery.recipientName" && e.Code == "INVALID_FORMAT");
+    }
+
+    [Theory]
+    [InlineData("Nguyễn Văn A")]
+    [InlineData("Trần Thị B")]
+    [InlineData("John Doe")]
+    [InlineData("Phạm Hoàng Minh")]
+    public void Validate_AcceptsLegitimateRecipientName(string legitimateName)
+    {
+        CheckoutRequest request = ValidRequest();
+        request = request with { Delivery = request.Delivery! with { RecipientName = legitimateName } };
+
+        Assert.Empty(CheckoutRequestValidator.Validate(request));
+    }
+
+    [Theory]
+    [InlineData("0901234567")]
+    [InlineData("+84901234567")]
+    [InlineData("0987654321")]
+    [InlineData("+84987654321")]
+    public void Validate_AcceptsLegitimateRecipientPhone(string legitimatePhone)
+    {
+        CheckoutRequest request = ValidRequest();
+        request = request with { Delivery = request.Delivery! with { RecipientPhone = legitimatePhone } };
+
+        Assert.Empty(CheckoutRequestValidator.Validate(request));
+    }
+
+    [Fact]
+    public void Validate_PickupDeliveryMethod_RejectsPlaceholderRecipientNameAndPhone()
+    {
+        CheckoutRequest reqName = ValidRequest() with
+        {
+            DeliveryMethod = "Pickup",
+            Delivery = new(null, null, "nguoi nhan", "0901234567", "Tự tới lấy"),
+        };
+        Assert.Contains(CheckoutRequestValidator.Validate(reqName), e => e.Field == "delivery.recipientName" && e.Code == "INVALID_FORMAT");
+
+        CheckoutRequest reqPhone = ValidRequest() with
+        {
+            DeliveryMethod = "Pickup",
+            Delivery = new(null, null, "Nguyễn Văn B", "+84900000000", "Tự tới lấy"),
+        };
+        Assert.Contains(CheckoutRequestValidator.Validate(reqPhone), e => e.Field == "delivery.recipientPhone" && e.Code == "INVALID_FORMAT");
+    }
 }

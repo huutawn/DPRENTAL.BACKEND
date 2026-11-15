@@ -349,7 +349,7 @@ public sealed partial class RentalOperationExecutor
 
         // Lấy mốc thời gian cho lần kiểm tra này; các deadline được đối chiếu với mốc của bước xử lý tương ứng.
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
-        decimal refundAmount = pendingItems.Sum(i => i.RentalAmount + i.DepositAmount);
+        decimal refundAmount = pendingItems.Sum(i => i.RentalAmount + i.DepositAmount + i.DeliveryFee + i.ReturnFee);
 
         // Mở transaction cho phần ghi local; các thay đổi và Outbox trong phạm vi này phải được commit/rollback cùng nhau.
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
@@ -392,7 +392,7 @@ public sealed partial class RentalOperationExecutor
                 // Ghi event/command vào Outbox; enqueue thành công chỉ xác nhận đã lưu ý định gửi, chưa xác nhận service đích đã thực thi.
                 var itemCancelledRes = await _rentalEvents.EnqueueRentalItemCancelledAsync(
                     new RentalItemCancelledPayload(order.Id, item.Id, renterId, ActorRole.Renter.ToString(), utcNow,
-                        KafkaContractSpec.ReasonCodes.RenterCancelled, item.RentalAmount + item.DepositAmount, order.Version),
+                        KafkaContractSpec.ReasonCodes.RenterCancelled, item.RentalAmount + item.DepositAmount + item.DeliveryFee + item.ReturnFee, order.Version),
                     correlationId: normalizedKey,
                     cancellationToken: cancellationToken);
                 // Không ghi tiếp khi bước xử lý lỗi: rollback phần đang làm và bỏ thay đổi tracked trước khi trả lỗi.

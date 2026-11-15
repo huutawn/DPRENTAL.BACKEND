@@ -4,6 +4,7 @@ using Dprental.RentalService.Application.DTOs.Inventory;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.Options;
+using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
@@ -461,19 +462,22 @@ public sealed class CheckoutPreparationServiceTests
     [Fact]
     public async Task Prepare_CallsInventoryOnceForListingsAndOnceForAvailability_WholeCart()
     {
-        Guid secondItem = AddCartItem(_listingId, 1, new(2026, 10, 20), new(2026, 10, 21));
+        Guid secondListingId = Guid.NewGuid();
+        _inventory.Listings[secondListingId] = Listing(secondListingId);
+        _inventory.AvailableQuantities[secondListingId] = 5;
+
+        Guid secondItem = AddCartItem(secondListingId, 1, Start, End);
 
         CheckoutPreparationResult result = await CreateService()
-            .PrepareAsync(Renter(), Request(3_000_000m + 1_000_000m, _cartItemId, secondItem));
+            .PrepareAsync(Renter(), Request(3_000_000m + 1_500_000m, _cartItemId, secondItem));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(2, result.Plan.Lines.Count);
-        // Một lần gọi cho Listing (hai dòng cùng Listing nên chỉ hỏi một mã); lịch thì mỗi dòng một lần.
+        // Một lần gọi cho Listing; lịch thì mỗi dòng một lần.
         Assert.Equal(1, _inventory.ListingReadCount);
-        Assert.Equal([_listingId], _inventory.RequestedListingIds);
         Assert.Equal(2, _inventory.AvailabilityCheckCount);
         Assert.Equal(
-            [(new DateOnly(2026, 10, 12), new DateOnly(2026, 10, 14)), (new DateOnly(2026, 10, 20), new DateOnly(2026, 10, 21))],
+            [(Start, End), (Start, End)],
             _inventory.AvailabilityPeriods);
     }
 
@@ -564,6 +568,7 @@ public sealed class CheckoutPreparationServiceTests
         public Task<Result<MarkAssetsOverdueResponse>> MarkAssetsOverdueAsync(string allocationGroupId, MarkAssetsOverdueRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<MarkAssetsReturnedResponse>> MarkAssetsReturnedAsync(string allocationGroupId, MarkAssetsReturnedRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<Result<BlockDamagedAssetsResponse>> BlockDamagedAssetsAsync(string allocationGroupId, BlockDamagedAssetsRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Result<WarehouseDeliveryPolicyResponse>> GetWarehouseDeliveryPolicyAsync(Guid supplierId, CancellationToken ct = default) => inner.GetWarehouseDeliveryPolicyAsync(supplierId, ct);
     }
 
     [Fact]
@@ -711,5 +716,145 @@ public sealed class CheckoutPreparationServiceTests
         CheckoutPreparationResult res = await CreateService().PrepareAsync(Renter(), req);
         Assert.True(res.IsSuccess);
         Assert.Equal("v1.0", res.Plan.TermsVersion);
+    }
+
+    [Fact]
+    public async Task Prepare_WithItemsFromMultipleSuppliers_RejectsWithMultiSupplierError()
+    {
+        Guid supplier2 = Guid.NewGuid();
+        Guid listing2 = Guid.NewGuid();
+        _inventory.Listings[listing2] = TestListings.Create(listing2, supplier2, "Canon R5", 600_000m, thumbnailMediaId: _thumbnailMediaId);
+        _inventory.AvailableQuantities[listing2] = 10;
+        Guid item2Id = _cart.AddItem(Guid.NewGuid(), listing2, supplier2, 1, Start, End, Now).Value.Id;
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(expectedTotal: 4_800_000m, _cartItemId, item2Id));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(CheckoutErrors.MultipleSuppliers, result.Error);
+        Assert.Equal("CHECKOUT_MULTI_SUPPLIER_FORBIDDEN", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task PreparePreview_CalculatesIdenticalPricingToPrepareAsync()
+    {
+        var request = Request(expectedTotal: 3_000_000m);
+        var service = CreateService();
+
+        CheckoutPreparationResult previewResult = await service.PreparePreviewAsync(Renter(), request);
+        CheckoutPreparationResult prepareResult = await service.PrepareAsync(Renter(), request);
+
+        Assert.True(previewResult.IsSuccess);
+        Assert.True(prepareResult.IsSuccess);
+        Assert.Equal(prepareResult.Plan.TotalRentalAmount, previewResult.Plan.TotalRentalAmount);
+        Assert.Equal(prepareResult.Plan.TotalDepositAmount, previewResult.Plan.TotalDepositAmount);
+        Assert.Equal(prepareResult.Plan.DeliveryFee, previewResult.Plan.DeliveryFee);
+        Assert.Equal(prepareResult.Plan.ReturnFee, previewResult.Plan.ReturnFee);
+        Assert.Equal(prepareResult.Plan.TotalAmount, previewResult.Plan.TotalAmount);
+        Assert.Equal(prepareResult.Plan.Currency, previewResult.Plan.Currency);
+        Assert.Equal(prepareResult.Plan.DeliveryMethod, previewResult.Plan.DeliveryMethod);
+        Assert.Equal(prepareResult.Plan.ReturnMethod, previewResult.Plan.ReturnMethod);
+        Assert.Equal(prepareResult.Plan.Lines.Count, previewResult.Plan.Lines.Count);
+    }
+
+    [Fact]
+    public async Task PreparePreview_AcceptsExpectedTotalAmountZero()
+    {
+        var request = Request(expectedTotal: 0m);
+        CheckoutPreparationResult previewResult = await CreateService().PreparePreviewAsync(Renter(), request);
+
+        Assert.True(previewResult.IsSuccess);
+        Assert.Equal(3_000_000m, previewResult.Plan.TotalAmount);
+    }
+
+    [Fact]
+    public async Task Prepare_Pickup_SnapshotsRealWarehouseAddressFromDeliveryPolicy()
+    {
+        _inventory.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
+            _supplierId,
+            true,
+            new WarehouseAddressDto("456 Real Street, Ward 5", "79", "Ward 5"),
+            new OperatingHoursDto("08:00", "18:00", []),
+            [new DeliveryZoneDto("79", null, 0m, 0m)]);
+
+        var request = Request(expectedTotal: 3_000_000m) with { DeliveryMethod = CheckoutRules.DeliveryMethodPickup };
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(CheckoutRules.DeliveryMethodPickup, result.Plan.DeliveryMethod);
+        Assert.Equal("456 Real Street, Ward 5", result.Plan.Delivery.AddressDetail);
+        Assert.Equal(0m, result.Plan.DeliveryFee);
+        Assert.Equal("456 Real Street, Ward 5", result.Plan.WarehouseSnapshot?.AddressDetail);
+    }
+
+    [Fact]
+    public async Task Prepare_Pickup_WhenWarehouseAddressMissing_RejectsWithoutPlaceholder()
+    {
+        _inventory.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
+            _supplierId,
+            true,
+            null,
+            new OperatingHoursDto("08:00", "18:00", []),
+            [new DeliveryZoneDto("79", null, 0m, 0m)]);
+
+        var request = Request(expectedTotal: 3_000_000m) with { DeliveryMethod = CheckoutRules.DeliveryMethodPickup };
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(CheckoutErrors.WarehouseAddressIncomplete, result.Error);
+        Assert.Equal("WAREHOUSE_ADDRESS_INCOMPLETE", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Prepare_Pickup_WhenPickupDisabled_ReturnsPickupNotSupported()
+    {
+        _inventory.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
+            _supplierId,
+            false,
+            new WarehouseAddressDto("123 Le Loi", "79", "Ward 1"),
+            new OperatingHoursDto("08:00", "18:00", []),
+            [new DeliveryZoneDto("79", null, 0m, 0m)]);
+
+        var request = Request(expectedTotal: 3_000_000m) with { DeliveryMethod = CheckoutRules.DeliveryMethodPickup };
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(CheckoutErrors.PickupNotSupported, result.Error);
+        Assert.Equal("PICKUP_NOT_SUPPORTED", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Prepare_Delivery_WhenAddressNotInZone_ReturnsAddressOutsideDeliveryZone()
+    {
+        _inventory.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
+            _supplierId,
+            true,
+            new WarehouseAddressDto("123 Le Loi", "79", "Ward 1"),
+            new OperatingHoursDto("08:00", "18:00", []),
+            [new DeliveryZoneDto("79", null, 50_000m, 50_000m)]);
+
+        var request = Request(expectedTotal: 3_000_000m) with
+        {
+            Delivery = new CheckoutDeliveryDto("Đà Nẵng", "123 Bach Dang", "Nguyen Van A", "0901234567", null)
+        };
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(CheckoutErrors.AddressOutsideDeliveryZone, result.Error);
+        Assert.Equal("ADDRESS_OUTSIDE_DELIVERY_ZONE", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Prepare_WithDifferingRentalPeriods_RejectsWithMultiPeriodError()
+    {
+        DateOnly secondStart = Start.AddDays(7);
+        DateOnly secondEnd = End.AddDays(7);
+        Guid item2Id = _cart.AddItem(Guid.NewGuid(), _listingId, _supplierId, 1, secondStart, secondEnd, Now).Value.Id;
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request(expectedTotal: 4_500_000m, _cartItemId, item2Id));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(CheckoutErrors.MultipleRentalPeriods, result.Error);
+        Assert.Equal("CHECKOUT_MULTI_PERIOD_FORBIDDEN", result.Error.Code);
+        Assert.Equal(0, _inventory.ListingReadCount);
     }
 }

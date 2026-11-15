@@ -280,13 +280,13 @@ public sealed partial class RentalOperationExecutor
         if (refundReceipt == null)
         {
             // Dựng request/command từ snapshot và định danh của luồng hiện tại để gửi đúng tác vụ sang service sở hữu.
-            var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
+            var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount, item.DeliveryFee, item.ReturnFee) };
             refundReceipt = new RentalOperationReceipt(
                 Guid.NewGuid(),
                 order.Id,
                 refundKey,
                 "RequestRefund",
-                ComputeOperationKey("RequestRefund", $"{order.Id}:{item.RentalAmount + item.DepositAmount}"),
+                ComputeOperationKey("RequestRefund", $"{order.Id}:{item.RentalAmount + item.DepositAmount + item.DeliveryFee + item.ReturnFee}"),
                 isSuccess: false,
                 errorCode: null,
                 errorMessage: null,

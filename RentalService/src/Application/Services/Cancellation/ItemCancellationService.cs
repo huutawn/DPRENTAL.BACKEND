@@ -159,7 +159,7 @@ public sealed class ItemCancellationService : IItemCancellationService
                     // Kiểm tra dữ liệu tùy chọn hoặc kết quả tra cứu trước khi dùng; xử lý riêng trường hợp không có giá trị.
                     if (cached != null) return cached;
                 }
-                return new CancelNotDeliveredResponse(item.Id, item.Status.ToString(), existingReceipt.CreatedAt, item.RentalAmount + item.DepositAmount);
+                return new CancelNotDeliveredResponse(item.Id, item.Status.ToString(), existingReceipt.CreatedAt, item.RentalAmount + item.DepositAmount + item.DeliveryFee + item.ReturnFee);
             }
             return Error.Conflict("IDEMPOTENCY_CONFLICT", "Khóa idempotency đã được dùng với nội dung khác.");
         }
@@ -183,7 +183,7 @@ public sealed class ItemCancellationService : IItemCancellationService
                 // Kiểm tra dữ liệu tùy chọn hoặc kết quả tra cứu trước khi dùng; xử lý riêng trường hợp không có giá trị.
                 if (cached != null) return cached;
             }
-            return new CancelNotDeliveredResponse(item.Id, RentalItemStatus.Cancelled.ToString(), cancelledAt, item.RentalAmount + item.DepositAmount);
+            return new CancelNotDeliveredResponse(item.Id, RentalItemStatus.Cancelled.ToString(), cancelledAt, item.RentalAmount + item.DepositAmount + item.DeliveryFee + item.ReturnFee);
         }
 
         // 7. Dòng không ở AWAITING_HANDOVER -> 409 Order.CancellationForbidden
@@ -215,7 +215,7 @@ public sealed class ItemCancellationService : IItemCancellationService
         // Giữ định danh/vai trò đã xác định cho thao tác để audit và các bước tiếp theo dùng cùng chủ thể.
         Guid actorId = caller.UserId!.Value;
         string cancelReason = string.IsNullOrWhiteSpace(reason) ? "Renter hủy do thiết bị không được bàn giao" : reason;
-        decimal refundAmount = item.RentalAmount + item.DepositAmount;
+        decimal refundAmount = item.RentalAmount + item.DepositAmount + item.DeliveryFee + item.ReturnFee;
         var response = new CancelNotDeliveredResponse(item.Id, RentalItemStatus.Cancelled.ToString(), utcNow, refundAmount);
         string responseJson = JsonSerializer.Serialize(response, JsonOptions);
 

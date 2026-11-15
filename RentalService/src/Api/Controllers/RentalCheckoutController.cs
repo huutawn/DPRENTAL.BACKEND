@@ -75,6 +75,43 @@ public sealed class RentalCheckoutController(
     }
 
     /// <summary>
+    /// Xem trước chi phí và snapshot đơn hàng (preview) trước khi checkout.
+    /// </summary>
+    /// <param name="request">Yêu cầu xem trước đơn hàng.</param>
+    /// <param name="cancellationToken">Token hủy yêu cầu.</param>
+    /// <response code="200">Thông tin chi phí dự tính, breakdown tiền thuê, cọc, phí giao/nhận và danh sách máy.</response>
+    /// <response code="400">Dữ liệu gửi lên không hợp lệ hoặc ngày thuê không hợp lệ.</response>
+    /// <response code="404">Không tìm thấy giỏ hàng hoặc địa chỉ/tài khoản.</response>
+    /// <response code="409">Thiết bị không còn cho thuê hoặc xung đột cấu hình.</response>
+    /// <response code="503">InventoryService tạm thời không khả dụng.</response>
+    [HttpPost("preview")]
+    [HttpPost("~/rental/checkout/preview")]
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(CheckoutPreviewResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> Preview(
+        [FromBody] CheckoutRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await checkout.PreviewAsync(
+            new CheckoutRenterContext(currentRenter.RenterId),
+            request,
+            cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>
     /// Xem trạng thái một lần gửi đơn (checkout) đang xử lý bất đồng bộ.
     /// </summary>
     /// <param name="operationId">Mã lần gửi đơn trả về trong 202.</param>

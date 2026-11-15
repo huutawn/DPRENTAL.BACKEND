@@ -106,9 +106,8 @@ public sealed class SynchronousCheckoutFlowTests
     public async Task SubmitAsync_MultipleLines_Returns200WithQrUrlImmediately()
     {
         Guid supplier1 = Guid.NewGuid();
-        Guid supplier2 = Guid.NewGuid();
         Guid camera = _harness.AddListing(supplier1, 500_000m, units: 5);
-        Guid lens = _harness.AddListing(supplier2, 200_000m, units: 3);
+        Guid lens = _harness.AddListing(supplier1, 200_000m, units: 3);
         Guid[] cart = await _harness.SeedCartAsync(_renterId, (camera, 2), (lens, 1));
         // 2 x 500k x 3 = 3m; 1 x 200k x 3 = 600k -> 3.6m
         CheckoutRequest request = CheckoutTestHarness.Request(3_600_000m, cart);

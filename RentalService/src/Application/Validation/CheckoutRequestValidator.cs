@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using Dprental.RentalService.Application.DTOs.Checkout;
 
@@ -23,6 +25,9 @@ public static partial class CheckoutRequestValidator
     [GeneratedRegex(@"^[0-9]{6,20}$")]
     private static partial Regex AccountNumberRegex();
 
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex MultipleWhitespaceRegex();
+
     public static IReadOnlyList<CheckoutFieldError> Validate(CheckoutRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -30,9 +35,9 @@ public static partial class CheckoutRequestValidator
         List<CheckoutFieldError> errors = [];
 
         ValidateSelection(request, errors);
+        ValidateDeliveryMethod(request, errors);
         ValidateDeliverySource(request, errors);
         ValidateRefundSource(request, errors);
-
 
         if (!request.TermsAccepted)
         {
@@ -45,6 +50,29 @@ public static partial class CheckoutRequestValidator
         }
 
         return errors;
+    }
+
+    private static void ValidateDeliveryMethod(CheckoutRequest request, List<CheckoutFieldError> errors)
+    {
+        if (request.DeliveryMethod is not null)
+        {
+            if (string.IsNullOrWhiteSpace(request.DeliveryMethod) ||
+                (!string.Equals(request.DeliveryMethod.Trim(), "Delivery", StringComparison.OrdinalIgnoreCase) &&
+                 !string.Equals(request.DeliveryMethod.Trim(), "Pickup", StringComparison.OrdinalIgnoreCase)))
+            {
+                errors.Add(new("deliveryMethod", InvalidFormat, "Phương thức nhận máy chỉ chấp nhận 'Delivery' hoặc 'Pickup'."));
+            }
+        }
+
+        if (request.ReturnMethod is not null)
+        {
+            if (string.IsNullOrWhiteSpace(request.ReturnMethod) ||
+                (!string.Equals(request.ReturnMethod.Trim(), "Return", StringComparison.OrdinalIgnoreCase) &&
+                 !string.Equals(request.ReturnMethod.Trim(), "Pickup", StringComparison.OrdinalIgnoreCase)))
+            {
+                errors.Add(new("returnMethod", InvalidFormat, "Phương thức trả máy chỉ chấp nhận 'Return' hoặc 'Pickup'."));
+            }
+        }
     }
 
     private static void ValidateSelection(CheckoutRequest request, List<CheckoutFieldError> errors)
@@ -106,7 +134,43 @@ public static partial class CheckoutRequestValidator
 
     private static void ValidateDeliverySource(CheckoutRequest request, List<CheckoutFieldError> errors)
     {
-        if (request.AddressId is not { } addressId)
+        bool isPickup = string.Equals(request.DeliveryMethod?.Trim(), "Pickup", StringComparison.OrdinalIgnoreCase);
+
+        if (isPickup)
+        {
+            if (request.Delivery is not null && request.AddressId is not null)
+            {
+                errors.Add(new("addressId", Conflicting, "Chỉ gửi một trong hai: addressId hoặc delivery."));
+                return;
+            }
+
+            if (request.Delivery is null && request.AddressId is null)
+            {
+                errors.Add(new("delivery", Required, "Thiếu thông tin người nhận khi nhận tại kho."));
+                return;
+            }
+
+            if (request.Delivery is not null)
+            {
+                ValidateRecipientName(request.Delivery.RecipientName, "delivery.recipientName", errors);
+                ValidateRecipientPhone(request.Delivery.RecipientPhone, "delivery.recipientPhone", errors);
+
+                if (request.Delivery.Note is not null && request.Delivery.Note.Trim().Length > MaxDeliveryNoteLength)
+                {
+                    errors.Add(new("delivery.note", InvalidLength, $"Ghi chú tối đa {MaxDeliveryNoteLength} ký tự."));
+                }
+            }
+            else if (request.AddressId is { } addressId)
+            {
+                if (addressId == Guid.Empty)
+                {
+                    errors.Add(new("addressId", InvalidFormat, "Mã địa chỉ không hợp lệ."));
+                }
+            }
+            return;
+        }
+
+        if (request.AddressId is not { } addrId)
         {
             if (request.DeliveryNote is not null)
             {
@@ -123,7 +187,7 @@ public static partial class CheckoutRequestValidator
             return;
         }
 
-        if (addressId == Guid.Empty)
+        if (addrId == Guid.Empty)
         {
             errors.Add(new("addressId", InvalidFormat, "Mã địa chỉ không hợp lệ."));
         }
@@ -164,16 +228,8 @@ public static partial class CheckoutRequestValidator
     {
         CheckLength(province, 1, 100, $"{fieldPrefix}province", "Tỉnh, thành phố giao", errors);
         CheckLength(addressDetail, 5, 200, $"{fieldPrefix}addressDetail", "Địa chỉ chi tiết", errors);
-        CheckLength(recipientName, 1, 100, $"{fieldPrefix}recipientName", "Người nhận", errors);
-
-        if (string.IsNullOrWhiteSpace(recipientPhone))
-        {
-            errors.Add(new($"{fieldPrefix}recipientPhone", Required, "Thiếu số điện thoại người nhận."));
-        }
-        else if (!PhoneRegex().IsMatch(recipientPhone.Trim()))
-        {
-            errors.Add(new($"{fieldPrefix}recipientPhone", InvalidFormat, "Số điện thoại phải bắt đầu bằng 0 hoặc +84, theo sau 9 chữ số."));
-        }
+        ValidateRecipientName(recipientName, $"{fieldPrefix}recipientName", errors);
+        ValidateRecipientPhone(recipientPhone, $"{fieldPrefix}recipientPhone", errors);
     }
 
     private static void ValidateRefundSource(CheckoutRequest request, List<CheckoutFieldError> errors)
@@ -244,5 +300,89 @@ public static partial class CheckoutRequestValidator
         {
             errors.Add(new(field, InvalidLength, $"{label} phải từ {min} đến {max} ký tự."));
         }
+    }
+
+    private static void ValidateRecipientName(string? recipientName, string fieldName, List<CheckoutFieldError> errors)
+    {
+        if (string.IsNullOrWhiteSpace(recipientName))
+        {
+            errors.Add(new(fieldName, Required, "Thiếu tên người nhận."));
+            return;
+        }
+
+        CheckLength(recipientName, 1, 100, fieldName, "Người nhận", errors);
+        if (IsPlaceholderRecipientName(recipientName))
+        {
+            errors.Add(new(fieldName, InvalidFormat, "Vui lòng nhập tên người nhận thật, không dùng tên mẫu."));
+        }
+    }
+
+    private static void ValidateRecipientPhone(string? recipientPhone, string fieldName, List<CheckoutFieldError> errors)
+    {
+        if (string.IsNullOrWhiteSpace(recipientPhone))
+        {
+            errors.Add(new(fieldName, Required, "Thiếu số điện thoại người nhận."));
+            return;
+        }
+
+        string trimmed = recipientPhone.Trim();
+        if (!PhoneRegex().IsMatch(trimmed))
+        {
+            errors.Add(new(fieldName, InvalidFormat, "Số điện thoại phải bắt đầu bằng 0 hoặc +84, theo sau 9 chữ số."));
+            return;
+        }
+
+        if (IsPlaceholderPhone(trimmed))
+        {
+            errors.Add(new(fieldName, InvalidFormat, "Vui lòng nhập số điện thoại thật, không dùng số mẫu."));
+        }
+    }
+
+    private static bool IsPlaceholderRecipientName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        string clean = RemoveDiacritics(name.Trim()).ToLowerInvariant();
+        clean = MultipleWhitespaceRegex().Replace(clean, " ");
+
+        return clean is "nguoi thue" or "nguoi nhan" or "khach hang";
+    }
+
+    private static string RemoveDiacritics(string text)
+    {
+        string normalized = text.Normalize(NormalizationForm.FormD);
+        StringBuilder sb = new(normalized.Length);
+        foreach (char c in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            {
+                if (c is 'đ' or 'Đ')
+                {
+                    sb.Append('d');
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+        }
+
+        return sb.ToString().Normalize(NormalizationForm.FormC);
+    }
+
+    private static bool IsPlaceholderPhone(string phone)
+    {
+        string normalized = phone;
+        if (normalized.StartsWith("+84", StringComparison.Ordinal))
+        {
+            normalized = "0" + normalized[3..];
+        }
+
+        return normalized == "0900000000"
+            || normalized == "0000000000"
+            || normalized.Distinct().Count() <= 2;
     }
 }
