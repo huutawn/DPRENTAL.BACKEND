@@ -11,6 +11,8 @@ public sealed class InvoiceItem
     public Guid SupplierId { get; private set; }
     public decimal RentalAmount { get; private set; }
     public decimal DepositAmount { get; private set; }
+    public decimal DeliveryFee { get; private set; }
+    public decimal ReturnFee { get; private set; }
     public decimal TotalAmount { get; private set; }
     public long Revision { get; private set; } = 1;
     public Invoice? Invoice { get; private set; }
@@ -25,7 +27,9 @@ public sealed class InvoiceItem
         Guid rentalItemId,
         Guid supplierId,
         decimal rentalAmount,
-        decimal depositAmount)
+        decimal depositAmount,
+        decimal deliveryFee = 0m,
+        decimal returnFee = 0m)
     {
         if (rentalItemId == Guid.Empty || supplierId == Guid.Empty)
         {
@@ -38,7 +42,13 @@ public sealed class InvoiceItem
         var depositCheck = VndAmountValidator.ValidateVndAmount(depositAmount, "Tiền cọc");
         if (depositCheck.IsFailure) return depositCheck.Error;
 
-        decimal total = rentalAmount + depositAmount;
+        var deliveryCheck = VndAmountValidator.ValidateVndAmount(deliveryFee, "Phí giao");
+        if (deliveryCheck.IsFailure) return deliveryCheck.Error;
+
+        var returnCheck = VndAmountValidator.ValidateVndAmount(returnFee, "Phí trả");
+        if (returnCheck.IsFailure) return returnCheck.Error;
+
+        decimal total = rentalAmount + depositAmount + deliveryFee + returnFee;
         var totalCheck = VndAmountValidator.ValidateVndAmount(total, "Tổng tiền item");
         if (totalCheck.IsFailure) return totalCheck.Error;
 
@@ -49,6 +59,8 @@ public sealed class InvoiceItem
             SupplierId = supplierId,
             RentalAmount = rentalAmount,
             DepositAmount = depositAmount,
+            DeliveryFee = deliveryFee,
+            ReturnFee = returnFee,
             TotalAmount = total
         });
     }

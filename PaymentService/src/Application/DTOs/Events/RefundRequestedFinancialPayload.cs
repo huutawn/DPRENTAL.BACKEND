@@ -9,4 +9,5 @@ public sealed record RefundRequestedFinancialPayload(
     [property: JsonPropertyName("refundKind")] string RefundKind,
     [property: JsonPropertyName("amount")] decimal Amount,
     [property: JsonPropertyName("currency")] string Currency,
-    [property: JsonPropertyName("requestedAt")] DateTimeOffset RequestedAt);
+    [property: JsonPropertyName("requestedAt")] DateTimeOffset RequestedAt,
+    [property: JsonPropertyName("renterId")] Guid? RenterId = null);

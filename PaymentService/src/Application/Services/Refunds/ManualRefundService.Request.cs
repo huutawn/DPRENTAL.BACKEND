@@ -58,9 +58,11 @@ public sealed partial class ManualRefundService
                 return Error.Conflict("Payment.ItemAlreadySettled", "Item already has a settlement.");
             var reserved = existing.SelectMany(x => x.Items).Where(x => x.RentalItemId == item.RentalItemId).ToArray();
             if (reserved.Sum(x => x.RentalAmount) + requested.RefundRentalAmount > item.RentalAmount ||
-                reserved.Sum(x => x.DepositAmount) + requested.RefundDepositAmount > item.DepositAmount)
+                reserved.Sum(x => x.DepositAmount) + requested.RefundDepositAmount > item.DepositAmount ||
+                reserved.Sum(x => x.DeliveryFee) + requested.RefundDeliveryFee > item.DeliveryFee ||
+                reserved.Sum(x => x.ReturnFee) + requested.RefundReturnFee > item.ReturnFee)
                 return Error.Conflict("REFUND_EXCEEDS_PAID_AMOUNT", "Refund exceeds the unreserved paid amount.");
-            lines.Add(ManualRefundItem.Create(item.RentalItemId, requested.RefundRentalAmount, requested.RefundDepositAmount));
+            lines.Add(ManualRefundItem.Create(item.RentalItemId, requested.RefundRentalAmount, requested.RefundDepositAmount, requested.RefundDeliveryFee, requested.RefundReturnFee));
         }
         if (existing.Sum(x => x.Amount) + request.TotalRefundAmount > invoice.TotalAmount)
             return Error.Conflict("REFUND_EXCEEDS_PAID_AMOUNT", "Refund exceeds the received invoice payment.");

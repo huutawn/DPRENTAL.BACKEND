@@ -58,7 +58,7 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
 
         var itemsTuples = request.Items?
             .Where(i => i is not null)
-            .Select(i => (i.RentalItemId, i.SupplierId, i.RentalAmount, i.DepositAmount));
+            .Select(i => (i.RentalItemId, i.SupplierId, i.RentalAmount, i.DepositAmount, i.DeliveryFee, i.ReturnFee));
 
         string fingerprint = PayloadFingerprinter.ComputeCreateFingerprint(
             request.RentalOrderId,
@@ -136,7 +136,9 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
                     itemReq.RentalItemId,
                     itemReq.SupplierId,
                     itemReq.RentalAmount,
-                    itemReq.DepositAmount);
+                    itemReq.DepositAmount,
+                    itemReq.DeliveryFee,
+                    itemReq.ReturnFee);
 
                 if (itemRes.IsFailure) return itemRes.Error;
                 domainItems.Add(itemRes.Value);
@@ -322,7 +324,7 @@ public sealed class InvoiceCreationService : IInvoiceCreationService
                 return PayloadFingerprinter.ComputeCreateFingerprint(
                     request.RentalOrderId, request.OrderCode, request.RenterId, original.PaymentDeadline,
                     request.Items?.Where(i => i is not null)
-                        .Select(i => (i.RentalItemId, i.SupplierId, i.RentalAmount, i.DepositAmount)));
+                        .Select(i => (i.RentalItemId, i.SupplierId, i.RentalAmount, i.DepositAmount, i.DeliveryFee, i.ReturnFee)));
             }
         }
         catch (JsonException)

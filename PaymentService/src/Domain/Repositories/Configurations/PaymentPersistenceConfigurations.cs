@@ -118,13 +118,14 @@ public sealed class RentalItemSettlementRecordConfiguration : IEntityTypeConfigu
         {
             t.HasCheckConstraint("ck_settlement_amounts_non_negative",
                 "\"RentalAmount\" >= 0 AND \"DepositAmount\" >= 0 AND \"FinalDeductionAmount\" >= 0 " +
-                "AND \"DepositRefundDue\" >= 0 AND \"PlatformFeeAmount\" >= 0 AND \"SupplierPayable\" >= 0");
+                "AND \"DepositRefundDue\" >= 0 AND \"PlatformFeeAmount\" >= 0 AND \"SupplierPayable\" >= 0 " +
+                "AND \"DeliveryFeeEarned\" >= 0 AND \"ReturnFeeEarned\" >= 0");
             t.HasCheckConstraint("ck_settlement_deduction_le_deposit",
                 "\"FinalDeductionAmount\" <= \"DepositAmount\"");
             t.HasCheckConstraint("ck_settlement_fee_rate_range",
                 "\"PlatformFeeRate\" >= 0 AND \"PlatformFeeRate\" <= 1");
             t.HasCheckConstraint("ck_settlement_money_balance",
-                "\"SupplierPayable\" + \"PlatformFeeAmount\" + \"DepositRefundDue\" = \"RentalAmount\" + \"DepositAmount\"");
+                "\"SupplierPayable\" + \"PlatformFeeAmount\" + \"DepositRefundDue\" = \"RentalAmount\" + \"DepositAmount\" + \"DeliveryFeeEarned\" + \"ReturnFeeEarned\"");
             t.HasCheckConstraint("ck_settlement_status_valid", "\"Status\" IN (1, 2)");
         });
 
@@ -145,6 +146,8 @@ public sealed class RentalItemSettlementRecordConfiguration : IEntityTypeConfigu
         builder.Property(x => x.PlatformFeeRate).HasColumnType("numeric(5,4)");
         builder.Property(x => x.PlatformFeeAmount).HasColumnType("numeric(18,0)");
         builder.Property(x => x.SupplierPayable).HasColumnType("numeric(18,0)");
+        builder.Property(x => x.DeliveryFeeEarned).HasColumnType("numeric(18,0)").HasDefaultValue(0m);
+        builder.Property(x => x.ReturnFeeEarned).HasColumnType("numeric(18,0)").HasDefaultValue(0m);
 
         builder.Property(x => x.Status).HasConversion<int>().IsRequired();
         builder.Property(x => x.CreatedAt).IsRequired();
@@ -279,10 +282,12 @@ public sealed class ManualRefundItemConfiguration : IEntityTypeConfiguration<Man
 {
     public void Configure(EntityTypeBuilder<ManualRefundItem> builder)
     {
-        builder.ToTable("manual_refund_items", t => t.HasCheckConstraint("ck_refund_item_amounts", "\"RentalAmount\" >= 0 AND \"DepositAmount\" >= 0"));
+        builder.ToTable("manual_refund_items", t => t.HasCheckConstraint("ck_refund_item_amounts", "\"RentalAmount\" >= 0 AND \"DepositAmount\" >= 0 AND \"DeliveryFee\" >= 0 AND \"ReturnFee\" >= 0"));
         builder.HasKey(x => new { x.RequirementId, x.RentalItemId });
         builder.Property(x => x.RentalAmount).HasColumnType("numeric(18,0)");
         builder.Property(x => x.DepositAmount).HasColumnType("numeric(18,0)");
+        builder.Property(x => x.DeliveryFee).HasColumnType("numeric(18,0)").HasDefaultValue(0m);
+        builder.Property(x => x.ReturnFee).HasColumnType("numeric(18,0)").HasDefaultValue(0m);
     }
 }
 

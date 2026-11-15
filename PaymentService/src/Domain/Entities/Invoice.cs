@@ -17,6 +17,8 @@ public sealed class Invoice
     public string Currency { get; private set; } = "VND";
     public decimal TotalRentalAmount { get; private set; }
     public decimal TotalDepositAmount { get; private set; }
+    public decimal TotalDeliveryFee { get; private set; }
+    public decimal TotalReturnFee { get; private set; }
     public decimal TotalAmount { get; private set; }
     public string Status { get; private set; } = InvoiceStatus.Pending;
     public string PaymentCode { get; private set; } = string.Empty;
@@ -104,7 +106,15 @@ public sealed class Invoice
         var depositCheck = VndAmountValidator.ValidateVndAmount(totalDeposit, "Tổng tiền cọc");
         if (depositCheck.IsFailure) return depositCheck.Error;
 
-        decimal totalAmount = totalRental + totalDeposit;
+        decimal totalDelivery = items.Sum(i => i.DeliveryFee);
+        var deliveryCheck = VndAmountValidator.ValidateVndAmount(totalDelivery, "Tổng phí giao");
+        if (deliveryCheck.IsFailure) return deliveryCheck.Error;
+
+        decimal totalReturn = items.Sum(i => i.ReturnFee);
+        var returnCheck = VndAmountValidator.ValidateVndAmount(totalReturn, "Tổng phí trả");
+        if (returnCheck.IsFailure) return returnCheck.Error;
+
+        decimal totalAmount = totalRental + totalDeposit + totalDelivery + totalReturn;
         var totalCheck = VndAmountValidator.ValidateVndAmount(totalAmount, "Tổng tiền hóa đơn");
         if (totalCheck.IsFailure) return totalCheck.Error;
 
@@ -125,6 +135,8 @@ public sealed class Invoice
             Currency = "VND",
             TotalRentalAmount = totalRental,
             TotalDepositAmount = totalDeposit,
+            TotalDeliveryFee = totalDelivery,
+            TotalReturnFee = totalReturn,
             TotalAmount = totalAmount,
             PaymentCode = paymentCode,
             MerchantBank = merchantBank.Trim(),

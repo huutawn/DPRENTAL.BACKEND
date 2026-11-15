@@ -35,7 +35,9 @@ internal static partial class PaymentOutboxFactory
             invoice.TotalDepositAmount,
             invoice.TotalAmount,
             invoice.Currency,
-            effectivePaidAt.ToUniversalTime());
+            effectivePaidAt.ToUniversalTime(),
+            invoice.TotalDeliveryFee,
+            invoice.TotalReturnFee);
 
         var envelope = new PaymentEventEnvelope<InvoicePaidFinancialPayload>(
             messageId,
@@ -70,7 +72,8 @@ internal static partial class PaymentOutboxFactory
             invoice.RentalOrderId, settlement.RentalItemId, settlement.SupplierId,
             settlement.RentalAmount, settlement.DepositAmount, settlement.FinalDeductionAmount,
             settlement.DepositRefundDue, settlement.PlatformFeeRate, settlement.PlatformFeeAmount,
-            settlement.SupplierPayable, settlement.CompletedAt.Value);
+            settlement.SupplierPayable, settlement.CompletedAt.Value,
+            settlement.DeliveryFeeEarned, settlement.ReturnFeeEarned);
         return CreateFinancialOutbox(OutboxTopics.RentalItemFinancialSettledMessageType,
             settlement.Id, invoice.RentalOrderId.ToString("D"), settlement.CompletedAt.Value, payload);
     }
@@ -104,7 +107,7 @@ internal static partial class PaymentOutboxFactory
 
         var payload = new RefundRequestedFinancialPayload(refund.RequirementRef,
             invoice.RentalOrderId, refund.RentalItemId, refund.FinancialRefundKind,
-            refund.Amount, invoice.Currency, refund.CreatedAt);
+            refund.Amount, invoice.Currency, refund.CreatedAt, refund.RenterId);
         return CreateFinancialOutbox(OutboxTopics.RefundRequestedFinancialMessageType,
             refund.Id, invoice.RentalOrderId.ToString("D"), refund.CreatedAt, payload);
     }

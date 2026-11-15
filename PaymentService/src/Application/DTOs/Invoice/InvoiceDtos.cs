@@ -9,10 +9,12 @@ public sealed record CreateInvoiceItemRequest(
     [Required] Guid RentalItemId,
     [Required] Guid SupplierId,
     [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RentalAmount,
-    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal DepositAmount)
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal DepositAmount,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal DeliveryFee = 0m,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal ReturnFee = 0m)
 {
     [JsonIgnore]
-    public decimal TotalAmount => RentalAmount + DepositAmount;
+    public decimal TotalAmount => RentalAmount + DepositAmount + DeliveryFee + ReturnFee;
 
     public Result Validate()
     {
@@ -27,6 +29,12 @@ public sealed record CreateInvoiceItemRequest(
         var depositCheck = VndAmountValidator.ValidateVndAmount(DepositAmount, "Tiền cọc");
         if (depositCheck.IsFailure) return depositCheck.Error;
 
+        var deliveryCheck = VndAmountValidator.ValidateVndAmount(DeliveryFee, "Phí giao");
+        if (deliveryCheck.IsFailure) return deliveryCheck.Error;
+
+        var returnCheck = VndAmountValidator.ValidateVndAmount(ReturnFee, "Phí trả");
+        if (returnCheck.IsFailure) return returnCheck.Error;
+
         return Result.Success();
     }
 }
@@ -38,7 +46,9 @@ public sealed record CreateInvoiceRequest(
     [Required][StringLength(3, MinimumLength = 3)] string Currency,
     [Required] DateTimeOffset PaymentDeadline,
     [Required] IReadOnlyList<CreateInvoiceItemRequest> Items,
-    [Required][MaxLength(64)] string OperationKey)
+    [Required][MaxLength(64)] string OperationKey,
+    decimal TotalDeliveryFee = 0m,
+    decimal TotalReturnFee = 0m)
 {
     [JsonIgnore]
     public decimal TotalAmount => Items?.Sum(i => i.TotalAmount) ?? 0m;
@@ -64,6 +74,12 @@ public sealed record CreateInvoiceRequest(
         {
             return Error.Validation("Payment.InvalidOperationKey", "OperationKey không được rỗng và tối đa 64 ký tự.");
         }
+
+        var deliveryCheck = VndAmountValidator.ValidateVndAmount(TotalDeliveryFee, "Tổng phí giao");
+        if (deliveryCheck.IsFailure) return deliveryCheck.Error;
+
+        var returnCheck = VndAmountValidator.ValidateVndAmount(TotalReturnFee, "Tổng phí trả");
+        if (returnCheck.IsFailure) return returnCheck.Error;
 
         if (Items is null || Items.Count == 0)
         {

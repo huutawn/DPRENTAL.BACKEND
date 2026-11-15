@@ -19,6 +19,8 @@ public sealed class RentalItemSettlementRecord
     public decimal PlatformFeeRate { get; private set; }
     public decimal PlatformFeeAmount { get; private set; }
     public decimal SupplierPayable { get; private set; }
+    public decimal DeliveryFeeEarned { get; private set; }
+    public decimal ReturnFeeEarned { get; private set; }
     public SettlementState Status { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
@@ -56,6 +58,8 @@ public sealed class RentalItemSettlementRecord
             PlatformFeeRate = s.PlatformFeeRate,
             PlatformFeeAmount = s.PlatformFeeAmount,
             SupplierPayable = s.SupplierPayable,
+            DeliveryFeeEarned = s.DeliveryFeeEarned,
+            ReturnFeeEarned = s.ReturnFeeEarned,
             CreatedAt = now.ToUniversalTime()
         };
 

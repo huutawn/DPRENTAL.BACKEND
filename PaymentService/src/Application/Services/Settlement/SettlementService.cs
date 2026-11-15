@@ -54,14 +54,16 @@ public sealed class SettlementService(
             ToWriteClaim(OperationalSnapshotEngine.CreateInvoiceItemClaim(item)));
         if (guarded.IsFailure) return guarded.Error;
         if (invoice.Status != InvoiceStatus.Paid || invoice.PaymentRef != request.PaymentRef.Trim() ||
-            invoice.RentalOrderId != request.RentalOrderId || item.SupplierId != request.SupplierId || item.DepositAmount != request.DepositAmount)
+            invoice.RentalOrderId != request.RentalOrderId || item.SupplierId != request.SupplierId || item.DepositAmount != request.DepositAmount ||
+            (request.RentalAmount > 0m && item.RentalAmount != request.RentalAmount) ||
+            request.DeliveryFeeEarned > item.DeliveryFee || request.ReturnFeeEarned > item.ReturnFee)
             return Error.Conflict("Payment.SettlementSnapshotMismatch", "Settlement does not match the paid invoice snapshot.");
         var existing = await ledger.FindByItemAsync(item.RentalItemId, ct);
         if (existing is not null) return Error.Conflict("DUPLICATE_SETTLEMENT", "Item already has a settlement.");
         var reservedRefunds = await refunds.GetForInvoiceAsync(invoice.Id, ct);
         if (reservedRefunds.Any(x => x.Kind == ManualRefundKind.RentalRefund && x.Items.Any(i => i.RentalItemId == item.RentalItemId)))
             return Error.Conflict("Payment.ItemAlreadyRefunded", "Item is already reserved for cancellation refund.");
-        var calculated = Calculate(item, request.FinalDeductionAmount, request.DecisionRef, request.OperationKey);
+        var calculated = Calculate(item, request.FinalDeductionAmount, request.DecisionRef, request.OperationKey, request.DeliveryFeeEarned, request.ReturnFeeEarned);
         if (calculated.IsFailure) return calculated.Error;
         var amounts = calculated.Value;
         var now = clock.GetUtcNow();
@@ -118,7 +120,7 @@ public sealed class SettlementService(
         if (record.Status == SettlementState.Completed)
             journals.Add(JournalEntryFactory.CreateLinkedFinancialEvent(settlementJournal,
                 JournalEventTypes.RentalItemFinancialSettledLinked, invoice,
-                record.RentalAmount + record.DepositAmount, "COMPLETED", "rental-service",
+                record.RentalAmount + record.DepositAmount + record.DeliveryFeeEarned + record.ReturnFeeEarned, "COMPLETED", "rental-service",
                 now, claims, encryptor, messages[1]));
         guarded = evidence.Value.Validate(clock.GetUtcNow(), ToWriteClaim(OperationalSnapshotEngine.CreateInvoiceClaim(invoice)),
             ToWriteClaim(OperationalSnapshotEngine.CreateInvoiceItemClaim(item)));
@@ -142,7 +144,13 @@ public sealed class SettlementService(
         catch (JsonException) { return Error.Failure("Payment.CorruptedReceipt", "Stored response is invalid."); }
     }
 
-    public static Result<RentalItemSettlement> Calculate(InvoiceItem item, decimal deduction, string decisionRef, string operationKey)
+    public static Result<RentalItemSettlement> Calculate(
+        InvoiceItem item,
+        decimal deduction,
+        string decisionRef,
+        string operationKey,
+        decimal deliveryFeeEarned = 0m,
+        decimal returnFeeEarned = 0m)
     {
         if (string.IsNullOrWhiteSpace(decisionRef))
             return Error.Validation("Payment.InvalidDecisionRef", "DecisionRef must contain 1 to 256 characters.");
@@ -152,9 +160,24 @@ public sealed class SettlementService(
         var valid = VndAmountValidator.ValidateVndAmount(deduction, "Deduction");
         if (valid.IsFailure) return valid.Error;
         if (deduction > item.DepositAmount) return Error.Validation("Payment.DeductionExceedsDeposit", "Deduction exceeds deposit.");
+
+        var deliveryValid = VndAmountValidator.ValidateVndAmount(deliveryFeeEarned, "DeliveryFeeEarned");
+        if (deliveryValid.IsFailure) return deliveryValid.Error;
+        if (deliveryFeeEarned > item.DeliveryFee)
+            return Error.Validation("Payment.DeliveryFeeEarnedExceedsItemFee", "Delivery fee earned cannot exceed the item's snapshotted delivery fee.");
+
+        var returnValid = VndAmountValidator.ValidateVndAmount(returnFeeEarned, "ReturnFeeEarned");
+        if (returnValid.IsFailure) return returnValid.Error;
+        if (returnFeeEarned > item.ReturnFee)
+            return Error.Validation("Payment.ReturnFeeEarnedExceedsItemFee", "Return fee earned cannot exceed the item's snapshotted return fee.");
+
         decimal fee = Math.Round(item.RentalAmount * 0.10m, 0, MidpointRounding.AwayFromZero);
-        return new RentalItemSettlement(operationKey.Trim(), item.InvoiceId, item.Id, item.RentalItemId,
+        decimal supplierPayable = item.RentalAmount - fee + deduction + deliveryFeeEarned + returnFeeEarned;
+
+        return new RentalItemSettlement(
+            operationKey.Trim(), item.InvoiceId, item.Id, item.RentalItemId,
             item.SupplierId, decisionRef.Trim(), item.RentalAmount, item.DepositAmount, deduction,
-            item.DepositAmount - deduction, 0.10m, fee, item.RentalAmount - fee + deduction);
+            item.DepositAmount - deduction, 0.10m, fee, supplierPayable,
+            deliveryFeeEarned, returnFeeEarned);
     }
 }

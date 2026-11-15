@@ -41,7 +41,8 @@ public sealed record SettlementDetailRow(
     DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt,
     string? RefundRef, ManualRefundStatus? RefundStatus, string? RefundTransferReference, DateTimeOffset? RefundCompletedAt,
     string? PayoutRef, string? PayoutStatus, DateTimeOffset? PayoutCompletedAt,
-    bool ViewerIsRenter, bool ViewerIsSupplier);
+    bool ViewerIsRenter, bool ViewerIsSupplier,
+    decimal DeliveryFeeEarned = 0m, decimal ReturnFeeEarned = 0m);
 
 public sealed record SupplierPayoutRow(
     Guid PayoutId, string PayoutRef, Guid RentalItemId, string SettlementRef,

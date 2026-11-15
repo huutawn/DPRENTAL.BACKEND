@@ -7,10 +7,12 @@ namespace Dprental.PaymentService.Application.DTOs.Settlement;
 public sealed record RefundItemRequest(
     [Required] Guid RentalItemId,
     [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RefundRentalAmount,
-    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RefundDepositAmount)
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RefundDepositAmount,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RefundDeliveryFee = 0m,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RefundReturnFee = 0m)
 {
     [JsonIgnore]
-    public decimal TotalRefundAmount => RefundRentalAmount + RefundDepositAmount;
+    public decimal TotalRefundAmount => RefundRentalAmount + RefundDepositAmount + RefundDeliveryFee + RefundReturnFee;
 
     public Result Validate()
     {
@@ -24,6 +26,12 @@ public sealed record RefundItemRequest(
 
         var depositCheck = VndAmountValidator.ValidateVndAmount(RefundDepositAmount, "Tiền cọc hoàn lại");
         if (depositCheck.IsFailure) return depositCheck.Error;
+
+        var deliveryCheck = VndAmountValidator.ValidateVndAmount(RefundDeliveryFee, "Phí giao hoàn lại");
+        if (deliveryCheck.IsFailure) return deliveryCheck.Error;
+
+        var returnCheck = VndAmountValidator.ValidateVndAmount(RefundReturnFee, "Phí trả hoàn lại");
+        if (returnCheck.IsFailure) return returnCheck.Error;
 
         return Result.Success();
     }

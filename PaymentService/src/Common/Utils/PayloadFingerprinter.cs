@@ -13,6 +13,21 @@ public static class PayloadFingerprinter
         DateTimeOffset paymentDeadline,
         IEnumerable<(Guid RentalItemId, Guid SupplierId, decimal RentalAmount, decimal DepositAmount)>? items)
     {
+        return ComputeCreateFingerprint(
+            rentalOrderId,
+            orderCode,
+            renterId,
+            paymentDeadline,
+            items?.Select(i => (i.RentalItemId, i.SupplierId, i.RentalAmount, i.DepositAmount, 0m, 0m)));
+    }
+
+    public static string ComputeCreateFingerprint(
+        Guid rentalOrderId,
+        string orderCode,
+        Guid renterId,
+        DateTimeOffset paymentDeadline,
+        IEnumerable<(Guid RentalItemId, Guid SupplierId, decimal RentalAmount, decimal DepositAmount, decimal DeliveryFee, decimal ReturnFee)>? items)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(orderCode);
 
         StringBuilder sb = new();
@@ -34,7 +49,16 @@ public static class PayloadFingerprinter
                 sb.Append(item.RentalItemId.ToString("D")).Append(':')
                   .Append(item.SupplierId.ToString("D")).Append(':')
                   .Append(decimal.Truncate(item.RentalAmount).ToString("0", CultureInfo.InvariantCulture)).Append(':')
-                  .Append(decimal.Truncate(item.DepositAmount).ToString("0", CultureInfo.InvariantCulture)).Append(';');
+                  .Append(decimal.Truncate(item.DepositAmount).ToString("0", CultureInfo.InvariantCulture));
+
+                if (item.DeliveryFee > 0m || item.ReturnFee > 0m)
+                {
+                    sb.Append(':')
+                      .Append(decimal.Truncate(item.DeliveryFee).ToString("0", CultureInfo.InvariantCulture)).Append(':')
+                      .Append(decimal.Truncate(item.ReturnFee).ToString("0", CultureInfo.InvariantCulture));
+                }
+
+                sb.Append(';');
             }
         }
 

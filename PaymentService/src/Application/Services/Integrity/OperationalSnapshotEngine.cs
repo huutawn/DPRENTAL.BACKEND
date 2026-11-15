@@ -31,7 +31,7 @@ public static class OperationalSnapshotEngine
             };
         }
 
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        var snap = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["entityType"] = "Invoice",
             ["entityId"] = invoice.InvoiceRef,
@@ -47,12 +47,20 @@ public static class OperationalSnapshotEngine
             ["paymentCode"] = invoice.PaymentCode.Trim(),
             ["cancellationOrigin"] = invoice.CancellationOrigin ?? string.Empty
         };
+
+        if (version >= 3 || invoice.TotalDeliveryFee > 0 || invoice.TotalReturnFee > 0)
+        {
+            snap["totalDeliveryFee"] = CanonicalJournalCodec.FormatVndAmount(invoice.TotalDeliveryFee);
+            snap["totalReturnFee"] = CanonicalJournalCodec.FormatVndAmount(invoice.TotalReturnFee);
+        }
+
+        return snap;
     }
 
     public static IReadOnlyDictionary<string, object?> CreateInvoiceItemSnapshot(InvoiceItem item, long revision)
     {
         ArgumentNullException.ThrowIfNull(item);
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        var dict = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["entityType"] = "InvoiceItem",
             ["entityId"] = item.RentalItemId.ToString("D"),
@@ -63,6 +71,12 @@ public static class OperationalSnapshotEngine
             ["depositAmount"] = CanonicalJournalCodec.FormatVndAmount(item.DepositAmount),
             ["totalAmount"] = CanonicalJournalCodec.FormatVndAmount(item.TotalAmount)
         };
+        if (item.DeliveryFee > 0 || item.ReturnFee > 0)
+        {
+            dict["deliveryFee"] = CanonicalJournalCodec.FormatVndAmount(item.DeliveryFee);
+            dict["returnFee"] = CanonicalJournalCodec.FormatVndAmount(item.ReturnFee);
+        }
+        return dict;
     }
 
     public static IReadOnlyDictionary<string, object?> CreatePaymentTransactionSnapshot(PaymentTransaction tx, long revision)
@@ -86,7 +100,7 @@ public static class OperationalSnapshotEngine
     public static IReadOnlyDictionary<string, object?> CreateSettlementRecordSnapshot(RentalItemSettlementRecord settlement, long revision)
     {
         ArgumentNullException.ThrowIfNull(settlement);
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        var snap = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["entityType"] = "RentalItemSettlement",
             ["entityId"] = settlement.SettlementRef,
@@ -100,6 +114,12 @@ public static class OperationalSnapshotEngine
             ["supplierPayable"] = CanonicalJournalCodec.FormatVndAmount(settlement.SupplierPayable),
             ["status"] = settlement.Status.ToString()
         };
+        if (settlement.DeliveryFeeEarned > 0 || settlement.ReturnFeeEarned > 0)
+        {
+            snap["deliveryFeeEarned"] = CanonicalJournalCodec.FormatVndAmount(settlement.DeliveryFeeEarned);
+            snap["returnFeeEarned"] = CanonicalJournalCodec.FormatVndAmount(settlement.ReturnFeeEarned);
+        }
+        return snap;
     }
 
     public static IReadOnlyDictionary<string, object?> CreateLedgerEntrySnapshot(SettlementLedgerEntry entry, long revision)
@@ -129,12 +149,21 @@ public static class OperationalSnapshotEngine
             ["amount"] = CanonicalJournalCodec.FormatVndAmount(refund.Amount),
             ["kind"] = refund.Kind.ToString(),
             ["operationKey"] = refund.OperationKey,
-            ["items"] = JsonSerializer.Serialize(refund.Items.OrderBy(x => x.RentalItemId).Select(x => new
-            {
-                x.RentalItemId,
-                RentalAmount = CanonicalJournalCodec.FormatVndAmount(x.RentalAmount),
-                DepositAmount = CanonicalJournalCodec.FormatVndAmount(x.DepositAmount)
-            })),
+            ["items"] = JsonSerializer.Serialize(refund.Items.OrderBy(x => x.RentalItemId).Select(x => (x.DeliveryFee > 0 || x.ReturnFee > 0)
+                ? (object)new
+                {
+                    x.RentalItemId,
+                    RentalAmount = CanonicalJournalCodec.FormatVndAmount(x.RentalAmount),
+                    DepositAmount = CanonicalJournalCodec.FormatVndAmount(x.DepositAmount),
+                    DeliveryFee = CanonicalJournalCodec.FormatVndAmount(x.DeliveryFee),
+                    ReturnFee = CanonicalJournalCodec.FormatVndAmount(x.ReturnFee)
+                }
+                : new
+                {
+                    x.RentalItemId,
+                    RentalAmount = CanonicalJournalCodec.FormatVndAmount(x.RentalAmount),
+                    DepositAmount = CanonicalJournalCodec.FormatVndAmount(x.DepositAmount)
+                })),
             ["status"] = refund.Status.ToString(),
             ["recipientAdminId"] = refund.CompletedBy?.ToString("D") ?? string.Empty,
             ["externalTransferReference"] = refund.ExternalTransferReference?.Trim() ?? string.Empty

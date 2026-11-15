@@ -60,7 +60,7 @@ public sealed class ManualRefundRequirement
             FinancialRefundKind = financialRefundKind,
             SettlementId = settlementId,
             RentalItemId = items.Count == 1 ? items[0].RentalItemId : null,
-            Amount = items.Sum(x => x.RentalAmount + x.DepositAmount),
+            Amount = items.Sum(x => x.RentalAmount + x.DepositAmount + x.DeliveryFee + x.ReturnFee),
             Items = items.ToList(),
             Status = ManualRefundStatus.PendingManualRefund,
             CreatedAt = now.ToUniversalTime()
@@ -83,8 +83,10 @@ public sealed class ManualRefundItem
     public Guid RentalItemId { get; private set; }
     public decimal RentalAmount { get; private set; }
     public decimal DepositAmount { get; private set; }
+    public decimal DeliveryFee { get; private set; }
+    public decimal ReturnFee { get; private set; }
     private ManualRefundItem() { }
-    public static ManualRefundItem Create(Guid itemId, decimal rentalAmount, decimal depositAmount) =>
-        new() { RentalItemId = itemId, RentalAmount = rentalAmount, DepositAmount = depositAmount };
+    public static ManualRefundItem Create(Guid itemId, decimal rentalAmount, decimal depositAmount, decimal deliveryFee = 0m, decimal returnFee = 0m) =>
+        new() { RentalItemId = itemId, RentalAmount = rentalAmount, DepositAmount = depositAmount, DeliveryFee = deliveryFee, ReturnFee = returnFee };
     internal void AssignRequirement(Guid id) => RequirementId = id;
 }

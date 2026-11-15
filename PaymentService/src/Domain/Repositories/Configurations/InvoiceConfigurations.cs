@@ -19,6 +19,8 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         builder.Property(i => i.Currency).IsRequired().HasMaxLength(3);
         builder.Property(i => i.TotalRentalAmount).IsRequired().HasColumnType("numeric(18,0)");
         builder.Property(i => i.TotalDepositAmount).IsRequired().HasColumnType("numeric(18,0)");
+        builder.Property(i => i.TotalDeliveryFee).IsRequired().HasColumnType("numeric(18,0)").HasDefaultValue(0m);
+        builder.Property(i => i.TotalReturnFee).IsRequired().HasColumnType("numeric(18,0)").HasDefaultValue(0m);
         builder.Property(i => i.TotalAmount).IsRequired().HasColumnType("numeric(18,0)");
         builder.Property(i => i.Status).IsRequired().HasMaxLength(32);
         builder.Property(i => i.PaymentCode).IsRequired().HasMaxLength(32);
@@ -53,6 +55,8 @@ public sealed class InvoiceItemConfiguration : IEntityTypeConfiguration<InvoiceI
         builder.Property(ii => ii.SupplierId).IsRequired();
         builder.Property(ii => ii.RentalAmount).IsRequired().HasColumnType("numeric(18,0)");
         builder.Property(ii => ii.DepositAmount).IsRequired().HasColumnType("numeric(18,0)");
+        builder.Property(ii => ii.DeliveryFee).IsRequired().HasColumnType("numeric(18,0)").HasDefaultValue(0m);
+        builder.Property(ii => ii.ReturnFee).IsRequired().HasColumnType("numeric(18,0)").HasDefaultValue(0m);
         builder.Property(ii => ii.TotalAmount).IsRequired().HasColumnType("numeric(18,0)");
         builder.Property(ii => ii.Revision).IsRequired().HasDefaultValue(1);
         builder.HasOne(ii => ii.Invoice)
