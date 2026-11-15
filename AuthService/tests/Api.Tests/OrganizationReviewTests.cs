@@ -499,6 +499,30 @@ public sealed class OrganizationReviewTests
         Assert.Equal(submitted.AddHours(42), OrganizationReviewSchedule.CanRemindAtUtc(org, options));
     }
 
+    [Fact]
+    public async Task ResubmitRejectedProfileWithoutRepresentativeCitizenIdFailsWithMissingRequirements()
+    {
+        await using Fixture f = await Fixture.CreateAsync();
+        await f.Review.RejectAsync(f.AdminId, f.OrgId, new RejectOrganizationRequest("Cần sửa đổi thông tin"));
+
+        // Clear representative citizen ID from org
+        Organization org = await f.Db.Organizations.SingleAsync(o => o.Id == f.OrgId);
+        org.LegalRepresentativeCitizenId = null;
+        await f.Db.SaveChangesAsync();
+
+        // Owner also has no citizen ID
+        User owner = await f.Db.Users.SingleAsync(u => u.Id == f.OwnerId);
+        owner.CitizenId = null;
+        await f.Db.SaveChangesAsync();
+
+        Result<OrganizationResponse> result = await f.Registration.UpdateProfileAsync(
+            f.OwnerId, f.OrgId, Profile() with { LegalRepresentativeCitizenId = null });
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("MISSING_REQUIREMENTS", result.Error.Code);
+        Assert.Contains("Còn thiếu: Số CCCD người đại diện pháp luật", result.Error.Message);
+    }
+
     private static UpdateOrganizationProfileRequest Profile() =>
         new(
             Name: "Dong A Rental",
@@ -509,7 +533,8 @@ public sealed class OrganizationReviewTests
             Address: "12 Nguyen Hue",
             Province: "TP. Ho Chi Minh",
             Ward: "Phuong Sai Gon",
-            BusinessLicenseDocumentMediaId: Guid.Parse("11111111-1111-1111-1111-111111111111"));
+            BusinessLicenseDocumentMediaId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            LegalRepresentativeCitizenId: "079203009999");
 
     private sealed class Fixture : IAsyncDisposable
     {
@@ -573,7 +598,7 @@ public sealed class OrganizationReviewTests
 
             foreach ((Guid id, string email) in new[] { (f.AdminId, "admin@x.vn"), (f.OwnerId, "owner@x.vn"), (f.OutsiderId, "outsider@x.vn") })
             {
-                db.Users.Add(new User { Id = id, Email = email, FullName = email, PasswordHash = "hash", IsActive = true, ProfileCompletedAtUtc = DateTime.UtcNow });
+                db.Users.Add(new User { Id = id, Email = email, FullName = email, PasswordHash = "hash", IsActive = true, ProfileCompletedAtUtc = DateTime.UtcNow, CitizenId = "079203009999" });
             }
 
             db.UserRoles.Add(new UserRole { UserId = f.AdminId, RoleId = PlatformRoleId });
@@ -609,6 +634,7 @@ public sealed class OrganizationReviewTests
                 Status = status,
                 TaxCode = taxCode,
                 CreatedAtUtc = createdAt ?? DateTime.UtcNow,
+                LegalRepresentativeCitizenId = "079203009999"
             };
             Db.Organizations.Add(org);
             await Db.SaveChangesAsync();

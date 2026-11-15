@@ -395,6 +395,9 @@ public sealed class OrganizationServiceTests
         public Task<OrganizationMembership?> GetByOrganizationAndUserAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Memberships.FirstOrDefault(m => m.OrganizationId == organizationId && m.UserId == userId));
 
+        public Task<OrganizationMembership?> GetActiveOwnerMembershipAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Memberships.FirstOrDefault(m => m.OrganizationId == organizationId && string.Equals(m.Role?.Name, "Owner", StringComparison.OrdinalIgnoreCase) && m.Status == MembershipStatus.Active));
+
         public Task<int> CountActiveOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Memberships.Count(m => m.OrganizationId == organizationId && string.Equals(m.Role?.Name, "Owner", StringComparison.OrdinalIgnoreCase) && m.Status == MembershipStatus.Active));
 

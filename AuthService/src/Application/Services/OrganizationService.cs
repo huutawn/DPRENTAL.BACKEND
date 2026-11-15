@@ -535,13 +535,45 @@ public sealed class OrganizationService(
         DateTime? licenseExpires = null;
         if (org.BusinessLicenseDocumentMediaId.HasValue)
         {
-            var accessResult = await mediaUrlResolver.ResolvePrivateAccessUrlAsync(org.BusinessLicenseDocumentMediaId.Value, cancellationToken);
-            if (accessResult.IsFailure)
+            bool shouldResolveUrl = true;
+
+            // For Draft and Rejected profiles: verify media ownership against organization owner before resolving private access URL.
+            // If verify fails (e.g. wrong uploader, unready, not found), do NOT issue private URL.
+            if (org.Status is OrganizationStatus.Draft or OrganizationStatus.Rejected)
             {
-                return Result.Failure<OrganizationResponse>(AuthErrors.Media.ServiceUnavailable);
+                var activeOwner = await membershipRepository.GetActiveOwnerMembershipAsync(org.Id, cancellationToken);
+                if (activeOwner is null)
+                {
+                    shouldResolveUrl = false;
+                }
+                else
+                {
+                    var verifyResult = await _mediaServiceClient.VerifyMediaAsync(org.BusinessLicenseDocumentMediaId.Value, cancellationToken);
+                    if (verifyResult.IsFailure)
+                    {
+                        shouldResolveUrl = false;
+                    }
+                    else
+                    {
+                        var docValidation = MediaVerificationRules.ValidateDocument(verifyResult.Value, activeOwner.UserId);
+                        if (docValidation.IsFailure)
+                        {
+                            shouldResolveUrl = false;
+                        }
+                    }
+                }
             }
-            licenseUrl = accessResult.Value.Url;
-            licenseExpires = accessResult.Value.ExpiresAtUtc.UtcDateTime;
+
+            if (shouldResolveUrl)
+            {
+                var accessResult = await mediaUrlResolver.ResolvePrivateAccessUrlAsync(org.BusinessLicenseDocumentMediaId.Value, cancellationToken);
+                if (accessResult.IsFailure)
+                {
+                    return Result.Failure<OrganizationResponse>(AuthErrors.Media.ServiceUnavailable);
+                }
+                licenseUrl = accessResult.Value.Url;
+                licenseExpires = accessResult.Value.ExpiresAtUtc.UtcDateTime;
+            }
         }
 
         return Result.Success(org.ToResponse(logoUrl, licenseUrl, licenseExpires, _reviewOptions));

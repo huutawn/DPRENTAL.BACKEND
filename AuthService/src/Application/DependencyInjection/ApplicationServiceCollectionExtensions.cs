@@ -63,6 +63,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IUserAccountService, UserAccountService>();
         services.AddScoped<IMediaUrlResolver, MediaUrlResolver>();
         services.AddScoped<IMediaOutboxService, MediaOutboxService>();
+        services.AddScoped<IMediaDraftAuditService, MediaDraftAuditService>();
 
         return services;
     }

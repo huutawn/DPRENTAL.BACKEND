@@ -45,6 +45,10 @@ public interface IOrganizationRepository
 
     Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default);
 
+    /// <summary>Lấy danh sách các hồ sơ Draft hoặc Rejected đang có BusinessLicenseDocumentMediaId để kiểm tra quyền sở hữu media.</summary>
+    Task<IReadOnlyList<Organization>> GetDraftOrRejectedWithMediaAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Organization>>([]);
+
     /// <summary>
     /// Khóa (row-level lock) các organization liên quan theo thứ tự cố định để chống race condition và deadlock khi thay đổi Owner.
     /// </summary>

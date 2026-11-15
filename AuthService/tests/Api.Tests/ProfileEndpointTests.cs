@@ -65,7 +65,7 @@ public sealed class ProfileEndpointTests
     }
 
     [Fact]
-    public async Task IncompleteProfileCannotRegisterOrganizationReturns403()
+    public async Task IncompleteProfileCannotRegisterWithoutRepresentativeCitizenIdReturns400()
     {
         Guid userId = Guid.NewGuid();
         using WebApplicationFactory<Program> factory = CreateFactory();
@@ -83,13 +83,74 @@ public sealed class ProfileEndpointTests
             Address: "123 Street",
             Province: "HCM",
             Ward: "Ben Nghe",
-            BusinessLicenseDocumentMediaId: Guid.Parse("22222222-2222-2222-2222-222222222222"));
+            BusinessLicenseDocumentMediaId: Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            LegalRepresentativeCitizenId: null);
 
         using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/organizations/register", request);
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("Profile.NotCompleted", document.RootElement.GetProperty("title").GetString());
+        Assert.Equal("MISSING_REQUIREMENTS", document.RootElement.GetProperty("title").GetString());
+        string detail = document.RootElement.GetProperty("detail").GetString() ?? "";
+        Assert.Contains("Còn thiếu: Số CCCD người đại diện pháp luật", detail);
+    }
+
+    [Fact]
+    public async Task IncompleteProfileWithRepresentativeCitizenIdCanRegisterOrganizationReturns201()
+    {
+        Guid userId = Guid.NewGuid();
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedUserAsync(factory, userId, isCompleted: false);
+        await SeedOwnerRoleAsync(factory);
+        using HttpClient client = CreateAuthenticatedClient(factory, userId);
+
+        OrganizationProfileRequest request = new(
+            Name: "Test Org",
+            TaxCode: "0123456789",
+            Type: OrganizationType.Supplier,
+            LegalRepresentativeName: "Test Rep",
+            ContactEmail: "org@example.com",
+            ContactPhone: "0901234567",
+            Address: "123 Street",
+            Province: "HCM",
+            Ward: "Ben Nghe",
+            BusinessLicenseDocumentMediaId: Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            LegalRepresentativeCitizenId: "079203009999");
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/organizations/register", request);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal((int)OrganizationStatus.Pending, document.RootElement.GetProperty("status").GetInt32());
+    }
+
+    [Fact]
+    public async Task CompletedProfileCanRegisterOrganizationUsingActorCitizenIdReturns201()
+    {
+        Guid userId = Guid.NewGuid();
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedUserAsync(factory, userId, isCompleted: true);
+        await SeedOwnerRoleAsync(factory);
+        using HttpClient client = CreateAuthenticatedClient(factory, userId);
+
+        OrganizationProfileRequest request = new(
+            Name: "Test Org Completed User",
+            TaxCode: "0123456789",
+            Type: OrganizationType.Supplier,
+            LegalRepresentativeName: "Test Rep",
+            ContactEmail: "org@example.com",
+            ContactPhone: "0901234567",
+            Address: "123 Street",
+            Province: "HCM",
+            Ward: "Ben Nghe",
+            BusinessLicenseDocumentMediaId: Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            LegalRepresentativeCitizenId: null);
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync("/api/v1/auth/organizations/register", request);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal((int)OrganizationStatus.Pending, document.RootElement.GetProperty("status").GetInt32());
     }
 
     [Fact]

@@ -40,7 +40,8 @@ public sealed record OrganizationResponse(
     DateTime? SubmittedAtUtc = null,
     DateTime? ReviewDueAtUtc = null,
     DateTime? CanRemindAtUtc = null,
-    DateTime? LastRemindedAtUtc = null);
+    DateTime? LastRemindedAtUtc = null,
+    IReadOnlyList<string>? MissingRequirements = null);
 
 /// <summary>
 /// Một dòng trong danh sách organization. Không có thông tin pháp lý/liên hệ — xem chi tiết qua GET /{id}.

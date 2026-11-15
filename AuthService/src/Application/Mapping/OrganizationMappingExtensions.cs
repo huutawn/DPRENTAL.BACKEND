@@ -17,6 +17,10 @@ public static class OrganizationMappingExtensions
     {
         ArgumentNullException.ThrowIfNull(organization);
         reviewOptions ??= new OrganizationReviewOptions();
+        IReadOnlyList<string>? missingRequirements = (organization.Status is Dprental.AuthService.Common.Enums.OrganizationStatus.Draft or Dprental.AuthService.Common.Enums.OrganizationStatus.Rejected)
+            ? organization.GetMissingRequirements()
+            : null;
+
         return new OrganizationResponse(
             organization.Id,
             organization.Name,
@@ -48,8 +52,12 @@ public static class OrganizationMappingExtensions
             OrganizationReviewSchedule.SubmittedAtUtc(organization),
             OrganizationReviewSchedule.ReviewDueAtUtc(organization, reviewOptions),
             OrganizationReviewSchedule.CanRemindAtUtc(organization, reviewOptions),
-            organization.LastRemindedAtUtc);
+            organization.LastRemindedAtUtc,
+            missingRequirements);
     }
+
+    public static IReadOnlyList<string> GetMissingRequirements(this Organization organization, string? fallbackCitizenId = null) =>
+        OrganizationProfilePolicy.GetMissingRequirements(organization, fallbackCitizenId);
 
     public static OrganizationSummaryResponse ToSummaryResponse(
         this Organization organization,
