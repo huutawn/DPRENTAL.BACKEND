@@ -73,6 +73,7 @@ public sealed class E2EScenariosHarnessTests
                 new LatePaymentRefundRequestedHandler(),
                 new RentalItemConfirmedHandler(),
                 new RentalItemRejectedHandler(),
+                new RefundRequestedFinancialHandler(),
                 new RefundCompletedFinancialHandler(),
                 new SupplierPayoutCompletedHandler()
             };

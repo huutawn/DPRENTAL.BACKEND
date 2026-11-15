@@ -10,6 +10,7 @@ public sealed class JobReconciliationService : IJobReconciliationService
     [
         "ORDER_PAID",
         "ORDER_COMPLETED",
+        "REFUND_REQUESTED",
         "REFUND_COMPLETED",
         "PAYOUT_COMPLETED"
     ];

@@ -53,12 +53,14 @@ public sealed class NotificationIngestionTests
             new RentalOrderCancelledHandler(),
             new RentalItemHandoverCompletedHandler(),
             new RentalHandoverOverdueHandler(),
+            new RentalReminderDueHandler(),
             new ReturnConfirmationOverdueHandler(),
             new RentalOrderCompletedHandler(),
             new RentalDeductionDisputeResolvedHandler(),
             new LatePaymentRefundRequestedHandler(),
             new RentalItemConfirmedHandler(),
             new RentalItemRejectedHandler(),
+            new RefundRequestedFinancialHandler(),
             new RefundCompletedFinancialHandler(),
             new SupplierPayoutCompletedHandler(),
             new RentalOrderRejectedHandler(),
@@ -1285,5 +1287,687 @@ public sealed class NotificationIngestionTests
             It.IsAny<string>(),
             It.IsAny<DateTimeOffset>(),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ingestion_RentalReminderDue_CreatesInAppNotification_NoEmailJob_And_Deduplicates()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        // 1. Ingest HandoverReminder for Supplier
+        var todayStr = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).DateTime).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var msgId1 = Guid.NewGuid();
+        var raw1 = ProducerFixtures.RentalReminderDue(msgId1, orderId, itemId, renterId, supplierId, "HandoverReminder", todayStr);
+        var outcome1 = await service.IngestMessageAsync(raw1, "rental.events.v1", 0, 10);
+        Assert.Equal(IngestionOutcome.Processed, outcome1);
+
+        // Verify in-app notification created for Supplier
+        var notif1 = await db.Notifications.FirstOrDefaultAsync(n => n.RecipientUserId == supplierId);
+        Assert.NotNull(notif1);
+        Assert.Equal("HANDOVER_REMINDER_SUPPLIER", notif1.NotificationType);
+        Assert.Equal("HANDOVER", notif1.Category);
+        Assert.True(notif1.IsActionable);
+        Assert.Equal("/own/orders", notif1.ActionUrl);
+
+        // Verify NO email job was created for RentalReminderDue!
+        var emailJobs = await db.DeliveryJobs.Where(j => j.NotificationId == notif1.Id).ToListAsync();
+        Assert.Empty(emailJobs);
+
+        // Verify watermark was NOT raised/upserted for this reminder
+        var watermark = await db.AggregateWatermarks.FirstOrDefaultAsync(w => w.AggregateId == itemId);
+        Assert.Null(watermark);
+
+        // 2. Ingest duplicate message with DIFFERENT messageId for same recipient, item, date
+        var msgId2 = Guid.NewGuid();
+        var raw2 = ProducerFixtures.RentalReminderDue(msgId2, orderId, itemId, renterId, supplierId, "HandoverReminder", todayStr);
+        var outcome2 = await service.IngestMessageAsync(raw2, "rental.events.v1", 0, 11);
+        Assert.Equal(IngestionOutcome.Processed, outcome2);
+
+        // Total notifications for this supplier must still be 1 (deduplicated by business key)
+        var count = await db.Notifications.CountAsync(n => n.RecipientUserId == supplierId && n.RentalItemId == itemId);
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public async Task Ingestion_RentalReminderDue_PastDate_DismissedWithInboxReceipt_NoNotificationCreated()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        // Yesterday's reminder date
+        var yesterday = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).DateTime).AddDays(-1);
+        var msgId = Guid.NewGuid();
+        var raw = ProducerFixtures.RentalReminderDue(msgId, orderId, itemId, renterId, supplierId, "HandoverReminder", yesterday.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 15);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        // No notification created
+        var notifs = await db.Notifications.Where(n => n.RentalItemId == itemId).ToListAsync();
+        Assert.Empty(notifs);
+
+        // Inbox receipt created with DismissedStaleReminder
+        var receipt = await db.InboxReceipts.FirstOrDefaultAsync(r => r.MessageId == msgId);
+        Assert.NotNull(receipt);
+        Assert.Equal("DismissedStaleReminder", receipt.Status);
+    }
+
+    [Fact]
+    public async Task Ingestion_RentalReminderDue_FutureDate_Quarantined()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        // Tomorrow's reminder date
+        var tomorrow = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).DateTime).AddDays(1);
+        var msgId = Guid.NewGuid();
+        var raw = ProducerFixtures.RentalReminderDue(msgId, orderId, itemId, renterId, supplierId, "HandoverReminder", tomorrow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 16);
+        Assert.Equal(IngestionOutcome.Quarantined, outcome);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(It.IsAny<string>(), msgId.ToString(), It.IsAny<string>(), "FUTURE_REMINDER_DATE", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ingestion_HandoverCompleted_DismissesPendingHandoverReminderCTA()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var todayStr = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).DateTime).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        // 1. Ingest HandoverReminder
+        var msgId1 = Guid.NewGuid();
+        var raw1 = ProducerFixtures.RentalReminderDue(msgId1, orderId, itemId, renterId, supplierId, "HandoverReminder", todayStr);
+        var outcome1 = await service.IngestMessageAsync(raw1, "rental.events.v1", 0, 20);
+        Assert.Equal(IngestionOutcome.Processed, outcome1);
+
+        var notif = await db.Notifications.FirstAsync(n => n.RecipientUserId == supplierId && n.RentalItemId == itemId);
+        Assert.True(notif.IsActionable);
+
+        // 2. Handover completed arrives
+        var msgId2 = Guid.NewGuid();
+        var rawHandover = ProducerFixtures.RentalItemHandoverCompleted(msgId2, orderId, itemId, renterId, supplierId);
+        var outcome2 = await service.IngestMessageAsync(rawHandover, "rental.events.v1", 0, 21);
+        Assert.Equal(IngestionOutcome.Processed, outcome2);
+
+        // 3. Verify handover reminder CTA is now dismissed
+        var updatedNotif = await db.Notifications.FirstAsync(n => n.Id == notif.Id);
+        Assert.False(updatedNotif.IsActionable);
+        Assert.Null(updatedNotif.ActionUrl);
+
+        // Verify SignalR realtime notification sent with UPDATED
+        realtime.Verify(r => r.NotifyInboxChangedAsync(
+            supplierId,
+            notif.Id,
+            "UPDATED",
+            notif.Category,
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ingestion_RentalReminderDue_OutOfWindow_Quarantined()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).DateTime);
+        var todayStr = today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        // Reminder date out of window: targetDate is 10 days in the future, diff = -10 (valid is [-3, 0])
+        var futureTargetStr = today.AddDays(10).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var msgId1 = Guid.NewGuid();
+        var raw1 = ProducerFixtures.RentalReminderDue(msgId1, orderId, itemId, renterId, supplierId, "HandoverReminder", todayStr, targetDate: futureTargetStr);
+
+        var outcome1 = await service.IngestMessageAsync(raw1, "rental.events.v1", 0, 30);
+        Assert.Equal(IngestionOutcome.Quarantined, outcome1);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(raw1, msgId1.ToString(), It.IsAny<string>(), "REMINDER_DATE_OUT_OF_WINDOW", It.IsAny<CancellationToken>()), Times.Once);
+
+        // Overdue date out of window: targetDate is today, reminderDate is today, diff = 0 (valid is [1, 30])
+        var msgId2 = Guid.NewGuid();
+        var raw2 = ProducerFixtures.RentalReminderDue(msgId2, orderId, itemId, renterId, supplierId, "HandoverOverdue", todayStr, targetDate: todayStr);
+
+        var outcome2 = await service.IngestMessageAsync(raw2, "rental.events.v1", 0, 31);
+        Assert.Equal(IngestionOutcome.Quarantined, outcome2);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(raw2, msgId2.ToString(), It.IsAny<string>(), "OVERDUE_DATE_OUT_OF_WINDOW", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("InvalidReminderType", "INVALID_REMINDER_TYPE")]
+    public async Task Ingestion_RentalReminderDue_InvalidType_Quarantined(string reminderType, string expectedErrorCode)
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var todayStr = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).DateTime).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        var msgId = Guid.NewGuid();
+        var raw = ProducerFixtures.RentalReminderDue(msgId, orderId, itemId, renterId, supplierId, reminderType, todayStr);
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 32);
+
+        Assert.Equal(IngestionOutcome.Quarantined, outcome);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(raw, msgId.ToString(), It.IsAny<string>(), expectedErrorCode, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(0, 1, "INVALID_ORDER_VERSION")]
+    [InlineData(-1, 1, "INVALID_ORDER_VERSION")]
+    [InlineData(1, 0, "INVALID_REMAINING_UNITS")]
+    [InlineData(1, -2, "INVALID_REMAINING_UNITS")]
+    public async Task Ingestion_RentalReminderDue_NonPositiveVersionOrUnits_Quarantined(long version, int units, string expectedErrorCode)
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var todayStr = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).DateTime).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        var msgId = Guid.NewGuid();
+        var raw = ProducerFixtures.RentalReminderDue(msgId, orderId, itemId, renterId, supplierId, "HandoverReminder", todayStr, remainingUnitCount: units, orderVersion: version);
+        var outcome = await service.IngestMessageAsync(raw, "rental.events.v1", 0, 33);
+
+        Assert.Equal(IngestionOutcome.Quarantined, outcome);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(raw, msgId.ToString(), It.IsAny<string>(), expectedErrorCode, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ingestion_RentalReminderDue_InvalidDateFormat_Quarantined()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        var msgId1 = Guid.NewGuid();
+        var raw1 = ProducerFixtures.RentalReminderDue(msgId1, orderId, itemId, renterId, supplierId, "HandoverReminder", "09/11/2026");
+        var outcome1 = await service.IngestMessageAsync(raw1, "rental.events.v1", 0, 34);
+        Assert.Equal(IngestionOutcome.Quarantined, outcome1);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(raw1, msgId1.ToString(), It.IsAny<string>(), "INVALID_REMINDER_DATE", It.IsAny<CancellationToken>()), Times.Once);
+
+        var msgId2 = Guid.NewGuid();
+        var raw2 = ProducerFixtures.RentalReminderDue(msgId2, orderId, itemId, renterId, supplierId, "HandoverReminder", "2026-11-09", targetDate: "invalid-date");
+        var outcome2 = await service.IngestMessageAsync(raw2, "rental.events.v1", 0, 35);
+        Assert.Equal(IngestionOutcome.Quarantined, outcome2);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(raw2, msgId2.ToString(), It.IsAny<string>(), "INVALID_TARGET_DATE", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ingestion_RentalReminderDue_MissingRequiredRecipient_Quarantined()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).DateTime);
+        var todayStr = today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        // HandoverReminder missing supplierId property in payload
+        var msgId1 = Guid.NewGuid();
+        var raw1 = $$"""
+        {
+          "messageId": "{{msgId1}}",
+          "messageType": "RentalReminderDue",
+          "version": 1,
+          "producer": "RentalService",
+          "aggregateId": "{{orderId}}",
+          "occurredAt": "2026-11-09T08:00:00.0000000+00:00",
+          "payload": {
+            "rentalOrderId": "{{orderId}}",
+            "rentalItemId": "{{itemId}}",
+            "orderCode": "DH-2026-0001",
+            "renterId": "{{Guid.NewGuid()}}",
+            "reminderType": "HandoverReminder",
+            "reminderDate": "{{todayStr}}",
+            "targetDate": "{{todayStr}}",
+            "actionDeadline": "2026-11-10T00:00:00.0000000+00:00",
+            "remainingUnitCount": 1,
+            "orderVersion": 3
+          }
+        }
+        """;
+        var outcome1 = await service.IngestMessageAsync(raw1, "rental.events.v1", 0, 36);
+        Assert.Equal(IngestionOutcome.Quarantined, outcome1);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(raw1, msgId1.ToString(), It.IsAny<string>(), "MISSING_SUPPLIER_ID", It.IsAny<CancellationToken>()), Times.Once);
+
+        // ReturnReminder missing renterId property in payload
+        var msgId2 = Guid.NewGuid();
+        var raw2 = $$"""
+        {
+          "messageId": "{{msgId2}}",
+          "messageType": "RentalReminderDue",
+          "version": 1,
+          "producer": "RentalService",
+          "aggregateId": "{{orderId}}",
+          "occurredAt": "2026-11-09T08:00:00.0000000+00:00",
+          "payload": {
+            "rentalOrderId": "{{orderId}}",
+            "rentalItemId": "{{itemId}}",
+            "orderCode": "DH-2026-0001",
+            "supplierId": "{{Guid.NewGuid()}}",
+            "reminderType": "ReturnReminder",
+            "reminderDate": "{{todayStr}}",
+            "targetDate": "{{todayStr}}",
+            "actionDeadline": "2026-11-10T00:00:00.0000000+00:00",
+            "remainingUnitCount": 1,
+            "orderVersion": 3
+          }
+        }
+        """;
+        var outcome2 = await service.IngestMessageAsync(raw2, "rental.events.v1", 0, 37);
+        Assert.Equal(IngestionOutcome.Quarantined, outcome2);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(raw2, msgId2.ToString(), It.IsAny<string>(), "MISSING_RENTER_ID", It.IsAny<CancellationToken>()), Times.Once);
+
+        // HandoverOverdue missing renterId property in payload
+        var msgId3 = Guid.NewGuid();
+        var targetOverdueStr = today.AddDays(-1).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var raw3 = $$"""
+        {
+          "messageId": "{{msgId3}}",
+          "messageType": "RentalReminderDue",
+          "version": 1,
+          "producer": "RentalService",
+          "aggregateId": "{{orderId}}",
+          "occurredAt": "2026-11-09T08:00:00.0000000+00:00",
+          "payload": {
+            "rentalOrderId": "{{orderId}}",
+            "rentalItemId": "{{itemId}}",
+            "orderCode": "DH-2026-0001",
+            "supplierId": "{{Guid.NewGuid()}}",
+            "reminderType": "HandoverOverdue",
+            "reminderDate": "{{todayStr}}",
+            "targetDate": "{{targetOverdueStr}}",
+            "actionDeadline": "2026-11-10T00:00:00.0000000+00:00",
+            "remainingUnitCount": 1,
+            "orderVersion": 3
+          }
+        }
+        """;
+        var outcome3 = await service.IngestMessageAsync(raw3, "rental.events.v1", 0, 38);
+        Assert.Equal(IngestionOutcome.Quarantined, outcome3);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(raw3, msgId3.ToString(), It.IsAny<string>(), "MISSING_RENTER_ID", It.IsAny<CancellationToken>()), Times.Once);
+
+        // Empty Guid for supplierId produces INVALID_GUID_VALUE
+        var msgId4 = Guid.NewGuid();
+        var raw4 = ProducerFixtures.RentalReminderDue(msgId4, orderId, itemId, Guid.NewGuid(), Guid.Empty, "HandoverReminder", todayStr);
+        var outcome4 = await service.IngestMessageAsync(raw4, "rental.events.v1", 0, 39);
+        Assert.Equal(IngestionOutcome.Quarantined, outcome4);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(raw4, msgId4.ToString(), It.IsAny<string>(), "INVALID_GUID_VALUE", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ingestion_ValidRefundRequestedFinancial_FromProducerFixtures_ShouldSucceedAndEnqueueEmail()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+
+        var messageId = Guid.NewGuid();
+        var refundRef = "REF-20261114-0001";
+        var orderId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+
+        var raw = ProducerFixtures.RefundRequestedFinancial(messageId, refundRef, orderId, renterId, amount: 1500000m);
+
+        var outcome = await service.IngestMessageAsync(raw, "payment.analytics.v1", 0, 100);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        var receipt = await db.InboxReceipts.FirstOrDefaultAsync(r => r.MessageId == messageId);
+        Assert.NotNull(receipt);
+        Assert.Equal("Processed", receipt.Status);
+
+        var notification = await db.Notifications.FirstOrDefaultAsync(n => n.SourceEventId == messageId);
+        Assert.NotNull(notification);
+        Assert.Equal(renterId, notification.RecipientUserId);
+        Assert.Equal("REFUND_REQUESTED", notification.NotificationType);
+        Assert.Equal("PAYMENT", notification.Category);
+        Assert.Equal("INFO", notification.Severity);
+        Assert.False(notification.IsActionable);
+        Assert.Contains("1.500.000 VND", notification.Body);
+        Assert.Contains("DPRental đang xử lý thủ tục chuyển khoản vào tài khoản ngân hàng của Quý khách", notification.Body);
+        Assert.Equal($"/orders/{orderId}", notification.DeepLinkUrl);
+
+        var deliveryJob = await db.DeliveryJobs.FirstOrDefaultAsync(j => j.NotificationId == notification.Id);
+        Assert.NotNull(deliveryJob);
+        Assert.Equal("Pending", deliveryJob.Status);
+        Assert.Equal("EMAIL", deliveryJob.Channel);
+        Assert.Equal(renterId, deliveryJob.RecipientUserId);
+    }
+
+    [Fact]
+    public async Task Ingestion_HandoverCompleted_DismissesPendingHandoverOverdueCTA_AndSuppressesPendingJobs()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        // 1. Create actionable HANDOVER_OVERDUE_SUPPLIER with pending delivery job
+        var overdueMsgId = Guid.NewGuid();
+        var overdueRaw = ProducerFixtures.RentalHandoverOverdue(overdueMsgId, orderId, itemId, renterId, supplierId, orderVersion: 2);
+        var outcome1 = await service.IngestMessageAsync(overdueRaw, "rental.events.v1", 0, 101);
+        Assert.Equal(IngestionOutcome.Processed, outcome1);
+
+        var overdueNotif = await db.Notifications.FirstAsync(n => n.SourceEventId == overdueMsgId && n.RecipientUserId == supplierId);
+        Assert.True(overdueNotif.IsActionable);
+
+        var overdueJob = await db.DeliveryJobs.FirstAsync(j => j.NotificationId == overdueNotif.Id);
+        Assert.Equal("Pending", overdueJob.Status);
+
+        // 2. Handover completed arrives
+        var completedMsgId = Guid.NewGuid();
+        var completedRaw = ProducerFixtures.RentalItemHandoverCompleted(completedMsgId, orderId, itemId, renterId, supplierId);
+        var outcome2 = await service.IngestMessageAsync(completedRaw, "rental.events.v1", 0, 102);
+        Assert.Equal(IngestionOutcome.Processed, outcome2);
+
+        // 3. Handover action dismissed and delivery job suppressed
+        var updatedNotif = await db.Notifications.FirstAsync(n => n.Id == overdueNotif.Id);
+        Assert.False(updatedNotif.IsActionable);
+        Assert.Null(updatedNotif.ActionUrl);
+
+        var updatedJob = await db.DeliveryJobs.FirstAsync(j => j.Id == overdueJob.Id);
+        Assert.Equal("Suppressed", updatedJob.Status);
+        Assert.Equal("STALE_EVENT_TERMINATED", updatedJob.LastErrorCode);
+        Assert.Equal("Bàn giao thiết bị đã hoàn tất.", updatedJob.LastErrorDetail);
+
+        realtime.Verify(r => r.NotifyInboxChangedAsync(
+            supplierId,
+            overdueNotif.Id,
+            "UPDATED",
+            overdueNotif.Category,
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ingestion_ItemReturned_DismissesAllReturnRemindersAndSuppressesPendingJobs()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+
+        // Seed RETURN_REMINDER_RENTER, RETURN_OVERDUE_SUPPLIER, RETURN_OVERDUE_RENTER, RETURN_CONFIRMATION_OVERDUE_SUPPLIER
+        var returnNotifTypes = new[]
+        {
+            "RETURN_REMINDER_RENTER",
+            "RETURN_OVERDUE_SUPPLIER",
+            "RETURN_OVERDUE_RENTER",
+            "RETURN_CONFIRMATION_OVERDUE_SUPPLIER"
+        };
+
+        var notifIds = new List<Guid>();
+        var jobIds = new List<Guid>();
+        var now = DateTimeOffset.UtcNow;
+
+        foreach (var type in returnNotifTypes)
+        {
+            var notif = new Notification
+            {
+                Id = Guid.NewGuid(),
+                OrderId = orderId,
+                RentalItemId = itemId,
+                RecipientUserId = type.Contains("SUPPLIER") ? supplierId : renterId,
+                NotificationType = type,
+                Category = "RETURN",
+                Severity = "ACTION_REQUIRED",
+                Title = $"Action {type}",
+                Body = "Body",
+                ResourceType = "RentalItem",
+                ResourceId = itemId.ToString(),
+                SourceEventId = Guid.NewGuid(),
+                SourceProducer = "RentalService",
+                SourceEventType = "RentalEvent",
+                EventVersion = 2,
+                TemplateCode = type,
+                TemplateVersion = "1.0",
+                RenderDataJson = "{}",
+                DeepLinkUrl = $"/orders/{orderId}",
+                IsActionable = true,
+                ActionUrl = $"/orders/{orderId}/return",
+                OccurredAt = now,
+                CreatedAt = now
+            };
+            db.Notifications.Add(notif);
+            notifIds.Add(notif.Id);
+
+            var job = new NotificationDeliveryJob
+            {
+                Id = Guid.NewGuid(),
+                NotificationId = notif.Id,
+                Channel = "EMAIL",
+                RecipientUserId = notif.RecipientUserId,
+                Status = "Pending",
+                MaxAttempts = 5,
+                AttemptCount = 0,
+                NextAttemptAt = now,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            db.DeliveryJobs.Add(job);
+            jobIds.Add(job.Id);
+        }
+        await db.SaveChangesAsync();
+
+        // Ingest RentalItemReturned
+        var returnedMsgId = Guid.NewGuid();
+        var returnedRaw = ProducerFixtures.RentalItemReturned(returnedMsgId, orderId, itemId, renterId, supplierId);
+        var outcome = await service.IngestMessageAsync(returnedRaw, "rental.events.v1", 0, 103);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        // Verify all 4 are dismissed
+        var notifications = await db.Notifications.Where(n => notifIds.Contains(n.Id)).ToListAsync();
+        Assert.Equal(4, notifications.Count);
+        foreach (var n in notifications)
+        {
+            Assert.False(n.IsActionable, $"Notification {n.NotificationType} should have been dismissed.");
+            Assert.Null(n.ActionUrl);
+        }
+
+        // Verify all 4 delivery jobs are suppressed
+        var jobs = await db.DeliveryJobs.Where(j => jobIds.Contains(j.Id)).ToListAsync();
+        Assert.Equal(4, jobs.Count);
+        foreach (var j in jobs)
+        {
+            Assert.Equal("Suppressed", j.Status);
+        }
+    }
+
+    [Fact]
+    public async Task Ingestion_OrderCancelled_DismissesBothHandoverAndReturnActionsAcrossAllItems_AndSuppressesDeliveryJobs()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var item1 = Guid.NewGuid();
+        var item2 = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        // Seed Handover action on item 1
+        var notif1 = new Notification
+        {
+            Id = Guid.NewGuid(),
+            OrderId = orderId,
+            RentalItemId = item1,
+            RecipientUserId = supplierId,
+            NotificationType = "HANDOVER_OVERDUE_SUPPLIER",
+            Category = "HANDOVER",
+            Severity = "ACTION_REQUIRED",
+            Title = "Handover overdue",
+            Body = "Body",
+            ResourceType = "RentalItem",
+            ResourceId = item1.ToString(),
+            SourceEventId = Guid.NewGuid(),
+            SourceProducer = "RentalService",
+            SourceEventType = "RentalEvent",
+            EventVersion = 2,
+            TemplateCode = "HANDOVER_OVERDUE_SUPPLIER",
+            TemplateVersion = "1.0",
+            RenderDataJson = "{}",
+            DeepLinkUrl = $"/orders/{orderId}",
+            IsActionable = true,
+            ActionUrl = $"/orders/{orderId}/handover",
+            OccurredAt = now,
+            CreatedAt = now
+        };
+        db.Notifications.Add(notif1);
+
+        var job1 = new NotificationDeliveryJob
+        {
+            Id = Guid.NewGuid(),
+            NotificationId = notif1.Id,
+            Channel = "EMAIL",
+            RecipientUserId = supplierId,
+            Status = "Pending",
+            MaxAttempts = 5,
+            AttemptCount = 0,
+            NextAttemptAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.DeliveryJobs.Add(job1);
+
+        // Seed Return action on item 2
+        var notif2 = new Notification
+        {
+            Id = Guid.NewGuid(),
+            OrderId = orderId,
+            RentalItemId = item2,
+            RecipientUserId = renterId,
+            NotificationType = "RETURN_REMINDER_RENTER",
+            Category = "RETURN",
+            Severity = "ACTION_REQUIRED",
+            Title = "Return reminder",
+            Body = "Body",
+            ResourceType = "RentalItem",
+            ResourceId = item2.ToString(),
+            SourceEventId = Guid.NewGuid(),
+            SourceProducer = "RentalService",
+            SourceEventType = "RentalEvent",
+            EventVersion = 2,
+            TemplateCode = "RETURN_REMINDER_RENTER",
+            TemplateVersion = "1.0",
+            RenderDataJson = "{}",
+            DeepLinkUrl = $"/orders/{orderId}",
+            IsActionable = true,
+            ActionUrl = $"/orders/{orderId}/return",
+            OccurredAt = now,
+            CreatedAt = now
+        };
+        db.Notifications.Add(notif2);
+
+        var job2 = new NotificationDeliveryJob
+        {
+            Id = Guid.NewGuid(),
+            NotificationId = notif2.Id,
+            Channel = "EMAIL",
+            RecipientUserId = renterId,
+            Status = "Pending",
+            MaxAttempts = 5,
+            AttemptCount = 0,
+            NextAttemptAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.DeliveryJobs.Add(job2);
+        await db.SaveChangesAsync();
+
+        // Ingest RentalOrderCancelled
+        var cancelMsgId = Guid.NewGuid();
+        var cancelRaw = ProducerFixtures.RentalOrderCancelled(cancelMsgId, orderId, renterId, orderVersion: 3);
+        var outcome = await service.IngestMessageAsync(cancelRaw, "rental.events.v1", 0, 104);
+        Assert.Equal(IngestionOutcome.Processed, outcome);
+
+        // Verify both item notifications are dismissed
+        var updatedNotif1 = await db.Notifications.FirstAsync(n => n.Id == notif1.Id);
+        var updatedNotif2 = await db.Notifications.FirstAsync(n => n.Id == notif2.Id);
+        Assert.False(updatedNotif1.IsActionable);
+        Assert.False(updatedNotif2.IsActionable);
+
+        // Verify both delivery jobs are suppressed
+        var updatedJob1 = await db.DeliveryJobs.FirstAsync(j => j.Id == job1.Id);
+        var updatedJob2 = await db.DeliveryJobs.FirstAsync(j => j.Id == job2.Id);
+        Assert.Equal("Suppressed", updatedJob1.Status);
+        Assert.Equal("Suppressed", updatedJob2.Status);
+    }
+
+    [Fact]
+    public async Task Ingestion_RentalReminderDue_WhenTerminalOrTransitionAlreadyOccurred_DiscardsReminder()
+    {
+        var (service, db, dlq, realtime) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var supplierId = Guid.NewGuid();
+        var todayStr = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(7)).DateTime).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        // Scenario 1: Order is Cancelled -> ReminderDue should be dismissed/discarded
+        var cancelMsgId = Guid.NewGuid();
+        var cancelRaw = ProducerFixtures.RentalOrderCancelled(cancelMsgId, orderId, renterId, orderVersion: 2);
+        await service.IngestMessageAsync(cancelRaw, "rental.events.v1", 0, 105);
+
+        var reminderMsgId1 = Guid.NewGuid();
+        var reminderRaw1 = ProducerFixtures.RentalReminderDue(reminderMsgId1, orderId, itemId, renterId, supplierId, "HandoverReminder", todayStr);
+        var outcome1 = await service.IngestMessageAsync(reminderRaw1, "rental.events.v1", 0, 106);
+        Assert.Equal(IngestionOutcome.Processed, outcome1);
+
+        var receipt1 = await db.InboxReceipts.FirstAsync(r => r.MessageId == reminderMsgId1);
+        Assert.Equal("DismissedStaleReminder", receipt1.Status);
+        Assert.Contains("trạng thái kết thúc", receipt1.ErrorDetail);
+
+        // No notification created for this reminder
+        Assert.Empty(await db.Notifications.Where(n => n.SourceEventId == reminderMsgId1).ToListAsync());
+
+        // Scenario 2: Item handover completed -> HandoverReminder should be dismissed/discarded
+        var orderId2 = Guid.NewGuid();
+        var itemId2 = Guid.NewGuid();
+        var handoverMsgId = Guid.NewGuid();
+        var handoverRaw = ProducerFixtures.RentalItemHandoverCompleted(handoverMsgId, orderId2, itemId2, renterId, supplierId);
+        await service.IngestMessageAsync(handoverRaw, "rental.events.v1", 0, 107);
+
+        var reminderMsgId2 = Guid.NewGuid();
+        var reminderRaw2 = ProducerFixtures.RentalReminderDue(reminderMsgId2, orderId2, itemId2, renterId, supplierId, "HandoverReminder", todayStr);
+        var outcome2 = await service.IngestMessageAsync(reminderRaw2, "rental.events.v1", 0, 108);
+        Assert.Equal(IngestionOutcome.Processed, outcome2);
+
+        var receipt2 = await db.InboxReceipts.FirstAsync(r => r.MessageId == reminderMsgId2);
+        Assert.Equal("DismissedStaleReminder", receipt2.Status);
+        Assert.Equal("Bàn giao thiết bị đã hoàn tất.", receipt2.ErrorDetail);
+        Assert.Empty(await db.Notifications.Where(n => n.SourceEventId == reminderMsgId2).ToListAsync());
+
+        // Scenario 3: Item returned -> ReturnReminder should be dismissed/discarded
+        var orderId3 = Guid.NewGuid();
+        var itemId3 = Guid.NewGuid();
+        var returnMsgId = Guid.NewGuid();
+        var returnRaw = ProducerFixtures.RentalItemReturned(returnMsgId, orderId3, itemId3, renterId, supplierId);
+        await service.IngestMessageAsync(returnRaw, "rental.events.v1", 0, 109);
+
+        var reminderMsgId3 = Guid.NewGuid();
+        var reminderRaw3 = ProducerFixtures.RentalReminderDue(reminderMsgId3, orderId3, itemId3, renterId, supplierId, "ReturnReminder", todayStr);
+        var outcome3 = await service.IngestMessageAsync(reminderRaw3, "rental.events.v1", 0, 110);
+        Assert.Equal(IngestionOutcome.Processed, outcome3);
+
+        var receipt3 = await db.InboxReceipts.FirstAsync(r => r.MessageId == reminderMsgId3);
+        Assert.Equal("DismissedStaleReminder", receipt3.Status);
+        Assert.Empty(await db.Notifications.Where(n => n.SourceEventId == reminderMsgId3).ToListAsync());
     }
 }

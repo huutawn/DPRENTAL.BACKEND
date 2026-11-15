@@ -210,6 +210,51 @@ public static class ProducerFixtures
     }
     """;
 
+    public static string RentalReminderDue(
+        Guid messageId,
+        Guid orderId,
+        Guid itemId,
+        Guid renterId,
+        Guid supplierId,
+        string reminderType,
+        string reminderDate = "2026-11-09",
+        int remainingUnitCount = 1,
+        long orderVersion = 3,
+        string? targetDate = null)
+    {
+        var effectiveTargetDate = targetDate ?? (reminderType is "HandoverOverdue" or "ReturnOverdue"
+            ? (DateOnly.TryParseExact(reminderDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var rd)
+                ? rd.AddDays(-1).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+                : reminderDate)
+            : reminderDate);
+
+        return $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RentalReminderDue",
+      "version": 1,
+      "producer": "RentalService",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-09T08:00:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "rentalOrderId": "{{orderId}}",
+        "rentalItemId": "{{itemId}}",
+        "orderCode": "DH-2026-0001",
+        "supplierId": "{{supplierId}}",
+        "renterId": "{{renterId}}",
+        "reminderType": "{{reminderType}}",
+        "reminderDate": "{{reminderDate}}",
+        "targetDate": "{{effectiveTargetDate}}",
+        "actionDeadline": "2026-11-10T00:00:00.0000000+00:00",
+        "remainingUnitCount": {{remainingUnitCount}},
+        "orderVersion": {{orderVersion}}
+      }
+    }
+    """;
+    }
+
     public static string ReturnConfirmationOverdue(
         Guid messageId,
         Guid orderId,
@@ -289,6 +334,38 @@ public static class ProducerFixtures
         "totalRefundAmount": {{totalRefundAmount}},
         "requestedAt": "2026-11-04T08:35:00.0000000+00:00",
         "orderVersion": {{orderVersion}}
+      }
+    }
+    """;
+
+    public static string RefundRequestedFinancial(
+        Guid messageId,
+        string refundRef,
+        Guid orderId,
+        Guid renterId,
+        Guid? itemId = null,
+        decimal amount = 1500000m,
+        string currency = "VND",
+        string refundKind = "FULL_CANCELLATION",
+        DateTimeOffset? requestedAt = null) => $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RefundRequestedFinancial",
+      "version": 1,
+      "producer": "payment-service",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-04T09:00:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "refundRef": "{{refundRef}}",
+        "rentalOrderId": "{{orderId}}",
+        "rentalItemId": {{(itemId.HasValue ? $"\"{itemId.Value}\"" : "null")}},
+        "renterId": "{{renterId}}",
+        "refundKind": "{{refundKind}}",
+        "amount": {{amount}},
+        "currency": "{{currency}}",
+        "requestedAt": "{{(requestedAt ?? DateTimeOffset.UtcNow):O}}"
       }
     }
     """;

@@ -61,6 +61,7 @@ public sealed class KafkaContractRegistry : IKafkaContractRegistry
 
     private static readonly HashSet<string> PaymentAnalyticsMessageTypes = new(StringComparer.OrdinalIgnoreCase)
     {
+        "RefundRequestedFinancial",
         "RefundCompletedFinancial",
         "SupplierPayoutCompleted"
     };

@@ -141,6 +141,34 @@ public sealed partial class NotificationTemplateRenderer : INotificationTemplate
                 bodyPattern = "Đơn thuê {displayOrderCode} hiện chưa được bàn giao theo lịch hẹn ({expectedStartDate:dd/MM/yyyy}). DPRental đang đôn đốc nhà cung cấp xử lý.";
                 break;
 
+            case "HANDOVER_REMINDER_SUPPLIER":
+                titlePattern = "Nhắc nhở bàn giao thiết bị đơn thuê #{displayOrderCode}";
+                bodyPattern = isStale
+                    ? "Lịch nhắc bàn giao cho đơn thuê {displayOrderCode} đã kết thúc (thông tin lưu trữ)."
+                    : "Bạn có lịch bàn giao {remainingUnitCount} thiết bị cho đơn thuê {displayOrderCode} vào ngày {targetDate:dd/MM/yyyy}. Vui lòng chuẩn bị thiết bị.";
+                break;
+
+            case "RETURN_REMINDER_RENTER":
+                titlePattern = "Nhắc nhở hoàn trả thiết bị đơn thuê #{displayOrderCode}";
+                bodyPattern = isStale
+                    ? "Lịch nhắc hoàn trả thiết bị cho đơn thuê {displayOrderCode} đã kết thúc (thông tin lưu trữ)."
+                    : "Đơn thuê {displayOrderCode} có {remainingUnitCount} thiết bị cần hoàn trả vào ngày {targetDate:dd/MM/yyyy}. Vui lòng sắp xếp hoàn trả đúng hạn.";
+                break;
+
+            case "RETURN_OVERDUE_SUPPLIER":
+                titlePattern = "CẢNH BÁO: Thiết bị quá hạn hoàn trả đơn thuê #{displayOrderCode}";
+                bodyPattern = isStale
+                    ? "Thông báo quá hạn hoàn trả thiết bị cho đơn thuê {displayOrderCode} đã kết thúc (thông tin lưu trữ)."
+                    : "{remainingUnitCount} thiết bị trong đơn thuê {displayOrderCode} đã quá hạn hoàn trả ({targetDate:dd/MM/yyyy}). Vui lòng kiểm tra và phối hợp thu hồi.";
+                break;
+
+            case "RETURN_OVERDUE_RENTER":
+                titlePattern = "CẢNH BÁO: Quá hạn hoàn trả thiết bị đơn thuê #{displayOrderCode}";
+                bodyPattern = isStale
+                    ? "Thông báo quá hạn hoàn trả thiết bị cho đơn thuê {displayOrderCode} đã được giải quyết (thông tin lưu trữ)."
+                    : "Đơn thuê {displayOrderCode} đã quá hạn hoàn trả ({targetDate:dd/MM/yyyy}) cho {remainingUnitCount} thiết bị. Vui lòng hoàn trả ngay để tránh phát sinh chi phí.";
+                break;
+
             case "RETURN_CONFIRMATION_OVERDUE_SUPPLIER":
                 titlePattern = "CẢNH BÁO: Quá hạn kiểm tra thiết bị hoàn trả đơn thuê #{displayOrderCode}";
                 bodyPattern = "Đã hết hạn xác nhận hoàn trả ({confirmationDeadlineAt:HH:mm dd/MM/yyyy}) cho đơn thuê {displayOrderCode}. Vui lòng hoàn tất kiểm tra tình trạng máy.";
@@ -202,6 +230,13 @@ public sealed partial class NotificationTemplateRenderer : INotificationTemplate
                 bodyPattern = "Thiết bị trong đơn thuê {displayOrderCode} đã hoàn tất chu kỳ thuê thành công.";
                 emailSubjectPattern = "[DPRental] Hoàn tất thuê thiết bị đơn #{displayOrderCode}";
                 emailBodyPattern = "<p>Kính gửi Quý khách / Quý Đối tác,</p><p>Thiết bị trong đơn thuê <strong>{displayOrderCode}</strong> đã hoàn tất chu kỳ thuê thành công.</p><p>Cảm ơn bạn đã đồng hành cùng DPRental.</p><p>Chi tiết: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
+                break;
+
+            case "REFUND_REQUESTED":
+                titlePattern = "Yêu cầu hoàn tiền đơn thuê #{displayOrderCode}";
+                bodyPattern = "Yêu cầu hoàn tiền {amount:N0} {currency} cho đơn thuê {displayOrderCode} đã được ghi nhận. DPRental đang xử lý thủ tục chuyển khoản vào tài khoản ngân hàng của Quý khách.";
+                emailSubjectPattern = "[DPRental] Tiếp nhận yêu cầu hoàn tiền đơn thuê #{displayOrderCode}";
+                emailBodyPattern = "<p>Kính gửi Quý khách,</p><p>Yêu cầu hoàn tiền <strong>{amount:N0} {currency}</strong> cho đơn thuê <strong>{displayOrderCode}</strong> đã được ghi nhận.</p><p>DPRental đang xử lý thủ tục chuyển khoản vào tài khoản ngân hàng của Quý khách.</p><p>Mã yêu cầu: {refundRef}.</p><p>Chi tiết đơn thuê: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
                 break;
 
             case "REFUND_COMPLETED":

@@ -42,6 +42,7 @@ public sealed class StrictJsonValidationTests
         {
             new RentalOrderCreatedHandler(),
             new RentalOrderPaidHandler(),
+            new RefundRequestedFinancialHandler(),
             new RefundCompletedFinancialHandler()
         };
 

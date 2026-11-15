@@ -380,7 +380,14 @@ WHERE id IN (
         var itemIdStr = rentalItemId.ToString();
         var notifIds = await _dbContext.Notifications
             .Where(n => (n.RentalItemId == rentalItemId || (n.ResourceType == "RentalItem" && n.ResourceId == itemIdStr))
-                && (n.NotificationType == "RETURN_CONFIRMATION_OVERDUE_SUPPLIER" || n.IsActionable))
+                && (n.NotificationType == "RETURN_CONFIRMATION_OVERDUE_SUPPLIER"
+                    || n.NotificationType == "RETURN_OVERDUE_SUPPLIER"
+                    || n.NotificationType == "RETURN_OVERDUE_RENTER"
+                    || n.NotificationType == "RETURN_REMINDER_RENTER"
+                    || n.NotificationType == "HANDOVER_OVERDUE_SUPPLIER"
+                    || n.NotificationType == "HANDOVER_OVERDUE_RENTER"
+                    || n.NotificationType == "HANDOVER_REMINDER_SUPPLIER"
+                    || n.IsActionable))
             .Select(n => n.Id)
             .ToListAsync(cancellationToken);
 

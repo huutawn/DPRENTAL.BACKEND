@@ -19,7 +19,8 @@ public interface IRecipientResolutionService
         Guid orderId,
         Guid? renterId,
         Guid? supplierId,
-        Guid? returnRequestId = null);
+        Guid? returnRequestId = null,
+        string? subType = null);
 }
 
 public sealed class RecipientResolutionService : IRecipientResolutionService
@@ -29,7 +30,8 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
         Guid orderId,
         Guid? renterId,
         Guid? supplierId,
-        Guid? returnRequestId = null)
+        Guid? returnRequestId = null,
+        string? subType = null)
     {
         if (orderId == Guid.Empty)
         {
@@ -202,6 +204,114 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                 }
                 break;
 
+            case "RentalReminderDue":
+                var reminderType = subType ?? string.Empty;
+                switch (reminderType)
+                {
+                    case "HandoverReminder":
+                        if (!supplierId.HasValue || supplierId.Value == Guid.Empty)
+                        {
+                            return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                                Error.Validation("MISSING_RECIPIENT", "RentalReminderDue HandoverReminder yêu cầu supplierId hợp lệ."));
+                        }
+                        results.Add(new ResolvedRecipient(
+                            RecipientUserId: supplierId.Value,
+                            RecipientRole: "Supplier",
+                            NotificationType: "HANDOVER_REMINDER_SUPPLIER",
+                            Category: "HANDOVER",
+                            Severity: "ACTION_REQUIRED",
+                            IsActionable: true,
+                            DeepLinkUrl: "/own/orders",
+                            ActionUrl: "/own/orders"));
+                        break;
+
+                    case "HandoverOverdue":
+                        if (!supplierId.HasValue || supplierId.Value == Guid.Empty)
+                        {
+                            return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                                Error.Validation("MISSING_RECIPIENT", "RentalReminderDue HandoverOverdue yêu cầu supplierId hợp lệ."));
+                        }
+                        results.Add(new ResolvedRecipient(
+                            RecipientUserId: supplierId.Value,
+                            RecipientRole: "Supplier",
+                            NotificationType: "HANDOVER_OVERDUE_SUPPLIER",
+                            Category: "HANDOVER",
+                            Severity: "ACTION_REQUIRED",
+                            IsActionable: true,
+                            DeepLinkUrl: "/own/orders",
+                            ActionUrl: "/own/orders"));
+
+                        if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                        {
+                            return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                                Error.Validation("MISSING_RECIPIENT", "RentalReminderDue HandoverOverdue yêu cầu renterId hợp lệ."));
+                        }
+                        results.Add(new ResolvedRecipient(
+                            RecipientUserId: renterId.Value,
+                            RecipientRole: "Renter",
+                            NotificationType: "HANDOVER_OVERDUE_RENTER",
+                            Category: "HANDOVER",
+                            Severity: "INFO",
+                            IsActionable: false,
+                            DeepLinkUrl: $"/orders/{orderId}",
+                            ActionUrl: null));
+                        break;
+
+                    case "ReturnReminder":
+                        if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                        {
+                            return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                                Error.Validation("MISSING_RECIPIENT", "RentalReminderDue ReturnReminder yêu cầu renterId hợp lệ."));
+                        }
+                        results.Add(new ResolvedRecipient(
+                            RecipientUserId: renterId.Value,
+                            RecipientRole: "Renter",
+                            NotificationType: "RETURN_REMINDER_RENTER",
+                            Category: "RETURN",
+                            Severity: "ACTION_REQUIRED",
+                            IsActionable: true,
+                            DeepLinkUrl: $"/orders/{orderId}",
+                            ActionUrl: $"/orders/{orderId}"));
+                        break;
+
+                    case "ReturnOverdue":
+                        if (!supplierId.HasValue || supplierId.Value == Guid.Empty)
+                        {
+                            return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                                Error.Validation("MISSING_RECIPIENT", "RentalReminderDue ReturnOverdue yêu cầu supplierId hợp lệ."));
+                        }
+                        results.Add(new ResolvedRecipient(
+                            RecipientUserId: supplierId.Value,
+                            RecipientRole: "Supplier",
+                            NotificationType: "RETURN_OVERDUE_SUPPLIER",
+                            Category: "RETURN",
+                            Severity: "ACTION_REQUIRED",
+                            IsActionable: true,
+                            DeepLinkUrl: "/own/orders",
+                            ActionUrl: "/own/orders"));
+
+                        if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                        {
+                            return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                                Error.Validation("MISSING_RECIPIENT", "RentalReminderDue ReturnOverdue yêu cầu renterId hợp lệ."));
+                        }
+                        results.Add(new ResolvedRecipient(
+                            RecipientUserId: renterId.Value,
+                            RecipientRole: "Renter",
+                            NotificationType: "RETURN_OVERDUE_RENTER",
+                            Category: "RETURN",
+                            Severity: "ACTION_REQUIRED",
+                            IsActionable: true,
+                            DeepLinkUrl: $"/orders/{orderId}",
+                            ActionUrl: $"/orders/{orderId}"));
+                        break;
+
+                    default:
+                        return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                            Error.Validation("UNKNOWN_REMINDER_TYPE", $"Loại nhắc nhở '{reminderType}' không được hỗ trợ."));
+                }
+                break;
+
             case "RentalOrderCompleted":
                 if (!renterId.HasValue || renterId.Value == Guid.Empty)
                 {
@@ -278,6 +388,23 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     NotificationType: "ORDER_REJECTED",
                     Category: "ORDER",
                     Severity: "WARNING",
+                    IsActionable: false,
+                    DeepLinkUrl: $"/orders/{orderId}",
+                    ActionUrl: null));
+                break;
+
+            case "RefundRequestedFinancial":
+                if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                {
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "RefundRequestedFinancial yêu cầu renterId hợp lệ."));
+                }
+                results.Add(new ResolvedRecipient(
+                    RecipientUserId: renterId.Value,
+                    RecipientRole: "Renter",
+                    NotificationType: "REFUND_REQUESTED",
+                    Category: "PAYMENT",
+                    Severity: "INFO",
                     IsActionable: false,
                     DeepLinkUrl: $"/orders/{orderId}",
                     ActionUrl: null));

@@ -17,11 +17,13 @@ public sealed class KafkaContractRegistryTests
         new RentalOrderCancelledHandler(),
         new RentalItemHandoverCompletedHandler(),
         new RentalHandoverOverdueHandler(),
+        new RentalReminderDueHandler(),
         new ReturnConfirmationOverdueHandler(),
         new RentalOrderCompletedHandler(),
         new LatePaymentRefundRequestedHandler(),
         new RentalItemConfirmedHandler(),
         new RentalItemRejectedHandler(),
+        new RefundRequestedFinancialHandler(),
         new RefundCompletedFinancialHandler(),
         new SupplierPayoutCompletedHandler()
     };
@@ -120,6 +122,7 @@ public sealed class KafkaContractRegistryTests
     }
 
     [Theory]
+    [InlineData("RefundRequestedFinancial")]
     [InlineData("RefundCompletedFinancial")]
     [InlineData("SupplierPayoutCompleted")]
     public void Resolve_PaymentAnalyticsEvents_HandledOnPaymentAnalyticsTopic(string messageType)

@@ -10,6 +10,11 @@ public sealed record StaleEvaluationResult(
 
 public static class StaleActionSuppressionPolicy
 {
+    public static bool IsTerminalState(string? state) =>
+        !string.IsNullOrWhiteSpace(state) &&
+        !string.Equals(state, "PAID", StringComparison.OrdinalIgnoreCase) &&
+        TerminalStates.Contains(state);
+
     private static readonly HashSet<string> TerminalStates = new(StringComparer.OrdinalIgnoreCase)
     {
         "EXPIRED",
@@ -24,7 +29,11 @@ public static class StaleActionSuppressionPolicy
         "ORDER_CREATED",
         "SUPPLIER_CONFIRMATION_REQUIRED",
         "HANDOVER_OVERDUE_SUPPLIER",
-        "RETURN_CONFIRMATION_OVERDUE_SUPPLIER"
+        "RETURN_CONFIRMATION_OVERDUE_SUPPLIER",
+        "HANDOVER_REMINDER_SUPPLIER",
+        "RETURN_REMINDER_RENTER",
+        "RETURN_OVERDUE_SUPPLIER",
+        "RETURN_OVERDUE_RENTER"
     };
 
     /// <summary>
@@ -35,8 +44,8 @@ public static class StaleActionSuppressionPolicy
         long incomingOrderVersion,
         AggregateStateProjection? aggregateState)
     {
-        // Financial notifications (REFUND_COMPLETED, PAYOUT_COMPLETED): NEVER apply Rental stale suppression
-        if (notificationType is "REFUND_COMPLETED" or "PAYOUT_COMPLETED")
+        // Financial notifications (REFUND_REQUESTED, REFUND_COMPLETED, PAYOUT_COMPLETED): NEVER apply Rental stale suppression
+        if (notificationType is "REFUND_REQUESTED" or "REFUND_COMPLETED" or "PAYOUT_COMPLETED")
         {
             return new StaleEvaluationResult(
                 IsStale: false,
@@ -141,7 +150,7 @@ public static class StaleActionSuppressionPolicy
         AggregateStateProjection? parentItemAggregateState = null,
         AggregateStateProjection? parentOrderAggregateState = null)
     {
-        if (notificationType is "REFUND_COMPLETED" or "PAYOUT_COMPLETED" or "ORDER_PAID" or "ORDER_COMPLETED")
+        if (notificationType is "REFUND_REQUESTED" or "REFUND_COMPLETED" or "PAYOUT_COMPLETED" or "ORDER_PAID" or "ORDER_COMPLETED")
         {
             return Evaluate(notificationType, incomingOrderVersion, currentAggregateState);
         }
