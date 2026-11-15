@@ -109,11 +109,14 @@ public sealed partial class EquipmentListingService
             return depositValidation.Error;
         }
 
-        var depositRateValidation = ListingDepositValidator.ValidateDepositExceedsDailyRate(
-            targetDeposit, request.RentalRate.DailyRate!.Value);
-        if (depositRateValidation.IsFailure)
+        if (request.RentalRate is not null && request.RentalRate.DailyRate.HasValue)
         {
-            return depositRateValidation.Error;
+            var depositRateValidation = ListingDepositValidator.ValidateDepositExceedsDailyRate(
+                targetDeposit, request.RentalRate.DailyRate.Value);
+            if (depositRateValidation.IsFailure)
+            {
+                return depositRateValidation.Error;
+            }
         }
 
         string specValuesJson = "{}";
