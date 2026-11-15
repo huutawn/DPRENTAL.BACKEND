@@ -7,5 +7,7 @@ public enum OrganizationStatus
     Pending,
     Active,
     Rejected,
-    Suspended
+    Suspended,
+    /// <summary>Hồ sơ nháp, người dùng đang soạn thảo và chưa nộp duyệt.</summary>
+    Draft
 }

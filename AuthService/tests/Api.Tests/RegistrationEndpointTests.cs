@@ -146,7 +146,8 @@ public sealed class RegistrationEndpointTests
             Address: "12 Nguyen Hue",
             Province: "TP. Ho Chi Minh",
             Ward: "Phuong Sai Gon",
-            BusinessLicenseDocumentMediaId: Guid.Parse("11111111-1111-1111-1111-111111111111"));
+            BusinessLicenseDocumentMediaId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            LegalRepresentativeCitizenId: "079203009999");
 
     private static async Task SeedOwnerRoleAsync(WebApplicationFactory<Program> factory)
     {
@@ -160,7 +161,7 @@ public sealed class RegistrationEndpointTests
     {
         using IServiceScope scope = factory.Services.CreateScope();
         AuthDbContext dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-        User user = new() { Id = Guid.NewGuid(), Email = email, FullName = "Owner", PasswordHash = "hash", IsActive = true, ProfileCompletedAtUtc = DateTime.UtcNow };
+        User user = new() { Id = Guid.NewGuid(), Email = email, FullName = "Owner", PasswordHash = "hash", IsActive = true, ProfileCompletedAtUtc = DateTime.UtcNow, CitizenId = "079203009999" };
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
         ((FakeMediaServiceClient)scope.ServiceProvider.GetRequiredService<IMediaServiceClient>()).DefaultUserId = user.Id;

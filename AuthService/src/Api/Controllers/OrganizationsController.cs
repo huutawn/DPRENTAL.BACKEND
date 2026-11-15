@@ -47,6 +47,56 @@ public sealed class OrganizationsController(
     }
 
     /// <summary>
+    /// Lưu nháp hồ sơ tổ chức Supplier/Renter. Tạo mới nếu chưa có, hoặc cập nhật nếu đang ở trạng thái Draft/Rejected.
+    /// </summary>
+    [HttpPost("draft")]
+    [ProducesResponseType<OrganizationResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> SaveDraft(OrganizationDraftRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        Result<OrganizationResponse> result = await organizationRegistrationService.SaveDraftAsync(userId, request, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>
+    /// Nộp hồ sơ tổ chức đã lưu nháp để Platform phê duyệt (chuyển sang trạng thái Pending).
+    /// </summary>
+    [HttpPost("{id:guid}/submit")]
+    [ProducesResponseType<OrganizationResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> SubmitDraft(Guid id, CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        Result<OrganizationResponse> result = await organizationRegistrationService.SubmitDraftAsync(userId, id, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>
     /// Tổ chức của chính người gọi, dùng để kiểm tra trạng thái hồ sơ mỗi lần vào trang: 200 kèm hồ sơ
     /// (xem <c>status</c>) nếu đã đăng ký, 204 nếu chưa. Không kèm URL xem giấy phép — lấy qua GET /{id} khi cần.
     /// </summary>

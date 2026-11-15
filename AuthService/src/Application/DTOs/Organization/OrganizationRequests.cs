@@ -85,3 +85,28 @@ public sealed record SuspendOrganizationRequest(
 /// <summary>Platform từ chối hồ sơ organization đang chờ duyệt; lý do được trả lại cho Owner để sửa và gửi lại.</summary>
 public sealed record RejectOrganizationRequest(
     [Required, StringLength(500)] string Reason);
+
+/// <summary>
+/// Yêu cầu tạo hoặc cập nhật hồ sơ organization ở trạng thái nháp (Draft).
+/// Cho phép các trường để trống; chỉ bắt buộc Name và Type hợp lệ.
+/// </summary>
+public sealed record OrganizationDraftRequest(
+    [Required, StringLength(150)] string Name,
+    OrganizationType Type,
+    [StringLength(14)] string? TaxCode = null,
+    [StringLength(100)] string? LegalRepresentativeName = null,
+    [StrictEmail, StringLength(254)] string? ContactEmail = null,
+    [StringLength(15)] string? ContactPhone = null,
+    [StringLength(250)] string? Address = null,
+    [StringLength(100)] string? Province = null,
+    [StringLength(100)] string? Ward = null,
+    Guid? BusinessLicenseDocumentMediaId = null,
+    [StringLength(100)] string? Slug = null,
+    [StringLength(50)] string? BusinessLicenseNumber = null,
+    DateOnly? BusinessLicenseIssuedDate = null,
+    [StringLength(200)] string? BusinessLicenseIssuedPlace = null,
+    DateOnly? EstablishedDate = null,
+    [RegularExpression(RegistrationPatterns.CitizenId, ErrorMessage = "Số CCCD phải gồm đúng 12 chữ số.")] string? LegalRepresentativeCitizenId = null,
+    [OptionalUrl, StringLength(500)] string? Website = null,
+    Guid? LogoMediaId = null,
+    [StringLength(2000)] string? Description = null);

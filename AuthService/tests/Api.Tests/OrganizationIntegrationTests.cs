@@ -469,7 +469,8 @@ public sealed class OrganizationIntegrationTests
             Province: "TP. Ho Chi Minh",
             Ward: "Phuong Sai Gon",
             BusinessLicenseDocumentMediaId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
-            Slug: slug);
+            Slug: slug,
+            LegalRepresentativeCitizenId: "079203009999");
 
     /// <summary>Dựng sẵn organization + Owner trong DB (thay cho POST /organizations đã bỏ).</summary>
     private static async Task<Guid> SeedOrganizationAsync(
@@ -661,6 +662,7 @@ public sealed class OrganizationIntegrationTests
             PasswordHash = "hash",
             CreatedAt = DateTime.UtcNow,
             ProfileCompletedAtUtc = DateTime.UtcNow,
+            CitizenId = "079203009999",
             IsActive = true
         };
         user.UserRoles.Add(new UserRole { UserId = userId, RoleId = roleId });

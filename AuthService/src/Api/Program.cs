@@ -109,6 +109,15 @@ HealthCheckOptions readinessOptions = new()
 };
 app.MapHealthChecks("/health/ready", readinessOptions).AllowAnonymous();
 
+if (args.Contains("audit-media-drafts"))
+{
+    using var scope = app.Services.CreateScope();
+    var auditService = scope.ServiceProvider.GetRequiredService<IMediaDraftAuditService>();
+    var auditResult = await auditService.AuditAndRepairDraftMediaAsync();
+    Console.WriteLine($"Audit complete: scanned {auditResult.Value.ScannedCount}, unlinked {auditResult.Value.UnlinkedCount}");
+    return;
+}
+
 app.Run();
 
 /// <summary>Điểm vào ứng dụng AuthService, được công khai để chạy kiểm thử tích hợp.</summary>

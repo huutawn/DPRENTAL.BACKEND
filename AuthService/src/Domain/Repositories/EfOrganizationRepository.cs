@@ -159,6 +159,12 @@ public sealed class EfOrganizationRepository(AuthDbContext dbContext) : IOrganiz
             .AsNoTracking()
             .AnyAsync(org => org.TaxCode == taxCode && (org.Status == OrganizationStatus.Active || org.Status == OrganizationStatus.Suspended), cancellationToken);
 
+    public async Task<IReadOnlyList<Organization>> GetDraftOrRejectedWithMediaAsync(CancellationToken cancellationToken = default) =>
+        await dbContext.Organizations
+            .Where(org => (org.Status == OrganizationStatus.Draft || org.Status == OrganizationStatus.Rejected) &&
+                          org.BusinessLicenseDocumentMediaId != null)
+            .ToListAsync(cancellationToken);
+
     public async Task<bool> UpdateAsync(Organization organization, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(organization);

@@ -17,7 +17,8 @@ namespace Dprental.AuthService.Api.Controllers;
 [Authorize]
 public sealed class AdminOrganizationsController(
     IOrganizationService organizationService,
-    IOrganizationReviewService organizationReviewService) : ControllerBase
+    IOrganizationReviewService organizationReviewService,
+    IMediaDraftAuditService mediaDraftAuditService) : ControllerBase
 {
     /// <summary>Lấy danh sách organization có phân trang, tìm kiếm và lọc theo trạng thái, loại, tỉnh/thành, quá hạn duyệt hoặc đã nhắc duyệt.</summary>
     /// <param name="request">Tham số phân trang và từ khóa tìm kiếm (page, pageSize, search).</param>
@@ -213,6 +214,18 @@ public sealed class AdminOrganizationsController(
         if (User.GetJwtSub() is not Guid adminId) return Unauthorized();
 
         Result<OrganizationResponse> result = await organizationReviewService.RejectAsync(adminId, id, request, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Rà soát và sửa liên kết media giấy phép kinh doanh trái phép hoặc không hợp lệ trên các hồ sơ Draft và Rejected.</summary>
+    [HttpPost("audit-media-drafts")]
+    [Authorize(Policy = Permissions.Organizations.Update)]
+    [ProducesResponseType<MediaDraftAuditResult>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<MediaDraftAuditResult>> AuditMediaDrafts(CancellationToken cancellationToken)
+    {
+        Result<MediaDraftAuditResult> result = await mediaDraftAuditService.AuditAndRepairDraftMediaAsync(cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 }

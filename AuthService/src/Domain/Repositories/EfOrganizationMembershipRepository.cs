@@ -17,6 +17,16 @@ public sealed class EfOrganizationMembershipRepository(AuthDbContext dbContext) 
                     .ThenInclude(rp => rp.Permission)
             .SingleOrDefaultAsync(m => m.OrganizationId == organizationId && m.UserId == userId, cancellationToken);
 
+    public Task<OrganizationMembership?> GetActiveOwnerMembershipAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
+        dbContext.OrganizationMemberships
+            .AsNoTracking()
+            .Include(m => m.User)
+            .Include(m => m.Role)
+            .Where(m => m.OrganizationId == organizationId &&
+                        (m.Role.Name == "Owner" || m.Role.Name == "owner") &&
+                        m.Status == MembershipStatus.Active)
+            .FirstOrDefaultAsync(cancellationToken);
+
     public async Task<int> CountActiveOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
         await dbContext.OrganizationMemberships
             .AsNoTracking()

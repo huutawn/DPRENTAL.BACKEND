@@ -6,6 +6,9 @@ public interface IOrganizationMembershipRepository
 {
     Task<OrganizationMembership?> GetByOrganizationAndUserAsync(Guid organizationId, Guid userId, CancellationToken cancellationToken = default);
 
+    Task<OrganizationMembership?> GetActiveOwnerMembershipAsync(Guid organizationId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<OrganizationMembership?>(null);
+
     Task<int> CountActiveOwnersAsync(Guid organizationId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> GetGlobalPermissionsAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> GetScopedPermissionCodesAsync(Guid userId, Guid organizationId, CancellationToken cancellationToken = default);

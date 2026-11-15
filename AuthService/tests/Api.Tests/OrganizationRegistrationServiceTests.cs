@@ -178,11 +178,12 @@ public sealed class OrganizationRegistrationServiceTests
             Province: "TP. Ho Chi Minh",
             Ward: "Phuong Sai Gon",
             BusinessLicenseDocumentMediaId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
-            Slug: slug);
+            Slug: slug,
+            LegalRepresentativeCitizenId: "079203009999");
 
     private static async Task<User> CreateUserAsync(AuthDbContext dbContext, string email)
     {
-        User user = new() { Id = Guid.NewGuid(), Email = email, FullName = "Owner", PasswordHash = "hash", IsActive = true, ProfileCompletedAtUtc = DateTime.UtcNow };
+        User user = new() { Id = Guid.NewGuid(), Email = email, FullName = "Owner", PasswordHash = "hash", IsActive = true, ProfileCompletedAtUtc = DateTime.UtcNow, CitizenId = "079203009999" };
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync();
         return user;
