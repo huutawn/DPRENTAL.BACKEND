@@ -7,7 +7,8 @@ public sealed record OverviewResponse(
 public sealed record OrderMetrics(
     int TotalOrders, int PaidOrders, int ActiveOrders, int CompletedOrders,
     int CancelledOrders, int ExpiredOrders,
-    int RejectedItems);
+    int RejectedItems,
+    int RepeatCustomers = 0);
 
 public sealed record FinancialMetrics(
     decimal GrossRentalValue, decimal CompletedRentalValue, decimal DepositCollected,

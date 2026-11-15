@@ -91,6 +91,55 @@ public sealed class RentalFactRepository : IRentalFactRepository
         }
     }
 
+    public async Task<int> GetRepeatCustomerCountAsync(
+        DateTimeOffset startUtc,
+        DateTimeOffset endUtc,
+        Guid? supplierId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (supplierId is null)
+        {
+            var rentersInWindow = await _context.RentalOrders.AsNoTracking()
+                .Where(x => x.CompletedAt >= startUtc && x.CompletedAt < endUtc && x.RenterId != null)
+                .Select(x => x.RenterId!.Value)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            if (rentersInWindow.Count == 0) return 0;
+
+            return await _context.RentalOrders.AsNoTracking()
+                .Where(x => x.RenterId != null && rentersInWindow.Contains(x.RenterId.Value) && x.CompletedAt != null)
+                .GroupBy(x => x.RenterId!.Value)
+                .Where(g => g.Count() >= 2)
+                .CountAsync(cancellationToken);
+        }
+        else
+        {
+            var supplierItems = _context.RentalItems.AsNoTracking().Where(x => x.SupplierId == supplierId.Value);
+            var orders = _context.RentalOrders.AsNoTracking();
+
+            var rentersInWindow = await (from item in supplierItems
+                                         join order in orders on item.RentalOrderId equals order.RentalOrderId
+                                         where order.CompletedAt >= startUtc && order.CompletedAt < endUtc && order.RenterId != null
+                                         select order.RenterId!.Value)
+                                         .Distinct()
+                                         .ToListAsync(cancellationToken);
+
+            if (rentersInWindow.Count == 0) return 0;
+
+            var supplierCompletedOrders = from item in supplierItems
+                                          join order in orders on item.RentalOrderId equals order.RentalOrderId
+                                          where order.RenterId != null && rentersInWindow.Contains(order.RenterId.Value) && order.CompletedAt != null
+                                          select new { RenterId = order.RenterId!.Value, order.RentalOrderId };
+
+            return await supplierCompletedOrders
+                .Distinct()
+                .GroupBy(x => x.RenterId)
+                .Where(g => g.Count() >= 2)
+                .CountAsync(cancellationToken);
+        }
+    }
+
     public async Task<int> GetActiveOrdersCountAsync(
         DateTimeOffset endUtc,
         Guid? supplierId = null,
@@ -251,7 +300,7 @@ public sealed class RentalFactRepository : IRentalFactRepository
                                SupplierId = g.Key,
                                Accepted = g.Sum(x => x.ConfirmedAt >= startUtc && x.ConfirmedAt < endUtc ? 1 : 0),
                                Rejected = g.Sum(x => x.RejectedAt >= startUtc && x.RejectedAt < endUtc && x.RejectionReason == "SUPPLIER_REJECTED" ? 1 : 0),
-                               Timeout = g.Sum(x => x.ExpiredAt >= startUtc && x.ExpiredAt < endUtc && x.ExpiryReason == "SUPPLIER_CONFIRMATION_EXPIRED" ? 1 : 0),
+                               Timeout = g.Sum(x => x.ExpiredAt >= startUtc && x.ExpiredAt < endUtc && (x.ExpiryReason == "SUPPLIER_CONFIRMATION_EXPIRED" || (x.SupplierConfirmationDeadline != null && x.ExpiredAt >= x.SupplierConfirmationDeadline)) ? 1 : 0),
                                Completed = g.Sum(x => x.CompletedAt >= startUtc && x.CompletedAt < endUtc ? 1 : 0)
                            }).ToDictionaryAsync(x => x.SupplierId, cancellationToken);
 

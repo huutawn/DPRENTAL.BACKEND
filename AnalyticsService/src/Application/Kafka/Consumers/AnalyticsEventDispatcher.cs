@@ -173,6 +173,7 @@ public sealed partial class AnalyticsEventDispatcher : IAnalyticsEventDispatcher
         RentalAnalyticsEventTypes.RentalOrderCancelled => Project<RentalOrderCancelledPayload>(envelope, p => _orders.ApplyAsync(p, ct)),
         RentalAnalyticsEventTypes.RentalOrderExpired => Project<RentalOrderExpiredPayload>(envelope, p => _orders.ApplyAsync(p, ct)),
         RentalAnalyticsEventTypes.RentalOrderRejected => Project<RentalOrderRejectedPayload>(envelope, p => _orders.ApplyAsync(p, ct)),
+        RentalAnalyticsEventTypes.RentalSupplierConfirmationRequested => Project<RentalSupplierConfirmationRequestedPayload>(envelope, p => _items.ApplyAsync(p, ct)),
         RentalAnalyticsEventTypes.RentalItemConfirmed => Project<RentalItemConfirmedPayload>(envelope, p => _items.ApplyAsync(p, ct)),
         RentalAnalyticsEventTypes.RentalItemRejected => Project<RentalItemRejectedPayload>(envelope, p => _items.ApplyAsync(p, ct)),
         RentalAnalyticsEventTypes.RentalItemExpired => Project<RentalItemExpiredPayload>(envelope, p => _items.ApplyAsync(p, ct)),

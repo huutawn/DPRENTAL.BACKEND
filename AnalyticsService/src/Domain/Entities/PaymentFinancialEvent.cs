@@ -19,6 +19,8 @@ public sealed class PaymentFinancialEvent
     public Guid? RenterId { get; set; }
     public decimal? RentalAmount { get; set; }
     public decimal? DepositAmount { get; set; }
+    public decimal? TotalDeliveryFee { get; set; }
+    public decimal? TotalReturnFee { get; set; }
     public decimal? TotalAmount { get; set; }
     public DateTimeOffset? PaidAt { get; set; }
 
@@ -30,6 +32,8 @@ public sealed class PaymentFinancialEvent
     public decimal? DepositRefundDue { get; set; }
     public decimal? PlatformFeeRate { get; set; }
     public decimal? PlatformFeeAmount { get; set; }
+    public decimal? DeliveryFeeEarned { get; set; }
+    public decimal? ReturnFeeEarned { get; set; }
     public decimal? SupplierPayable { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
 

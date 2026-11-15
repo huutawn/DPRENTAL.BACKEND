@@ -56,6 +56,7 @@ public sealed class RentalOrderProjector
         // 2. Dòng đơn: chỉ điền cột đang trống; Created(v1) đến muộn không kéo lùi trạng thái
         RentalOrderFact order = await RentalFactRows.GetOrCreateOrderAsync(_repository, payload.RentalOrderId, cancellationToken);
         order.CreatedAt ??= payload.CreatedAt.ToUniversalTime();
+        order.RenterId ??= payload.RenterId;
         StatusGate.Apply(order, OrderStatuses.PendingPayment, payload.OrderVersion);
         _changes.TrackOrder(payload.RentalOrderId);
         // 3. Dòng item: Created là nguồn snapshot chính thức nên ghi đè snapshot.
@@ -76,10 +77,25 @@ public sealed class RentalOrderProjector
             item.Quantity = source.Quantity;
             item.RentalAmount = source.RentalAmount;
             item.DepositAmount = source.DepositAmount;
+            item.DeliveryFee = source.DeliveryFee ?? 0m;
+            item.ReturnFee = source.ReturnFee ?? 0m;
             StatusGate.Apply(item, itemStatus, payload.OrderVersion);
             _changes.TrackItem(item);
         }
 
+        return Result.Success();
+    }
+
+    public async Task<Result> ApplyAsync(RentalSupplierConfirmationRequestedPayload payload, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+
+        RentalOrderFact order = await RentalFactRows.GetOrCreateOrderAsync(_repository, payload.RentalOrderId, cancellationToken);
+        DateTimeOffset deadlineUtc = payload.SupplierConfirmationDeadline.ToUniversalTime();
+        order.SupplierConfirmationDeadline = order.SupplierConfirmationDeadline is null || deadlineUtc < order.SupplierConfirmationDeadline
+            ? deadlineUtc
+            : order.SupplierConfirmationDeadline;
+        _changes.TrackOrder(payload.RentalOrderId);
         return Result.Success();
     }
 

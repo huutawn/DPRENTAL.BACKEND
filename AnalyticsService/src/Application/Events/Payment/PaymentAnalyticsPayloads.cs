@@ -12,6 +12,8 @@ public sealed record InvoicePaidFinancialPayload
     public required Guid RenterId { get; init; }
     public required decimal RentalAmount { get; init; }
     public required decimal DepositAmount { get; init; }
+    public decimal? TotalDeliveryFee { get; init; }
+    public decimal? TotalReturnFee { get; init; }
     public required decimal TotalAmount { get; init; }
     public required string Currency { get; init; }
     public required DateTimeOffset PaidAt { get; init; }
@@ -31,6 +33,8 @@ public sealed record RentalItemFinancialSettledPayload
     public required decimal DepositRefundDue { get; init; }
     public required decimal PlatformFeeRate { get; init; }
     public required decimal PlatformFeeAmount { get; init; }
+    public decimal? DeliveryFeeEarned { get; init; }
+    public decimal? ReturnFeeEarned { get; init; }
     public required decimal SupplierPayable { get; init; }
     public string? Currency { get; init; } // Payment hiện không gửi; nếu có thì phải là VND
     public required DateTimeOffset CompletedAt { get; init; }
