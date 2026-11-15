@@ -969,6 +969,37 @@ public sealed class CheckoutService : ICheckoutService
     private static bool IsTemporary(Error error) =>
         error.Type is ErrorType.ServiceUnavailable or ErrorType.Failure;
 
+    public async Task<Result<CheckoutPreviewResponse>> PreviewAsync(
+        CheckoutRenterContext renter,
+        CheckoutRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(renter);
+        ArgumentNullException.ThrowIfNull(request);
+
+        CheckoutPreparationResult prep = await _preparation.PreparePreviewAsync(renter, request, cancellationToken);
+        if (prep.IsFailure)
+        {
+            return prep.Error;
+        }
+
+        CheckoutPlan plan = prep.Plan;
+        CheckoutPreviewResponse response = new(
+            plan.TotalRentalAmount,
+            plan.TotalDepositAmount,
+            plan.DeliveryFee,
+            plan.ReturnFee,
+            plan.TotalAmount,
+            plan.Currency,
+            plan.DeliveryMethod,
+            plan.ReturnMethod,
+            plan.Delivery,
+            plan.WarehouseSnapshot,
+            plan.Lines);
+
+        return response;
+    }
+
     // Băm cả renter và nội dung request để phát hiện cùng Idempotency-Key nhưng đổi payload checkout.
     private static string ComputeRequestFingerprint(Guid renterId, CheckoutRequest request)
     {

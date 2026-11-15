@@ -19,8 +19,14 @@ public static class CheckoutRules
     public const int BookingHorizonMonths = 6;
     public const string Currency = "VND";
 
-    /// <summary>Phase 1 chỉ có một cách giao: nhà cung cấp giao tới địa chỉ của người thuê.</summary>
+    /// <summary>Phương thức giao nhận: giao tận nơi hoặc nhận tại kho.</summary>
     public const string DeliveryMethod = "Delivery";
+    public const string DeliveryMethodDelivery = "Delivery";
+    public const string DeliveryMethodPickup = "Pickup";
+
+    /// <summary>Phương thức trả máy: nhà cung cấp thu hồi hoặc trả tại kho.</summary>
+    public const string ReturnMethodReturn = "Return";
+    public const string ReturnMethodPickup = "Pickup";
 
     public const int MaxIdempotencyKeyLength = 64;
 

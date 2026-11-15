@@ -225,7 +225,7 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                 if (refundReceipt == null)
                 {
                     // Dựng request/command từ snapshot và định danh của luồng hiện tại để gửi đúng tác vụ sang service sở hữu.
-                    var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
+                    var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount, item.DeliveryFee, item.ReturnFee) };
                     var refundReq = new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, "Supplier confirmation deadline expired", refundOpKey, RentalRefundKinds.CancellationRefund);
                     var refundCmd = new RentalOperationCommand(
                         1,
@@ -243,7 +243,7 @@ public sealed class ExpiryWorkflowService : IExpiryWorkflowService
                         order.Id,
                         refundOpKey,
                         "RequestRefund",
-                        RentalOperationExecutor.ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount}"),
+                        RentalOperationExecutor.ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount + item.DeliveryFee + item.ReturnFee}"),
                         isSuccess: false,
                         errorCode: null,
                         errorMessage: null,

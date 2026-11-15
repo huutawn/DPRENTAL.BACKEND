@@ -40,6 +40,9 @@ public static class InventoryContractSpec
 
         public static string BlockDamaged(string allocationGroupId) =>
             $"/allocation-groups/{allocationGroupId}/block-damaged";
+
+        public static string DeliveryPolicy(Guid supplierId) =>
+            $"/warehouses/{supplierId}/delivery-policy";
     }
 
     public static class ErrorCodes
@@ -62,6 +65,7 @@ public static class InventoryContractSpec
     {
         public const string ReadAvailability = "inventory.availability.read";
         public const string ReadWarehouse = "inventory.warehouse.read";
+        public const string ReadDeliveryPolicy = "inventory.warehouse.read";
         public const string WriteAllocation = "inventory.allocation.write";
     }
 }

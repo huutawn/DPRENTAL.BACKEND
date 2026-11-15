@@ -77,8 +77,14 @@ public partial class RentalItem
     [Precision(18, 2)]
     public decimal DepositAmount { get; private set; }
 
+    [Precision(18, 2)]
+    public decimal DeliveryFee { get; private set; }
+
+    [Precision(18, 2)]
+    public decimal ReturnFee { get; private set; }
+
     [NotMapped]
-    public decimal TotalAmount => RentalAmount + DepositAmount;
+    public decimal TotalAmount => RentalAmount + DepositAmount + DeliveryFee + ReturnFee;
 
     public RentalItemStatus Status { get; private set; }
 
@@ -191,7 +197,9 @@ public partial class RentalItem
         decimal depositPerUnitSnapshot,
         string allocationGroupId,
         IEnumerable<InitialRentalUnitAssignmentDto> assignments,
-        RentalItemListingSnapshotDto listingSnapshot)
+        RentalItemListingSnapshotDto listingSnapshot,
+        decimal deliveryFee = 0m,
+        decimal returnFee = 0m)
     {
         Id = id;
         RentalOrderId = rentalOrderId;
@@ -220,6 +228,8 @@ public partial class RentalItem
 
         RentalAmount = RentalPricingPolicy.CalculateRentalAmount(dailyRateSnapshot, quantity, RentalDays);
         DepositAmount = RentalPricingPolicy.CalculateDepositAmount(depositPerUnitSnapshot, quantity);
+        DeliveryFee = deliveryFee;
+        ReturnFee = returnFee;
 
         foreach (var a in assignments)
         {

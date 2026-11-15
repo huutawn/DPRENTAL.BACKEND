@@ -209,12 +209,12 @@ public sealed class SupplierConfirmationStatisticsQueryAndMigrationPostgreSqlTes
             orderCmd.CommandText = """
                 INSERT INTO rental.rental_orders (
                     "Id", "OrderCode", "RenterId", "Status", "Currency",
-                    "DeliveryMethod", "RecipientName", "RecipientPhone", "DeliveryAddress",
+                    "DeliveryMethod", "ReturnMethod", "DeliveryFee", "ReturnFee", "RecipientName", "RecipientPhone", "DeliveryAddress",
                     "RefundDestinationRef", "TermsVersion", "TermsDocumentRef", "TermsContentHash",
                     "PaymentDeadline", "LatePaymentRefundRequired", "CheckoutOperationId", "CreatedAt", "UpdatedAt", "Version"
                 ) VALUES (
                     @id, 'ORD-BULK-001', @renterId, 1, 'VND',
-                    'Pickup', 'Test Recipient', '0900000000', 'Test Address',
+                    'Pickup', 'Pickup', 0, 0, 'Test Recipient', '0900000000', 'Test Address',
                     'bank-ref-1', 'v1.0', 'doc-1', 'hash-1',
                     @now, false, 'op-bulk-create', @now, @now, 0
                 );
@@ -362,7 +362,7 @@ public sealed class SupplierConfirmationStatisticsQueryAndMigrationPostgreSqlTes
                 "EquipmentTypeNameSnapshot", "BrandId", "BrandNameSnapshot", "ModelSnapshot",
                 "SpecSchemaVersionSnapshot", "SpecValuesSnapshot", "ThumbnailMediaIdSnapshot",
                 "DailyRateSnapshot", "DepositPerUnitSnapshot",
-                "RentalAmount", "DepositAmount", "Status", "AllocationGroupId", "RentalSubOrderId"
+                "RentalAmount", "DepositAmount", "DeliveryFee", "ReturnFee", "Status", "AllocationGroupId", "RentalSubOrderId"
             ) FROM STDIN (FORMAT BINARY)
         """))
         {
@@ -391,6 +391,8 @@ public sealed class SupplierConfirmationStatisticsQueryAndMigrationPostgreSqlTes
                 await writer.WriteAsync(200_000m, NpgsqlDbType.Numeric);
                 await writer.WriteAsync(500_000m, NpgsqlDbType.Numeric);
                 await writer.WriteAsync(200_000m, NpgsqlDbType.Numeric);
+                await writer.WriteAsync(0m, NpgsqlDbType.Numeric);
+                await writer.WriteAsync(0m, NpgsqlDbType.Numeric);
                 await writer.WriteAsync((int)RentalItemStatus.PendingSupplierConfirmation, NpgsqlDbType.Integer);
                 await writer.WriteAsync($"grp-{itemId:N}", NpgsqlDbType.Varchar);
                 await writer.WriteAsync(subOrderIds[supplierId], NpgsqlDbType.Uuid);

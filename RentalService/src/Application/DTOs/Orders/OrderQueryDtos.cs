@@ -26,12 +26,18 @@ public sealed record PagedResponse<T>(
 /// <param name="RecipientPhone">Số điện thoại người nhận.</param>
 /// <param name="Address">Địa chỉ nhận máy.</param>
 /// <param name="Note">Ghi chú giao nhận, có thể rỗng.</param>
+/// <param name="ReturnMethod">Hình thức trả máy.</param>
+/// <param name="DeliveryFee">Phí giao hàng (VND).</param>
+/// <param name="ReturnFee">Phí thu hồi máy (VND).</param>
 public sealed record OrderDeliveryResponse(
     string Method,
     string RecipientName,
     string RecipientPhone,
     string Address,
-    string? Note);
+    string? Note,
+    string? ReturnMethod = null,
+    decimal DeliveryFee = 0m,
+    decimal ReturnFee = 0m);
 
 /// <summary>
 /// Một dòng thiết bị trong đơn, lấy từ thông tin đã chụp lúc đặt hàng. Chỉ gồm những gì cần hiển thị;
@@ -237,6 +243,9 @@ public sealed record RenterOrderDetailResponse(
 /// <param name="PaidAt">Thời điểm người thuê thanh toán.</param>
 /// <param name="CreatedAt">Thời điểm đặt hàng.</param>
 /// <param name="OrderVersion">Phiên bản dữ liệu của đơn hàng cha, tăng khi có thay đổi nghiệp vụ.</param>
+/// <param name="SupplierConfirmationDeadline">Hạn chót nhà cung cấp xác nhận đơn.</param>
+/// <param name="DeliveryFee">Phí giao hàng.</param>
+/// <param name="ReturnFee">Phí thu hồi máy.</param>
 public sealed record SupplierSubOrderSummaryResponse(
     Guid SubOrderId,
     string SubOrderCode,
@@ -249,13 +258,17 @@ public sealed record SupplierSubOrderSummaryResponse(
     int ItemCount,
     DateTimeOffset? PaidAt,
     DateTimeOffset CreatedAt,
-    long OrderVersion);
+    long OrderVersion,
+    DateTimeOffset? SupplierConfirmationDeadline = null,
+    decimal DeliveryFee = 0m,
+    decimal ReturnFee = 0m);
 
 /// <summary>
 /// Chi tiết đơn con mà nhà cung cấp xem: chỉ thiết bị của mình, không có tổng tiền cả đơn hay tài khoản hoàn tiền.
 /// </summary>
 /// <param name="SubOrderId">Mã định danh đơn con.</param>
 /// <param name="SubOrderCode">Mã đơn con hiển thị.</param>
+/// <param name="OrderId">Mã định danh đơn cha.</param>
 /// <param name="OrderCode">Mã đơn cha.</param>
 /// <param name="Status">Trạng thái đơn con, tính từ các dòng.</param>
 /// <param name="Currency">Đơn vị tiền.</param>
@@ -267,9 +280,13 @@ public sealed record SupplierSubOrderSummaryResponse(
 /// <param name="TotalAmount">Tiền thuê + tiền cọc phần của nhà cung cấp.</param>
 /// <param name="Items">Các dòng thiết bị của nhà cung cấp trong đơn.</param>
 /// <param name="OrderVersion">Phiên bản dữ liệu của đơn hàng cha, tăng khi có thay đổi nghiệp vụ.</param>
+/// <param name="SupplierConfirmationDeadline">Hạn chót nhà cung cấp xác nhận đơn.</param>
+/// <param name="DeliveryFee">Phí giao hàng.</param>
+/// <param name="ReturnFee">Phí thu hồi máy.</param>
 public sealed record SupplierSubOrderDetailResponse(
     Guid SubOrderId,
     string SubOrderCode,
+    Guid OrderId,
     string OrderCode,
     RentalItemStatus Status,
     string Currency,
@@ -280,4 +297,26 @@ public sealed record SupplierSubOrderDetailResponse(
     decimal TotalDepositAmount,
     decimal TotalAmount,
     IReadOnlyList<SupplierOrderItemResponse> Items,
-    long OrderVersion);
+    long OrderVersion,
+    DateTimeOffset? SupplierConfirmationDeadline = null,
+    decimal DeliveryFee = 0m,
+    decimal ReturnFee = 0m)
+{
+    public SupplierSubOrderDetailResponse(
+        Guid subOrderId,
+        string subOrderCode,
+        string orderCode,
+        RentalItemStatus status,
+        string currency,
+        DateTimeOffset? paidAt,
+        DateTimeOffset createdAt,
+        OrderDeliveryResponse delivery,
+        decimal totalRentalAmount,
+        decimal totalDepositAmount,
+        decimal totalAmount,
+        IReadOnlyList<SupplierOrderItemResponse> items,
+        long orderVersion)
+        : this(subOrderId, subOrderCode, Guid.Empty, orderCode, status, currency, paidAt, createdAt, delivery, totalRentalAmount, totalDepositAmount, totalAmount, items, orderVersion)
+    {
+    }
+}

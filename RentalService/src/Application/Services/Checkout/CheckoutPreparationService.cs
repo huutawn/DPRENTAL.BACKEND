@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.DTOs.Inventory;
@@ -58,10 +59,23 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     }
 
     // Kiểm tra hồ sơ Auth, điều khoản, địa chỉ/tài khoản thuộc renter và các dòng được chọn; dựng snapshot rồi so tổng tiền client xác nhận.
-    public async Task<CheckoutPreparationResult> PrepareAsync(
+    public Task<CheckoutPreparationResult> PrepareAsync(
         CheckoutRenterContext renter,
         CheckoutRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        PrepareCoreAsync(renter, request, isPreview: false, cancellationToken);
+
+    public Task<CheckoutPreparationResult> PreparePreviewAsync(
+        CheckoutRenterContext renter,
+        CheckoutRequest request,
+        CancellationToken cancellationToken = default) =>
+        PrepareCoreAsync(renter, request, isPreview: true, cancellationToken);
+
+    private async Task<CheckoutPreparationResult> PrepareCoreAsync(
+        CheckoutRenterContext renter,
+        CheckoutRequest request,
+        bool isPreview,
+        CancellationToken cancellationToken)
     {
         // Kiểm tra tham số bắt buộc ở đầu hàm để không dùng một dependency/request rỗng trong các bước sau.
         ArgumentNullException.ThrowIfNull(renter);
@@ -97,6 +111,13 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 
         // Chạy validator/policy của bước hiện tại; chỉ chuyển sang bước sau khi kết quả hợp lệ.
         IReadOnlyList<CheckoutFieldError> fieldErrors = CheckoutRequestValidator.Validate(request);
+        if (isPreview)
+        {
+            fieldErrors = fieldErrors
+                .Where(e => e.Field != "termsAccepted" && e.Field != "refundAccount" && e.Field != "refundAccountId")
+                .ToList();
+        }
+
         // Kiểm tra số lượng và giới hạn tập dữ liệu trước khi xử lý, tránh chấp nhận thiếu/thừa phần tử của yêu cầu.
         if (fieldErrors.Count > 0)
         {
@@ -114,7 +135,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         // Chuẩn hóa nội dung/key trước khi so sánh hoặc lưu, tránh khoảng trắng làm cùng dữ liệu bị coi là hai yêu cầu khác nhau.
         string effectiveTermsVersion = _terms.CurrentVersion.Trim();
         // Phân biệt dữ liệu thiếu với nội dung có thể sử dụng trước khi chuẩn hóa, parse hoặc gửi sang bước kế tiếp.
-        if (!string.IsNullOrWhiteSpace(request.TermsVersion))
+        if (!isPreview && !string.IsNullOrWhiteSpace(request.TermsVersion))
         {
             // Đối chiếu phiên bản điều khoản client đồng ý với phiên bản hiện hành, tránh gửi đơn theo nội dung đã cũ.
             if (!string.Equals(request.TermsVersion.Trim(), effectiveTermsVersion, StringComparison.Ordinal))
@@ -125,6 +146,9 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 
         // Lấy mốc thời gian cho lần kiểm tra này; các deadline được đối chiếu với mốc của bước xử lý tương ứng.
         DateTimeOffset utcNow = _timeProvider.GetUtcNow();
+
+        bool isPickup = string.Equals(request.DeliveryMethod?.Trim(), CheckoutRules.DeliveryMethodPickup, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(request.DeliveryMethod?.Trim(), "PickUpAtWarehouse", StringComparison.OrdinalIgnoreCase);
 
         // Chuẩn bị snapshot giao nhận từ địa chỉ thuộc sở hữu hoặc dữ liệu trực tiếp đã validate trong request.
         CheckoutDeliveryDto delivery;
@@ -142,10 +166,14 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             // Chuẩn bị snapshot giao nhận/tài khoản từ dữ liệu đã chọn, tách khỏi sổ dữ liệu có thể được sửa sau checkout.
             delivery = new(address.Province, address.AddressDetail, address.RecipientName, address.RecipientPhone, request.DeliveryNote);
         }
-        else
+        else if (request.Delivery is not null)
         {
             // Chuẩn bị snapshot giao nhận/tài khoản từ dữ liệu đã chọn, tách khỏi sổ dữ liệu có thể được sửa sau checkout.
-            delivery = request.Delivery!;
+            delivery = request.Delivery;
+        }
+        else
+        {
+            return CheckoutPreparationResult.Failure(CheckoutErrors.InvalidRequest);
         }
 
         // Chuẩn bị snapshot giao nhận/tài khoản từ dữ liệu đã chọn, tách khỏi sổ dữ liệu có thể được sửa sau checkout.
@@ -164,10 +192,18 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             // Cập nhật số lượng xử lý của batch để báo cáo tiến độ; không dùng bộ đếm thay cho trạng thái đã lưu của từng tác vụ.
             refundAccount = new(bankAccount.BankCode, bankAccount.AccountNumber, bankAccount.AccountHolderName);
         }
-        else
+        else if (request.RefundAccount is not null)
         {
             // Cập nhật số lượng xử lý của batch để báo cáo tiến độ; không dùng bộ đếm thay cho trạng thái đã lưu của từng tác vụ.
-            refundAccount = request.RefundAccount!;
+            refundAccount = request.RefundAccount;
+        }
+        else if (isPreview)
+        {
+            refundAccount = new("PREVIEW", "0000000000", "PREVIEW USER");
+        }
+        else
+        {
+            return CheckoutPreparationResult.Failure(CheckoutErrors.InvalidRequest);
         }
 
         // Giữ ID giỏ khi checkout từ giỏ; BuyNow không cần gắn hoặc sửa một giỏ không liên quan.
@@ -230,6 +266,11 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             return CheckoutPreparationResult.LinesRejected(CheckoutErrors.InvalidRentalDates, dateIssues);
         }
 
+        if (selections.Select(s => (s.ExpectedStartDate, s.ExpectedEndDate)).Distinct().Count() > 1)
+        {
+            return CheckoutPreparationResult.Failure(CheckoutErrors.MultipleRentalPeriods);
+        }
+
         // Chuyển bước xử lý sang use case/core đang sở hữu trách nhiệm này và kiểm tra kết quả trước khi đi tiếp.
         LineBuildOutcome outcome = await BuildLinesAsync(renter.RenterId, selections, cancellationToken);
         // Lỗi phụ thuộc không được biến thành một kết quả đánh giá listing hợp lệ; trả lỗi để client có thể thử lại.
@@ -248,6 +289,117 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             return CheckoutPreparationResult.LinesRejected(linesError, outcome.Issues);
         }
 
+        if (outcome.Lines.Select(l => l.SupplierId).Distinct().Count() > 1)
+        {
+            return CheckoutPreparationResult.Failure(CheckoutErrors.MultipleSuppliers);
+        }
+
+        if (outcome.Lines.Select(l => (l.ExpectedStartDate, l.ExpectedEndDate)).Distinct().Count() > 1)
+        {
+            return CheckoutPreparationResult.Failure(CheckoutErrors.MultipleRentalPeriods);
+        }
+
+        string effectiveDeliveryMethod = isPickup ? CheckoutRules.DeliveryMethodPickup : CheckoutRules.DeliveryMethodDelivery;
+        string effectiveReturnMethod = string.Equals(request.ReturnMethod?.Trim(), CheckoutRules.ReturnMethodPickup, StringComparison.OrdinalIgnoreCase)
+            ? CheckoutRules.ReturnMethodPickup
+            : (string.Equals(request.ReturnMethod?.Trim(), CheckoutRules.ReturnMethodReturn, StringComparison.OrdinalIgnoreCase)
+                ? CheckoutRules.ReturnMethodReturn
+                : (isPickup ? CheckoutRules.ReturnMethodPickup : CheckoutRules.ReturnMethodReturn));
+
+        Guid supplierId = outcome.Lines.First().SupplierId;
+        Result<WarehouseDeliveryPolicyResponse> policyResult = await _inventory.GetWarehouseDeliveryPolicyAsync(supplierId, cancellationToken);
+        if (policyResult.IsFailure)
+        {
+            return CheckoutPreparationResult.Failure(CheckoutErrors.DependencyUnavailable);
+        }
+
+        WarehouseDeliveryPolicyResponse policy = policyResult.Value;
+        ListingWarehouseDto? warehouseSnapshot = outcome.Warehouse;
+        if (warehouseSnapshot is null && policy.WarehouseAddress is not null)
+        {
+            warehouseSnapshot = new(
+                policy.WarehouseAddress.AddressDetail,
+                policy.WarehouseAddress.ProvinceCode,
+                null,
+                policy.WarehouseAddress.WardCode,
+                null,
+                null,
+                null);
+        }
+
+        decimal deliveryFee;
+        if (effectiveDeliveryMethod == CheckoutRules.DeliveryMethodPickup)
+        {
+            if (!policy.IsPickupEnabled)
+            {
+                return CheckoutPreparationResult.Failure(CheckoutErrors.PickupNotSupported);
+            }
+
+            string? warehouseProvince = warehouseSnapshot?.ProvinceName
+                ?? warehouseSnapshot?.ProvinceCode
+                ?? policy.WarehouseAddress?.ProvinceCode;
+            string? warehouseAddressDetail = warehouseSnapshot?.AddressDetail
+                ?? policy.WarehouseAddress?.AddressDetail;
+
+            if (string.IsNullOrWhiteSpace(warehouseProvince) || string.IsNullOrWhiteSpace(warehouseAddressDetail))
+            {
+                return CheckoutPreparationResult.Failure(CheckoutErrors.WarehouseAddressIncomplete);
+            }
+
+            delivery = new(
+                warehouseProvince,
+                warehouseAddressDetail,
+                delivery.RecipientName,
+                delivery.RecipientPhone,
+                delivery.Note);
+            deliveryFee = 0m;
+        }
+        else
+        {
+            var zone = MatchZone(policy.DeliveryZones, delivery.Province);
+            if (zone is null)
+            {
+                return CheckoutPreparationResult.Failure(CheckoutErrors.AddressOutsideDeliveryZone);
+            }
+            deliveryFee = zone.DeliveryFeeVnd;
+        }
+
+        decimal returnFee;
+        if (effectiveReturnMethod == CheckoutRules.ReturnMethodPickup)
+        {
+            if (!policy.IsPickupEnabled)
+            {
+                return CheckoutPreparationResult.Failure(CheckoutErrors.PickupNotSupported);
+            }
+            returnFee = 0m;
+        }
+        else
+        {
+            var zone = MatchZone(policy.DeliveryZones, delivery.Province);
+            if (zone is null)
+            {
+                return CheckoutPreparationResult.Failure(CheckoutErrors.AddressOutsideDeliveryZone);
+            }
+            returnFee = zone.ReturnFeeVnd;
+        }
+
+        List<CheckoutPlanLine> linesWithFees = AllocateFeesToLines(outcome.Lines, deliveryFee, returnFee);
+
+        var deliverySnapshotObj = new
+        {
+            deliveryMethod = effectiveDeliveryMethod,
+            returnMethod = effectiveReturnMethod,
+            isPickupEnabled = policy.IsPickupEnabled,
+            warehouseAddress = policy.WarehouseAddress,
+            operatingHours = policy.OperatingHours,
+            deliveryFee = deliveryFee,
+            returnFee = returnFee,
+            totalRentalAmount = linesWithFees.Sum(l => l.RentalAmount),
+            totalDepositAmount = linesWithFees.Sum(l => l.DepositAmount),
+            totalAmount = linesWithFees.Sum(l => l.RentalAmount) + linesWithFees.Sum(l => l.DepositAmount) + deliveryFee + returnFee
+        };
+        string deliverySnapshotJson = JsonSerializer.Serialize(deliverySnapshotObj);
+
         // Đóng gói kế hoạch gồm điều khoản, giao nhận, tài khoản hoàn và giá từng dòng; so tổng với ExpectedTotalAmount để yêu cầu xác nhận lại nếu giá đổi.
         CheckoutPlan plan = new(
             renter.RenterId,
@@ -258,7 +410,18 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             _terms.DocumentRef.Trim(),
             _terms.ContentHash.Trim(),
             CheckoutRules.Currency,
-            outcome.Lines);
+            linesWithFees,
+            effectiveDeliveryMethod,
+            effectiveReturnMethod,
+            deliveryFee,
+            returnFee,
+            warehouseSnapshot,
+            deliverySnapshotJson);
+
+        if (isPreview)
+        {
+            return CheckoutPreparationResult.Success(plan);
+        }
 
         return plan.TotalAmount == request.ExpectedTotalAmount
             ? CheckoutPreparationResult.Success(plan)
@@ -363,7 +526,8 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
 
         // Chọn, sắp xếp hoặc chiếu dữ liệu đã có thành tập phục vụ bước tiếp theo; không thay đổi nguồn dữ liệu gốc.
         Dictionary<Guid, int> cartOrder = items.Select((item, index) => (item.LineId, index)).ToDictionary(x => x.LineId, x => x.index);
-        return new(false, lines, issues.OrderBy(i => cartOrder[i.CartItemId]).ToList());
+        ListingWarehouseDto? warehouse = listings.Values.FirstOrDefault(l => l.Warehouse != null)?.Warehouse;
+        return new(false, lines, issues.OrderBy(i => cartOrder[i.CartItemId]).ToList(), warehouse);
     }
 
     /// <summary>
@@ -514,10 +678,189 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             refundAccount.AccountNumber!.Trim(),
             refundAccount.AccountHolderName!.Trim());
 
+    private static DeliveryZoneDto? MatchZone(IEnumerable<DeliveryZoneDto>? zones, string? province)
+    {
+        if (zones is null || string.IsNullOrWhiteSpace(province))
+        {
+            return null;
+        }
+
+        string normalizedProvince = province.Trim();
+        foreach (DeliveryZoneDto zone in zones)
+        {
+            if (string.IsNullOrWhiteSpace(zone.ProvinceCode))
+            {
+                continue;
+            }
+
+            if (string.Equals(zone.ProvinceCode.Trim(), normalizedProvince, StringComparison.OrdinalIgnoreCase))
+            {
+                return zone;
+            }
+
+            if (IsProvinceMatch(zone.ProvinceCode, normalizedProvince))
+            {
+                return zone;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsProvinceMatch(string zoneCode, string provinceName)
+    {
+        string z = zoneCode.Trim().ToLowerInvariant();
+        string p = provinceName.Trim().ToLowerInvariant();
+
+        if (z == p) return true;
+
+        string cleanP = p.Replace("thành phố", "").Replace("tp.", "").Replace("tp", "").Replace("tỉnh", "").Trim();
+        string cleanZ = z.Replace("thành phố", "").Replace("tp.", "").Replace("tp", "").Replace("tỉnh", "").Trim();
+        if (!string.IsNullOrEmpty(cleanP) && !string.IsNullOrEmpty(cleanZ) && (cleanP == cleanZ || cleanP.Contains(cleanZ) || cleanZ.Contains(cleanP)))
+        {
+            return true;
+        }
+
+        if ((z == "79" || z == "sg" || z == "hcm") && (cleanP.Contains("hồ chí minh") || cleanP.Contains("ho chi minh") || cleanP.Contains("sài gòn") || cleanP.Contains("sai gon") || cleanP == "79"))
+            return true;
+        if ((p == "79" || p == "sg" || p == "hcm") && (cleanZ.Contains("hồ chí minh") || cleanZ.Contains("ho chi minh") || cleanZ.Contains("sài gòn") || cleanZ.Contains("sai gon") || cleanZ == "79"))
+            return true;
+
+        if ((z == "01" || z == "hn") && (cleanP.Contains("hà nội") || cleanP.Contains("ha noi") || cleanP == "01"))
+            return true;
+        if ((p == "01" || p == "hn") && (cleanZ.Contains("hà nội") || cleanZ.Contains("ha noi") || cleanZ == "01"))
+            return true;
+
+        if ((z == "48" || z == "dn") && (cleanP.Contains("đà nẵng") || cleanP.Contains("da nang") || cleanP == "48"))
+            return true;
+        if ((p == "48" || p == "dn") && (cleanZ.Contains("đà nẵng") || cleanZ.Contains("da nang") || cleanZ == "48"))
+            return true;
+
+        if ((z == "74" || z == "bd") && (cleanP.Contains("bình dương") || cleanP.Contains("binh duong") || cleanP == "74"))
+            return true;
+        if ((p == "74" || p == "bd") && (cleanZ.Contains("bình dương") || cleanZ.Contains("binh duong") || cleanZ == "74"))
+            return true;
+
+        return false;
+    }
+
+    private static List<CheckoutPlanLine> AllocateFeesToLines(
+        List<CheckoutPlanLine> lines,
+        decimal totalDeliveryFee,
+        decimal totalReturnFee)
+    {
+        if (lines.Count == 0)
+        {
+            return [];
+        }
+
+        if (lines.Count == 1)
+        {
+            CheckoutPlanLine l = lines[0];
+            return [new CheckoutPlanLine(
+                l.CartItemId,
+                l.EquipmentListingId,
+                l.SupplierId,
+                l.Quantity,
+                l.ExpectedStartDate,
+                l.ExpectedEndDate,
+                l.ListingName,
+                l.ListingSnapshot,
+                l.DailyRate,
+                l.DepositPerUnit,
+                l.RentalDays,
+                l.RentalAmount,
+                l.DepositAmount,
+                l.PickupLocationSnapshot,
+                totalDeliveryFee,
+                totalReturnFee)];
+        }
+
+        decimal totalRental = lines.Sum(l => l.RentalAmount);
+        decimal[] deliveryShares = AllocateLargestRemainder(lines, totalDeliveryFee, totalRental);
+        decimal[] returnShares = AllocateLargestRemainder(lines, totalReturnFee, totalRental);
+
+        List<CheckoutPlanLine> result = new(lines.Count);
+        for (int i = 0; i < lines.Count; i++)
+        {
+            CheckoutPlanLine l = lines[i];
+            result.Add(new CheckoutPlanLine(
+                l.CartItemId,
+                l.EquipmentListingId,
+                l.SupplierId,
+                l.Quantity,
+                l.ExpectedStartDate,
+                l.ExpectedEndDate,
+                l.ListingName,
+                l.ListingSnapshot,
+                l.DailyRate,
+                l.DepositPerUnit,
+                l.RentalDays,
+                l.RentalAmount,
+                l.DepositAmount,
+                l.PickupLocationSnapshot,
+                deliveryShares[i],
+                returnShares[i]));
+        }
+
+        return result;
+    }
+
+    private static decimal[] AllocateLargestRemainder(
+        List<CheckoutPlanLine> lines,
+        decimal totalFee,
+        decimal totalRental)
+    {
+        int count = lines.Count;
+        decimal[] shares = new decimal[count];
+        if (totalFee <= 0m || count == 0)
+        {
+            return shares;
+        }
+
+        if (totalRental <= 0m)
+        {
+            decimal baseShare = Math.Floor(totalFee / count);
+            decimal rem = totalFee - (baseShare * count);
+            for (int i = 0; i < count; i++)
+            {
+                shares[i] = baseShare + (i < rem ? 1m : 0m);
+            }
+            return shares;
+        }
+
+        decimal[] exactShares = new decimal[count];
+        decimal allocatedSum = 0m;
+        for (int i = 0; i < count; i++)
+        {
+            exactShares[i] = (lines[i].RentalAmount / totalRental) * totalFee;
+            shares[i] = Math.Floor(exactShares[i]);
+            allocatedSum += shares[i];
+        }
+
+        decimal remainder = totalFee - allocatedSum;
+        if (remainder > 0)
+        {
+            var remaindersWithIndex = exactShares
+                .Select((exact, idx) => (Fraction: exact - shares[idx], Index: idx))
+                .OrderByDescending(x => x.Fraction)
+                .ThenBy(x => x.Index)
+                .ToList();
+
+            for (int i = 0; i < (int)remainder && i < count; i++)
+            {
+                shares[remaindersWithIndex[i].Index] += 1m;
+            }
+        }
+
+        return shares;
+    }
+
     private sealed record LineBuildOutcome(
         bool DependencyFailed,
         List<CheckoutPlanLine> Lines,
-        List<CheckoutLineIssue> Issues)
+        List<CheckoutLineIssue> Issues,
+        ListingWarehouseDto? Warehouse = null)
     {
         public static readonly LineBuildOutcome Unavailable = new(true, [], []);
     }

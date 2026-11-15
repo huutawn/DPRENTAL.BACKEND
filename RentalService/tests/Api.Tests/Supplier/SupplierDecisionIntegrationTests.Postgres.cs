@@ -1,8 +1,13 @@
 using Dprental.RentalService.Api.Tests.TestHelpers;
+using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Inventory;
+using Dprental.RentalService.Application.DTOs.Orders;
+using Dprental.RentalService.Application.DTOs.Supplier;
 using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Producers;
+using Dprental.RentalService.Application.Services.Expiry;
 using Dprental.RentalService.Application.Services.Operations;
+using Dprental.RentalService.Application.Services.SupplierDecision;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Dprental.RentalService.Common;
@@ -193,6 +198,178 @@ public sealed partial class SupplierDecisionIntegrationTests
         {
             await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
         }
+    }
+
+    [Fact]
+    public async Task Concurrent_AcceptSubOrder_And_SupplierTimeout_ExactlyOneWins()
+    {
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            await using var seed = new RentalServiceDbContext(options);
+            await seed.Database.MigrateAsync();
+            Guid supplierId = Guid.NewGuid();
+            DateTimeOffset deadline = FixedNow.AddSeconds(10);
+            var (order, item) = CreatePaidOrderWithItem(supplierId, deadline: deadline);
+            seed.RentalOrders.Add(order);
+            await seed.SaveChangesAsync();
+
+            Result<SubOrderDecisionResponse>? acceptResult = null;
+            Result? expiryResult = null;
+
+            async Task RunAcceptAsync()
+            {
+                await using var db = new RentalServiceDbContext(options);
+                var inventory = new StubInventoryClient
+                {
+                    ConfirmHandler = (group, _) => Task.FromResult(Confirmed(item, group))
+                };
+                var service = CreateDecisionService(db, inventory, now: FixedNow);
+                acceptResult = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "postgres-accept-timeout-race", CreateUserCaller(supplierId));
+            }
+
+            async Task RunExpiryAsync()
+            {
+                await using var db = new RentalServiceDbContext(options);
+                var inventory = new StubInventoryClient();
+                var expiry = CreateExpiryService(db, inventory, now: deadline.AddMinutes(1));
+                expiryResult = await expiry.ExpireSingleItemSupplierTimeoutAsync(item.Id);
+            }
+
+            await Task.WhenAll(RunAcceptAsync(), RunExpiryAsync());
+
+            await using var verify = new RentalServiceDbContext(options);
+            var finalItem = await verify.RentalItems.SingleAsync();
+            var outbox = await verify.RentalOutboxMessages.ToListAsync();
+
+            bool acceptWon = finalItem.Status == RentalItemStatus.AwaitingHandover;
+            bool timeoutWon = finalItem.Status == RentalItemStatus.Expired;
+
+            Assert.True(acceptWon ^ timeoutWon, $"Expected exactly one winner (AwaitingHandover or Expired), but got {finalItem.Status}");
+
+            if (acceptWon)
+            {
+                Assert.NotNull(acceptResult);
+                Assert.True(acceptResult.IsSuccess, acceptResult.Error.Code);
+                Assert.Single(outbox, m => m.MessageType == "RentalItemConfirmed");
+                Assert.DoesNotContain(outbox, m => m.MessageType == "RentalItemExpired");
+            }
+            else
+            {
+                Assert.NotNull(acceptResult);
+                Assert.True(acceptResult.IsFailure);
+                Assert.DoesNotContain(outbox, m => m.MessageType == "RentalItemConfirmed");
+                Assert.Single(outbox, m => m.MessageType == "RentalItemExpired");
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task Concurrent_AcceptSubOrder_And_RenterCancel_ExactlyOneWins()
+    {
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            await using var seed = new RentalServiceDbContext(options);
+            await seed.Database.MigrateAsync();
+            Guid supplierId = Guid.NewGuid();
+            DateTimeOffset deadline = FixedNow.AddHours(24);
+            var (order, item) = CreatePaidOrderWithItem(supplierId, deadline: deadline);
+            seed.RentalOrders.Add(order);
+            await seed.SaveChangesAsync();
+
+            Result<SubOrderDecisionResponse>? acceptResult = null;
+            Result<CancelOrderResponse>? cancelResult = null;
+
+            async Task RunAcceptAsync()
+            {
+                await using var db = new RentalServiceDbContext(options);
+                var inventory = new StubInventoryClient
+                {
+                    ConfirmHandler = (group, _) => Task.FromResult(Confirmed(item, group))
+                };
+                var service = CreateDecisionService(db, inventory, now: FixedNow);
+                acceptResult = await service.AcceptSubOrderAsync(item.RentalSubOrderId, "postgres-accept-cancel-race", CreateUserCaller(supplierId));
+            }
+
+            async Task RunCancelAsync()
+            {
+                await using var db = new RentalServiceDbContext(options);
+                var executor = CreateExecutor(db, new StubInventoryClient(), now: FixedNow);
+                cancelResult = await executor.ExecuteRenterCancelOrderAsync(order.Id, order.RenterId, "Customer decided not to rent", "postgres-renter-cancel-race");
+            }
+
+            await Task.WhenAll(RunAcceptAsync(), RunCancelAsync());
+
+            await using var verify = new RentalServiceDbContext(options);
+            var finalItem = await verify.RentalItems.SingleAsync();
+            var outbox = await verify.RentalOutboxMessages.ToListAsync();
+
+            bool acceptWon = finalItem.Status == RentalItemStatus.AwaitingHandover;
+            bool cancelWon = finalItem.Status == RentalItemStatus.Cancelled;
+
+            Assert.True(acceptWon ^ cancelWon, $"Expected exactly one winner (AwaitingHandover or Cancelled), but got {finalItem.Status}");
+
+            if (acceptWon)
+            {
+                Assert.NotNull(acceptResult);
+                Assert.True(acceptResult.IsSuccess, acceptResult.Error.Code);
+                Assert.NotNull(cancelResult);
+                Assert.True(cancelResult.IsFailure);
+                Assert.Single(outbox, m => m.MessageType == "RentalItemConfirmed");
+                Assert.DoesNotContain(outbox, m => m.MessageType == "RentalItemCancelled");
+            }
+            else
+            {
+                Assert.NotNull(acceptResult);
+                Assert.True(acceptResult.IsFailure);
+                Assert.NotNull(cancelResult);
+                Assert.True(cancelResult.IsSuccess, cancelResult.Error.Code);
+                Assert.DoesNotContain(outbox, m => m.MessageType == "RentalItemConfirmed");
+                Assert.Single(outbox, m => m.MessageType == "RentalItemCancelled");
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    private static ExpiryWorkflowService CreateExpiryService(
+        RentalServiceDbContext db,
+        IInventoryRentalClient inventoryClient,
+        IPaymentRentalClient? paymentClient = null,
+        DateTimeOffset? now = null)
+    {
+        var orderRepo = new RentalOrderRepository(db);
+        var receiptRepo = new OperationReceiptRepository(db);
+        var outboxRepo = new OutboxRepository(db);
+        var lockManager = new FakeOrderLockManager();
+        var time = new TestTimeProvider(now ?? FixedNow);
+        var config = new ConfigurationBuilder().Build();
+        var executor = new RentalOperationExecutor(orderRepo, receiptRepo, outboxRepo, lockManager, inventoryClient, paymentClient ?? new StubPaymentClient(), db, config, NullLogger<RentalOperationExecutor>.Instance, time);
+        return new ExpiryWorkflowService(orderRepo, outboxRepo, lockManager, executor, db, config, NullLogger<ExpiryWorkflowService>.Instance, time);
+    }
+
+    private static RentalOperationExecutor CreateExecutor(
+        RentalServiceDbContext db,
+        IInventoryRentalClient inventoryClient,
+        IPaymentRentalClient? paymentClient = null,
+        DateTimeOffset? now = null)
+    {
+        var orderRepo = new RentalOrderRepository(db);
+        var receiptRepo = new OperationReceiptRepository(db);
+        var outboxRepo = new OutboxRepository(db);
+        var lockManager = new FakeOrderLockManager();
+        var time = new TestTimeProvider(now ?? FixedNow);
+        var config = new ConfigurationBuilder().Build();
+        return new RentalOperationExecutor(orderRepo, receiptRepo, outboxRepo, lockManager, inventoryClient, paymentClient ?? new StubPaymentClient(), db, config, NullLogger<RentalOperationExecutor>.Instance, time);
     }
 
     private static Result<ConfirmAllocationResponse> Confirmed(RentalItem item, string group) =>

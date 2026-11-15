@@ -19,4 +19,9 @@ public interface ICheckoutService
         string operationId,
         Guid renterUserId,
         CancellationToken cancellationToken = default);
+
+    Task<Result<CheckoutPreviewResponse>> PreviewAsync(
+        CheckoutRenterContext renter,
+        CheckoutRequest request,
+        CancellationToken cancellationToken = default);
 }

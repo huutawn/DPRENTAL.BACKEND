@@ -25,7 +25,7 @@ public sealed class CheckoutScenarioTests
     private readonly Guid _binh = Guid.NewGuid();
 
     [Fact]
-    public async Task Checkout_WithItemsFromTwoSuppliers_CreatesOneOrderAndOneInvoiceWithALinePerSupplier()
+    public async Task Checkout_WithItemsFromTwoSuppliers_RejectsWithMultiSupplierForbidden()
     {
         Guid cameraSupplier = Guid.NewGuid();
         Guid lightSupplier = Guid.NewGuid();
@@ -37,33 +37,37 @@ public sealed class CheckoutScenarioTests
 
         CheckoutResult result = await _harness.SubmitAsync(_an, "key-1", CheckoutTestHarness.Request(3_450_000m, cartItems));
 
-        Assert.True(result.IsSuccess, result.Error.Code);
-        RentalOrder order = Assert.Single(await _harness.LoadOrdersAsync());
-        Assert.Equal(new[] { cameraSupplier, lightSupplier }.Order(), order.Items.Select(i => i.SupplierId).Order());
-        Assert.Equal(3_450_000m, order.TotalPayableAmount);
+        Assert.False(result.IsSuccess);
+        Assert.Equal(CheckoutErrors.MultipleSuppliers.Code, result.Error.Code);
+        Assert.Empty(await _harness.LoadOrdersAsync());
+        Assert.Empty(_harness.Payment.InvoiceRequests);
+        Assert.Empty(_harness.Inventory.HoldRequests);
+    }
 
-        // Thanh toán một lần cho cả đơn; Payment nhận từng dòng kèm supplier để chia tiền về sau.
-        CreateInvoiceRequest invoice = Assert.Single(_harness.Payment.InvoiceRequests);
-        Assert.Equal(3_450_000m, invoice.TotalAmount);
+    [Fact]
+    public async Task Checkout_WithDifferingRentalPeriods_RejectsAndCreatesNoHoldOrInvoice()
+    {
+        Guid supplier = Guid.NewGuid();
+        Guid item1Listing = _harness.AddListing(supplier, 500_000m);
+        Guid item2Listing = _harness.AddListing(supplier, 300_000m);
 
-        CreateInvoiceItemRequest cameraLine = Assert.Single(invoice.Items, i => i.SupplierId == cameraSupplier);
-        Assert.Equal(3_000_000m, cameraLine.RentalAmount);
-        Assert.Equal(0m, cameraLine.DepositAmount);
-        Assert.Equal(order.Items.Single(i => i.SupplierId == cameraSupplier).Id, cameraLine.RentalItemId);
+        DateOnly start1 = new(2026, 10, 12);
+        DateOnly end1 = new(2026, 10, 14);
+        DateOnly start2 = new(2026, 10, 15);
+        DateOnly end2 = new(2026, 10, 17);
 
-        CreateInvoiceItemRequest lightLine = Assert.Single(invoice.Items, i => i.SupplierId == lightSupplier);
-        Assert.Equal(450_000m, lightLine.RentalAmount);
-        Assert.Equal(0m, lightLine.DepositAmount);
-        Assert.Equal(order.Items.Single(i => i.SupplierId == lightSupplier).Id, lightLine.RentalItemId);
+        Guid[] cartItems = await _harness.SeedCartWithPeriodsAsync(_an,
+            (item1Listing, 1, start1, end1),
+            (item2Listing, 1, start2, end2));
 
-        // Lưu cùng đơn: mỗi supplier một đơn con, đánh số theo thứ tự dòng trong giỏ.
-        Assert.Equal(2, order.SubOrders.Count);
-        RentalSubOrder cameraSubOrder = order.SubOrders.Single(s => s.SupplierId == cameraSupplier);
-        RentalSubOrder lightSubOrder = order.SubOrders.Single(s => s.SupplierId == lightSupplier);
-        Assert.Equal($"{order.OrderCode}-01", cameraSubOrder.SubOrderCode);
-        Assert.Equal($"{order.OrderCode}-02", lightSubOrder.SubOrderCode);
-        Assert.Equal(cameraSubOrder.Id, order.Items.Single(i => i.SupplierId == cameraSupplier).RentalSubOrderId);
-        Assert.Equal(lightSubOrder.Id, order.Items.Single(i => i.SupplierId == lightSupplier).RentalSubOrderId);
+        CheckoutResult result = await _harness.SubmitAsync(_an, "key-differing-periods", CheckoutTestHarness.Request(2_400_000m, cartItems));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(CheckoutErrors.MultipleRentalPeriods.Code, result.Error.Code);
+        Assert.Equal("CHECKOUT_MULTI_PERIOD_FORBIDDEN", result.Error.Code);
+        Assert.Empty(await _harness.LoadOrdersAsync());
+        Assert.Empty(_harness.Payment.InvoiceRequests);
+        Assert.Empty(_harness.Inventory.HoldRequests);
     }
 
     [Fact]

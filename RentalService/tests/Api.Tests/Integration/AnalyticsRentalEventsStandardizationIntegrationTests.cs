@@ -52,6 +52,7 @@ public sealed class AnalyticsRentalEventsStandardizationIntegrationTests
         // Items & financial
         "items", "rentalItemId", "equipmentListingId", "equipmentTypeId", "equipmentTypeName", "brandId", "brandName", "model",
         "quantity", "expectedStartDate", "expectedEndDate", "rentalAmount", "depositAmount", "totalRentalAmount", "totalDepositAmount", "totalPayableAmount",
+        "deliveryFee", "returnFee", "totalDeliveryFee", "totalReturnFee",
         // Status & references
         "paymentDeadline", "createdAt", "decisionAt", "supplierConfirmationDeadline", "paidAmount", "paidAt", "invoiceRef", "paymentRef",
         "expiredAt", "rejectedAt", "cancelledAt", "completedAt", "actualHandoverAt", "actualReturnAt", "submittedAt", "returnsCompletedAt", "overdueAt",

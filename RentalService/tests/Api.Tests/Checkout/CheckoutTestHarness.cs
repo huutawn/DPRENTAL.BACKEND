@@ -84,6 +84,20 @@ internal sealed class CheckoutTestHarness
         return cartItemIds;
     }
 
+    public async Task<Guid[]> SeedCartWithPeriodsAsync(Guid renterId, params (Guid ListingId, int Quantity, DateOnly Start, DateOnly End)[] lines)
+    {
+        RentalCart cart = RentalCart.Create(Guid.NewGuid(), renterId, Now).Value;
+        Guid[] cartItemIds = lines
+            .Select(l => cart.AddItem(
+                Guid.NewGuid(), l.ListingId, Listings.Listings[l.ListingId].OwnerUserId, l.Quantity, l.Start, l.End, Now).Value.Id)
+            .ToArray();
+
+        await using RentalServiceDbContext context = NewContext();
+        context.RentalCarts.Add(cart);
+        await context.SaveChangesAsync();
+        return cartItemIds;
+    }
+
     public static CheckoutRequest Request(decimal expectedTotal, params Guid[] cartItemIds) => new(
         cartItemIds,
         new("Hồ Chí Minh", "123 Nguyễn Huệ, Quận 1", "Nguyễn Văn A", "0901234567", null),

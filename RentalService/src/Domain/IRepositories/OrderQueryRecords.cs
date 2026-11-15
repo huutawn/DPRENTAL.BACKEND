@@ -75,7 +75,10 @@ public sealed record SupplierSubOrderSummaryRecord(
     IReadOnlyList<RentalItemStatus> ItemStatuses,
     DateTimeOffset? PaidAt,
     DateTimeOffset CreatedAt,
-    long OrderVersion);
+    long OrderVersion,
+    DateTimeOffset? SupplierConfirmationDeadline = null,
+    decimal DeliveryFee = 0m,
+    decimal ReturnFee = 0m);
 
 /// <summary>
 /// Điều kiện tìm đơn của Admin; ô rỗng là không lọc. Các điều kiện cấp dòng (dòng, thiết bị, máy, nhà cung cấp,

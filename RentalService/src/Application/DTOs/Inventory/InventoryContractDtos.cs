@@ -15,6 +15,40 @@ public sealed record ListingWarehouseDto(
     double? Latitude,
     double? Longitude);
 
+public sealed record WarehouseAddressDto(
+    string? AddressDetail,
+    string? ProvinceCode,
+    string? WardCode);
+
+public sealed record OperatingHoursDto(
+    string OpenTime,
+    string CloseTime,
+    IReadOnlyList<int> ClosedDays);
+
+public sealed record DeliveryZoneDto(
+    string ProvinceCode,
+    string? WardCode,
+    decimal DeliveryFeeVnd,
+    decimal ReturnFeeVnd);
+
+public sealed record WarehouseDeliveryPolicyResponse(
+    Guid SupplierId,
+    bool IsPickupEnabled,
+    WarehouseAddressDto? WarehouseAddress,
+    OperatingHoursDto? OperatingHours,
+    IReadOnlyList<DeliveryZoneDto>? DeliveryZones);
+
+public sealed record WarehouseOperatingHoursDto(
+    string OpenTime,
+    string CloseTime,
+    IReadOnlyList<int> ClosedDays);
+
+public sealed record WarehouseDeliveryZoneDto(
+    string ProvinceCode,
+    string? WardCode,
+    decimal DeliveryFeeVnd,
+    decimal ReturnFeeVnd);
+
 public sealed record ListingRentalSnapshotDto(
     Guid Id,
     Guid OwnerUserId,

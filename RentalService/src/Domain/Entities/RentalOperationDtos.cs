@@ -53,7 +53,9 @@ public sealed record InitialRentalItemDto(
     decimal DepositPerUnitSnapshot,
     string AllocationGroupId,
     IEnumerable<InitialRentalUnitAssignmentDto> Assignments,
-    RentalItemListingSnapshotDto ListingSnapshot);
+    RentalItemListingSnapshotDto ListingSnapshot,
+    decimal DeliveryFee = 0m,
+    decimal ReturnFee = 0m);
 
 public sealed record RentalOperationCommand(
     int Version,

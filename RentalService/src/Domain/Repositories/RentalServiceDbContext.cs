@@ -115,6 +115,18 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
             b.Property(o => o.Version)
                 .IsConcurrencyToken();
 
+            b.Property(o => o.ReturnMethod)
+                .HasMaxLength(64);
+
+            b.Property(o => o.DeliveryFee)
+                .HasPrecision(18, 2);
+
+            b.Property(o => o.ReturnFee)
+                .HasPrecision(18, 2);
+
+            b.Property(o => o.DeliverySnapshotJson)
+                .HasColumnType("jsonb");
+
             b.HasOne(o => o.TermsAcceptance)
                 .WithOne(t => t.RentalOrder)
                 .HasForeignKey<RentalTermsAcceptance>(t => t.RentalOrderId)
@@ -185,6 +197,12 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
                 .HasPrecision(18, 2);
 
             b.Property(i => i.FinalDeductionAmount)
+                .HasPrecision(18, 2);
+
+            b.Property(i => i.DeliveryFee)
+                .HasPrecision(18, 2);
+
+            b.Property(i => i.ReturnFee)
                 .HasPrecision(18, 2);
 
             b.Property(i => i.PickupLocationSnapshot)

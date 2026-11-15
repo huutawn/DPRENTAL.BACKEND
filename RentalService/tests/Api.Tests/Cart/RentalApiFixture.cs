@@ -180,7 +180,7 @@ public class RentalApiFixture : WebApplicationFactory<Program>
         public Task<Result<RentalListingSnapshot>> GetListingAsync(Guid listingId, CancellationToken cancellationToken = default)
             => ListingHandler?.Invoke(listingId)
                ?? Task.FromResult(Result.Success(new RentalListingSnapshot(
-                   listingId, Guid.NewGuid(), Guid.NewGuid(), true, true, 100m, 50m, "v1")));
+                   listingId, Guid.Parse("11111111-1111-1111-1111-111111111111"), Guid.NewGuid(), true, true, 100m, 50m, "v1")));
 
         public Task<Result<RentalAvailabilityResult>> GetAvailableQuantityAsync(
             Guid listingId, DateOnly startDate, DateOnly endDate, int requestedQuantity, CancellationToken cancellationToken = default)
