@@ -58,6 +58,17 @@ namespace Dprental.PaymentService.Application.Services
             var showRenter = caller.IsAdmin || row.ViewerIsRenter;
             var showSupplier = caller.IsAdmin || row.ViewerIsSupplier;
 
+            decimal shippingFeeEarned = row.DeliveryFeeEarned + row.ReturnFeeEarned;
+            var earningsBreakdown = new SupplierEarningsBreakdownResponse(
+                row.RentalAmount,
+                row.PlatformFeeRate,
+                row.PlatformFeeAmount,
+                row.FinalDeductionAmount,
+                row.DeliveryFeeEarned,
+                row.ReturnFeeEarned,
+                shippingFeeEarned,
+                row.SupplierPayable);
+
             return Result.Success(new SettlementDetailResponse(
                 row.Id, row.SettlementRef, row.RentalItemId, row.Status.ToString(),
                 row.RentalAmount, row.DepositAmount, row.FinalDeductionAmount,
@@ -69,8 +80,37 @@ namespace Dprental.PaymentService.Application.Services
                     : null,
                 showSupplier
                     ? new SettlementSupplierView(row.SupplierPayable, row.PlatformFeeRate, row.PlatformFeeAmount,
-                        row.PayoutRef, row.PayoutStatus, row.PayoutCompletedAt)
-                    : null));
+                        row.PayoutRef, row.PayoutStatus, row.PayoutCompletedAt,
+                        row.DeliveryFeeEarned, row.ReturnFeeEarned, shippingFeeEarned, row.SupplierPayable,
+                        earningsBreakdown)
+                    : null,
+                row.DeliveryFeeEarned,
+                row.ReturnFeeEarned,
+                showSupplier ? earningsBreakdown : null));
+        }
+
+        public async Task<Result<SupplierEarningsBreakdownResponse>> GetSupplierEarningsBreakdownAsync(
+            Guid id, CallerContext caller, CancellationToken ct)
+        {
+            if (id == Guid.Empty || caller.UserId == Guid.Empty)
+                return Error.Validation("Payment.SettlementIdInvalid", "id không hợp lệ.");
+
+            var row = await repository.GetSettlementAsync(id, caller.UserId, caller.IsAdmin, ct);
+            if (row is null) return Error.NotFound("Payment.SettlementNotFound", "Không tìm thấy settlement.");
+
+            if (!caller.IsAdmin && !row.ViewerIsSupplier)
+                return Error.Forbidden("Payment.Forbidden", "Chỉ nhà cung cấp hoặc quản trị viên mới có quyền xem thu nhập.");
+
+            decimal shippingFeeEarned = row.DeliveryFeeEarned + row.ReturnFeeEarned;
+            return Result.Success(new SupplierEarningsBreakdownResponse(
+                row.RentalAmount,
+                row.PlatformFeeRate,
+                row.PlatformFeeAmount,
+                row.FinalDeductionAmount,
+                row.DeliveryFeeEarned,
+                row.ReturnFeeEarned,
+                shippingFeeEarned,
+                row.SupplierPayable));
         }
 
         public async Task<Result<FinancialPage<SupplierPayoutListItem>>> ListSupplierPayoutsAsync(

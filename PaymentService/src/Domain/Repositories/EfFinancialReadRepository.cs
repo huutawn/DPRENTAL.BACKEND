@@ -62,7 +62,9 @@ public sealed class EfFinancialReadRepository(PaymentServiceDbContext db) : IFin
              s.Payout == null ? null : s.Payout.Status,
              s.Payout == null ? null : s.Payout.CompletedAt,
              i.RenterId == callerId,
-             s.SupplierId == callerId))
+             s.SupplierId == callerId,
+             s.DeliveryFeeEarned,
+             s.ReturnFeeEarned))
         .SingleOrDefaultAsync(ct);
 
     public async Task<ReadPage<SupplierPayoutRow>> ListSupplierPayoutsAsync(

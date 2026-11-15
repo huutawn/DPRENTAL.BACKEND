@@ -30,7 +30,7 @@ Codebase tuân thủ cấu trúc phân tầng sạch (Clean Architecture) tươn
 
 ---
 
-## 3. Quyền Sở Hữu Nghiệp Vụ & Thiết Kế SOLID
+## 3. Quyền Sở Hữu Nghiệp Vụ, Thiết Kế SOLID & DRY
 
 - **SRP (Single Responsibility)**:
   - **Application Service**: Là nơi duy nhất sở hữu và điều phối toàn bộ quyết định nghiệp vụ: xác thực quyền và ownership, kiểm tra invariants, tính toán số tiền/phí/hoàn cọc, quyết định ledger entries, điều phối state transitions, xử lý idempotency/replay, điều phối transaction qua `IUnitOfWork` và phát outbox messages.
@@ -40,7 +40,7 @@ Codebase tuân thủ cấu trúc phân tầng sạch (Clean Architecture) tươn
 - **OCP & LSP**: Các implementation phải tuân thủ nghiêm ngặt contracts của abstraction (kiểu trả về, mã lỗi chuẩn, hành vi biên); không giả vờ thành công hoặc âm thầm nuốt lỗi persistence.
 - **ISP**: Interface nhỏ gọn, thiết kế theo nhu cầu thực tế của use cases; phân tách rõ ràng contracts repository (`IInvoiceRepository`, `ISettlementLedger`, `IManualRefundRepository`, `ITransactionJournalRepository`, `IIntegrityEvidenceRepository`).
 - **DIP**: Các tầng cấp cao phụ thuộc vào abstraction qua Dependency Injection. Domain hoàn toàn độc lập, không tham chiếu ngược lại Application hay API.
-
+- **DRY (Don't Repeat Yourself)**: Triệt tiêu sự trùng lặp công thức tài chính, quy tắc làm tròn VND, logic giải mã payment code và mapping ledger; mọi công thức tính toán tài chính (RentalAmount, DepositAmount, PlatformFee) và kiểm tra bất biến phải được định nghĩa tại một nguồn chân lý duy nhất trong Application layer. Tái sử dụng các validator, parser và helper dùng chung thay vì sao chép mã nguồn.
 ---
 
 ## 4. Truy Cập Dữ Liệu & ORM (LINQ / EF Core)

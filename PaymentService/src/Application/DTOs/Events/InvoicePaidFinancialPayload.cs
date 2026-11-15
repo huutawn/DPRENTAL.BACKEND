@@ -11,4 +11,6 @@ public sealed record InvoicePaidFinancialPayload(
     [property: JsonPropertyName("depositAmount")] decimal DepositAmount,
     [property: JsonPropertyName("totalAmount")] decimal TotalAmount,
     [property: JsonPropertyName("currency")] string Currency,
-    [property: JsonPropertyName("paidAt")] DateTimeOffset PaidAt);
+    [property: JsonPropertyName("paidAt")] DateTimeOffset PaidAt,
+    [property: JsonPropertyName("totalDeliveryFee")] decimal TotalDeliveryFee = 0m,
+    [property: JsonPropertyName("totalReturnFee")] decimal TotalReturnFee = 0m);

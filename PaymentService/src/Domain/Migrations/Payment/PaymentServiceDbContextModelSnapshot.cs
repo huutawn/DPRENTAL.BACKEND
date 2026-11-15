@@ -178,11 +178,21 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Property<decimal>("TotalAmount")
                         .HasColumnType("numeric(18,0)");
 
+                    b.Property<decimal>("TotalDeliveryFee")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric(18,0)")
+                        .HasDefaultValue(0m);
+
                     b.Property<decimal>("TotalDepositAmount")
                         .HasColumnType("numeric(18,0)");
 
                     b.Property<decimal>("TotalRentalAmount")
                         .HasColumnType("numeric(18,0)");
+
+                    b.Property<decimal>("TotalReturnFee")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric(18,0)")
+                        .HasDefaultValue(0m);
 
                     b.HasKey("Id");
 
@@ -207,6 +217,11 @@ namespace Dprental.PaymentService.Domain.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("DeliveryFee")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric(18,0)")
+                        .HasDefaultValue(0m);
+
                     b.Property<decimal>("DepositAmount")
                         .HasColumnType("numeric(18,0)");
 
@@ -218,6 +233,11 @@ namespace Dprental.PaymentService.Domain.Migrations
 
                     b.Property<Guid>("RentalItemId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal>("ReturnFee")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric(18,0)")
+                        .HasDefaultValue(0m);
 
                     b.Property<long>("Revision")
                         .ValueGeneratedOnAdd()
@@ -246,17 +266,27 @@ namespace Dprental.PaymentService.Domain.Migrations
                     b.Property<Guid>("RentalItemId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("DeliveryFee")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric(18,0)")
+                        .HasDefaultValue(0m);
+
                     b.Property<decimal>("DepositAmount")
                         .HasColumnType("numeric(18,0)");
 
                     b.Property<decimal>("RentalAmount")
                         .HasColumnType("numeric(18,0)");
 
+                    b.Property<decimal>("ReturnFee")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric(18,0)")
+                        .HasDefaultValue(0m);
+
                     b.HasKey("RequirementId", "RentalItemId");
 
                     b.ToTable("manual_refund_items", null, t =>
                         {
-                            t.HasCheckConstraint("ck_refund_item_amounts", "\"RentalAmount\" >= 0 AND \"DepositAmount\" >= 0");
+                            t.HasCheckConstraint("ck_refund_item_amounts", "\"RentalAmount\" >= 0 AND \"DepositAmount\" >= 0 AND \"DeliveryFee\" >= 0 AND \"ReturnFee\" >= 0");
                         });
                 });
 
@@ -772,6 +802,11 @@ namespace Dprental.PaymentService.Domain.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<decimal>("DeliveryFeeEarned")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric(18,0)")
+                        .HasDefaultValue(0m);
+
                     b.Property<decimal>("DepositAmount")
                         .HasColumnType("numeric(18,0)");
 
@@ -803,6 +838,11 @@ namespace Dprental.PaymentService.Domain.Migrations
 
                     b.Property<Guid>("RentalItemId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal>("ReturnFeeEarned")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric(18,0)")
+                        .HasDefaultValue(0m);
 
                     b.Property<long>("Revision")
                         .ValueGeneratedOnAdd()
@@ -838,13 +878,13 @@ namespace Dprental.PaymentService.Domain.Migrations
 
                     b.ToTable("rental_item_settlements", null, t =>
                         {
-                            t.HasCheckConstraint("ck_settlement_amounts_non_negative", "\"RentalAmount\" >= 0 AND \"DepositAmount\" >= 0 AND \"FinalDeductionAmount\" >= 0 AND \"DepositRefundDue\" >= 0 AND \"PlatformFeeAmount\" >= 0 AND \"SupplierPayable\" >= 0");
+                            t.HasCheckConstraint("ck_settlement_amounts_non_negative", "\"RentalAmount\" >= 0 AND \"DepositAmount\" >= 0 AND \"FinalDeductionAmount\" >= 0 AND \"DepositRefundDue\" >= 0 AND \"PlatformFeeAmount\" >= 0 AND \"SupplierPayable\" >= 0 AND \"DeliveryFeeEarned\" >= 0 AND \"ReturnFeeEarned\" >= 0");
 
                             t.HasCheckConstraint("ck_settlement_deduction_le_deposit", "\"FinalDeductionAmount\" <= \"DepositAmount\"");
 
                             t.HasCheckConstraint("ck_settlement_fee_rate_range", "\"PlatformFeeRate\" >= 0 AND \"PlatformFeeRate\" <= 1");
 
-                            t.HasCheckConstraint("ck_settlement_money_balance", "\"SupplierPayable\" + \"PlatformFeeAmount\" + \"DepositRefundDue\" = \"RentalAmount\" + \"DepositAmount\"");
+                            t.HasCheckConstraint("ck_settlement_money_balance", "\"SupplierPayable\" + \"PlatformFeeAmount\" + \"DepositRefundDue\" = \"RentalAmount\" + \"DepositAmount\" + \"DeliveryFeeEarned\" + \"ReturnFeeEarned\"");
 
                             t.HasCheckConstraint("ck_settlement_status_valid", "\"Status\" IN (1, 2)");
                         });

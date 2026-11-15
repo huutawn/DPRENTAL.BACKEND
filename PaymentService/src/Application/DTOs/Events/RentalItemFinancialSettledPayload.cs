@@ -15,4 +15,6 @@ public sealed record RentalItemFinancialSettledPayload(
     [property: JsonPropertyName("platformFeeRate")] decimal PlatformFeeRate,
     [property: JsonPropertyName("platformFeeAmount")] decimal PlatformFeeAmount,
     [property: JsonPropertyName("supplierPayable")] decimal SupplierPayable,
-    [property: JsonPropertyName("completedAt")] DateTimeOffset CompletedAt);
+    [property: JsonPropertyName("completedAt")] DateTimeOffset CompletedAt,
+    [property: JsonPropertyName("deliveryFeeEarned")] decimal DeliveryFeeEarned = 0m,
+    [property: JsonPropertyName("returnFeeEarned")] decimal ReturnFeeEarned = 0m);

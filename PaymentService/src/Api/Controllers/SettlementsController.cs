@@ -48,4 +48,17 @@ public sealed class SettlementsController : ControllerBase
         var result = await _financialRead.GetSettlementAsync(id, caller, ct);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
+
+    /// <summary>Đọc phân rã 5 phần thu nhập của nhà cung cấp từ quyết toán.</summary>
+    [HttpGet("{id:guid}/breakdown")]
+    [Authorize(Policy = "FinancialReadClientPolicy")]
+    [ProducesResponseType(typeof(SupplierEarningsBreakdownResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetBreakdown(Guid id, CancellationToken ct)
+    {
+        if (!CallerIdentity.TryGetCaller(User, out var caller)) return Forbid();
+        var result = await _financialRead.GetSupplierEarningsBreakdownAsync(id, caller, ct);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
 }

@@ -5,4 +5,5 @@ public sealed record RentalItemSettlement(
     string OperationKey, Guid InvoiceId, Guid InvoiceItemId, Guid RentalItemId,
     Guid SupplierId, string DecisionRef, decimal RentalAmount, decimal DepositAmount,
     decimal FinalDeductionAmount, decimal DepositRefundDue, decimal PlatformFeeRate,
-    decimal PlatformFeeAmount, decimal SupplierPayable);
+    decimal PlatformFeeAmount, decimal SupplierPayable,
+    decimal DeliveryFeeEarned = 0m, decimal ReturnFeeEarned = 0m);

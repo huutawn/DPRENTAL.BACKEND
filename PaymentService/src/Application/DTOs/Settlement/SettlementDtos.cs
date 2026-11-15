@@ -53,7 +53,10 @@ public sealed record SettleRentalRequest(
     [Required][MaxLength(256)] string DecisionRef,
     [Required][MaxLength(64)] string OperationKey,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TransferRecipientDto? SupplierAccount = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TransferRecipientDto? RenterRefundAccount = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TransferRecipientDto? RenterRefundAccount = null,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RentalAmount = 0m,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal DeliveryFeeEarned = 0m,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal ReturnFeeEarned = 0m)
 {
     public Result Validate()
     {
@@ -81,6 +84,18 @@ public sealed record SettleRentalRequest(
         {
             return Error.Validation("Payment.InvalidCurrency", "Currency bắt buộc phải là 'VND'.");
         }
+
+        if (RentalAmount > 0m)
+        {
+            var rentalValidation = VndAmountValidator.ValidateVndAmount(RentalAmount, "Tiền thuê");
+            if (rentalValidation.IsFailure) return rentalValidation.Error;
+        }
+
+        var deliveryValidation = VndAmountValidator.ValidateVndAmount(DeliveryFeeEarned, "Phí giao nhận được nhận");
+        if (deliveryValidation.IsFailure) return deliveryValidation.Error;
+
+        var returnValidation = VndAmountValidator.ValidateVndAmount(ReturnFeeEarned, "Phí thu hồi được nhận");
+        if (returnValidation.IsFailure) return returnValidation.Error;
 
         var depositValidation = VndAmountValidator.ValidateVndAmount(DepositAmount, "Tiền cọc");
         if (depositValidation.IsFailure) return depositValidation.Error;
