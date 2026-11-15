@@ -23,6 +23,12 @@ public interface IRentalFactRepository
         Guid? supplierId = null,
         CancellationToken cancellationToken = default);
 
+    Task<int> GetRepeatCustomerCountAsync(
+        DateTimeOffset startUtc,
+        DateTimeOffset endUtc,
+        Guid? supplierId = null,
+        CancellationToken cancellationToken = default);
+
     Task<int> GetActiveOrdersCountAsync(
         DateTimeOffset endUtc,
         Guid? supplierId = null,

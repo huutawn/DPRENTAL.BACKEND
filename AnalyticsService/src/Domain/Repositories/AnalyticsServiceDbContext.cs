@@ -40,10 +40,14 @@ public sealed class AnalyticsServiceDbContext : DbContext, IAnalyticsUnitOfWork
         {
             nameof(PaymentFinancialEvent.RentalAmount),
             nameof(PaymentFinancialEvent.DepositAmount),
+            nameof(PaymentFinancialEvent.TotalDeliveryFee),
+            nameof(PaymentFinancialEvent.TotalReturnFee),
             nameof(PaymentFinancialEvent.TotalAmount),
             nameof(PaymentFinancialEvent.FinalDeductionAmount),
             nameof(PaymentFinancialEvent.DepositRefundDue),
             nameof(PaymentFinancialEvent.PlatformFeeAmount),
+            nameof(PaymentFinancialEvent.DeliveryFeeEarned),
+            nameof(PaymentFinancialEvent.ReturnFeeEarned),
             nameof(PaymentFinancialEvent.SupplierPayable),
             nameof(PaymentFinancialEvent.Amount)
         })
@@ -70,6 +74,8 @@ public sealed class AnalyticsServiceDbContext : DbContext, IAnalyticsUnitOfWork
         orders.HasIndex(x => x.CancelledAt);
         orders.HasIndex(x => x.ExpiredAt);
         orders.HasIndex(x => x.RejectedAt);
+        orders.HasIndex(x => x.RenterId);
+        orders.HasIndex(x => new { x.RenterId, x.CompletedAt });
         orders.HasIndex(x => new { x.Status, x.PaidAt });
 
         var items = modelBuilder.Entity<RentalItemFact>();
@@ -84,12 +90,15 @@ public sealed class AnalyticsServiceDbContext : DbContext, IAnalyticsUnitOfWork
         items.Property(x => x.Status).HasMaxLength(40).HasDefaultValue("UNKNOWN");
         items.Property(x => x.RentalAmount).HasPrecision(18, 0);
         items.Property(x => x.DepositAmount).HasPrecision(18, 0);
+        items.Property(x => x.DeliveryFee).HasPrecision(18, 0);
+        items.Property(x => x.ReturnFee).HasPrecision(18, 0);
         items.HasIndex(x => x.RentalOrderId);
         items.HasIndex(x => new { x.SupplierId, x.RentalOrderId });
         items.HasIndex(x => new { x.SupplierId, x.ConfirmedAt });
         items.HasIndex(x => new { x.SupplierId, x.RejectedAt });
         items.HasIndex(x => new { x.SupplierId, x.ExpiredAt });
         items.HasIndex(x => new { x.SupplierId, x.CompletedAt });
+        items.HasIndex(x => new { x.SupplierId, x.SupplierConfirmationDeadline });
         items.HasIndex(x => x.EquipmentTypeId);
         items.HasIndex(x => x.EquipmentListingId);
         items.HasIndex(x => x.BrandId);

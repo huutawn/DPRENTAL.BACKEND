@@ -28,6 +28,7 @@ public static class RentalAnalyticsEventTypes
     public const string RentalOrderCancelled = "RentalOrderCancelled";
     public const string RentalOrderExpired = "RentalOrderExpired";
     public const string RentalOrderRejected = "RentalOrderRejected";
+    public const string RentalSupplierConfirmationRequested = "RentalSupplierConfirmationRequested";
     public const string RentalItemConfirmed = "RentalItemConfirmed";
     public const string RentalItemRejected = "RentalItemRejected";
     public const string RentalItemExpired = "RentalItemExpired";

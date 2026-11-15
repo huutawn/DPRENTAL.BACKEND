@@ -84,6 +84,10 @@ namespace AnalyticsService.Domain.Migrations
                         .HasMaxLength(3)
                         .HasColumnType("character varying(3)");
 
+                    b.Property<decimal?>("DeliveryFeeEarned")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
                     b.Property<decimal?>("DepositAmount")
                         .HasPrecision(18)
                         .HasColumnType("numeric(18,0)");
@@ -161,6 +165,10 @@ namespace AnalyticsService.Domain.Migrations
                     b.Property<DateTimeOffset?>("RequestedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<decimal?>("ReturnFeeEarned")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
                     b.Property<Guid?>("SettlementId")
                         .HasColumnType("uuid");
 
@@ -176,6 +184,14 @@ namespace AnalyticsService.Domain.Migrations
                         .HasColumnType("numeric(18,0)");
 
                     b.Property<decimal?>("TotalAmount")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<decimal?>("TotalDeliveryFee")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
+                    b.Property<decimal?>("TotalReturnFee")
                         .HasPrecision(18)
                         .HasColumnType("numeric(18,0)");
 
@@ -233,6 +249,10 @@ namespace AnalyticsService.Domain.Migrations
                     b.Property<DateTimeOffset?>("ConfirmedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<decimal>("DeliveryFee")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
                     b.Property<decimal>("DepositAmount")
                         .HasPrecision(18)
                         .HasColumnType("numeric(18,0)");
@@ -278,6 +298,10 @@ namespace AnalyticsService.Domain.Migrations
                     b.Property<Guid>("RentalOrderId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("ReturnFee")
+                        .HasPrecision(18)
+                        .HasColumnType("numeric(18,0)");
+
                     b.Property<DateTimeOffset?>("ReturnedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -290,6 +314,9 @@ namespace AnalyticsService.Domain.Migrations
 
                     b.Property<long>("StatusVersion")
                         .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("SupplierConfirmationDeadline")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("SupplierId")
                         .HasColumnType("uuid");
@@ -315,6 +342,8 @@ namespace AnalyticsService.Domain.Migrations
                     b.HasIndex("SupplierId", "RejectedAt");
 
                     b.HasIndex("SupplierId", "RentalOrderId");
+
+                    b.HasIndex("SupplierId", "SupplierConfirmationDeadline");
 
                     b.ToTable("analytics_rental_items", (string)null);
                 });
@@ -343,6 +372,9 @@ namespace AnalyticsService.Domain.Migrations
                     b.Property<DateTimeOffset?>("RejectedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("RenterId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -350,6 +382,9 @@ namespace AnalyticsService.Domain.Migrations
 
                     b.Property<long>("StatusVersion")
                         .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("SupplierConfirmationDeadline")
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("RentalOrderId");
 
@@ -364,6 +399,10 @@ namespace AnalyticsService.Domain.Migrations
                     b.HasIndex("PaidAt");
 
                     b.HasIndex("RejectedAt");
+
+                    b.HasIndex("RenterId");
+
+                    b.HasIndex("RenterId", "CompletedAt");
 
                     b.HasIndex("Status", "PaidAt");
 

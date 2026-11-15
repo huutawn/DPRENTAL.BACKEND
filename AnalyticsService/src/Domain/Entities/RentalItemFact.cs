@@ -17,6 +17,9 @@ public sealed class RentalItemFact
     public int Quantity { get; set; }
     public decimal RentalAmount { get; set; }
     public decimal DepositAmount { get; set; }
+    public decimal DeliveryFee { get; set; }
+    public decimal ReturnFee { get; set; }
+    public DateTimeOffset? SupplierConfirmationDeadline { get; set; }
     public DateTimeOffset? ConfirmedAt { get; set; }
     public DateTimeOffset? RejectedAt { get; set; }
     public string? RejectionReason { get; set; }

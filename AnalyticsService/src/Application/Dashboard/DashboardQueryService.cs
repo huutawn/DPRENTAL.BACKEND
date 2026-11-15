@@ -13,6 +13,7 @@ public sealed class DashboardQueryService(
         CancellationToken ct = default)
     {
         var orderCounts = await rentalRepo.GetOrderMetricsAsync(range.StartUtc, range.EndUtc, supplierId, ct);
+        var repeatCustomers = await rentalRepo.GetRepeatCustomerCountAsync(range.StartUtc, range.EndUtc, supplierId, ct);
         var financialCounts = await paymentRepo.GetFinancialMetricsAsync(range.StartUtc, range.EndUtc, supplierId, ct);
         var rentalCounts = await rentalRepo.GetRentalMetricsAsync(range.StartUtc, range.EndUtc, supplierId, ct);
 
@@ -23,7 +24,8 @@ public sealed class DashboardQueryService(
             orderCounts.CompletedOrders,
             orderCounts.CancelledOrders,
             orderCounts.ExpiredOrders,
-            orderCounts.RejectedItems);
+            orderCounts.RejectedItems,
+            repeatCustomers);
 
         var financial = new FinancialMetrics(
             financialCounts.GrossRentalValue,

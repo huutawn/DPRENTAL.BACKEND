@@ -20,6 +20,24 @@ public sealed class RentalItemProjector
         _changes = changes ?? throw new ArgumentNullException(nameof(changes));
     }
 
+    public async Task<Result> ApplyAsync(RentalSupplierConfirmationRequestedPayload payload, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+
+        RentalItemFact item = await GetItemAsync(payload.RentalItemId, payload.RentalOrderId, payload.SupplierId, cancellationToken);
+        DateTimeOffset deadlineUtc = payload.SupplierConfirmationDeadline.ToUniversalTime();
+        item.SupplierConfirmationDeadline ??= deadlineUtc;
+        StatusGate.Apply(item, ItemStatuses.PendingSupplierConfirmation, payload.OrderVersion);
+
+        RentalOrderFact order = await RentalFactRows.GetOrCreateOrderAsync(_repository, payload.RentalOrderId, cancellationToken);
+        order.SupplierConfirmationDeadline = order.SupplierConfirmationDeadline is null || deadlineUtc < order.SupplierConfirmationDeadline
+            ? deadlineUtc
+            : order.SupplierConfirmationDeadline;
+        _changes.TrackOrder(payload.RentalOrderId);
+
+        return Result.Success();
+    }
+
     public async Task<Result> ApplyAsync(RentalItemConfirmedPayload payload, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(payload);

@@ -31,7 +31,7 @@ public sealed class PaymentFinancialProjector
     {
         ArgumentNullException.ThrowIfNull(payload);
 
-        if (payload.RentalAmount + payload.DepositAmount != payload.TotalAmount)
+        if (payload.RentalAmount + payload.DepositAmount + (payload.TotalDeliveryFee ?? 0m) + (payload.TotalReturnFee ?? 0m) != payload.TotalAmount)
         {
             return Task.FromResult(Result.Failure<bool>(ProjectionErrors.FinancialFactsInvalid()));
         }
@@ -43,6 +43,8 @@ public sealed class PaymentFinancialProjector
         row.RenterId = payload.RenterId;
         row.RentalAmount = payload.RentalAmount;
         row.DepositAmount = payload.DepositAmount;
+        row.TotalDeliveryFee = payload.TotalDeliveryFee;
+        row.TotalReturnFee = payload.TotalReturnFee;
         row.TotalAmount = payload.TotalAmount;
         row.PaidAt = payload.PaidAt.ToUniversalTime();
         return RecordAsync(row, payload.Currency, cancellationToken);
@@ -56,7 +58,7 @@ public sealed class PaymentFinancialProjector
             payload.DepositRefundDue + payload.FinalDeductionAmount != payload.DepositAmount ||
             payload.PlatformFeeRate is < 0 or > 1 ||
             payload.PlatformFeeAmount > payload.RentalAmount ||
-            payload.SupplierPayable != payload.RentalAmount - payload.PlatformFeeAmount + payload.FinalDeductionAmount)
+            payload.SupplierPayable != payload.RentalAmount - payload.PlatformFeeAmount + payload.FinalDeductionAmount + (payload.DeliveryFeeEarned ?? 0m) + (payload.ReturnFeeEarned ?? 0m))
         {
             return Task.FromResult(Result.Failure<bool>(ProjectionErrors.FinancialFactsInvalid()));
         }
@@ -73,6 +75,8 @@ public sealed class PaymentFinancialProjector
         row.DepositRefundDue = payload.DepositRefundDue;
         row.PlatformFeeRate = payload.PlatformFeeRate;
         row.PlatformFeeAmount = payload.PlatformFeeAmount;
+        row.DeliveryFeeEarned = payload.DeliveryFeeEarned;
+        row.ReturnFeeEarned = payload.ReturnFeeEarned;
         row.SupplierPayable = payload.SupplierPayable;
         row.CompletedAt = payload.CompletedAt.ToUniversalTime();
         // Payment hiện không gửi currency cho settlement; có gửi thì phải là VND
@@ -187,7 +191,8 @@ public sealed class PaymentFinancialProjector
     private static decimal?[] Amounts(PaymentFinancialEvent row) =>
     [
         row.RentalAmount, row.DepositAmount, row.TotalAmount, row.FinalDeductionAmount,
-        row.DepositRefundDue, row.PlatformFeeAmount, row.SupplierPayable, row.Amount
+        row.DepositRefundDue, row.PlatformFeeAmount, row.SupplierPayable, row.Amount,
+        row.TotalDeliveryFee, row.TotalReturnFee, row.DeliveryFeeEarned, row.ReturnFeeEarned
     ];
 
     // Cùng nghiệp vụ thì mọi số tiền và mốc thời gian phải giống hệt

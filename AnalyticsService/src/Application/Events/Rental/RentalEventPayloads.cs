@@ -7,9 +7,12 @@ namespace Dprental.AnalyticsService.Application.Events.Rental;
 public sealed record RentalOrderCreatedPayload
 {
     public required Guid RentalOrderId { get; init; }
+    public Guid? RenterId { get; init; }
     public required string Currency { get; init; }
     public required DateTimeOffset CreatedAt { get; init; }
     public required IReadOnlyList<RentalOrderCreatedItemPayload> Items { get; init; }
+    public decimal? TotalDeliveryFee { get; init; }
+    public decimal? TotalReturnFee { get; init; }
     public long? OrderVersion { get; init; }
 }
 
@@ -21,6 +24,8 @@ public sealed record RentalOrderCreatedItemPayload
     public required int Quantity { get; init; }
     public required decimal RentalAmount { get; init; }
     public required decimal DepositAmount { get; init; }
+    public decimal? DeliveryFee { get; init; }
+    public decimal? ReturnFee { get; init; }
 
     // Snapshot thiết bị có thể thiếu ở dữ liệu gốc → không bắt buộc, không bịa giá trị
     public Guid? EquipmentTypeId { get; init; }
@@ -62,6 +67,15 @@ public sealed record RentalOrderRejectedPayload
 {
     public required Guid RentalOrderId { get; init; }
     public required DateTimeOffset RejectedAt { get; init; }
+    public long? OrderVersion { get; init; }
+}
+
+public sealed record RentalSupplierConfirmationRequestedPayload
+{
+    public required Guid RentalOrderId { get; init; }
+    public required Guid RentalItemId { get; init; }
+    public Guid? SupplierId { get; init; }
+    public required DateTimeOffset SupplierConfirmationDeadline { get; init; }
     public long? OrderVersion { get; init; }
 }
 
