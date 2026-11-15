@@ -41,6 +41,7 @@ public sealed partial class AssetHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { resolution = "4K" },
+            depositAmount = 1_000_000m,
             rentalRate = new
             {
                 dailyRate = 500_000m,
@@ -285,6 +286,7 @@ public sealed partial class AssetHttpIntegrationTests
                 manufactureYear = 2024,
                 schemaVersion = 1,
                 specValues = new { sensor = "Full-Frame" },
+                depositAmount = 1_000_000m,
                 rentalRate = new
                 {
                     dailyRate = 500_000m,
@@ -333,6 +335,7 @@ public sealed partial class AssetHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 1_000_000m,
             rentalRate = new
             {
                 dailyRate = 500_000m,

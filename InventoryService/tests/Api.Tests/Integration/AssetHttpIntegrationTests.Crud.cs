@@ -41,6 +41,7 @@ public sealed partial class AssetHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { resolution = "4K", fps = 120 },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
         var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -100,6 +101,7 @@ public sealed partial class AssetHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { resolution = "4K" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
         var response = await client.PostAsync("api/v1/inventory/equipment-listings",
@@ -131,6 +133,7 @@ public sealed partial class AssetHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { resolution = "4K" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
         var createResp = await client.PostAsync("api/v1/inventory/equipment-listings",
@@ -265,6 +268,7 @@ public sealed partial class AssetHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
@@ -309,6 +313,7 @@ public sealed partial class AssetHttpIntegrationTests
             manufactureYear = 2024,
             schemaVersion = 1,
             specValues = new { sensor = "Full-Frame" },
+            depositAmount = 200_000m,
             rentalRate = new { dailyRate = 100_000m, currency = "VND" }
         };
 
