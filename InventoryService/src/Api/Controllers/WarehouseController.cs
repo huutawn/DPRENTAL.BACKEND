@@ -75,6 +75,7 @@ public sealed class WarehouseController : ControllerBase
     /// <summary>
     /// Đọc chính sách giao nhận của kho thuộc nhà cung cấp (SupplierId).
     /// </summary>
+    [AllowAnonymous]
     [HttpGet("{supplierId:guid}/delivery-policy")]
     [HttpGet("/api/v1/inventory/warehouses/{supplierId:guid}/delivery-policy")]
     [ProducesResponseType(typeof(WarehouseDeliveryPolicyResponse), StatusCodes.Status200OK)]
