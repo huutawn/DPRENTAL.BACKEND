@@ -8,6 +8,7 @@ using Dprental.InventoryService.Application.DTOs.Assets;
 using Dprental.InventoryService.Application.DTOs.Catalog;
 using Dprental.InventoryService.Application.DTOs.Listings;
 using Dprental.InventoryService.Application.DTOs.Pagination;
+using Dprental.InventoryService.Application.Policies;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Domain.Entities;
@@ -73,7 +74,7 @@ public sealed partial class AssetHttpIntegrationTests
     }
 
     [Fact]
-    public async Task CreateListing_MissingRentalRate_FailsBeforeCallingCatalogOrMedia()
+    public async Task CreateListing_MissingRentalRate_SucceedsAsDraftWithZeroDailyRate()
     {
         var owner = Guid.NewGuid();
         int catalogCalls = 0;
@@ -110,8 +111,14 @@ public sealed partial class AssetHttpIntegrationTests
         var response = await client.PostAsync("api/v1/inventory/equipment-listings",
             new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal(0, catalogCalls);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = await response.Content.ReadFromJsonAsync<EquipmentListingResponse>();
+        Assert.NotNull(created);
+        Assert.Equal("Draft", created.Status);
+        Assert.NotNull(created.RentalRate);
+        Assert.Equal(0m, created.RentalRate.DailyRate);
+        Assert.NotNull(created.MissingRequirements);
+        Assert.Contains(EquipmentListingPublishPolicy.RequirementDailyRate, created.MissingRequirements);
         Assert.Equal(0, stubMedia.VerifyCalls);
     }
 

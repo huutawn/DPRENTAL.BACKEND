@@ -9,6 +9,7 @@ using Dprental.InventoryService.Common;
 using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Application.Kafka.Outbox;
+using Dprental.InventoryService.Application.Policies;
 
 namespace Dprental.InventoryService.Application.Services;
 
@@ -55,15 +56,14 @@ public sealed partial class EquipmentListingService
             }
             trimmedDescription = trimmedDesc;
         }
-        if (string.IsNullOrWhiteSpace(request.SerialNumber))
+        string? normalizedSerial = null;
+        if (!string.IsNullOrWhiteSpace(request.SerialNumber))
         {
-            return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial là bắt buộc và không được để trống.");
-        }
-
-        var normalizedSerial = request.SerialNumber.Trim();
-        if (normalizedSerial.Length > 100)
-        {
-            return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial tối đa 100 ký tự.");
+            normalizedSerial = request.SerialNumber.Trim();
+            if (normalizedSerial.Length > 100)
+            {
+                return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial tối đa 100 ký tự.");
+            }
         }
 
         if (request.EquipmentTypeId == Guid.Empty)
@@ -83,16 +83,25 @@ public sealed partial class EquipmentListingService
             return yearValidation.Error;
         }
 
-        if (request.RentalRate is null)
+        decimal dailyRate = 0m;
+        decimal? weeklyRate = null;
+        decimal? monthlyRate = null;
+        string currency = EquipmentListing.DefaultCurrency;
+
+        if (request.RentalRate is not null)
         {
-            return Error.Validation("RENTAL_RATE_REQUIRED", "Thông tin giá thuê (rentalRate) là bắt buộc.");
+            var rateValidation = request.RentalRate.Validate();
+            if (rateValidation.IsFailure)
+            {
+                return rateValidation.Error;
+            }
+
+            dailyRate = request.RentalRate.DailyRate!.Value;
+            weeklyRate = request.RentalRate.WeeklyRate;
+            monthlyRate = request.RentalRate.MonthlyRate;
+            currency = request.RentalRate.Currency!;
         }
 
-        var rateValidation = request.RentalRate.Validate();
-        if (rateValidation.IsFailure)
-        {
-            return rateValidation.Error;
-        }
         decimal targetDeposit = request.DepositAmount ?? 0m;
         var depositValidation = EquipmentListing.ValidateDepositAmount(targetDeposit);
         if (depositValidation.IsFailure)
@@ -100,20 +109,26 @@ public sealed partial class EquipmentListingService
             return depositValidation.Error;
         }
 
-        var depositRateValidation = ListingDepositValidator.ValidateDepositExceedsDailyRate(
-            targetDeposit, request.RentalRate.DailyRate!.Value);
-        if (depositRateValidation.IsFailure)
+        if (request.RentalRate is not null && request.RentalRate.DailyRate.HasValue)
         {
-            return depositRateValidation.Error;
+            var depositRateValidation = ListingDepositValidator.ValidateDepositExceedsDailyRate(
+                targetDeposit, request.RentalRate.DailyRate.Value);
+            if (depositRateValidation.IsFailure)
+            {
+                return depositRateValidation.Error;
+            }
         }
 
-
-        if (request.SpecValues.ValueKind != JsonValueKind.Object)
+        string specValuesJson = "{}";
+        if (request.SpecValues.ValueKind != JsonValueKind.Undefined && request.SpecValues.ValueKind != JsonValueKind.Null)
         {
-            return Error.Validation("INVALID_SPEC_VALUES", "Spec values phải là JSON object.");
+            if (request.SpecValues.ValueKind != JsonValueKind.Object)
+            {
+                return Error.Validation("INVALID_SPEC_VALUES", "Spec values phải là JSON object.");
+            }
+            specValuesJson = request.SpecValues.GetRawText();
         }
 
-        var specValuesJson = request.SpecValues.GetRawText();
         var detailsValidation = EquipmentListing.ValidateDetails(
             trimmedName,
             trimmedDescription,
@@ -170,7 +185,7 @@ public sealed partial class EquipmentListingService
             }
         }
 
-        // 7. Atomic write transaction: tạo Listing Draft và đúng 1 physical asset ban đầu kế thừa năm sản xuất của Listing
+        // 7. Atomic write transaction: tạo Listing Draft và optional physical asset
         var listingId = Guid.NewGuid();
         now = _timeProvider.GetUtcNow();
 
@@ -184,10 +199,10 @@ public sealed partial class EquipmentListingService
             validModel,
             validSchema,
             validSpecs,
-            request.RentalRate.DailyRate!.Value,
-            request.RentalRate.WeeklyRate,
-            request.RentalRate.MonthlyRate,
-            request.RentalRate.Currency!,
+            dailyRate,
+            weeklyRate,
+            monthlyRate,
+            currency,
             now,
             yearValidation.Value,
             validMediaIds,
@@ -201,13 +216,19 @@ public sealed partial class EquipmentListingService
         }
 
         var listing = listingResult.Value;
-        var assetId = Guid.NewGuid();
-        var assetResult = InventoryAsset.Create(assetId, listingId, normalizedSerial, now, listing.ManufactureYear);
-        if (assetResult.IsFailure)
+        bool createUnit = request.CreateInitialUnit ?? (request.SerialNumber != null);
+        InventoryAsset? initialAsset = null;
+        if (createUnit)
         {
-            return assetResult.Error;
+            var assetId = Guid.NewGuid();
+            var assetResult = InventoryAsset.Create(assetId, listingId, normalizedSerial, now, listing.ManufactureYear);
+            if (assetResult.IsFailure)
+            {
+                return assetResult.Error;
+            }
+            initialAsset = assetResult.Value;
         }
-        var asset = assetResult.Value;
+
         var txResult = await _writeTransaction.ExecuteListingWriteAsync(listingId, async (ctx, ct) =>
         {
             await ctx.AcquireWarehouseLockAsync(listing.OwnerUserId, ct);
@@ -219,13 +240,23 @@ public sealed partial class EquipmentListingService
                 ctx.Warehouses.Add(warehouse);
             }
             ctx.Listings.Add(listing);
-            ctx.Assets.Add(asset);
+            if (initialAsset is not null)
+            {
+                ctx.Assets.Add(initialAsset);
+                var revAsset = await ctx.GetNextSearchRevisionAsync(ct);
+                ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(initialAsset.Id, "Upsert", revAsset, now, ctx.SearchBackfillRunId));
+            }
+
             var revListing = await ctx.GetNextSearchRevisionAsync(ct);
-            var revAsset = await ctx.GetNextSearchRevisionAsync(ct);
             ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revListing, false, now, ctx.SearchBackfillRunId));
-            ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(asset.Id, "Upsert", revAsset, now, ctx.SearchBackfillRunId));
-            ctx.StageCacheInvalidation([$"listing:{listing.Id:D}", $"asset:{asset.Id:D}", $"owner:{listing.OwnerUserId:D}", "public-discovery"]);
-            return Result.Success(listing);
+
+            var cacheKeys = new List<string> { $"listing:{listing.Id:D}", $"owner:{listing.OwnerUserId:D}", "public-discovery" };
+            if (initialAsset is not null)
+            {
+                cacheKeys.Add($"asset:{initialAsset.Id:D}");
+            }
+            ctx.StageCacheInvalidation(cacheKeys);
+            return Result.Success(warehouse);
         }, cancellationToken);
 
         if (txResult.IsFailure)
@@ -233,7 +264,12 @@ public sealed partial class EquipmentListingService
             return txResult.Error;
         }
 
-        return EquipmentListingMapper.ToResponse(listing, 1, _mediaOptions.PublicGatewayUrl);
+        var warehouseEntity = txResult.Value;
+        int totalQuantity = initialAsset is not null ? 1 : 0;
+        bool hasWarehouse = warehouseEntity is not null && warehouseEntity.HasValidAddress;
+        var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(listing, hasWarehouse, totalQuantity > 0);
+
+        return EquipmentListingMapper.ToResponse(listing, totalQuantity, _mediaOptions.PublicGatewayUrl, missingRequirements);
     }
 
     /// <inheritdoc />
@@ -451,13 +487,14 @@ public sealed partial class EquipmentListingService
                 {
                     var warehouse = await ctx.Warehouses.GetByOwnerUserIdAsync(listing.OwnerUserId, ct);
                     hasValidWarehouseAddress = warehouse is not null && warehouse.HasValidAddress;
-                    if (!hasValidWarehouseAddress)
-                    {
-                        return Error.Validation("WAREHOUSE_ADDRESS_REQUIRED", "Cần thiết lập địa chỉ kho hợp lệ trước khi chuyển Listing sang trạng thái Active.");
-                    }
-
                     int totalActiveUnits = await ctx.Listings.GetTotalQuantityAsync(id, ct);
                     hasAcceptingBookingsUnit = totalActiveUnits > 0;
+
+                    var publishCheck = EquipmentListingPublishPolicy.CanPublish(listing, hasValidWarehouseAddress, hasAcceptingBookingsUnit);
+                    if (publishCheck.IsFailure)
+                    {
+                        return publishCheck.Error;
+                    }
                 }
 
                 var statusRes = listing.UpdateStatus(request.Status.Value, hasAcceptingBookingsUnit, now, hasValidWarehouseAddress);
@@ -516,7 +553,10 @@ public sealed partial class EquipmentListingService
         }
 
         int totalQty = await _listingRepository.GetTotalQuantityAsync(id, cancellationToken);
-        return EquipmentListingMapper.ToResponse(txResult.Value, totalQty, _mediaOptions.PublicGatewayUrl);
+        var warehouse = _warehouseRepository is not null ? await _warehouseRepository.GetByOwnerUserIdAsync(txResult.Value.OwnerUserId, cancellationToken) : null;
+        bool hasWarehouse = warehouse is not null && warehouse.HasValidAddress;
+        var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(txResult.Value, hasWarehouse, totalQty > 0);
+        return EquipmentListingMapper.ToResponse(txResult.Value, totalQty, _mediaOptions.PublicGatewayUrl, missingRequirements);
     }
 
     /// <inheritdoc />
@@ -642,15 +682,15 @@ public sealed partial class EquipmentListingService
         {
             return Error.Forbidden("FORBIDDEN", "Người dùng không có quyền quản lý kho tài sản.");
         }
-        if (string.IsNullOrWhiteSpace(request.SerialNumber))
-        {
-            return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial là bắt buộc và không được để trống.");
-        }
 
-        var normalizedSerial = request.SerialNumber.Trim();
-        if (normalizedSerial.Length > 100)
+        string? normalizedSerial = null;
+        if (!string.IsNullOrWhiteSpace(request.SerialNumber))
         {
-            return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial tối đa 100 ký tự.");
+            normalizedSerial = request.SerialNumber.Trim();
+            if (normalizedSerial.Length > 100)
+            {
+                return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial tối đa 100 ký tự.");
+            }
         }
 
         var snapshot = await _listingRepository.GetByIdAsync(id, cancellationToken);
@@ -663,6 +703,7 @@ public sealed partial class EquipmentListingService
         {
             return Error.Forbidden("FORBIDDEN", "Không có quyền thêm thiết bị cho Listing của người dùng khác.");
         }
+
         var txResult = await _writeTransaction.ExecuteListingWriteAsync(id, async (ctx, ct) =>
         {
             var listing = await ctx.Listings.GetByIdAsync(id, ct);
@@ -683,10 +724,13 @@ public sealed partial class EquipmentListingService
                 return yearValidation.Error;
             }
 
-            bool serialExists = await ctx.Assets.ExistsSerialInListingAsync(id, normalizedSerial, null, ct);
-            if (serialExists)
+            if (!string.IsNullOrWhiteSpace(normalizedSerial))
             {
-                return Error.Conflict("SERIAL_ALREADY_EXISTS", "Số serial đã tồn tại trong danh mục thiết bị này.");
+                bool serialExists = await ctx.Assets.ExistsSerialInListingAsync(id, normalizedSerial, null, ct);
+                if (serialExists)
+                {
+                    return Error.Conflict("SERIAL_ALREADY_EXISTS", "Số serial đã tồn tại trong danh mục thiết bị này.");
+                }
             }
 
             var assetId = Guid.NewGuid();
@@ -712,5 +756,152 @@ public sealed partial class EquipmentListingService
         }
 
         return Result.Success(InventoryAssetMapper.ToResponse(txResult.Value));
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<IReadOnlyList<InventoryAssetResponse>>> BatchAddAssetsAsync(
+        Guid id,
+        BatchAddListingAssetsRequest request,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (id == Guid.Empty)
+        {
+            return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+        }
+
+        if (request.Assets == null || request.Assets.Count == 0)
+        {
+            return Error.Validation("EMPTY_ASSETS_LIST", "Danh sách thiết bị không được để trống.");
+        }
+
+        if (request.Assets.Any(a => a is null))
+        {
+            return Error.Validation("INVALID_ASSET_ITEM", "Danh sách thiết bị không được chứa phần tử null.");
+        }
+
+        if (request.Assets.Count > 100)
+        {
+            return Error.Validation("ASSET_BATCH_LIMIT_EXCEEDED", "Số lượng thiết bị thêm mỗi lần tối đa 100 đơn vị.");
+        }
+
+        var batchSerials = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in request.Assets)
+        {
+            if (!string.IsNullOrWhiteSpace(item.SerialNumber))
+            {
+                var trimmed = item.SerialNumber.Trim();
+                if (trimmed.Length > 100)
+                {
+                    return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial tối đa 100 ký tự.");
+                }
+
+                if (!batchSerials.Add(trimmed))
+                {
+                    return Error.Conflict("SERIAL_ALREADY_EXISTS", $"Số serial '{trimmed}' bị trùng lặp trong danh sách yêu cầu.");
+                }
+            }
+        }
+
+        if (!caller.IsAuthenticated)
+        {
+            return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
+        }
+
+        if (caller.IsService || !caller.UserId.HasValue)
+        {
+            return Error.Forbidden("FORBIDDEN", "Chỉ người dùng cá nhân mới có quyền thêm thiết bị cho Listing.");
+        }
+
+        if (!caller.IsAdmin && !caller.Permissions.Contains(InventoryAccessEvaluator.PermissionAssetManage))
+        {
+            return Error.Forbidden("FORBIDDEN", "Người dùng không có quyền quản lý kho tài sản.");
+        }
+
+        var snapshot = await _listingRepository.GetByIdAsync(id, cancellationToken);
+        if (snapshot is null)
+        {
+            return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+        }
+
+        if (!InventoryAccessEvaluator.CanAddListingAsset(caller, snapshot.OwnerUserId))
+        {
+            return Error.Forbidden("FORBIDDEN", "Không có quyền thêm thiết bị cho Listing của người dùng khác.");
+        }
+
+        var txResult = await _writeTransaction.ExecuteListingWriteAsync(id, async (ctx, ct) =>
+        {
+            var listing = await ctx.Listings.GetByIdAsync(id, ct);
+            if (listing is null)
+            {
+                return Error.NotFound("LISTING_NOT_FOUND", "Listing không tồn tại.");
+            }
+
+            if (!InventoryAccessEvaluator.CanAddListingAsset(caller, listing.OwnerUserId))
+            {
+                return Error.Forbidden("FORBIDDEN", "Không có quyền thêm thiết bị cho Listing của người dùng khác.");
+            }
+
+            var now = _timeProvider.GetUtcNow();
+            var yearValidation = EquipmentListing.ValidateManufactureYear(listing.ManufactureYear, now);
+            if (yearValidation.IsFailure)
+            {
+                return yearValidation.Error;
+            }
+
+            var createdAssets = new List<InventoryAsset>(request.Assets.Count);
+            var cacheKeys = new List<string> { $"listing:{listing.Id:D}", $"owner:{listing.OwnerUserId:D}", "public-discovery" };
+
+            foreach (var item in request.Assets)
+            {
+                string? itemSerial = null;
+                if (!string.IsNullOrWhiteSpace(item.SerialNumber))
+                {
+                    itemSerial = item.SerialNumber.Trim();
+                    if (itemSerial.Length > 100)
+                    {
+                        return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial tối đa 100 ký tự.");
+                    }
+
+                    bool serialExists = await ctx.Assets.ExistsSerialInListingAsync(id, itemSerial, null, ct);
+                    if (serialExists || createdAssets.Any(a => string.Equals(a.SerialNumber, itemSerial, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return Error.Conflict("SERIAL_ALREADY_EXISTS", $"Số serial '{itemSerial}' đã tồn tại trong danh mục thiết bị này.");
+                    }
+                }
+
+                var assetId = Guid.NewGuid();
+                var assetRes = InventoryAsset.Create(assetId, id, itemSerial, now, yearValidation.Value);
+                if (assetRes.IsFailure)
+                {
+                    return assetRes.Error;
+                }
+
+                var newAsset = assetRes.Value;
+                ctx.Assets.Add(newAsset);
+                createdAssets.Add(newAsset);
+
+                var revAsset = await ctx.GetNextSearchRevisionAsync(ct);
+                ctx.StageOutbox(SearchProjectionEvents.CreateAssetProjectionOutboxMessage(newAsset.Id, "Upsert", revAsset, now, ctx.SearchBackfillRunId));
+                cacheKeys.Add($"asset:{newAsset.Id:D}");
+            }
+
+            var revListing = await ctx.GetNextSearchRevisionAsync(ct);
+            ctx.StageOutbox(SearchProjectionEvents.CreateListingProjectionOutboxMessage(listing.Id, "Upsert", revListing, false, now, ctx.SearchBackfillRunId));
+            ctx.StageCacheInvalidation(cacheKeys);
+
+            return Result.Success(createdAssets);
+        }, cancellationToken);
+
+        if (txResult.IsFailure)
+        {
+            return txResult.Error;
+        }
+
+        var responses = txResult.Value.Select(InventoryAssetMapper.ToResponse).ToList();
+        return Result.Success<IReadOnlyList<InventoryAssetResponse>>(responses);
     }
 }

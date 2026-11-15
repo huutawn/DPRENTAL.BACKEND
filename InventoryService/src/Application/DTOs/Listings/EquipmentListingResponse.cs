@@ -27,5 +27,6 @@ public sealed record EquipmentListingResponse(
     string Status,
     int TotalQuantity,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt
+    DateTimeOffset UpdatedAt,
+    IReadOnlyList<string>? MissingRequirements = null
 );

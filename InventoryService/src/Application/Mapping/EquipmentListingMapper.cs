@@ -13,7 +13,8 @@ public static class EquipmentListingMapper
     public static EquipmentListingResponse ToResponse(
         EquipmentListing listing,
         int totalQuantity,
-        string? publicGatewayUrl)
+        string? publicGatewayUrl,
+        IReadOnlyList<string>? missingRequirements = null)
     {
         ArgumentNullException.ThrowIfNull(listing);
 
@@ -44,6 +45,7 @@ public static class EquipmentListingMapper
             listing.Status.ToString(),
             totalQuantity,
             listing.CreatedAt,
-            listing.UpdatedAt);
+            listing.UpdatedAt,
+            missingRequirements);
     }
 }

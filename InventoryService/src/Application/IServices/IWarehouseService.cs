@@ -23,4 +23,20 @@ public interface IWarehouseService
         UpdateWarehouseRequest request,
         IInventoryCallerContext caller,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Đọc chính sách giao nhận của kho thuộc nhà cung cấp (SupplierId).
+    /// </summary>
+    Task<Result<WarehouseDeliveryPolicyResponse>> GetDeliveryPolicyAsync(
+        Guid supplierId,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cập nhật chính sách giao nhận (nhận tại kho, giờ mở/đóng cửa, ngày nghỉ, vùng và phí giao/thu hồi) cho kho của người dùng hiện tại.
+    /// </summary>
+    Task<Result<WarehouseDeliveryPolicyResponse>> UpdateDeliveryPolicyAsync(
+        UpdateWarehouseDeliveryPolicyRequest request,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default);
 }

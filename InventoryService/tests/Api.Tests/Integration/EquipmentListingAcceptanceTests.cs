@@ -413,12 +413,16 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             listingId = listing.Id;
         }
 
-        // 1. Missing / whitespace serial
+        // 1. Whitespace serial trims to null and succeeds under R3 nullable serial rules
         var blankResp = await client.PostAsync($"api/v1/inventory/equipment-listings/{listingId:D}/assets",
             new StringContent("{\"serialNumber\":\"   \"}", Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.BadRequest, blankResp.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, blankResp.StatusCode);
+        var blankAsset = await blankResp.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        Assert.NotNull(blankAsset);
+        Assert.Null(blankAsset.SerialNumber);
+        Assert.False(string.IsNullOrWhiteSpace(blankAsset.AssetCode));
 
-        // 2. Serial too long (>100 chars)
+        // 2. Serial too long (>100 chars) returns BadRequest
         var longSerial = new string('A', 101);
         var longResp = await client.PostAsync($"api/v1/inventory/equipment-listings/{listingId:D}/assets",
             new StringContent(JsonSerializer.Serialize(new { serialNumber = longSerial }), Encoding.UTF8, "application/json"));
@@ -561,10 +565,19 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
             new StringContent("{\"serialNumber\":\"serial-aaa\"}", Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.Conflict, dupResp.StatusCode);
 
-        // 2. PATCH a2 with empty serial -> 400 Bad Request
+        // 2. PATCH a2 with empty serial -> 200 OK and clears serial to null per R3 nullable serial rules
         var emptyResp = await client.PatchAsync($"api/v1/inventory/assets/{a2Id:D}",
             new StringContent("{\"serialNumber\":\"  \"}", Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.BadRequest, emptyResp.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, emptyResp.StatusCode);
+        var clearedAsset = await emptyResp.Content.ReadFromJsonAsync<InventoryAssetResponse>();
+        Assert.NotNull(clearedAsset);
+        Assert.Null(clearedAsset.SerialNumber);
+
+        // 2b. PATCH a2 with serial too long (>100 chars) -> 400 Bad Request
+        var longSerial = new string('X', 101);
+        var overlongResp = await client.PatchAsync($"api/v1/inventory/assets/{a2Id:D}",
+            new StringContent(JsonSerializer.Serialize(new { serialNumber = longSerial }), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, overlongResp.StatusCode);
 
         // 3. PATCH a2 with valid new serial -> 200 OK
         var okResp = await client.PatchAsync($"api/v1/inventory/assets/{a2Id:D}",
@@ -925,14 +938,19 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
     [Fact]
     public async Task PatchListing_DepositAmount_PresenceTracking_AndReadConsistency()
     {
-        var (app, secFactory) = CreateFactory();
+        var mediaClient = new StubMediaClient();
+        var (app, secFactory) = CreateFactory(mediaClient: mediaClient);
         await using var _ = app;
         await using var __ = secFactory;
         using var client = app.CreateClient();
 
         var owner = Guid.NewGuid();
+        mediaClient.DefaultUploaderId = owner;
         var token = secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var img1 = Guid.NewGuid();
+        mediaClient.MediaStore[img1] = ("Ready", owner, "image/jpeg");
 
         // 1. Create with depositAmount = 500,000
         var createPayload = new
@@ -1015,7 +1033,20 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         var whResp2 = await client.PutAsJsonAsync("api/v1/inventory/warehouse/me", whPayload2);
         Assert.Equal(HttpStatusCode.OK, whResp2.StatusCode);
 
-        // 8. Activate listing and test Public Detail and Batch Read consistency
+        // 8. Attempt activation without photos -> 400 LISTING_NOT_ELIGIBLE_FOR_PUBLISH per R3 publish policy
+        var patchActiveWithoutPhotosResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
+            new StringContent("{\"status\":\"Active\"}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, patchActiveWithoutPhotosResp.StatusCode);
+        var probNotEligible = await patchActiveWithoutPhotosResp.Content.ReadFromJsonAsync<ProblemDetails>();
+        Assert.Equal("LISTING_NOT_ELIGIBLE_FOR_PUBLISH", probNotEligible!.Title);
+
+        // 8b. Supply valid photos and thumbnail before activation
+        var patchPhotosPayload = new { mediaIds = new[] { img1 }, thumbnailMediaId = img1 };
+        var patchPhotosResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
+            new StringContent(JsonSerializer.Serialize(patchPhotosPayload), Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, patchPhotosResp.StatusCode);
+
+        // 8c. Activate listing and test Public Detail and Batch Read consistency
         var patchActiveResp = await client.PatchAsync($"api/v1/inventory/equipment-listings/{listingId:D}",
             new StringContent("{\"status\":\"Active\"}", Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.OK, patchActiveResp.StatusCode);

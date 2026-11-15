@@ -43,12 +43,9 @@ public sealed partial class InventoryAssetService
             return Error.Forbidden("FORBIDDEN", "Không có quyền chỉnh sửa tài sản này.");
         }
 
-        if (request.IsSerialNumberSpecified && string.IsNullOrWhiteSpace(request.SerialNumber))
-        {
-            return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial là bắt buộc và không được để trống.");
-        }
-
-        var targetSerial = request.IsSerialNumberSpecified ? request.SerialNumber!.Trim() : snapshot.SerialNumber;
+        var targetSerial = request.IsSerialNumberSpecified
+            ? (string.IsNullOrWhiteSpace(request.SerialNumber) ? null : request.SerialNumber.Trim())
+            : snapshot.SerialNumber;
         var targetYear = request.IsManufactureYearSpecified ? request.ManufactureYear : snapshot.ManufactureYear;
 
         var now = _timeProvider.GetUtcNow();
@@ -76,7 +73,7 @@ public sealed partial class InventoryAssetService
                 return Error.Conflict("STALE_INVENTORY_WRITE", "Dữ liệu tài sản đã được thay đổi; đọc lại trước khi thử lại.");
             }
 
-            if (request.IsSerialNumberSpecified)
+            if (request.IsSerialNumberSpecified && !string.IsNullOrWhiteSpace(targetSerial))
             {
                 bool serialExists = await ctx.Assets.ExistsSerialInListingAsync(
                     asset.EquipmentListingId,

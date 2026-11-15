@@ -65,6 +65,15 @@ public interface IEquipmentListingService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Thêm nhiều đơn vị thiết bị vật lý vào một EquipmentListing hiện có trong một thao tác.
+    /// </summary>
+    Task<Result<IReadOnlyList<InventoryAssetResponse>>> BatchAddAssetsAsync(
+        Guid id,
+        BatchAddListingAssetsRequest request,
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Lấy danh sách phân trang các đơn vị thiết bị vật lý thuộc một EquipmentListing.
     /// </summary>
     Task<Result<PagedResponse<InventoryAssetResponse>>> GetListingAssetsAsync(

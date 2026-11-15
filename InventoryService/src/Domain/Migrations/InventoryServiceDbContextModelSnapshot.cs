@@ -543,7 +543,7 @@ namespace InventoryService.Domain.Migrations
                         {
                             t.HasCheckConstraint("ck_equipment_listings_currency", "currency = 'VND'");
 
-                            t.HasCheckConstraint("ck_equipment_listings_daily_rate", "daily_rate >= 1 AND daily_rate <= 999999999999999999 AND trunc(daily_rate) = daily_rate");
+                            t.HasCheckConstraint("ck_equipment_listings_daily_rate", "daily_rate >= 0 AND daily_rate <= 999999999999999999 AND trunc(daily_rate) = daily_rate");
 
                             t.HasCheckConstraint("ck_equipment_listings_deposit_amount", "deposit_amount >= 0 AND deposit_amount <= 999999999999999999 AND trunc(deposit_amount) = deposit_amount");
 
@@ -666,7 +666,6 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnName("manufacture_year");
 
                     b.Property<string>("SerialNumber")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("serial_number");
@@ -703,7 +702,7 @@ namespace InventoryService.Domain.Migrations
 
                             t.HasCheckConstraint("ck_assets_manufacture_year", "manufacture_year IS NULL OR manufacture_year >= 1900");
 
-                            t.HasCheckConstraint("ck_assets_serial_number", "length(btrim(serial_number)) > 0 AND length(serial_number) <= 100");
+                            t.HasCheckConstraint("ck_assets_serial_number", "serial_number IS NULL OR (length(btrim(serial_number)) > 0 AND length(serial_number) <= 100)");
                         });
                 });
 
@@ -1078,9 +1077,29 @@ namespace InventoryService.Domain.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("address_detail");
 
+                    b.Property<string>("CloseTime")
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("18:00")
+                        .HasColumnName("close_time");
+
+                    b.PrimitiveCollection<int[]>("ClosedDays")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer[]")
+                        .HasColumnName("closed_days")
+                        .HasDefaultValueSql("'{}'::integer[]");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<bool>("IsPickupEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_pickup_enabled");
 
                     b.Property<double?>("Latitude")
                         .HasColumnType("double precision")
@@ -1089,6 +1108,13 @@ namespace InventoryService.Domain.Migrations
                     b.Property<double?>("Longitude")
                         .HasColumnType("double precision")
                         .HasColumnName("longitude");
+
+                    b.Property<string>("OpenTime")
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("08:00")
+                        .HasColumnName("open_time");
 
                     b.Property<string>("ProvinceCode")
                         .HasMaxLength(20)
@@ -1129,11 +1155,15 @@ namespace InventoryService.Domain.Migrations
                         {
                             t.HasCheckConstraint("ck_warehouses_address_detail", "address_detail IS NULL OR (address_detail ~ '\\S' AND length(address_detail) <= 500)");
 
+                            t.HasCheckConstraint("ck_warehouses_close_time", "close_time IS NULL OR close_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'");
+
                             t.HasCheckConstraint("ck_warehouses_identity", "owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid");
 
                             t.HasCheckConstraint("ck_warehouses_latitude", "latitude IS NULL OR (latitude >= -90.0 AND latitude <= 90.0)");
 
                             t.HasCheckConstraint("ck_warehouses_longitude", "longitude IS NULL OR (longitude >= -180.0 AND longitude <= 180.0)");
+
+                            t.HasCheckConstraint("ck_warehouses_open_time", "open_time IS NULL OR open_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'");
 
                             t.HasCheckConstraint("ck_warehouses_province_code", "province_code IS NULL OR (province_code ~ '\\S' AND length(province_code) <= 20)");
 
@@ -1142,6 +1172,64 @@ namespace InventoryService.Domain.Migrations
                             t.HasCheckConstraint("ck_warehouses_ward_code", "ward_code IS NULL OR (ward_code ~ '\\S' AND length(ward_code) <= 20)");
 
                             t.HasCheckConstraint("ck_warehouses_ward_name", "ward_name IS NULL OR (ward_name ~ '\\S' AND length(ward_name) <= 200)");
+                        });
+                });
+
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.WarehouseDeliveryZone", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<decimal>("DeliveryFeeVnd")
+                        .HasColumnType("numeric(18,0)")
+                        .HasColumnName("delivery_fee_vnd");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_user_id");
+
+                    b.Property<string>("ProvinceCode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("province_code");
+
+                    b.Property<decimal>("ReturnFeeVnd")
+                        .HasColumnType("numeric(18,0)")
+                        .HasColumnName("return_fee_vnd");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("WardCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("ward_code");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId", "ProvinceCode", "WardCode")
+                        .IsUnique()
+                        .HasDatabaseName("ix_warehouse_delivery_zones_owner_province_ward");
+
+                    b.ToTable("warehouse_delivery_zones", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_warehouse_delivery_zones_delivery_fee", "delivery_fee_vnd >= 0 AND delivery_fee_vnd <= 999999999999999999 AND trunc(delivery_fee_vnd) = delivery_fee_vnd");
+
+                            t.HasCheckConstraint("ck_warehouse_delivery_zones_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+
+                            t.HasCheckConstraint("ck_warehouse_delivery_zones_province_code", "province_code ~ '\\S' AND length(province_code) <= 20");
+
+                            t.HasCheckConstraint("ck_warehouse_delivery_zones_return_fee", "return_fee_vnd >= 0 AND return_fee_vnd <= 999999999999999999 AND trunc(return_fee_vnd) = return_fee_vnd");
+
+                            t.HasCheckConstraint("ck_warehouse_delivery_zones_ward_code", "ward_code IS NULL OR (ward_code ~ '\\S' AND length(ward_code) <= 20)");
                         });
                 });
 
@@ -1200,6 +1288,17 @@ namespace InventoryService.Domain.Migrations
                     b.Navigation("Listing");
                 });
 
+            modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.WarehouseDeliveryZone", b =>
+                {
+                    b.HasOne("Dprental.InventoryService.Domain.Entities.Warehouse", "Warehouse")
+                        .WithMany("DeliveryZones")
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Warehouse");
+                });
+
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.AssetAllocation", b =>
                 {
                     b.Navigation("Transitions");
@@ -1219,6 +1318,8 @@ namespace InventoryService.Domain.Migrations
 
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.Warehouse", b =>
                 {
+                    b.Navigation("DeliveryZones");
+
                     b.Navigation("Listings");
                 });
 #pragma warning restore 612, 618

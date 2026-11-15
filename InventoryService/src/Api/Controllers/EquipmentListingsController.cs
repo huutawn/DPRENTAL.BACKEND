@@ -248,6 +248,30 @@ public sealed class EquipmentListingsController : ControllerBase
     }
 
     /// <summary>
+    /// Thêm hàng loạt đơn vị thiết bị vật lý vào một EquipmentListing hiện có.
+    /// </summary>
+    [HttpPost("{id:guid}/assets/batch")]
+    [ProducesResponseType(typeof(IReadOnlyList<InventoryAssetResponse>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> BatchAddAssets(
+        Guid id,
+        [FromBody] BatchAddListingAssetsRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _listingService.BatchAddAssetsAsync(id, request, _callerContext, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return StatusCode(StatusCodes.Status201Created, result.Value);
+    }
+
+    /// <summary>
     /// Thống kê số lượng listing của người dùng hiện tại nhóm theo equipmentTypeId và brandId, lọc trạng thái tùy chọn.
     /// </summary>
     [HttpGet("statistics")]
