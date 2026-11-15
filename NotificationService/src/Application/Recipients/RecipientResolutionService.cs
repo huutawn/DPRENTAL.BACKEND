@@ -393,6 +393,23 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     ActionUrl: null));
                 break;
 
+            case "RefundRequestedFinancial":
+                if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                {
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "RefundRequestedFinancial yêu cầu renterId hợp lệ."));
+                }
+                results.Add(new ResolvedRecipient(
+                    RecipientUserId: renterId.Value,
+                    RecipientRole: "Renter",
+                    NotificationType: "REFUND_REQUESTED",
+                    Category: "PAYMENT",
+                    Severity: "INFO",
+                    IsActionable: false,
+                    DeepLinkUrl: $"/orders/{orderId}",
+                    ActionUrl: null));
+                break;
+
             case "RefundCompletedFinancial":
                 if (!renterId.HasValue || renterId.Value == Guid.Empty)
                 {

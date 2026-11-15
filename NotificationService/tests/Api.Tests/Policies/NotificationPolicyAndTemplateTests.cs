@@ -64,6 +64,8 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.False(NotificationChannelPolicy.ShouldSendEmail("HANDOVER_OVERDUE_RENTER", "Renter"));
         Assert.True(NotificationChannelPolicy.ShouldSendEmail("ORDER_COMPLETED", "Renter"));
         Assert.False(NotificationChannelPolicy.ShouldSendEmail("LATE_PAYMENT_REFUND_REQUESTED", "Renter"));
+        Assert.True(NotificationChannelPolicy.ShouldSendEmail("REFUND_REQUESTED", "Renter"));
+        Assert.False(NotificationChannelPolicy.ShouldSendEmail("REFUND_REQUESTED", "Supplier"));
         Assert.True(NotificationChannelPolicy.ShouldSendEmail("REFUND_COMPLETED", "Renter"));
         Assert.False(NotificationChannelPolicy.ShouldSendEmail("REFUND_COMPLETED", "Supplier"));
         Assert.True(NotificationChannelPolicy.ShouldSendEmail("PAYOUT_COMPLETED", "Supplier"));
@@ -447,6 +449,19 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.False(rejectedRecipient.IsActionable);
         Assert.Equal($"/orders/{orderId}", rejectedRecipient.DeepLinkUrl);
 
+        // RefundRequestedFinancial -> Renter (Category PAYMENT, Severity INFO, NotificationType REFUND_REQUESTED)
+        var refundReq = _recipientResolver.ResolveRecipients("RefundRequestedFinancial", orderId, renterId, null);
+        Assert.True(refundReq.IsSuccess);
+        Assert.Single(refundReq.Value);
+        var reqRecipient = refundReq.Value[0];
+        Assert.Equal(renterId, reqRecipient.RecipientUserId);
+        Assert.Equal("Renter", reqRecipient.RecipientRole);
+        Assert.Equal("REFUND_REQUESTED", reqRecipient.NotificationType);
+        Assert.Equal("PAYMENT", reqRecipient.Category);
+        Assert.Equal("INFO", reqRecipient.Severity);
+        Assert.False(reqRecipient.IsActionable);
+        Assert.Equal($"/orders/{orderId}", reqRecipient.DeepLinkUrl);
+
         // RefundCompletedFinancial -> Renter (Category PAYMENT, Severity SUCCESS, NotificationType REFUND_COMPLETED)
         var refund = _recipientResolver.ResolveRecipients("RefundCompletedFinancial", orderId, renterId, null);
         Assert.True(refund.IsSuccess);
@@ -558,6 +573,34 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Contains("Thiết bị đã được giải phóng", result.Value.Body);
         Assert.NotNull(result.Value.EmailBody);
         Assert.Contains($"/orders/{orderId}", result.Value.EmailBody);
+    }
+
+    [Fact]
+    public void TemplateRenderer_RefundRequested_RendersAccurately()
+    {
+        var orderId = Guid.NewGuid();
+        var data = new Dictionary<string, object?>
+        {
+            ["rentalOrderId"] = orderId,
+            ["orderCode"] = "RNT-20261114-9999",
+            ["amount"] = 2500000m,
+            ["currency"] = "VND",
+            ["refundRef"] = "REF-REQ-001",
+            ["refundKind"] = "FULL_CANCELLATION",
+            ["requestedAt"] = "2026-11-14T09:00:00.0000000+00:00"
+        };
+
+        var result = _renderer.Render("REFUND_REQUESTED", data);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Yêu cầu hoàn tiền đơn thuê #RNT-20261114-9999", result.Value.Title);
+        Assert.Contains("2.500.000 VND", result.Value.Body);
+        Assert.Contains("DPRental đang xử lý thủ tục chuyển khoản vào tài khoản ngân hàng của Quý khách", result.Value.Body);
+        // Ensure no false promise of instant automatic refund or 24h turnaround
+        Assert.DoesNotContain("tự động hoàn ngay", result.Value.Body.ToLowerInvariant());
+        Assert.DoesNotContain("24 giờ", result.Value.Body.ToLowerInvariant());
+        Assert.NotNull(result.Value.EmailBody);
+        Assert.Contains("2.500.000 VND", result.Value.EmailBody);
+        Assert.Contains("REF-REQ-001", result.Value.EmailBody);
     }
 
     [Fact]

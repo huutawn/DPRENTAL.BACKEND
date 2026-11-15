@@ -1094,6 +1094,79 @@ public sealed class RentalItemRejectedHandler : IKafkaEventHandler
     }
 }
 
+public sealed class RefundRequestedFinancialHandler : IKafkaEventHandler
+{
+    public string EventType => "RefundRequestedFinancial";
+
+    public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
+    {
+        var payload = envelope.Payload;
+        var validation = payload.ValidateFields(
+            guidFields: ["rentalOrderId", "orderId", "refundId", "rentalItemId", "itemId", "renterId", "userId"],
+            numberFields: ["orderVersion", "version", "amount", "refundAmount"],
+            utcTimestampFields: ["requestedAt"],
+            stringFields: ["refundRef", "refundKind", "currency", "orderCode"]);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<NotificationEventIntent>(validation.Error);
+        }
+
+        var orderId = payload.GetGuidFromAny("rentalOrderId", "orderId") ?? (Guid.TryParse(envelope.AggregateId, out var g2) && g2 != Guid.Empty ? g2 : null);
+        if (!orderId.HasValue || orderId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_ORDER_ID", "rentalOrderId không thể để trống."));
+        }
+
+        var refundId = payload.GetGuidFromAny("refundId");
+        var refundRef = payload.GetStringFromAny("refundRef") ?? (refundId.HasValue ? $"REF-{refundId.Value.ToString()[..8]}" : "REF-REQUESTED");
+        var itemId = payload.GetGuidFromAny("rentalItemId", "itemId");
+        var renterId = payload.GetGuidFromAny("renterId", "userId");
+        if (!renterId.HasValue || renterId.Value == Guid.Empty)
+        {
+            return Result.Failure<NotificationEventIntent>(Error.Validation("MISSING_RENTER_ID", "renterId không thể để trống."));
+        }
+        var refundKind = payload.GetStringFromAny("refundKind") ?? "FULL_CANCELLATION";
+        var amount = payload.GetDecimalFromAny(0, "amount", "refundAmount");
+        var currency = payload.GetStringFromAny("currency") ?? "VND";
+        var requestedAt = payload.GetStringFromAny("requestedAt");
+        var orderVersion = payload.GetInt64FromAny(1, "orderVersion", "version");
+        var orderCode = payload.GetStringFromAny("orderCode") ?? string.Empty;
+
+        var renderData = new Dictionary<string, object?>
+        {
+            ["rentalOrderId"] = orderId.Value,
+            ["refundId"] = refundId,
+            ["refundRef"] = refundRef,
+            ["rentalItemId"] = itemId,
+            ["renterId"] = renterId,
+            ["refundKind"] = refundKind,
+            ["amount"] = amount,
+            ["currency"] = currency,
+            ["requestedAt"] = requestedAt,
+            ["orderCode"] = orderCode,
+            ["orderVersion"] = orderVersion,
+            ["deepLinkUrl"] = $"/orders/{orderId.Value}"
+        };
+
+        return Result.Success(new NotificationEventIntent(
+            EventType: EventType,
+            OrderId: orderId.Value,
+            ResourceType: "Refund",
+            ResourceId: refundRef,
+            WatermarkScope: null,
+            WatermarkId: null,
+            OrderVersion: 0,
+            IsTerminal: false,
+            TerminalState: null,
+            RenterId: renterId,
+            SupplierId: null,
+            ReturnRequestId: null,
+            RenderData: renderData,
+            FinancialId: refundId,
+            RentalItemId: itemId));
+    }
+}
+
 public sealed class RefundCompletedFinancialHandler : IKafkaEventHandler
 {
     public string EventType => "RefundCompletedFinancial";

@@ -232,6 +232,13 @@ public sealed partial class NotificationTemplateRenderer : INotificationTemplate
                 emailBodyPattern = "<p>Kính gửi Quý khách / Quý Đối tác,</p><p>Thiết bị trong đơn thuê <strong>{displayOrderCode}</strong> đã hoàn tất chu kỳ thuê thành công.</p><p>Cảm ơn bạn đã đồng hành cùng DPRental.</p><p>Chi tiết: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
                 break;
 
+            case "REFUND_REQUESTED":
+                titlePattern = "Yêu cầu hoàn tiền đơn thuê #{displayOrderCode}";
+                bodyPattern = "Yêu cầu hoàn tiền {amount:N0} {currency} cho đơn thuê {displayOrderCode} đã được ghi nhận. DPRental đang xử lý thủ tục chuyển khoản vào tài khoản ngân hàng của Quý khách.";
+                emailSubjectPattern = "[DPRental] Tiếp nhận yêu cầu hoàn tiền đơn thuê #{displayOrderCode}";
+                emailBodyPattern = "<p>Kính gửi Quý khách,</p><p>Yêu cầu hoàn tiền <strong>{amount:N0} {currency}</strong> cho đơn thuê <strong>{displayOrderCode}</strong> đã được ghi nhận.</p><p>DPRental đang xử lý thủ tục chuyển khoản vào tài khoản ngân hàng của Quý khách.</p><p>Mã yêu cầu: {refundRef}.</p><p>Chi tiết đơn thuê: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
+                break;
+
             case "REFUND_COMPLETED":
                 titlePattern = "Hoàn tiền thành công cho đơn thuê #{displayOrderCode}";
                 bodyPattern = "Khoản tiền {amount:N0} {currency} cho đơn thuê {displayOrderCode} đã được hoàn tiền thành công lúc {completedAt:HH:mm dd/MM/yyyy}. Mã hoàn tiền: {refundRef}.";

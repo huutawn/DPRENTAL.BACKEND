@@ -165,10 +165,27 @@ public sealed class NotificationRepository : INotificationRepository
             .ToListAsync(cancellationToken);
     }
 
+    private static readonly string[] ReturnActionNotificationTypes =
+    [
+        "RETURN_REMINDER_RENTER",
+        "RETURN_OVERDUE_SUPPLIER",
+        "RETURN_OVERDUE_RENTER",
+        "RETURN_CONFIRMATION_OVERDUE_SUPPLIER"
+    ];
+
+    private static readonly string[] HandoverActionNotificationTypes =
+    [
+        "HANDOVER_REMINDER_SUPPLIER",
+        "HANDOVER_OVERDUE_SUPPLIER",
+        "HANDOVER_OVERDUE_RENTER"
+    ];
+
     public async Task<IReadOnlyList<Notification>> DismissReturnOverdueActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default)
     {
         var actionableNotifications = await _dbContext.Notifications
-            .Where(n => n.RentalItemId == rentalItemId && n.NotificationType == "RETURN_CONFIRMATION_OVERDUE_SUPPLIER" && n.IsActionable)
+            .Where(n => n.RentalItemId == rentalItemId
+                     && ReturnActionNotificationTypes.Contains(n.NotificationType)
+                     && n.IsActionable)
             .ToListAsync(cancellationToken);
 
         foreach (var notification in actionableNotifications)
@@ -180,11 +197,14 @@ public sealed class NotificationRepository : INotificationRepository
         return actionableNotifications;
     }
 
+    public Task<IReadOnlyList<Notification>> DismissReturnActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default) =>
+        DismissReturnOverdueActionsForRentalItemAsync(rentalItemId, cancellationToken);
+
     public async Task<IReadOnlyList<Notification>> DismissHandoverActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default)
     {
         var actionableNotifications = await _dbContext.Notifications
             .Where(n => n.RentalItemId == rentalItemId
-                     && (n.NotificationType == "HANDOVER_REMINDER_SUPPLIER" || n.NotificationType == "HANDOVER_OVERDUE_SUPPLIER")
+                     && HandoverActionNotificationTypes.Contains(n.NotificationType)
                      && n.IsActionable)
             .ToListAsync(cancellationToken);
 
@@ -221,5 +241,28 @@ public sealed class NotificationRepository : INotificationRepository
                         && n.RentalItemId == rentalItemId
                         && n.NotificationType == notificationType
                         && n.ResourceId == resourceId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetRentalItemIdsForOrderAsync(Guid orderId, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Notifications
+            .Where(n => n.OrderId == orderId && n.RentalItemId != null)
+            .Select(n => n.RentalItemId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<bool> HasItemHandoverCompletedAsync(Guid rentalItemId, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Notifications
+            .AsNoTracking()
+            .AnyAsync(n => n.RentalItemId == rentalItemId && n.NotificationType == "HANDOVER_COMPLETED", cancellationToken);
+    }
+
+    public async Task<bool> HasItemReturnedAsync(Guid rentalItemId, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Notifications
+            .AsNoTracking()
+            .AnyAsync(n => n.RentalItemId == rentalItemId && (n.NotificationType == "RETURN_CONFIRMED" || n.NotificationType == "RENTAL_COMPLETED"), cancellationToken);
     }
 }

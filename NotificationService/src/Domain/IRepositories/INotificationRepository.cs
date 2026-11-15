@@ -15,7 +15,11 @@ public interface INotificationRepository
     Task<IReadOnlyList<Notification>> SuppressPendingActionsForOrderAsync(Guid orderId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Notification>> GetByRentalItemIdAsync(Guid rentalItemId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Notification>> DismissReturnOverdueActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Notification>> DismissReturnActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Notification>> DismissHandoverActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Notification>> SuppressPendingActionsForRentalItemAsync(Guid rentalItemId, CancellationToken cancellationToken = default);
     Task<bool> ExistsReminderNotificationAsync(Guid recipientUserId, Guid rentalItemId, string notificationType, string resourceId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Guid>> GetRentalItemIdsForOrderAsync(Guid orderId, CancellationToken cancellationToken = default);
+    Task<bool> HasItemHandoverCompletedAsync(Guid rentalItemId, CancellationToken cancellationToken = default);
+    Task<bool> HasItemReturnedAsync(Guid rentalItemId, CancellationToken cancellationToken = default);
 }

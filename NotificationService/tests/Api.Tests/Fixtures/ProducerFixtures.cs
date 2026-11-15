@@ -338,6 +338,38 @@ public static class ProducerFixtures
     }
     """;
 
+    public static string RefundRequestedFinancial(
+        Guid messageId,
+        string refundRef,
+        Guid orderId,
+        Guid renterId,
+        Guid? itemId = null,
+        decimal amount = 1500000m,
+        string currency = "VND",
+        string refundKind = "FULL_CANCELLATION",
+        DateTimeOffset? requestedAt = null) => $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RefundRequestedFinancial",
+      "version": 1,
+      "producer": "payment-service",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-04T09:00:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "refundRef": "{{refundRef}}",
+        "rentalOrderId": "{{orderId}}",
+        "rentalItemId": {{(itemId.HasValue ? $"\"{itemId.Value}\"" : "null")}},
+        "renterId": "{{renterId}}",
+        "refundKind": "{{refundKind}}",
+        "amount": {{amount}},
+        "currency": "{{currency}}",
+        "requestedAt": "{{(requestedAt ?? DateTimeOffset.UtcNow):O}}"
+      }
+    }
+    """;
+
     public static string RefundCompletedFinancial(
         Guid messageId,
         Guid refundId,

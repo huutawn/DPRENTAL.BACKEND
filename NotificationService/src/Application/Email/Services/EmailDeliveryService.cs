@@ -244,7 +244,7 @@ public sealed class EmailDeliveryService : IEmailDeliveryService
                 bool isStale = false;
                 string? staleReason = null;
 
-                var isFinancialNotification = notification.NotificationType is "REFUND_COMPLETED" or "PAYOUT_COMPLETED";
+                var isFinancialNotification = notification.NotificationType is "REFUND_REQUESTED" or "REFUND_COMPLETED" or "PAYOUT_COMPLETED";
 
                 if (!isFinancialNotification)
                 {
