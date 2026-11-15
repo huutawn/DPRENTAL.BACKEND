@@ -72,11 +72,15 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         var unit = item.UnitAssignments.Single();
         ReturnTestDataSeeder.SeedReturn(item, item.SupplierId, Now.AddHours(-1), null,
             [new ReturnUnitData(unit.Id, UnitCondition.Damaged, "Damage", [])], Now, item.SupplierId);
+        item.SetDamageLevelsSnapshot(DamageLevelTestData.SnapshotJson);
         await using var db = NewDb();
         db.Add(order);
         await db.SaveChangesAsync();
         return item;
     }
+
+    private static IReadOnlyList<DamageAssessment> Assess(RentalItem item, int level) =>
+        [new DamageAssessment(item.UnitAssignments.Single().AssetId, level)];
 
     private DeductionService Service(RentalServiceDbContext db, IRentalMediaClient media) => new(
         new RentalOrderRepository(db),
@@ -109,8 +113,7 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         {
             var submitted = await Service(db, ReadyMedia(evidenceId, item.SupplierId).Object)
                 .SubmitAsync(item.Id, Caller(item.SupplierId),
-                    new SubmitDeductionRequest(100_000m, "Repair", [evidenceId],
-                        [item.UnitAssignments.Single().AssetId]), "proposal-key");
+                    new SubmitDeductionRequest(Assess(item, 2), "Repair", [evidenceId]), "proposal-key");
             Assert.True(submitted.IsSuccess, submitted.Error.Message);
         }
 
@@ -129,7 +132,7 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
     [Theory]
     [InlineData(0, "Rejected")]
     [InlineData(20_000, "Partial")]
-    [InlineData(100_000, "UpheldInFull")]
+    [InlineData(150_000, "UpheldInFull")]
     public async Task AdminResolution_PostgreSql_CommitsDecisionAndOutboxOnce(
         int finalAmount, string expectedDecision)
     {
@@ -260,7 +263,7 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
     {
         var item = await SeedDamagedAsync();
         Guid mediaId = Guid.NewGuid();
-        var request = new SubmitDeductionRequest(100_000m, "Repair", [mediaId], [item.UnitAssignments.Single().AssetId]);
+        var request = new SubmitDeductionRequest(Assess(item, 2), "Repair", [mediaId]);
         var media = ReadyMedia(mediaId, item.SupplierId);
         await using (var db = NewDb())
         {
@@ -274,13 +277,13 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
             Assert.True(replay.IsSuccess, replay.Error.Message);
             Assert.Equal(Now.AddHours(48), replay.Value.RenterResponseDeadline);
             var conflict = await Service(db, media.Object).SubmitAsync(item.Id, Caller(item.SupplierId),
-                request with { DeductionAmount = 100_001m }, "deduction-key");
+                request with { Assessments = Assess(item, 3) }, "deduction-key");
             Assert.Equal("IDEMPOTENCY_CONFLICT", conflict.Error.Code);
             Assert.Equal(0, await Service(db, media.Object).ProcessDeductionTimeoutsAsync());
         }
         await using var check = NewDb();
         Assert.Single(await check.DeductionProposals.ToListAsync());
-        Assert.Equal(100_000m, (await check.DeductionProposals.SingleAsync()).TotalProposedAmount);
+        Assert.Equal(150_000m, (await check.DeductionProposals.SingleAsync()).TotalProposedAmount);
         Assert.Null((await check.RentalUnitAssignments.SingleAsync()).ProposedDeductionAmount);
     }
 
@@ -308,7 +311,7 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         var item = await SeedDamagedAsync();
         Guid mediaId = Guid.NewGuid();
         var media = ReadyMedia(mediaId, item.SupplierId);
-        var request = new SubmitDeductionRequest(100_000m, "Repair", [mediaId], [item.UnitAssignments.Single().AssetId]);
+        var request = new SubmitDeductionRequest(Assess(item, 2), "Repair", [mediaId]);
 
         async Task<Result<SubmitDeductionResponse>> Send(string key)
         {
@@ -340,7 +343,7 @@ public sealed class DeductionWorkflowTests : IAsyncLifetime
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Remove("X-Api-Key");
         client.DefaultRequestHeaders.Add("Idempotency-Key", "auth-check");
-        var request = new SubmitDeductionRequest(1, "Damage", [Guid.NewGuid()], [item.UnitAssignments.Single().AssetId]);
+        var request = new SubmitDeductionRequest(Assess(item, 2), "Damage", [Guid.NewGuid()]);
         string route = $"/api/v1/rental/items/{item.Id}/deductions";
         using var anonymous = await client.PostAsJsonAsync(route, request);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);

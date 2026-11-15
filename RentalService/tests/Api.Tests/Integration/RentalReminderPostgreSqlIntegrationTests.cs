@@ -792,6 +792,57 @@ public sealed class RentalReminderPostgreSqlIntegrationTests
     }
 
     [Fact]
+    public async Task CompleteHandover_WhenReturnIsMoreThanThreeDaysAway_PersistsReturnScheduleAt8AmVietnam()
+    {
+        // Hồi quy: lịch nhắc trả hẹn 08:00 VN từng mang offset +07:00, Npgsql từ chối ghi
+        // nên cả transaction xử lý kết quả bàn giao bị hủy và đơn kẹt ở AwaitingHandover.
+        await EnsurePostgreSqlAvailableAsync();
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+
+        try
+        {
+            var options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            var handedOverAt = new DateTimeOffset(2026, 11, 11, 3, 32, 0, TimeSpan.Zero); // 10:32 VN
+            Guid orderId = Guid.NewGuid();
+            Guid itemId = Guid.NewGuid();
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+                db.RentalReminderSchedules.Add(RentalReminderSchedule.Create(
+                    orderId, itemId, RentalReminderScheduleType.Handover, 10, handedOverAt.AddHours(-1), handedOverAt.AddDays(-1)));
+                await db.SaveChangesAsync();
+            }
+
+            await using (var db = new RentalServiceDbContext(options))
+            {
+                var scheduleService = new RentalReminderScheduleService(
+                    new RentalReminderScheduleRepository(db),
+                    NullLogger<RentalReminderScheduleService>.Instance);
+
+                await scheduleService.CompleteHandoverAndCreateReturnScheduleAsync(
+                    orderId, itemId, new DateOnly(2026, 11, 15), 10, handedOverAt);
+                await db.SaveChangesAsync();
+            }
+
+            await using (var verifyDb = new RentalServiceDbContext(options))
+            {
+                var returnSchedule = await verifyDb.RentalReminderSchedules
+                    .SingleAsync(s => s.RentalItemId == itemId && s.ScheduleType == RentalReminderScheduleType.Return);
+                Assert.Equal(new DateTimeOffset(2026, 11, 12, 8, 0, 0, TimeSpan.FromHours(7)), returnSchedule.NextTriggerAt);
+
+                var handoverSchedule = await verifyDb.RentalReminderSchedules
+                    .SingleAsync(s => s.RentalItemId == itemId && s.ScheduleType == RentalReminderScheduleType.Handover);
+                Assert.Equal(RentalReminderScheduleStatus.Completed, handoverSchedule.Status);
+            }
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
     public async Task Retry_WhenRollbackFinished_RetryRecordedInNewContext_NextRetryAtPreventsImmediateReclaim()
     {
         await EnsurePostgreSqlAvailableAsync();

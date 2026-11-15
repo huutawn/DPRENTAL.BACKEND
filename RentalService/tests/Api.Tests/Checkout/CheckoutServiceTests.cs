@@ -62,7 +62,7 @@ public sealed class CheckoutServiceTests
         RentalCheckoutOperationRepository operations = new(context);
         OutboxRepository outbox = new(context);
         InventoryCommandProducer inventoryCommands = new(outbox, Options.Create(new KafkaOptions { Enabled = true }), _harness.Clock);
-        CheckoutOrderWriter orderWriter = new(orders, carts, _harness.OrderCodes, context, NullLogger<CheckoutOrderWriter>.Instance);
+        CheckoutOrderWriter orderWriter = new(orders, carts, _harness.OrderCodes, new DamageLevelRepository(context), context, NullLogger<CheckoutOrderWriter>.Instance);
         RentalEventProducer rentalEvents = new(new KafkaOutboxWriter(outbox), Options.Create(new KafkaOptions { Enabled = true }), _harness.Clock);
         CheckoutInvoiceIssuer invoiceIssuer = new(_harness.Payment, orders, operations, context, _harness.Clock, NullLogger<CheckoutInvoiceIssuer>.Instance);
 

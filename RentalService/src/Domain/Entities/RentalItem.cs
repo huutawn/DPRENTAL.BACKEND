@@ -71,6 +71,16 @@ public partial class RentalItem
     [Precision(18, 2)]
     public decimal DepositPerUnitSnapshot { get; private set; }
 
+    /// <summary>Bảng mức hư hại lúc checkout (JSON); đổi bảng sau không ảnh hưởng đơn này.</summary>
+    [Column(TypeName = "jsonb")]
+    public string? DamageLevelsSnapshot { get; private set; }
+
+    public void SetDamageLevelsSnapshot(string snapshotJson)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(snapshotJson);
+        DamageLevelsSnapshot = snapshotJson;
+    }
+
     [Precision(18, 2)]
     public decimal RentalAmount { get; private set; }
 

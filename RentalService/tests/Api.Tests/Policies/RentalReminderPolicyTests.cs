@@ -217,4 +217,22 @@ public sealed class RentalReminderPolicyTests
         Assert.Equal(new DateOnly(2026, 11, 19), result.ReminderDate);
         Assert.Equal("HandoverReminder", result.ReminderType);
     }
+
+    [Fact]
+    public void NextTriggerAt_IsTheSameVietnam8AmInstant_ExpressedInUtc()
+    {
+        // Bàn giao 10:32 VN ngày 11/11, trả máy 15/11: hẹn nhắc 08:00 VN ngày 12/11.
+        var now = new DateTimeOffset(2026, 11, 11, 10, 32, 0, VnOffset);
+
+        DateTimeOffset? rescheduled = RentalReminderPolicy.CalculateInitialTriggerAt(
+            RentalReminderScheduleType.Return, new DateOnly(2026, 11, 15), now);
+        DateTimeOffset? afterSend = RentalReminderPolicy.Evaluate(
+            RentalReminderScheduleType.Return, new DateOnly(2026, 11, 13), null, 0, now).NextTriggerAt;
+
+        // Npgsql chỉ ghi được DateTimeOffset offset 0 vào cột timestamptz.
+        Assert.Equal(TimeSpan.Zero, rescheduled!.Value.Offset);
+        Assert.Equal(new DateTimeOffset(2026, 11, 12, 1, 0, 0, TimeSpan.Zero), rescheduled.Value);
+        Assert.Equal(TimeSpan.Zero, afterSend!.Value.Offset);
+        Assert.Equal(new DateTimeOffset(2026, 11, 12, 8, 0, 0, VnOffset), afterSend.Value);
+    }
 }

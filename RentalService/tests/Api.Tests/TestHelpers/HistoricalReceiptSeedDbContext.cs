@@ -24,6 +24,9 @@ internal sealed class HistoricalReceiptSeedDbContext(DbContextOptions<RentalServ
         modelBuilder.Entity<RentalItem>()
             .Property(i => i.ReturnFee)
             .Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+        modelBuilder.Entity<RentalItem>()
+            .Property(i => i.DamageLevelsSnapshot)
+            .Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
         modelBuilder.Entity<RentalOrder>()
             .Property(o => o.DeliveryFee)
             .Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);

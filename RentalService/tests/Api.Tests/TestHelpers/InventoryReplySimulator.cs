@@ -196,6 +196,7 @@ internal sealed class InventoryReplySimulator(
                 orders,
                 new RentalCartRepository(context),
                 orderCodes?.Invoke(context) ?? _defaultOrderCodes,
+                new DamageLevelRepository(context),
                 NullLogger<CheckoutOrderWriter>.Instance),
             NullLogger<InventoryAllocationResultHandler>.Instance,
             new RentalEventProducer(new KafkaOutboxWriter(outbox), options, clock),

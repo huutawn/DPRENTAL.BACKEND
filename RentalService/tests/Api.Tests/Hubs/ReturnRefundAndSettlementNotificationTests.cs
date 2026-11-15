@@ -196,6 +196,7 @@ public sealed class ReturnRefundAndSettlementNotificationTests
         var unitData = new ReturnUnitData(itemA.UnitAssignments.First().Id, UnitCondition.Damaged, "Trầy xước nặng", [Guid.NewGuid()]);
         ReturnTestDataSeeder.SeedReturn(itemA, supplierA, FixedNow, null, [unitData], FixedNow, supplierA);
 
+        itemA.SetDamageLevelsSnapshot(DamageLevelTestData.SnapshotJson);
         await orders.CreateAsync(order);
         await db.SaveChangesAsync();
 
@@ -210,10 +211,9 @@ public sealed class ReturnRefundAndSettlementNotificationTests
         var caller = OrderTestData.User(supplierA);
 
         var request = new SubmitDeductionRequest(
-            DeductionAmount: 1_000_000m,
+            Assessments: [new DamageAssessment(itemA.UnitAssignments.First().AssetId, 2)],
             DamageDescription: "Trầy xước nặng thân máy",
-            EvidenceMediaIds: [mediaId],
-            AffectedAssetIds: [itemA.UnitAssignments.First().AssetId]);
+            EvidenceMediaIds: [mediaId]);
 
         // Submit deduction proposal -> commits and emits SETTLEMENT_CHANGED
         var result = await deductionService.SubmitAsync(itemA.Id, caller, request, "deduction-submit-1");
