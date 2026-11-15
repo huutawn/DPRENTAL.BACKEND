@@ -25,7 +25,7 @@ public sealed class InventoryAsset
 
     [Column("serial_number")]
     [MaxLength(100)]
-    public string SerialNumber { get; private set; } = string.Empty;
+    public string? SerialNumber { get; private set; }
 
     [Column("manufacture_year")]
     public int? ManufactureYear { get; private set; }
@@ -61,7 +61,7 @@ public sealed class InventoryAsset
         Guid id,
         Guid equipmentListingId,
         string assetCode,
-        string serialNumber,
+        string? serialNumber,
         int? manufactureYear,
         bool acceptingBookings,
         string? suspensionReason,
@@ -81,11 +81,12 @@ public sealed class InventoryAsset
     /// <summary>
     /// Tạo mới một Physical Inventory Asset thuộc về một EquipmentListing.
     /// AssetCode được sinh tự động theo định dạng AST-{AssetId:N} và bất biến.
+    /// Số serial là tùy chọn (nullable); không sinh serial giả từ AssetCode.
     /// </summary>
     public static Result<InventoryAsset> Create(
         Guid id,
         Guid equipmentListingId,
-        string serialNumber,
+        string? serialNumber,
         DateTimeOffset now,
         int? manufactureYear = null)
     {
@@ -99,6 +100,7 @@ public sealed class InventoryAsset
             return Error.Validation("INVALID_EQUIPMENT_LISTING_ID", "Equipment Listing ID không được rỗng.");
         }
 
+        string assetCode = $"AST-{id:N}";
         var validation = ValidatePhysicalDetails(serialNumber, manufactureYear, now);
         if (validation.IsFailure)
         {
@@ -106,7 +108,6 @@ public sealed class InventoryAsset
         }
 
         var (validSerial, validYear) = validation.Value;
-        string assetCode = $"AST-{id:N}";
 
         return new InventoryAsset(
             id,
@@ -121,9 +122,10 @@ public sealed class InventoryAsset
 
     /// <summary>
     /// Cập nhật thông tin vật lý của đơn vị thiết bị (serial number, năm sản xuất).
+    /// Cho phép cập nhật serialNumber về null.
     /// </summary>
     public Result UpdatePhysicalDetails(
-        string serialNumber,
+        string? serialNumber,
         int? manufactureYear,
         DateTimeOffset now)
     {
@@ -141,20 +143,19 @@ public sealed class InventoryAsset
         return Result.Success();
     }
 
-    public static Result<(string SerialNumber, int? ManufactureYear)> ValidatePhysicalDetails(
-        string serialNumber,
+    public static Result<(string? SerialNumber, int? ManufactureYear)> ValidatePhysicalDetails(
+        string? serialNumber,
         int? manufactureYear,
         DateTimeOffset now)
     {
-        if (string.IsNullOrWhiteSpace(serialNumber))
+        string? normalizedSerial = null;
+        if (!string.IsNullOrWhiteSpace(serialNumber))
         {
-            return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial là bắt buộc và không được để trống.");
-        }
-
-        var normalizedSerial = serialNumber.Trim();
-        if (normalizedSerial.Length > 100)
-        {
-            return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial tối đa 100 ký tự.");
+            normalizedSerial = serialNumber.Trim();
+            if (normalizedSerial.Length > 100)
+            {
+                return Error.Validation("INVALID_SERIAL_NUMBER", "Số serial tối đa 100 ký tự.");
+            }
         }
 
         if (manufactureYear.HasValue)

@@ -31,6 +31,11 @@ public sealed class InventoryServiceDbContext : DbContext
     /// </summary>
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
 
+    /// <summary>
+    /// Bảng quản lý vùng giao hàng và phí vận chuyển của kho.
+    /// </summary>
+    public DbSet<WarehouseDeliveryZone> WarehouseDeliveryZones => Set<WarehouseDeliveryZone>();
+
 
     /// <summary>
     /// Bảng quản lý các lượt phân bổ lịch tài sản.
@@ -111,7 +116,7 @@ public sealed class InventoryServiceDbContext : DbContext
                 t.HasCheckConstraint("ck_equipment_listings_thumbnail_media_id", "thumbnail_media_id IS NULL OR thumbnail_media_id <> '00000000-0000-0000-0000-000000000000'::uuid");
                 t.HasCheckConstraint("ck_equipment_listings_schema_version", "schema_version >= 1");
                 t.HasCheckConstraint("ck_equipment_listings_spec_values_object", "jsonb_typeof(spec_values) = 'object'");
-                t.HasCheckConstraint("ck_equipment_listings_daily_rate", "daily_rate >= 1 AND daily_rate <= 999999999999999999 AND trunc(daily_rate) = daily_rate");
+                t.HasCheckConstraint("ck_equipment_listings_daily_rate", "daily_rate >= 0 AND daily_rate <= 999999999999999999 AND trunc(daily_rate) = daily_rate");
                 t.HasCheckConstraint("ck_equipment_listings_weekly_rate", "weekly_rate IS NULL OR (weekly_rate >= 1 AND weekly_rate <= 999999999999999999 AND trunc(weekly_rate) = weekly_rate)");
                 t.HasCheckConstraint("ck_equipment_listings_monthly_rate", "monthly_rate IS NULL OR (monthly_rate >= 1 AND monthly_rate <= 999999999999999999 AND trunc(monthly_rate) = monthly_rate)");
                 t.HasCheckConstraint("ck_equipment_listings_deposit_amount", "deposit_amount >= 0 AND deposit_amount <= 999999999999999999 AND trunc(deposit_amount) = deposit_amount");
@@ -205,6 +210,8 @@ public sealed class InventoryServiceDbContext : DbContext
                 t.HasCheckConstraint("ck_warehouses_province_name", "province_name IS NULL OR (province_name ~ '\\S' AND length(province_name) <= 200)");
                 t.HasCheckConstraint("ck_warehouses_ward_code", "ward_code IS NULL OR (ward_code ~ '\\S' AND length(ward_code) <= 20)");
                 t.HasCheckConstraint("ck_warehouses_ward_name", "ward_name IS NULL OR (ward_name ~ '\\S' AND length(ward_name) <= 200)");
+                t.HasCheckConstraint("ck_warehouses_open_time", "open_time IS NULL OR open_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'");
+                t.HasCheckConstraint("ck_warehouses_close_time", "close_time IS NULL OR close_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'");
             });
 
             b.HasKey(w => w.OwnerUserId);
@@ -242,11 +249,92 @@ public sealed class InventoryServiceDbContext : DbContext
             b.Property(w => w.Longitude)
                 .HasColumnName("longitude");
 
+            b.Property(w => w.IsPickupEnabled)
+                .HasColumnName("is_pickup_enabled")
+                .HasDefaultValue(true)
+                .IsRequired();
+
+            b.Property(w => w.OpenTime)
+                .HasColumnName("open_time")
+                .HasMaxLength(10)
+                .HasDefaultValue("08:00");
+
+            b.Property(w => w.CloseTime)
+                .HasColumnName("close_time")
+                .HasMaxLength(10)
+                .HasDefaultValue("18:00");
+
+            b.Property(w => w.ClosedDays)
+                .HasColumnName("closed_days")
+                .HasColumnType("integer[]")
+                .HasDefaultValueSql("'{}'::integer[]")
+                .IsRequired();
+
             b.Property(w => w.CreatedAt)
                 .HasColumnName("created_at")
                 .IsRequired();
 
             b.Property(w => w.UpdatedAt)
+                .HasColumnName("updated_at")
+                .IsRequired();
+
+            b.HasMany(w => w.DeliveryZones)
+                .WithOne(z => z.Warehouse)
+                .HasForeignKey(z => z.OwnerUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Cấu hình thực thể WarehouseDeliveryZone
+        modelBuilder.Entity<WarehouseDeliveryZone>(b =>
+        {
+            b.ToTable("warehouse_delivery_zones", SchemaName, t =>
+            {
+                t.HasCheckConstraint("ck_warehouse_delivery_zones_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND owner_user_id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                t.HasCheckConstraint("ck_warehouse_delivery_zones_delivery_fee", "delivery_fee_vnd >= 0 AND delivery_fee_vnd <= 999999999999999999 AND trunc(delivery_fee_vnd) = delivery_fee_vnd");
+                t.HasCheckConstraint("ck_warehouse_delivery_zones_return_fee", "return_fee_vnd >= 0 AND return_fee_vnd <= 999999999999999999 AND trunc(return_fee_vnd) = return_fee_vnd");
+                t.HasCheckConstraint("ck_warehouse_delivery_zones_province_code", "province_code ~ '\\S' AND length(province_code) <= 20");
+                t.HasCheckConstraint("ck_warehouse_delivery_zones_ward_code", "ward_code IS NULL OR (ward_code ~ '\\S' AND length(ward_code) <= 20)");
+            });
+
+            b.HasKey(z => z.Id);
+
+            b.HasIndex(z => new { z.OwnerUserId, z.ProvinceCode, z.WardCode })
+                .IsUnique()
+                .HasDatabaseName("ix_warehouse_delivery_zones_owner_province_ward");
+
+            b.Property(z => z.Id)
+                .HasColumnName("id")
+                .ValueGeneratedNever()
+                .IsRequired();
+
+            b.Property(z => z.OwnerUserId)
+                .HasColumnName("owner_user_id")
+                .IsRequired();
+
+            b.Property(z => z.ProvinceCode)
+                .HasColumnName("province_code")
+                .HasMaxLength(20)
+                .IsRequired();
+
+            b.Property(z => z.WardCode)
+                .HasColumnName("ward_code")
+                .HasMaxLength(20);
+
+            b.Property(z => z.DeliveryFeeVnd)
+                .HasColumnName("delivery_fee_vnd")
+                .HasColumnType("numeric(18,0)")
+                .IsRequired();
+
+            b.Property(z => z.ReturnFeeVnd)
+                .HasColumnName("return_fee_vnd")
+                .HasColumnType("numeric(18,0)")
+                .IsRequired();
+
+            b.Property(z => z.CreatedAt)
+                .HasColumnName("created_at")
+                .IsRequired();
+
+            b.Property(z => z.UpdatedAt)
                 .HasColumnName("updated_at")
                 .IsRequired();
         });
@@ -257,7 +345,7 @@ public sealed class InventoryServiceDbContext : DbContext
             {
                 t.HasCheckConstraint("ck_assets_identity", "id <> '00000000-0000-0000-0000-000000000000'::uuid AND equipment_listing_id <> '00000000-0000-0000-0000-000000000000'::uuid");
                 t.HasCheckConstraint("ck_assets_asset_code", "asset_code ~ '^AST-[0-9a-fA-F]{32}$'");
-                t.HasCheckConstraint("ck_assets_serial_number", "length(btrim(serial_number)) > 0 AND length(serial_number) <= 100");
+                t.HasCheckConstraint("ck_assets_serial_number", "serial_number IS NULL OR (length(btrim(serial_number)) > 0 AND length(serial_number) <= 100)");
                 t.HasCheckConstraint("ck_assets_manufacture_year", "manufacture_year IS NULL OR manufacture_year >= 1900");
             });
 
@@ -274,7 +362,7 @@ public sealed class InventoryServiceDbContext : DbContext
             b.Property(a => a.SerialNumber)
                 .HasColumnName("serial_number")
                 .HasMaxLength(100)
-                .IsRequired();
+                .IsRequired(false);
             b.HasMany(a => a.Allocations)
                 .WithOne(al => al.Asset)
                 .HasForeignKey(al => al.AssetId)

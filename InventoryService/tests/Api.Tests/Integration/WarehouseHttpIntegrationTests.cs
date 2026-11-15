@@ -221,4 +221,87 @@ public sealed class WarehouseHttpIntegrationTests
             await fixture.DisposeAsync();
         }
     }
+
+    [Fact]
+    public async Task Warehouse_DeliveryPolicy_HttpLifecycle_GetAndPut_BothRoutesWork()
+    {
+        var fixture = new PostgresFixture();
+        await fixture.InitializeAsync();
+
+        try
+        {
+            var (factory, client) = CreateClient(fixture);
+            await using var _ = factory;
+            using var __ = client;
+
+            var userA = Guid.NewGuid();
+            var userB = Guid.NewGuid();
+
+            var tokenA = factory.CreateHumanToken(userA, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+            var tokenB = factory.CreateHumanToken(userB, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+
+            // 1. Setup warehouse address for user A
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenA);
+            var setupWh = await client.PutAsJsonAsync("api/v1/inventory/warehouse/me",
+                new UpdateWarehouseRequest("123 Le Loi", "79", "25747", 10.7, 106.7));
+            Assert.Equal(HttpStatusCode.OK, setupWh.StatusCode);
+
+            // 2. Put delivery policy via plural route /warehouses/me/delivery-policy
+            var policyReq = new UpdateWarehouseDeliveryPolicyRequest(
+                true,
+                new OperatingHoursDto("08:30", "17:30", [0]),
+                [
+                    new DeliveryZoneDto("79", "25747", 150000m, 120000m),
+                    new DeliveryZoneDto("01", null, 0m, 0m)
+                ]);
+
+            var putPolicyPlural = await client.PutAsJsonAsync("api/v1/inventory/warehouses/me/delivery-policy", policyReq);
+            Assert.Equal(HttpStatusCode.OK, putPolicyPlural.StatusCode);
+            var policyResp = await putPolicyPlural.Content.ReadFromJsonAsync<WarehouseDeliveryPolicyResponse>();
+            Assert.NotNull(policyResp);
+            Assert.Equal(userA, policyResp.SupplierId);
+            Assert.True(policyResp.IsPickupEnabled);
+            Assert.NotNull(policyResp.WarehouseAddress);
+            Assert.Equal("123 Le Loi", policyResp.WarehouseAddress.AddressDetail);
+            Assert.Equal("79", policyResp.WarehouseAddress.ProvinceCode);
+            Assert.Equal("25747", policyResp.WarehouseAddress.WardCode);
+            Assert.Equal("08:30", policyResp.OperatingHours.OpenTime);
+            Assert.Equal("17:30", policyResp.OperatingHours.CloseTime);
+            Assert.Equal([0], policyResp.OperatingHours.ClosedDays);
+            Assert.Equal(2, policyResp.DeliveryZones.Count);
+
+            // 3. User B GET policy via plural route /warehouses/{supplierId}/delivery-policy
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenB);
+            var getPlural = await client.GetAsync($"api/v1/inventory/warehouses/{userA}/delivery-policy");
+            Assert.Equal(HttpStatusCode.OK, getPlural.StatusCode);
+            var gotPlural = await getPlural.Content.ReadFromJsonAsync<WarehouseDeliveryPolicyResponse>();
+            Assert.NotNull(gotPlural);
+            Assert.Equal(userA, gotPlural.SupplierId);
+            Assert.Equal(2, gotPlural.DeliveryZones.Count);
+
+            // 4. User B GET policy via singular route /warehouse/{supplierId}/delivery-policy
+            var getSingular = await client.GetAsync($"api/v1/inventory/warehouse/{userA}/delivery-policy");
+            Assert.Equal(HttpStatusCode.OK, getSingular.StatusCode);
+            var gotSingular = await getSingular.Content.ReadFromJsonAsync<WarehouseDeliveryPolicyResponse>();
+            Assert.NotNull(gotSingular);
+            Assert.Equal(userA, gotSingular.SupplierId);
+
+            // 5. User A update policy via singular alias route /warehouse/me/delivery-policy
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenA);
+            var updateSingularReq = new UpdateWarehouseDeliveryPolicyRequest(
+                false,
+                new OperatingHoursDto("09:00", "18:00", []),
+                []);
+            var putSingular = await client.PutAsJsonAsync("api/v1/inventory/warehouse/me/delivery-policy", updateSingularReq);
+            Assert.Equal(HttpStatusCode.OK, putSingular.StatusCode);
+            var updatedResp = await putSingular.Content.ReadFromJsonAsync<WarehouseDeliveryPolicyResponse>();
+            Assert.NotNull(updatedResp);
+            Assert.False(updatedResp.IsPickupEnabled);
+            Assert.Empty(updatedResp.DeliveryZones);
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
+    }
 }

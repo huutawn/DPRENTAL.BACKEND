@@ -59,7 +59,23 @@ public sealed class Warehouse
     [Column("xmin")]
     public uint Version { get; set; }
 
+    [Column("is_pickup_enabled")]
+    public bool IsPickupEnabled { get; private set; } = true;
+
+    [Column("open_time")]
+    [MaxLength(10)]
+    public string? OpenTime { get; private set; } = "08:00";
+
+    [Column("close_time")]
+    [MaxLength(10)]
+    public string? CloseTime { get; private set; } = "18:00";
+
+    [Column("closed_days")]
+    public int[] ClosedDays { get; private set; } = [];
+
     public ICollection<EquipmentListing> Listings { get; private set; } = new List<EquipmentListing>();
+
+    public ICollection<WarehouseDeliveryZone> DeliveryZones { get; private set; } = new List<WarehouseDeliveryZone>();
 
     public bool HasValidAddress =>
         !string.IsNullOrWhiteSpace(AddressDetail) &&
@@ -227,6 +243,67 @@ public sealed class Warehouse
         {
             return Error.Validation("INVALID_COORDINATES", $"Kinh độ (longitude) phải nằm trong khoảng [{MinLongitude}, {MaxLongitude}].");
         }
+
+        return Result.Success();
+    }
+
+    public Result SetDeliveryPolicy(
+        bool isPickupEnabled,
+        string? openTime,
+        string? closeTime,
+        int[]? closedDays,
+        DateTimeOffset now)
+    {
+        if (isPickupEnabled && !HasValidAddress)
+        {
+            return Error.Validation("PICKUP_REQUIRES_VALID_ADDRESS", "Cần cấu hình địa chỉ kho hợp lệ trước khi bật nhận tại kho.");
+        }
+
+        string normalizedOpen = "08:00";
+        string normalizedClose = "18:00";
+
+        if (!string.IsNullOrWhiteSpace(openTime) || !string.IsNullOrWhiteSpace(closeTime))
+        {
+            if (string.IsNullOrWhiteSpace(openTime) || !TimeOnly.TryParseExact(openTime.Trim(), "HH:mm", out var parsedOpen))
+            {
+                return Error.Validation("INVALID_OPEN_TIME", "Giờ mở cửa phải theo định dạng HH:mm (ví dụ 08:00).");
+            }
+
+            if (string.IsNullOrWhiteSpace(closeTime) || !TimeOnly.TryParseExact(closeTime.Trim(), "HH:mm", out var parsedClose))
+            {
+                return Error.Validation("INVALID_CLOSE_TIME", "Giờ đóng cửa phải theo định dạng HH:mm (ví dụ 18:00).");
+            }
+
+            if (parsedOpen >= parsedClose)
+            {
+                return Error.Validation("INVALID_OPERATING_HOURS", "Giờ mở cửa phải trước giờ đóng cửa.");
+            }
+
+            normalizedOpen = openTime.Trim();
+            normalizedClose = closeTime.Trim();
+        }
+
+        int[] normalizedClosedDays = [];
+        if (closedDays is not null && closedDays.Length > 0)
+        {
+            if (closedDays.Any(d => d < 0 || d > 6))
+            {
+                return Error.Validation("INVALID_CLOSED_DAYS", "Ngày nghỉ phải nằm trong khoảng 0 đến 6 (0: Chủ nhật, 6: Thứ bảy).");
+            }
+
+            if (closedDays.Distinct().Count() != closedDays.Length)
+            {
+                return Error.Validation("INVALID_CLOSED_DAYS", "Ngày nghỉ không được trùng lặp.");
+            }
+
+            normalizedClosedDays = closedDays.OrderBy(d => d).ToArray();
+        }
+
+        IsPickupEnabled = isPickupEnabled;
+        OpenTime = normalizedOpen;
+        CloseTime = normalizedClose;
+        ClosedDays = normalizedClosedDays;
+        UpdatedAt = now;
 
         return Result.Success();
     }

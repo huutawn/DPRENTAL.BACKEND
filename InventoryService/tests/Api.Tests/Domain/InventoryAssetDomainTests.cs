@@ -123,10 +123,25 @@ public sealed class InventoryAssetDomainTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void Create_NullOrWhitespaceSerialNumber_FailsValidation(string? serial)
+    public void Create_NullOrWhitespaceSerialNumber_SucceedsWithNullSerial(string? serial)
     {
-        var result = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), serial!, FixedNow);
-        Assert.True(result.IsFailure);
-        Assert.Equal("INVALID_SERIAL_NUMBER", result.Error.Code);
+        var result = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), serial, FixedNow);
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Value.SerialNumber);
+        Assert.StartsWith("AST-", result.Value.AssetCode);
+    }
+
+    [Fact]
+    public void UpdatePhysicalDetails_NullSerialNumber_UpdatesToNull()
+    {
+        var asset = InventoryAsset.Create(Guid.NewGuid(), Guid.NewGuid(), "SN-12345", FixedNow).Value;
+        var updateTime = FixedNow.AddHours(2);
+
+        var updateResult = asset.UpdatePhysicalDetails(null, null, updateTime);
+
+        Assert.True(updateResult.IsSuccess);
+        Assert.Null(asset.SerialNumber);
+        Assert.Null(asset.ManufactureYear);
+        Assert.Equal(updateTime, asset.UpdatedAt);
     }
 }

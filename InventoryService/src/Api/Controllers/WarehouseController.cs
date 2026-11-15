@@ -32,6 +32,7 @@ public sealed class WarehouseController : ControllerBase
     /// Đọc thông tin kho của bên cho thuê hiện tại (current user).
     /// </summary>
     [HttpGet("me")]
+    [HttpGet("/api/v1/inventory/warehouses/me")]
     [ProducesResponseType(typeof(WarehouseResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
@@ -52,6 +53,7 @@ public sealed class WarehouseController : ControllerBase
     /// Cập nhật nguyên tử, hỗ trợ kiểm tra xung đột ghi qua expectedVersion.
     /// </summary>
     [HttpPut("me")]
+    [HttpPut("/api/v1/inventory/warehouses/me")]
     [ProducesResponseType(typeof(WarehouseResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
@@ -62,6 +64,52 @@ public sealed class WarehouseController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _warehouseService.UpdateMyWarehouseAsync(request, _callerContext, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>
+    /// Đọc chính sách giao nhận của kho thuộc nhà cung cấp (SupplierId).
+    /// </summary>
+    [HttpGet("{supplierId:guid}/delivery-policy")]
+    [HttpGet("/api/v1/inventory/warehouses/{supplierId:guid}/delivery-policy")]
+    [ProducesResponseType(typeof(WarehouseDeliveryPolicyResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetDeliveryPolicy(
+        Guid supplierId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _warehouseService.GetDeliveryPolicyAsync(supplierId, _callerContext, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>
+    /// Cập nhật chính sách giao nhận (nhận tại kho, giờ mở/đóng cửa, ngày nghỉ, vùng và phí giao/thu hồi) cho kho của nhà cung cấp hiện tại.
+    /// </summary>
+    [HttpPut("me/delivery-policy")]
+    [HttpPut("/api/v1/inventory/warehouses/me/delivery-policy")]
+    [ProducesResponseType(typeof(WarehouseDeliveryPolicyResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> UpdateDeliveryPolicy(
+        [FromBody] UpdateWarehouseDeliveryPolicyRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _warehouseService.UpdateDeliveryPolicyAsync(request, _callerContext, cancellationToken);
         if (result.IsFailure)
         {
             return this.ToProblem(result.Error);

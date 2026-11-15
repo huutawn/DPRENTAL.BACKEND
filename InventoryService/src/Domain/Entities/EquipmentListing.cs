@@ -192,7 +192,7 @@ public sealed class EquipmentListing
             return yearValidation.Error;
         }
 
-        var rateValidation = ValidateRateValues(dailyRate, weeklyRate, monthlyRate, currency);
+        var rateValidation = ValidateRateValues(dailyRate, weeklyRate, monthlyRate, currency, allowZero: true);
         if (rateValidation.IsFailure)
         {
             return rateValidation.Error;
@@ -497,11 +497,25 @@ public sealed class EquipmentListing
         decimal dailyRate,
         decimal? weeklyRate,
         decimal? monthlyRate,
-        string currency)
+        string currency,
+        bool allowZero = false)
     {
         if (currency != DefaultCurrency)
         {
             return Error.Validation("INVALID_CURRENCY", $"Đơn vị tiền tệ bắt buộc phải là '{DefaultCurrency}'.");
+        }
+
+        if (allowZero && dailyRate == 0m)
+        {
+            if (weeklyRate.HasValue && weeklyRate.Value != 0m)
+            {
+                return Error.Validation("INVALID_WEEKLY_RATE", "Giá tuần chỉ được cấu hình khi đã có giá ngày.");
+            }
+            if (monthlyRate.HasValue && monthlyRate.Value != 0m)
+            {
+                return Error.Validation("INVALID_MONTHLY_RATE", "Giá tháng chỉ được cấu hình khi đã có giá ngày.");
+            }
+            return Result.Success();
         }
 
         if (decimal.Truncate(dailyRate) != dailyRate || dailyRate < MinRate || dailyRate > MaxRate)

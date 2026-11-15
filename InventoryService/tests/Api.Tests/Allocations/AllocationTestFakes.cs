@@ -169,6 +169,7 @@ internal sealed class FakeAssetRepository : IInventoryAssetRepository
     public Task<bool> ExistsSerialInListingAsync(Guid listingId, string serialNumber, Guid? excludeAssetId = null, CancellationToken cancellationToken = default) =>
         Task.FromResult(Store.Values.Any(a => a.EquipmentListingId == listingId &&
             (!excludeAssetId.HasValue || a.Id != excludeAssetId.Value) &&
+            a.SerialNumber != null &&
             string.Equals(a.SerialNumber.Trim(), serialNumber.Trim(), StringComparison.OrdinalIgnoreCase)));
     public void Update(InventoryAsset asset) => Store[asset.Id] = asset;
 }

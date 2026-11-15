@@ -26,11 +26,16 @@ public sealed record RentalRateDto(
             return Error.Validation("DAILY_RATE_REQUIRED", "Giá thuê theo ngày (dailyRate) là bắt buộc.");
         }
 
+        if (DailyRate.Value < EquipmentListing.MinRate)
+        {
+            return Error.Validation("INVALID_DAILY_RATE", $"Giá thuê theo ngày phải là số nguyên từ {EquipmentListing.MinRate} đến {EquipmentListing.MaxRate}.");
+        }
+
         if (string.IsNullOrWhiteSpace(Currency))
         {
             return Error.Validation("CURRENCY_REQUIRED", "Đơn vị tiền tệ (currency) là bắt buộc.");
         }
 
-        return EquipmentListing.ValidateRateValues(DailyRate.Value, WeeklyRate, MonthlyRate, Currency);
+        return EquipmentListing.ValidateRateValues(DailyRate.Value, WeeklyRate, MonthlyRate, Currency, allowZero: false);
     }
 }

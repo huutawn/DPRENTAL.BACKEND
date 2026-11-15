@@ -148,7 +148,7 @@ public sealed partial class InventoryAssetRepository : IInventoryAssetRepository
 #pragma warning disable CA1304 // EF Core LINQ translation
 #pragma warning disable CA1311 // EF Core LINQ translation
         return await query.AnyAsync(
-            a => a.SerialNumber.Trim().ToLower() == normalized,
+            a => a.SerialNumber != null && a.SerialNumber.Trim().ToLower() == normalized,
             cancellationToken);
 #pragma warning restore CA1311
 #pragma warning restore CA1304

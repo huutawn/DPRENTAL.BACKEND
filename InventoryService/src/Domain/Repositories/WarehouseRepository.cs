@@ -25,6 +25,7 @@ public sealed class WarehouseRepository : IWarehouseRepository
         }
 
         return await _context.Warehouses
+            .Include(w => w.DeliveryZones)
             .FirstOrDefaultAsync(w => w.OwnerUserId == ownerUserId, cancellationToken);
     }
 

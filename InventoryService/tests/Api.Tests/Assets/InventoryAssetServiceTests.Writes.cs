@@ -95,6 +95,32 @@ public sealed partial class InventoryAssetServiceTests
     }
 
     [Fact]
+    public async Task PatchAssetAsync_NullSerialNumber_UpdatesAssetWithNullSerial()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = new TestCaller(ownerId);
+
+        var asset = CreateAssetWithRate(
+            ownerUserId: ownerId,
+            serialNumber: "SN-ORIG",
+            manufactureYear: 2022);
+        _repo.Add(asset);
+
+        var patch = new PatchInventoryAssetRequest
+        {
+            IsSerialNumberSpecified = true,
+            SerialNumber = null
+        };
+
+        var result = await service.PatchAssetAsync(asset.Id, patch, caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Value.SerialNumber);
+        Assert.Null(_repo.Store[asset.Id].SerialNumber);
+    }
+
+    [Fact]
     public async Task ToggleAcceptingBookingsAsync_EnableAndDisable_UpdatesFlagAndOutbox()
     {
         var service = CreateService();

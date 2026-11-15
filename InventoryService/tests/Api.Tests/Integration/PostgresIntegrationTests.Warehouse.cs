@@ -69,9 +69,13 @@ public sealed class PostgresWarehouseIntegrationTests
                     "SELECT to_regclass('inventory.warehouses') IS NOT NULL AS \"Value\"").SingleAsync();
                 Assert.True(tableExists);
 
-                var backfilled = await db.Warehouses.FirstOrDefaultAsync(w => w.OwnerUserId == ownerId);
-                Assert.NotNull(backfilled);
-                Assert.False(backfilled.HasValidAddress);
+                var backfilledCount = await db.Database.SqlQueryRaw<int>(
+                    "SELECT count(*)::int AS \"Value\" FROM inventory.warehouses WHERE owner_user_id = {0}", ownerId).SingleAsync();
+                Assert.Equal(1, backfilledCount);
+
+                var hasAddress = await db.Database.SqlQueryRaw<bool>(
+                    "SELECT address_detail IS NOT NULL AS \"Value\" FROM inventory.warehouses WHERE owner_user_id = {0}", ownerId).SingleAsync();
+                Assert.False(hasAddress);
 
                 // Kiểm tra ràng buộc khóa ngoại tồn tại
                 var hasFk = await db.Database.SqlQueryRaw<bool>("""
@@ -383,6 +387,62 @@ public sealed class PostgresWarehouseIntegrationTests
 
             Assert.Equal(1, successCount);
             Assert.Equal(1, conflictCount);
+        }
+        finally
+        {
+            await fixture.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task PostgreSQL_WarehouseDeliveryZones_MigrationAndPersistence_WorksCorrectly()
+    {
+        var fixture = new PostgresFixture();
+        await fixture.InitializeAsync();
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryServiceDbContext>()
+                .UseNpgsql(fixture.ConnectionString, o => o.MigrationsHistoryTable(InventoryServiceDbContext.MigrationsHistoryTableName, InventoryServiceDbContext.SchemaName))
+                .Options;
+
+            var ownerId = Guid.NewGuid();
+            var now = DateTimeOffset.UtcNow;
+
+            await using (var db = new InventoryServiceDbContext(options))
+            {
+                var tableExists = await db.Database.SqlQueryRaw<bool>(
+                    "SELECT to_regclass('inventory.warehouse_delivery_zones') IS NOT NULL AS \"Value\"").SingleAsync();
+                Assert.True(tableExists);
+
+                // Create warehouse
+                var warehouse = Warehouse.CreateWithAddress(
+                    ownerId, "123 Le Loi", "79", "Thành phố Hồ Chí Minh", "25747", "Phường Thủ Dầu Một", 10.7, 106.7, now).Value;
+                warehouse.SetDeliveryPolicy(true, "08:00", "18:00", [0], now);
+
+                var zone = WarehouseDeliveryZone.Create(ownerId, "79", "25747", 50000m, 50000m, now).Value;
+                warehouse.DeliveryZones.Add(zone);
+
+                db.Warehouses.Add(warehouse);
+                await db.SaveChangesAsync();
+            }
+
+            // Verify persistence
+            await using (var db = new InventoryServiceDbContext(options))
+            {
+                var loaded = await db.Warehouses.Include(w => w.DeliveryZones).SingleAsync(w => w.OwnerUserId == ownerId);
+                Assert.True(loaded.IsPickupEnabled);
+                Assert.Equal("08:00", loaded.OpenTime);
+                Assert.Equal("18:00", loaded.CloseTime);
+                Assert.Equal([0], loaded.ClosedDays);
+                Assert.Single(loaded.DeliveryZones);
+                Assert.Equal(50000m, loaded.DeliveryZones.First().DeliveryFeeVnd);
+
+                // Test unique constraint: duplicate (OwnerUserId, ProvinceCode, WardCode) fails
+                var duplicateZone = WarehouseDeliveryZone.Create(ownerId, "79", "25747", 60000m, 60000m, now).Value;
+                db.WarehouseDeliveryZones.Add(duplicateZone);
+                await Assert.ThrowsAnyAsync<Exception>(() => db.SaveChangesAsync());
+            }
         }
         finally
         {

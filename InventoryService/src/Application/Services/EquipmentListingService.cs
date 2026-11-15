@@ -6,6 +6,7 @@ using Dprental.InventoryService.Application.DTOs.Pagination;
 using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Mapping;
 using Dprental.InventoryService.Application.Options;
+using Dprental.InventoryService.Application.Policies;
 using Dprental.InventoryService.Application.Security;
 using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Common;
@@ -31,6 +32,7 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
     private readonly TimeProvider _timeProvider;
     private readonly IInventorySearchIndexService? _searchIndexService;
     private readonly ILogger<EquipmentListingService>? _logger;
+    private readonly IWarehouseRepository? _warehouseRepository;
     private readonly Dprental.InventoryService.Application.Caching.IInventoryReadCache _cache;
     private readonly Dprental.InventoryService.Application.Caching.InventoryCacheOptions _cacheOptions;
 
@@ -43,8 +45,9 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         IOptions<MediaServiceOptions> mediaOptions,
         TimeProvider? timeProvider = null,
         IInventorySearchIndexService? searchIndexService = null,
-        ILogger<EquipmentListingService>? logger = null)
-        : this(listingRepository, assetRepository, writeTransaction, catalogClient, mediaService, mediaOptions, null, null, timeProvider, searchIndexService, logger)
+        ILogger<EquipmentListingService>? logger = null,
+        IWarehouseRepository? warehouseRepository = null)
+        : this(listingRepository, assetRepository, writeTransaction, catalogClient, mediaService, mediaOptions, null, null, timeProvider, searchIndexService, logger, warehouseRepository)
     {
     }
 
@@ -60,7 +63,8 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         IOptions<Dprental.InventoryService.Application.Caching.InventoryCacheOptions>? cacheOptions = null,
         TimeProvider? timeProvider = null,
         IInventorySearchIndexService? searchIndexService = null,
-        ILogger<EquipmentListingService>? logger = null)
+        ILogger<EquipmentListingService>? logger = null,
+        IWarehouseRepository? warehouseRepository = null)
     {
         _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _assetRepository = assetRepository ?? throw new ArgumentNullException(nameof(assetRepository));
@@ -74,6 +78,7 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         _timeProvider = timeProvider ?? TimeProvider.System;
         _searchIndexService = searchIndexService;
         _logger = logger;
+        _warehouseRepository = warehouseRepository;
     }
 
     /// <inheritdoc />
@@ -114,7 +119,10 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
                 }
 
                 int totalQuantity = await _listingRepository.GetTotalQuantityAsync(id, ct);
-                var response = EquipmentListingMapper.ToResponse(listing, totalQuantity, _mediaOptions.PublicGatewayUrl);
+                var warehouse = _warehouseRepository is not null ? await _warehouseRepository.GetByOwnerUserIdAsync(listing.OwnerUserId, ct) : null;
+                bool hasWarehouse = warehouse is not null && warehouse.HasValidAddress;
+                var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(listing, hasWarehouse, totalQuantity > 0);
+                var response = EquipmentListingMapper.ToResponse(listing, totalQuantity, _mediaOptions.PublicGatewayUrl, missingRequirements);
                 var ttl = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.MetadataTtlSeconds > 0 ? _cacheOptions.MetadataTtlSeconds : 120);
                 return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<EquipmentListingResponse>(response, ttl));
             },
@@ -267,8 +275,15 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
                 var searchResult = await _listingRepository.SearchOwnerAsync(criteria, ct);
                 int totalPages = searchResult.TotalCount == 0 ? 0 : (int)Math.Ceiling((double)searchResult.TotalCount / pageSize);
 
+                var warehouse = _warehouseRepository is not null ? await _warehouseRepository.GetByOwnerUserIdAsync(ownerUserId, ct) : null;
+                bool hasWarehouse = warehouse is not null && warehouse.HasValidAddress;
+
                 var items = searchResult.Items
-                    .Select(item => EquipmentListingMapper.ToResponse(item.Listing, item.TotalQuantity, _mediaOptions.PublicGatewayUrl))
+                    .Select(item =>
+                    {
+                        var missing = EquipmentListingPublishPolicy.GetMissingRequirements(item.Listing, hasWarehouse, item.TotalQuantity > 0);
+                        return EquipmentListingMapper.ToResponse(item.Listing, item.TotalQuantity, _mediaOptions.PublicGatewayUrl, missing);
+                    })
                     .ToList();
 
                 var paged = new PagedResponse<EquipmentListingResponse>(items, page, pageSize, searchResult.TotalCount, totalPages);

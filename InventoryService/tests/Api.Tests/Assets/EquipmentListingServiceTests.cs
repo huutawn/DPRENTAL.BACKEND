@@ -144,6 +144,7 @@ public sealed class EquipmentListingServiceTests
         public Task<bool> ExistsSerialInListingAsync(Guid listingId, string serialNumber, Guid? excludeAssetId = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(Store.Values.Any(a => a.EquipmentListingId == listingId &&
                 (!excludeAssetId.HasValue || a.Id != excludeAssetId.Value) &&
+                a.SerialNumber != null &&
                 string.Equals(a.SerialNumber.Trim(), serialNumber.Trim(), StringComparison.OrdinalIgnoreCase)));
         public void Update(InventoryAsset asset) => Store[asset.Id] = asset;
     }
@@ -272,7 +273,8 @@ public sealed class EquipmentListingServiceTests
             _catalogClient,
             _mediaService,
             mediaOptions,
-            _clock);
+            _clock,
+            warehouseRepository: _writeTx.Warehouses);
     }
     private static TestCaller CreateHumanCaller(Guid userId, params string[] permissions) =>
         new()
@@ -329,18 +331,15 @@ public sealed class EquipmentListingServiceTests
         Assert.Equal(2024, assets[0].ManufactureYear);
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public async Task CreateListingAsync_InvalidSerialNumber_ReturnsValidationError(string? invalidSerial)
+    [Fact]
+    public async Task CreateListingAsync_SerialNumberTooLong_ReturnsValidationError()
     {
         var service = CreateService();
         var caller = CreateHumanCaller(Guid.NewGuid(), "inventory.asset.manage");
 
         using var specDoc = JsonDocument.Parse("{}");
         var request = new CreateEquipmentListingRequest(
-            Guid.NewGuid(), Guid.NewGuid(), "Name", "Model", invalidSerial!, specDoc.RootElement,
+            Guid.NewGuid(), Guid.NewGuid(), "Name", "Model", new string('A', 101), specDoc.RootElement,
             RentalRate: new RentalRateDto(100_000m, null, null, "VND"),
             ManufactureYear: 2024);
         var result = await service.CreateListingAsync(request, caller);
@@ -368,6 +367,166 @@ public sealed class EquipmentListingServiceTests
         Assert.Equal("FX3-TEST-00002", result.Value.SerialNumber);
         Assert.Equal(2023, result.Value.ManufactureYear);
         Assert.Equal(1, _assetRepo.Store.Values.Count(a => a.EquipmentListingId == listingId));
+    }
+
+    [Fact]
+    public async Task AddAssetAsync_EmptySerialNumber_CreatesWithNullSerialNumber()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+
+        var listingId = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2023).Value;
+        _listingRepo.Add(listing);
+
+        var addRequest = new AddListingAssetRequest(null);
+        var result = await service.AddAssetAsync(listingId, addRequest, caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Value.SerialNumber);
+        Assert.StartsWith("AST-", result.Value.AssetCode);
+        Assert.Equal(1, _assetRepo.Store.Values.Count(a => a.EquipmentListingId == listingId));
+    }
+
+    [Fact]
+    public async Task BatchAddAssetsAsync_MultipleAssets_AddsAllAssetsSuccessfully()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+
+        var listingId = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2023).Value;
+        _listingRepo.Add(listing);
+
+        var batchRequest = new BatchAddListingAssetsRequest([
+            new AddListingAssetRequest("SN-BATCH-001"),
+            new AddListingAssetRequest(null),
+            new AddListingAssetRequest("SN-BATCH-002")
+        ]);
+
+        var result = await service.BatchAddAssetsAsync(listingId, batchRequest, caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(3, result.Value.Count);
+        Assert.Equal("SN-BATCH-001", result.Value[0].SerialNumber);
+        Assert.Null(result.Value[1].SerialNumber);
+        Assert.Equal("SN-BATCH-002", result.Value[2].SerialNumber);
+        Assert.Equal(3, _assetRepo.Store.Values.Count(a => a.EquipmentListingId == listingId));
+    }
+
+    [Fact]
+    public async Task BatchAddAssetsAsync_NullItemInList_FailsValidation()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+
+        var listingId = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2023).Value;
+        _listingRepo.Add(listing);
+
+        var batchRequest = new BatchAddListingAssetsRequest([
+            new AddListingAssetRequest("SN-BATCH-001"),
+            null!,
+            new AddListingAssetRequest("SN-BATCH-002")
+        ]);
+
+        var result = await service.BatchAddAssetsAsync(listingId, batchRequest, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("INVALID_ASSET_ITEM", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task BatchAddAssetsAsync_IntraBatchDuplicateSerials_FailsAndRollsBack()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+
+        var listingId = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2023).Value;
+        _listingRepo.Add(listing);
+
+        var batchRequest = new BatchAddListingAssetsRequest([
+            new AddListingAssetRequest("SN-BATCH-DUP"),
+            new AddListingAssetRequest("SN-BATCH-OTHER"),
+            new AddListingAssetRequest("SN-BATCH-DUP")
+        ]);
+
+        var result = await service.BatchAddAssetsAsync(listingId, batchRequest, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("SERIAL_ALREADY_EXISTS", result.Error.Code);
+        Assert.DoesNotContain(_assetRepo.Store.Values, a => a.EquipmentListingId == listingId);
+    }
+
+    [Fact]
+    public async Task CreateListingAsync_DraftWithoutPhotosPricingOrUnits_Succeeds()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+
+        using var specDoc = JsonDocument.Parse("{}");
+        var request = new CreateEquipmentListingRequest(
+            EquipmentTypeId: Guid.NewGuid(),
+            BrandId: Guid.NewGuid(),
+            Name: "Máy quay Sony FX3 bản nháp",
+            Model: "Sony FX3",
+            SerialNumber: null,
+            SpecValues: specDoc.RootElement.Clone(),
+            RentalRate: null,
+            ManufactureYear: 2024,
+            CreateInitialUnit: false);
+
+        var result = await service.CreateListingAsync(request, caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Draft", result.Value.Status);
+        Assert.Equal(0, result.Value.TotalQuantity);
+        Assert.NotNull(result.Value.MissingRequirements);
+        Assert.Contains("Hình ảnh thiết bị (tối thiểu 1 ảnh)", result.Value.MissingRequirements);
+        Assert.Contains("Giá thuê theo ngày", result.Value.MissingRequirements);
+        Assert.Contains("Ít nhất một máy vật lý sẵn sàng nhận lịch (AcceptingBookings)", result.Value.MissingRequirements);
+    }
+
+    [Fact]
+    public async Task PatchListingAsync_ToActiveMissingPhotosOrRate_FailsListingNotEligibleForPublish()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId);
+
+        _writeTx.Warehouses.Add(Warehouse.CreateWithAddress(ownerId, "123 Le Loi", "01", "Hà Nội", "00004", "Ba Đình", 21.0, 105.8, FixedNow).Value);
+
+        var listingId = Guid.NewGuid();
+        // Listing created with 0 dailyRate and no media
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 0m, null, null, "VND", FixedNow, 2024).Value;
+        _listingRepo.Add(listing);
+
+        // Add 1 asset accepting bookings
+        var asset = InventoryAsset.Create(Guid.NewGuid(), listingId, "SN-001", FixedNow, 2024).Value;
+        _assetRepo.Add(asset);
+        listing.Assets.Add(asset);
+
+        var patch = new PatchEquipmentListingRequest
+        {
+            IsStatusSpecified = true,
+            Status = EquipmentListingStatus.Active
+        };
+
+        var result = await service.PatchListingAsync(listingId, patch, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("LISTING_NOT_ELIGIBLE_FOR_PUBLISH", result.Error.Code);
     }
 
     [Fact]
