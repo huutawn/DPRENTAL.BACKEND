@@ -56,25 +56,33 @@ public static class UserAccessResolver
             .ToArray();
     }
 
-    /// <summary>Permission từ role toàn cục cộng permission từ role của các membership Active.</summary>
+    /// <summary>
+    /// Permission từ role toàn cục, permission từ role của các membership Active, và riêng với organization Pending
+    /// chỉ phần giao với <see cref="PermissionCode.PendingOrganizationDraft"/>. Pending không đóng góp role hay organization ID.
+    /// </summary>
     public static string[] Permissions(User user)
     {
         ArgumentNullException.ThrowIfNull(user);
 
-        return (user.UserRoles ?? [])
-            .Where(userRole => userRole.Role?.RolePermissions is not null)
-            .SelectMany(userRole => userRole.Role.RolePermissions)
-            .Where(rolePermission => rolePermission.Permission is not null)
-            .Select(rolePermission => rolePermission.Permission.Code)
-            .Concat(ActiveMemberships(user)
-                .Where(membership => membership.Role?.RolePermissions is not null)
-                .SelectMany(membership => membership.Role.RolePermissions)
-                .Where(rolePermission => rolePermission.Permission is not null)
-                .Select(rolePermission => rolePermission.Permission.Code))
+        IEnumerable<OrganizationMembership> pendingMemberships = (user.OrganizationMemberships ?? [])
+            .Where(membership => membership.Status == MembershipStatus.Active
+                && membership.Organization is { Status: OrganizationStatus.Pending });
+
+        return PermissionCodes((user.UserRoles ?? []).Select(userRole => userRole.Role))
+            .Concat(PermissionCodes(ActiveMemberships(user).Select(membership => membership.Role)))
+            .Concat(PermissionCodes(pendingMemberships.Select(membership => membership.Role))
+                .Where(PermissionCode.PendingOrganizationDraft.Contains))
             .Where(code => !string.IsNullOrEmpty(code))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
     }
+
+    private static IEnumerable<string> PermissionCodes(IEnumerable<Role?> roles) =>
+        roles
+            .Where(role => role?.RolePermissions is not null)
+            .SelectMany(role => role!.RolePermissions)
+            .Where(rolePermission => rolePermission.Permission is not null)
+            .Select(rolePermission => rolePermission.Permission.Code);
 
     /// <summary>Danh sách ID các organization của các membership đang Active (cả membership và organization đều Active).</summary>
     public static Guid[] OrganizationIds(User user)
