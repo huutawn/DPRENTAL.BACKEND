@@ -196,6 +196,7 @@ public sealed class UserAccessResolverTests
     [InlineData(MembershipStatus.Active, OrganizationStatus.Pending, true, false)]
     [InlineData(MembershipStatus.Active, OrganizationStatus.Rejected, false, false)]
     [InlineData(MembershipStatus.Active, OrganizationStatus.Suspended, false, false)]
+    [InlineData(MembershipStatus.Active, OrganizationStatus.Draft, false, false)]
     [InlineData(MembershipStatus.Suspended, OrganizationStatus.Active, false, false)]
     [InlineData(MembershipStatus.Suspended, OrganizationStatus.Pending, false, false)]
     [InlineData(MembershipStatus.Invited, OrganizationStatus.Pending, false, false)]
