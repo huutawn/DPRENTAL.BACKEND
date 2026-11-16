@@ -73,6 +73,26 @@ public sealed class WarehouseController : ControllerBase
     }
 
     /// <summary>
+    /// Đọc chính sách giao nhận của kho thuộc sở hữu người dùng hiện tại (current user).
+    /// </summary>
+    [HttpGet("me/delivery-policy")]
+    [HttpGet("/api/v1/inventory/warehouses/me/delivery-policy")]
+    [ProducesResponseType(typeof(WarehouseDeliveryPolicyResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMyDeliveryPolicy(CancellationToken cancellationToken)
+    {
+        var result = await _warehouseService.GetMyDeliveryPolicyAsync(_callerContext, cancellationToken);
+        if (result.IsFailure)
+        {
+            return this.ToProblem(result.Error);
+        }
+
+        return Ok(result.Value);
+    }
+
+    /// <summary>
     /// Đọc chính sách giao nhận của kho thuộc nhà cung cấp (SupplierId).
     /// </summary>
     [AllowAnonymous]

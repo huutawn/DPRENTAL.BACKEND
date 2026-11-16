@@ -182,6 +182,8 @@ public sealed class WarehouseDeliveryPolicyTests
         Assert.Equal("123 Nguyễn Huệ", policy.WarehouseAddress.AddressDetail);
         Assert.Equal("79", policy.WarehouseAddress.ProvinceCode);
         Assert.Equal("25747", policy.WarehouseAddress.WardCode);
+        Assert.Equal("Thành phố Hồ Chí Minh", policy.WarehouseAddress.ProvinceName);
+        Assert.Equal("Phường Bến Nghé", policy.WarehouseAddress.WardName);
 
         Assert.Equal("08:30", policy.OperatingHours.OpenTime);
         Assert.Equal("17:30", policy.OperatingHours.CloseTime);
@@ -190,8 +192,77 @@ public sealed class WarehouseDeliveryPolicyTests
         Assert.Single(policy.DeliveryZones);
         Assert.Equal("79", policy.DeliveryZones[0].ProvinceCode);
         Assert.Equal("25747", policy.DeliveryZones[0].WardCode);
+        Assert.Equal("Thành phố Hồ Chí Minh", policy.DeliveryZones[0].ProvinceName);
+        Assert.Equal("Phường Thủ Dầu Một", policy.DeliveryZones[0].WardName);
         Assert.Equal(150000m, policy.DeliveryZones[0].DeliveryFeeVnd);
         Assert.Equal(120000m, policy.DeliveryZones[0].ReturnFeeVnd);
+    }
+
+    [Fact]
+    public async Task GetMyDeliveryPolicy_Unauthenticated_ReturnsUnauthorized()
+    {
+        var service = CreateService();
+        var caller = new TestCaller { IsAuthenticated = false };
+
+        var result = await service.GetMyDeliveryPolicyAsync(caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("UNAUTHORIZED", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task GetMyDeliveryPolicy_CallerWithoutPermission_ReturnsForbidden()
+    {
+        var service = CreateService();
+        var caller = new TestCaller { UserId = Guid.NewGuid(), Permissions = new HashSet<string>() };
+
+        var result = await service.GetMyDeliveryPolicyAsync(caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("FORBIDDEN", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task GetMyDeliveryPolicy_Configured_ReturnsPolicyWithEnrichedNames()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = new TestCaller { UserId = ownerId };
+
+        var warehouse = Warehouse.CreateWithAddress(
+            ownerId,
+            "456 Lê Lợi",
+            "79",
+            "Thành phố Hồ Chí Minh",
+            "25747",
+            "Phường Bến Nghé",
+            10.776,
+            106.700,
+            FixedNow).Value;
+
+        warehouse.SetDeliveryPolicy(true, "08:00", "18:00", [0, 6], FixedNow);
+
+        var zone = WarehouseDeliveryZone.Create(
+            ownerId,
+            "79",
+            "25747",
+            50000m,
+            50000m,
+            FixedNow).Value;
+        warehouse.DeliveryZones.Add(zone);
+
+        _warehouseRepo.Add(warehouse);
+
+        var result = await service.GetMyDeliveryPolicyAsync(caller);
+
+        Assert.True(result.IsSuccess);
+        var policy = result.Value;
+        Assert.Equal(ownerId, policy.SupplierId);
+        Assert.Equal("Thành phố Hồ Chí Minh", policy.WarehouseAddress?.ProvinceName);
+        Assert.Equal("Phường Bến Nghé", policy.WarehouseAddress?.WardName);
+        Assert.Single(policy.DeliveryZones);
+        Assert.Equal("Thành phố Hồ Chí Minh", policy.DeliveryZones[0].ProvinceName);
+        Assert.Equal("Phường Thủ Dầu Một", policy.DeliveryZones[0].WardName);
     }
 
     [Fact]

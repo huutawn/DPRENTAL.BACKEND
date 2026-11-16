@@ -25,6 +25,13 @@ public interface IWarehouseService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Đọc chính sách giao nhận của kho thuộc sở hữu người dùng hiện tại (current user).
+    /// </summary>
+    Task<Result<WarehouseDeliveryPolicyResponse>> GetMyDeliveryPolicyAsync(
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Đọc chính sách giao nhận của kho thuộc nhà cung cấp (SupplierId).
     /// </summary>
     Task<Result<WarehouseDeliveryPolicyResponse>> GetDeliveryPolicyAsync(

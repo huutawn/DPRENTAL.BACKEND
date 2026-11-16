@@ -172,6 +172,9 @@ public sealed class WarehouseServiceTests
         Assert.Equal(10.7769, result.Value.Latitude);
         Assert.Equal(106.7009, result.Value.Longitude);
         Assert.True(result.Value.HasValidAddress);
+        Assert.True(result.Value.IsPickupEnabled);
+        Assert.NotNull(result.Value.OperatingHours);
+        Assert.NotNull(result.Value.DeliveryZones);
     }
 
     [Fact]
