@@ -111,4 +111,10 @@ public interface ISearchProjectionStore
     Task SaveBackfillStateAsync(SearchBackfillRun run, SearchGeneration generation, CancellationToken cancellationToken = default);
     Task<bool> HasUncertainSubmissionsAsync(CancellationToken cancellationToken = default);
     Task<List<int>> ReadPendingTaskIdsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tính toán thời điểm cần kiểm tra tiếp theo dựa trên các search projection jobs đang Pending hoặc Processing (chờ retry hoặc lease hết hạn).
+    /// Bỏ qua các job terminal (retry_count >= 10).
+    /// </summary>
+    Task<DateTimeOffset?> GetNextWakeUpTimeAsync(DateTimeOffset now, CancellationToken cancellationToken = default);
 }

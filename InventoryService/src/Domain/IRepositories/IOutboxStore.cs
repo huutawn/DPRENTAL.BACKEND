@@ -76,4 +76,13 @@ public interface IOutboxStore
         Guid id,
         DateTimeOffset now,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tính toán thời điểm cần kiểm tra tiếp theo dựa trên các message chưa hoàn tất (đang đợi retry hoặc lease hết hạn).
+    /// Bỏ qua các message terminal (retry_count >= 10) hoặc message bị chặn bởi thứ tự cùng partition key.
+    /// Trả về null nếu không có bản ghi nào cần kiểm tra trong tương lai.
+    /// </summary>
+    Task<DateTimeOffset?> GetNextWakeUpTimeAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
 }

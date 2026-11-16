@@ -224,4 +224,62 @@ public sealed class CacheInvalidationStore : ICacheInvalidationStore
         await _context.SaveChangesAsync(cancellationToken);
         return completed.Count;
     }
+
+    /// <inheritdoc />
+    public async Task<DateTimeOffset?> GetNextWakeUpTimeAsync(
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken = default)
+    {
+        if (_context.Database.IsNpgsql())
+        {
+            var connection = _context.Database.GetDbConnection();
+            var wasOpen = connection.State == System.Data.ConnectionState.Open;
+            if (!wasOpen) await connection.OpenAsync(cancellationToken);
+
+            try
+            {
+                await using var cmd = connection.CreateCommand();
+                cmd.CommandText = """
+                    SELECT MIN(
+                        CASE
+                            WHEN status = 'Pending' THEN next_attempt_at
+                            WHEN status = 'Processing' THEN lock_lease_expires_at
+                        END
+                    )
+                    FROM inventory.cache_invalidation_jobs
+                    WHERE status IN ('Pending', 'Processing');
+                    """;
+
+                var result = await cmd.ExecuteScalarAsync(cancellationToken);
+                if (result is null || result is DBNull) return null;
+
+                if (result is DateTime dt)
+                {
+                    if (dt == DateTime.MinValue) return nowUtc;
+                    var dto = new DateTimeOffset(dt, TimeSpan.Zero);
+                    return dto < nowUtc ? nowUtc : dto;
+                }
+                if (result is DateTimeOffset dtoVal)
+                {
+                    return dtoVal < nowUtc ? nowUtc : dtoVal;
+                }
+                return null;
+            }
+            finally
+            {
+                if (!wasOpen) await connection.CloseAsync();
+            }
+        }
+
+        var candidates = await _context.CacheInvalidationJobs
+            .Where(j => j.Status == CacheInvalidationJob.StatusPending || j.Status == CacheInvalidationJob.StatusProcessing)
+            .Select(j => j.Status == CacheInvalidationJob.StatusPending ? j.NextAttemptAt : j.LockLeaseExpiresAt)
+            .ToListAsync(cancellationToken);
+
+        var validTimes = candidates.Where(t => t.HasValue).Select(t => t!.Value).ToList();
+        if (validTimes.Count == 0) return null;
+
+        var min = validTimes.Min();
+        return min < nowUtc ? nowUtc : min;
+    }
 }

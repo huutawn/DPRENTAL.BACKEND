@@ -227,4 +227,99 @@ public sealed class OutboxStore : IOutboxStore
 
         throw new NotSupportedException("Behavior outbox cleanup requires PostgreSQL.");
     }
+
+    /// <inheritdoc />
+    public async Task<DateTimeOffset?> GetNextWakeUpTimeAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        if (_context.Database.IsNpgsql())
+        {
+            var connection = _context.Database.GetDbConnection();
+            var wasOpen = connection.State == System.Data.ConnectionState.Open;
+            if (!wasOpen) await connection.OpenAsync(cancellationToken);
+
+            try
+            {
+                await using var cmd = connection.CreateCommand();
+                cmd.CommandText = """
+                    WITH earliest_per_key AS (
+                        SELECT DISTINCT ON (kafka_key)
+                            id,
+                            retry_count,
+                            next_attempt_at,
+                            lock_lease_expires_at,
+                            created_at
+                        FROM inventory.outbox_messages
+                        WHERE published_at IS NULL
+                        ORDER BY kafka_key, created_at, id
+                    )
+                    SELECT MIN(
+                        GREATEST(
+                            COALESCE(next_attempt_at, '-infinity'::timestamptz),
+                            COALESCE(lock_lease_expires_at, '-infinity'::timestamptz)
+                        )
+                    )
+                    FROM earliest_per_key
+                    WHERE retry_count < 10;
+                    """;
+
+                var result = await cmd.ExecuteScalarAsync(cancellationToken);
+                if (result is null || result is DBNull) return null;
+
+                if (result is DateTime dt)
+                {
+                    if (dt == DateTime.MinValue) return now;
+                    var dto = new DateTimeOffset(dt, TimeSpan.Zero);
+                    return dto < now ? now : dto;
+                }
+                if (result is DateTimeOffset dtoVal)
+                {
+                    return dtoVal < now ? now : dtoVal;
+                }
+                return null;
+            }
+            finally
+            {
+                if (!wasOpen) await connection.CloseAsync();
+            }
+        }
+
+        // Fallback InMemory cho unit tests
+        var unpublished = await _context.OutboxMessages
+            .Where(o => o.PublishedAt == null)
+            .OrderBy(o => o.CreatedAt)
+            .ThenBy(o => o.Id)
+            .ToListAsync(cancellationToken);
+
+        var earliestPerKey = unpublished.GroupBy(x => x.KafkaKey)
+            .Select(g => g.First())
+            .Where(x => x.RetryCount < 10)
+            .ToList();
+
+        if (earliestPerKey.Count == 0) return null;
+
+        DateTimeOffset? minTime = null;
+        foreach (var item in earliestPerKey)
+        {
+            DateTimeOffset readyAt;
+            if (item.NextAttemptAt.HasValue && item.LockLeaseExpiresAt.HasValue)
+            {
+                readyAt = item.NextAttemptAt.Value > item.LockLeaseExpiresAt.Value
+                    ? item.NextAttemptAt.Value
+                    : item.LockLeaseExpiresAt.Value;
+            }
+            else
+            {
+                readyAt = item.NextAttemptAt ?? item.LockLeaseExpiresAt ?? item.CreatedAt;
+            }
+
+            if (readyAt < now) readyAt = now;
+            if (!minTime.HasValue || readyAt < minTime.Value)
+            {
+                minTime = readyAt;
+            }
+        }
+        return minTime;
+    }
 }

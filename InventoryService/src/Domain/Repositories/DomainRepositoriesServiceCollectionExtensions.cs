@@ -34,6 +34,13 @@ public static class DomainRepositoriesServiceCollectionExtensions
         services.AddScoped<ICacheInvalidationStore, CacheInvalidationStore>();
         services.AddScoped<IInventoryWriteTransaction, InventoryWriteTransaction>();
 
+        services.AddSingleton<PostgresQueueNotificationListener>(sp =>
+            new PostgresQueueNotificationListener(
+                connectionString,
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<PostgresQueueNotificationListener>>()));
+        services.AddSingleton<IQueueNotificationListener>(sp => sp.GetRequiredService<PostgresQueueNotificationListener>());
+        services.AddHostedService(sp => sp.GetRequiredService<PostgresQueueNotificationListener>());
+
         return services;
     }
 }

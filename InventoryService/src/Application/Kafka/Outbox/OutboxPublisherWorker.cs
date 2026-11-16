@@ -12,6 +12,8 @@ namespace Dprental.InventoryService.Application.Kafka.Outbox;
 
 /// <summary>
 /// Background worker quét và xuất bản các thông điệp Transactional Outbox lên Kafka broker.
+/// - Chờ PostgreSQL notification, mốc retry/lease gần nhất hoặc quét dự phòng 30s.
+/// - Khi listener mất kết nối, chuyển sang polling 1s trong lúc kết nối lại.
 /// - Claim bản ghi bằng transaction ngắn với FOR UPDATE SKIP LOCKED.
 /// - Xuất bản ra Kafka ngoài database transaction.
 /// - Cập nhật kết quả kèm lease token (chống worker mất lease ghi đè).
@@ -24,21 +26,23 @@ public sealed class OutboxPublisherWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IKafkaProducer _producer;
+    private readonly IQueueNotificationListener? _notificationListener;
     private readonly ILogger<OutboxPublisherWorker>? _logger;
     private readonly TimeProvider _timeProvider;
     private DateTimeOffset _nextCleanupAt = DateTimeOffset.MinValue;
     public int BatchSize { get; set; } = 20;
     public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromSeconds(30);
-    public TimeSpan IdleDelay { get; set; } = TimeSpan.FromMilliseconds(100);
 
     public OutboxPublisherWorker(
         IServiceScopeFactory scopeFactory,
         IKafkaProducer producer,
+        IQueueNotificationListener? notificationListener = null,
         ILogger<OutboxPublisherWorker>? logger = null,
         TimeProvider? timeProvider = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _producer = producer ?? throw new ArgumentNullException(nameof(producer));
+        _notificationListener = notificationListener;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
@@ -54,16 +58,44 @@ public sealed class OutboxPublisherWorker : BackgroundService
                 var processedCount = await ProcessBatchAsync(stoppingToken);
                 await TryCleanupBehaviorMessagesAsync(stoppingToken);
 
-                if (processedCount == 0)
+                if (processedCount == BatchSize)
                 {
-                    await Task.Delay(IdleDelay, stoppingToken);
+                    // Lô đầy, còn backlog: tiếp tục ngay lập tức để drain
+                    continue;
                 }
-                else if (processedCount < BatchSize)
+
+                // Batch chưa đầy hoặc rỗng: tính mốc thời gian chờ tiếp theo
+                var now = _timeProvider.GetUtcNow();
+                DateTimeOffset? nextWakeUp = null;
+
+                try
                 {
-                    // Lô chưa đầy, nghỉ ngắn để nhường tài nguyên
-                    await Task.Delay(TimeSpan.FromMilliseconds(20), stoppingToken);
+                    await using var scope = _scopeFactory.CreateAsyncScope();
+                    var store = scope.ServiceProvider.GetRequiredService<IOutboxStore>();
+                    nextWakeUp = await store.GetNextWakeUpTimeAsync(now, stoppingToken);
                 }
-                // Nếu processedCount == BatchSize, tiếp tục ngay lập tức để drain backlog
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Lỗi khi lấy next wake up time trong OutboxPublisherWorker.");
+                }
+
+                var delay = CalculateDelay(now, nextWakeUp, _nextCleanupAt);
+
+                if (delay > TimeSpan.Zero)
+                {
+                    if (_notificationListener != null)
+                    {
+                        await _notificationListener.WaitForWorkAsync(QueueWorkKind.Outbox, delay, stoppingToken);
+                    }
+                    else
+                    {
+                        await Task.Delay(delay, _timeProvider, stoppingToken);
+                    }
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -72,11 +104,53 @@ public sealed class OutboxPublisherWorker : BackgroundService
             catch (Exception ex)
             {
                 _logger?.LogError(ex, "Lỗi ngoài dự kiến trong OutboxPublisherWorker loop.");
-                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), _timeProvider, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
             }
         }
 
         _logger?.LogInformation("OutboxPublisherWorker đã dừng.");
+    }
+
+    private TimeSpan CalculateDelay(DateTimeOffset now, DateTimeOffset? nextWakeUp, DateTimeOffset nextCleanupAt)
+    {
+        // Khi listener không khả dụng: polling 1 giây
+        if (_notificationListener != null && !_notificationListener.IsConnected)
+        {
+            return TimeSpan.FromSeconds(1);
+        }
+
+        // Mặc định quét dự phòng 30 giây
+        var maxDelay = TimeSpan.FromSeconds(30);
+
+        if (nextWakeUp.HasValue)
+        {
+            var untilWakeUp = nextWakeUp.Value - now;
+            if (untilWakeUp < TimeSpan.Zero) untilWakeUp = TimeSpan.Zero;
+            if (untilWakeUp < maxDelay)
+            {
+                maxDelay = untilWakeUp;
+            }
+        }
+
+        // Đảm bảo không ngủ quên qua mốc cleanup định kỳ độc lập
+        if (nextCleanupAt > DateTimeOffset.MinValue && nextCleanupAt > now)
+        {
+            var untilCleanup = nextCleanupAt - now;
+            if (untilCleanup < TimeSpan.Zero) untilCleanup = TimeSpan.Zero;
+            if (untilCleanup < maxDelay)
+            {
+                maxDelay = untilCleanup;
+            }
+        }
+
+        return maxDelay;
     }
 
     /// <summary>

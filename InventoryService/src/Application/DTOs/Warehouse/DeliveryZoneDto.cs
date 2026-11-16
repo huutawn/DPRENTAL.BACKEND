@@ -4,4 +4,6 @@ public sealed record DeliveryZoneDto(
     string ProvinceCode,
     string? WardCode,
     decimal DeliveryFeeVnd,
-    decimal ReturnFeeVnd);
+    decimal ReturnFeeVnd,
+    string? ProvinceName = null,
+    string? WardName = null);
