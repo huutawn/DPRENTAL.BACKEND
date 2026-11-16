@@ -213,6 +213,26 @@ public sealed class WarehouseService : IWarehouseService
     }
 
     /// <inheritdoc />
+    public async Task<Result<WarehouseDeliveryPolicyResponse>> GetMyDeliveryPolicyAsync(
+        IInventoryCallerContext caller,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (!caller.IsAuthenticated || !caller.UserId.HasValue)
+        {
+            return Error.Unauthorized("UNAUTHORIZED", "Yêu cầu xác thực danh tính.");
+        }
+
+        if (!InventoryAccessEvaluator.CanManageOwnInventory(caller))
+        {
+            return Error.Forbidden("FORBIDDEN", "Người dùng không có quyền quản lý kho tài sản.");
+        }
+
+        return await GetDeliveryPolicyAsync(caller.UserId.Value, caller, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task<Result<WarehouseDeliveryPolicyResponse>> GetDeliveryPolicyAsync(
         Guid supplierId,
         IInventoryCallerContext caller,
@@ -453,7 +473,7 @@ public sealed class WarehouseService : IWarehouseService
         return Result.Success(ToDeliveryPolicyResponse(txResult.Value));
     }
 
-    private static WarehouseDeliveryPolicyResponse ToDeliveryPolicyResponse(Warehouse warehouse)
+    private WarehouseDeliveryPolicyResponse ToDeliveryPolicyResponse(Warehouse warehouse)
     {
         WarehouseAddressDto? addressDto = null;
         if (!string.IsNullOrWhiteSpace(warehouse.AddressDetail))
@@ -461,7 +481,9 @@ public sealed class WarehouseService : IWarehouseService
             addressDto = new WarehouseAddressDto(
                 warehouse.AddressDetail,
                 warehouse.ProvinceCode,
-                warehouse.WardCode);
+                warehouse.WardCode,
+                warehouse.ProvinceName,
+                warehouse.WardName);
         }
 
         var operatingHours = new OperatingHoursDto(
@@ -472,11 +494,27 @@ public sealed class WarehouseService : IWarehouseService
         var deliveryZones = (warehouse.DeliveryZones ?? [])
             .OrderBy(z => z.ProvinceCode)
             .ThenBy(z => z.WardCode)
-            .Select(z => new DeliveryZoneDto(
-                z.ProvinceCode,
-                z.WardCode,
-                z.DeliveryFeeVnd,
-                z.ReturnFeeVnd))
+            .Select(z =>
+            {
+                string? pName = null;
+                string? wName = null;
+                if (!string.IsNullOrWhiteSpace(z.WardCode))
+                {
+                    _divisionsCatalog.IsValidPair(z.ProvinceCode, z.WardCode, out pName, out wName);
+                }
+                else
+                {
+                    _divisionsCatalog.IsValidProvince(z.ProvinceCode, out pName);
+                }
+
+                return new DeliveryZoneDto(
+                    z.ProvinceCode,
+                    z.WardCode,
+                    z.DeliveryFeeVnd,
+                    z.ReturnFeeVnd,
+                    pName,
+                    wName);
+            })
             .ToList();
 
         return new WarehouseDeliveryPolicyResponse(
@@ -487,17 +525,54 @@ public sealed class WarehouseService : IWarehouseService
             deliveryZones);
     }
 
-    private static WarehouseResponse ToResponse(Warehouse warehouse) => new(
-        warehouse.OwnerUserId,
-        warehouse.AddressDetail,
-        warehouse.ProvinceCode,
-        warehouse.ProvinceName,
-        warehouse.WardCode,
-        warehouse.WardName,
-        warehouse.Latitude,
-        warehouse.Longitude,
-        warehouse.HasValidAddress,
-        warehouse.UpdatedAt,
-        warehouse.Version
-    );
+    private WarehouseResponse ToResponse(Warehouse warehouse)
+    {
+        var operatingHours = new OperatingHoursDto(
+            warehouse.OpenTime ?? "08:00",
+            warehouse.CloseTime ?? "18:00",
+            warehouse.ClosedDays ?? []);
+
+        var deliveryZones = (warehouse.DeliveryZones ?? [])
+            .OrderBy(z => z.ProvinceCode)
+            .ThenBy(z => z.WardCode)
+            .Select(z =>
+            {
+                string? pName = null;
+                string? wName = null;
+                if (!string.IsNullOrWhiteSpace(z.WardCode))
+                {
+                    _divisionsCatalog.IsValidPair(z.ProvinceCode, z.WardCode, out pName, out wName);
+                }
+                else
+                {
+                    _divisionsCatalog.IsValidProvince(z.ProvinceCode, out pName);
+                }
+
+                return new DeliveryZoneDto(
+                    z.ProvinceCode,
+                    z.WardCode,
+                    z.DeliveryFeeVnd,
+                    z.ReturnFeeVnd,
+                    pName,
+                    wName);
+            })
+            .ToList();
+
+        return new(
+            warehouse.OwnerUserId,
+            warehouse.AddressDetail,
+            warehouse.ProvinceCode,
+            warehouse.ProvinceName,
+            warehouse.WardCode,
+            warehouse.WardName,
+            warehouse.Latitude,
+            warehouse.Longitude,
+            warehouse.HasValidAddress,
+            warehouse.UpdatedAt,
+            warehouse.Version,
+            warehouse.IsPickupEnabled,
+            operatingHours,
+            deliveryZones
+        );
+    }
 }

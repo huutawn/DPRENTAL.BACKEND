@@ -140,4 +140,59 @@ public sealed partial class SearchProjectionStore(InventoryServiceDbContext cont
                 lock_lease_token = NULL, lock_lease_expires_at = NULL, processing_revision = NULL, updated_at = {now}
             WHERE id = {jobId} AND lock_lease_token = {leaseToken} AND processing_revision = {processedRevision}
             """, cancellationToken) == 1;
+
+    public async Task<DateTimeOffset?> GetNextWakeUpTimeAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        if (context.Database.IsNpgsql())
+        {
+            var connection = context.Database.GetDbConnection();
+            var wasOpen = connection.State == System.Data.ConnectionState.Open;
+            if (!wasOpen) await connection.OpenAsync(cancellationToken);
+
+            try
+            {
+                await using var cmd = connection.CreateCommand();
+                cmd.CommandText = """
+                    SELECT MIN(
+                        CASE
+                            WHEN status = 'Pending' THEN COALESCE(next_attempt_at, created_at)
+                            WHEN status = 'Processing' THEN lock_lease_expires_at
+                        END
+                    )
+                    FROM inventory.search_projection_jobs
+                    WHERE status IN ('Pending', 'Processing') AND retry_count < 10;
+                    """;
+
+                var result = await cmd.ExecuteScalarAsync(cancellationToken);
+                if (result is null || result is DBNull) return null;
+
+                if (result is DateTime dt)
+                {
+                    if (dt == DateTime.MinValue) return now;
+                    var dto = new DateTimeOffset(dt, TimeSpan.Zero);
+                    return dto < now ? now : dto;
+                }
+                if (result is DateTimeOffset dtoVal)
+                {
+                    return dtoVal < now ? now : dtoVal;
+                }
+                return null;
+            }
+            finally
+            {
+                if (!wasOpen) await connection.CloseAsync();
+            }
+        }
+
+        var candidates = await context.SearchProjectionJobs
+            .Where(j => (j.Status == "Pending" || j.Status == "Processing") && j.RetryCount < 10)
+            .Select(j => j.Status == "Pending" ? (j.NextAttemptAt ?? j.CreatedAt) : j.LockLeaseExpiresAt)
+            .ToListAsync(cancellationToken);
+
+        var validTimes = candidates.Where(t => t.HasValue).Select(t => t!.Value).ToList();
+        if (validTimes.Count == 0) return null;
+
+        var min = validTimes.Min();
+        return min < now ? now : min;
+    }
 }

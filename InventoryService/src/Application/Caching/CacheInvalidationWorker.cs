@@ -16,6 +16,7 @@ public sealed class CacheInvalidationWorker : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IInventoryReadCache _cache;
+    private readonly IQueueNotificationListener? _notificationListener;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<CacheInvalidationWorker>? _logger;
 
@@ -24,19 +25,29 @@ public sealed class CacheInvalidationWorker : BackgroundService
 
     public int BatchSize { get; set; } = 100;
     public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromSeconds(30);
-    public TimeSpan IdleDelay { get; set; } = TimeSpan.FromMilliseconds(100);
     public int MaxDegreeOfParallelism { get; set; } = 4;
 
     public CacheInvalidationWorker(
         IServiceScopeFactory scopeFactory,
         IInventoryReadCache cache,
+        IQueueNotificationListener? notificationListener = null,
         TimeProvider? timeProvider = null,
         ILogger<CacheInvalidationWorker>? logger = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _notificationListener = notificationListener;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
+    }
+
+    public CacheInvalidationWorker(
+        IServiceScopeFactory scopeFactory,
+        IInventoryReadCache cache,
+        TimeProvider timeProvider,
+        ILogger<CacheInvalidationWorker>? logger = null)
+        : this(scopeFactory, cache, null, timeProvider, logger)
+    {
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -52,9 +63,46 @@ public sealed class CacheInvalidationWorker : BackgroundService
                 // Dọn dẹp định kỳ completed jobs quá 7 ngày
                 await TryCleanupExpiredCompletedJobsAsync(stoppingToken);
 
-                if (processedCount == 0)
+                if (processedCount == BatchSize)
                 {
-                    await Task.Delay(IdleDelay, _timeProvider, stoppingToken);
+                    // Lô đầy, còn backlog: tiếp tục ngay lập tức để drain
+                    continue;
+                }
+
+                var now = _timeProvider.GetUtcNow();
+                DateTimeOffset? nextWakeUp = null;
+
+                try
+                {
+                    await using var scope = _scopeFactory.CreateAsyncScope();
+                    var store = scope.ServiceProvider.GetRequiredService<ICacheInvalidationStore>();
+                    nextWakeUp = await store.GetNextWakeUpTimeAsync(now, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Lỗi khi lấy next wake up time trong CacheInvalidationWorker.");
+                }
+
+                var nextCleanup = _lastCleanupTime == DateTimeOffset.MinValue
+                    ? now
+                    : _lastCleanupTime.AddHours(1);
+
+                var delay = CalculateDelay(now, nextWakeUp, nextCleanup);
+
+                if (delay > TimeSpan.Zero)
+                {
+                    if (_notificationListener != null)
+                    {
+                        await _notificationListener.WaitForWorkAsync(QueueWorkKind.CacheInvalidation, delay, stoppingToken);
+                    }
+                    else
+                    {
+                        await Task.Delay(delay, _timeProvider, stoppingToken);
+                    }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -76,6 +124,38 @@ public sealed class CacheInvalidationWorker : BackgroundService
         }
 
         _logger?.LogInformation("CacheInvalidationWorker đã dừng.");
+    }
+
+    private TimeSpan CalculateDelay(DateTimeOffset now, DateTimeOffset? nextWakeUp, DateTimeOffset nextCleanupAt)
+    {
+        if (_notificationListener != null && !_notificationListener.IsConnected)
+        {
+            return TimeSpan.FromSeconds(1);
+        }
+
+        var maxDelay = TimeSpan.FromSeconds(30);
+
+        if (nextWakeUp.HasValue)
+        {
+            var untilWakeUp = nextWakeUp.Value - now;
+            if (untilWakeUp < TimeSpan.Zero) untilWakeUp = TimeSpan.Zero;
+            if (untilWakeUp < maxDelay)
+            {
+                maxDelay = untilWakeUp;
+            }
+        }
+
+        if (nextCleanupAt > DateTimeOffset.MinValue && nextCleanupAt > now)
+        {
+            var untilCleanup = nextCleanupAt - now;
+            if (untilCleanup < TimeSpan.Zero) untilCleanup = TimeSpan.Zero;
+            if (untilCleanup < maxDelay)
+            {
+                maxDelay = untilCleanup;
+            }
+        }
+
+        return maxDelay;
     }
 
     /// <summary>

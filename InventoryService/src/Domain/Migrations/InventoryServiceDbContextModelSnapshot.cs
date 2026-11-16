@@ -1178,7 +1178,6 @@ namespace InventoryService.Domain.Migrations
             modelBuilder.Entity("Dprental.InventoryService.Domain.Entities.WarehouseDeliveryZone", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 

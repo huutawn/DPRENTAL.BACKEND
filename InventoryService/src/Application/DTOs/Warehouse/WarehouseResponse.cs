@@ -15,5 +15,8 @@ public sealed record WarehouseResponse(
     double? Longitude,
     bool HasValidAddress,
     DateTimeOffset UpdatedAt,
-    uint Version
+    uint Version,
+    bool IsPickupEnabled = true,
+    OperatingHoursDto? OperatingHours = null,
+    IReadOnlyList<DeliveryZoneDto>? DeliveryZones = null
 );

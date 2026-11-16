@@ -270,6 +270,27 @@ public sealed class WarehouseHttpIntegrationTests
             Assert.Equal([0], policyResp.OperatingHours.ClosedDays);
             Assert.Equal(2, policyResp.DeliveryZones.Count);
 
+            // 2b. User A GET own delivery policy via /me/delivery-policy routes
+            var getMyPolicyPlural = await client.GetAsync("api/v1/inventory/warehouses/me/delivery-policy");
+            Assert.Equal(HttpStatusCode.OK, getMyPolicyPlural.StatusCode);
+            var myPolicyResp = await getMyPolicyPlural.Content.ReadFromJsonAsync<WarehouseDeliveryPolicyResponse>();
+            Assert.NotNull(myPolicyResp);
+            Assert.Equal(userA, myPolicyResp.SupplierId);
+            Assert.True(myPolicyResp.IsPickupEnabled);
+
+            var getMyPolicySingular = await client.GetAsync("api/v1/inventory/warehouse/me/delivery-policy");
+            Assert.Equal(HttpStatusCode.OK, getMyPolicySingular.StatusCode);
+
+            // 2c. User A GET /warehouse/me returns delivery policy & zones in WarehouseResponse
+            var getMyWh = await client.GetAsync("api/v1/inventory/warehouse/me");
+            Assert.Equal(HttpStatusCode.OK, getMyWh.StatusCode);
+            var whResp = await getMyWh.Content.ReadFromJsonAsync<WarehouseResponse>();
+            Assert.NotNull(whResp);
+            Assert.True(whResp.IsPickupEnabled);
+            Assert.NotNull(whResp.OperatingHours);
+            Assert.NotNull(whResp.DeliveryZones);
+            Assert.Equal(2, whResp.DeliveryZones.Count);
+
             // 3. User B GET policy via plural route /warehouses/{supplierId}/delivery-policy
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenB);
             var getPlural = await client.GetAsync($"api/v1/inventory/warehouses/{userA}/delivery-policy");
