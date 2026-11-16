@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Application.Options;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Dprental.InventoryService.Api.Controllers;
@@ -26,6 +27,8 @@ builder.Services.AddInventoryJwtAuthentication(builder.Configuration);
 builder.Services.AddInventoryAuthorization();
 // Clean Architecture: Application services (IInventoryAssetService, ICalendarService, IInventoryMediaService, IInventoryAvailabilityService)
 builder.Services.AddInventoryApplication();
+builder.Services.AddOptions<UnapprovedInventoryLimitsOptions>()
+    .Bind(builder.Configuration.GetSection(UnapprovedInventoryLimitsOptions.SectionName));
 // DPR-150: Valkey Read Cache
 builder.Services.AddInventoryValkeyCache(builder.Configuration, builder.Environment);
 builder.Services.AddRecommendationRanking(builder.Configuration);

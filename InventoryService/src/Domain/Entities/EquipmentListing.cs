@@ -237,6 +237,26 @@ public sealed class EquipmentListing
     }
 
     /// <summary>
+    /// Gán tổ chức cho listing nháp tạo khi tổ chức chưa được duyệt. Listing đã có tổ chức thì giữ nguyên.
+    /// </summary>
+    public Result AssignOrganization(Guid organizationId, DateTimeOffset now)
+    {
+        if (organizationId == Guid.Empty)
+        {
+            return Error.Validation("INVALID_ORGANIZATION_ID", "OrganizationId không được rỗng.");
+        }
+
+        if (OrganizationId.HasValue)
+        {
+            return Result.Success();
+        }
+
+        OrganizationId = organizationId;
+        UpdatedAt = now;
+        return Result.Success();
+    }
+
+    /// <summary>
     /// Cập nhật thông tin chi tiết, năm sản xuất, danh sách media và thông số kỹ thuật của Listing.
     /// </summary>
     public Result UpdateDetails(
