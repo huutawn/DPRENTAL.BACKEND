@@ -21,6 +21,12 @@ public class RenterAddress
     [MaxLength(100)]
     public string Province { get; private set; } = string.Empty;
 
+    [MaxLength(20)]
+    public string? ProvinceCode { get; private set; }
+
+    [MaxLength(20)]
+    public string? WardCode { get; private set; }
+
     [Required]
     [MaxLength(200)]
     public string AddressDetail { get; private set; } = string.Empty;
@@ -51,7 +57,9 @@ public class RenterAddress
         string recipientName,
         string recipientPhone,
         bool isDefault,
-        DateTimeOffset utcNow)
+        DateTimeOffset utcNow,
+        string? provinceCode = null,
+        string? wardCode = null)
     {
         Id = id;
         RenterId = renterId;
@@ -62,15 +70,26 @@ public class RenterAddress
         IsDefault = isDefault;
         CreatedAt = utcNow;
         UpdatedAt = utcNow;
+        ProvinceCode = provinceCode;
+        WardCode = wardCode;
     }
 
-    public void Update(string province, string addressDetail, string recipientName, string recipientPhone, DateTimeOffset utcNow)
+    public void Update(
+        string province,
+        string addressDetail,
+        string recipientName,
+        string recipientPhone,
+        DateTimeOffset utcNow,
+        string? provinceCode = null,
+        string? wardCode = null)
     {
         Province = province;
         AddressDetail = addressDetail;
         RecipientName = recipientName;
         RecipientPhone = recipientPhone;
         UpdatedAt = utcNow;
+        ProvinceCode = provinceCode;
+        WardCode = wardCode;
     }
 
     public void SetDefault(bool isDefault, DateTimeOffset utcNow)

@@ -128,6 +128,12 @@ public class RentalServiceDbContext : DbContext, IUnitOfWork
             b.Property(o => o.DeliverySnapshotJson)
                 .HasColumnType("jsonb");
 
+            b.Property(o => o.ProvinceCode)
+                .HasMaxLength(20);
+
+            b.Property(o => o.WardCode)
+                .HasMaxLength(20);
+
             b.HasOne(o => o.TermsAcceptance)
                 .WithOne(t => t.RentalOrder)
                 .HasForeignKey<RentalTermsAcceptance>(t => t.RentalOrderId)

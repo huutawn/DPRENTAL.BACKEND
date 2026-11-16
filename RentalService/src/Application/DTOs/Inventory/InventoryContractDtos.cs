@@ -18,7 +18,9 @@ public sealed record ListingWarehouseDto(
 public sealed record WarehouseAddressDto(
     string? AddressDetail,
     string? ProvinceCode,
-    string? WardCode);
+    string? WardCode,
+    string? ProvinceName = null,
+    string? WardName = null);
 
 public sealed record OperatingHoursDto(
     string OpenTime,
@@ -29,7 +31,9 @@ public sealed record DeliveryZoneDto(
     string ProvinceCode,
     string? WardCode,
     decimal DeliveryFeeVnd,
-    decimal ReturnFeeVnd);
+    decimal ReturnFeeVnd,
+    string? ProvinceName = null,
+    string? WardName = null);
 
 public sealed record WarehouseDeliveryPolicyResponse(
     Guid SupplierId,

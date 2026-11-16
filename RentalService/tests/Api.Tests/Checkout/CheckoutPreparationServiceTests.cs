@@ -612,7 +612,7 @@ public sealed class CheckoutPreparationServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(new CheckoutDeliveryDto("Bình Dương", "Công trường KCN VSIP 2, Thủ Dầu Một",
-            "Trần Văn Bình", "0912345678", "Gọi trước khi giao"), result.Plan.Delivery);
+            "Trần Văn Bình", "0912345678", "Gọi trước khi giao", "74", null), result.Plan.Delivery);
     }
 
     [Fact]
@@ -856,5 +856,177 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(CheckoutErrors.MultipleRentalPeriods, result.Error);
         Assert.Equal("CHECKOUT_MULTI_PERIOD_FORBIDDEN", result.Error.Code);
         Assert.Equal(0, _inventory.ListingReadCount);
+    }
+
+    [Fact]
+    public async Task Prepare_SupplierWithoutDeliveryZones_PickupAllowed_DeliveryBlockedWithDeliveryNotConfigured()
+    {
+        _inventory.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
+            _supplierId,
+            true,
+            new WarehouseAddressDto("123 Le Loi", "79", "Ward 1"),
+            new OperatingHoursDto("08:00", "18:00", []),
+            DeliveryZones: []);
+
+        // 1. Delivery is blocked with DELIVERY_NOT_CONFIGURED
+        var deliveryRequest = Request(expectedTotal: 3_000_000m) with
+        {
+            DeliveryMethod = "Delivery",
+            Delivery = new CheckoutDeliveryDto("Hồ Chí Minh", "123 Le Loi, P. Thu Dau Mot", "Nguyen Van A", "0901234567", null, "79", "25747")
+        };
+        CheckoutPreparationResult deliveryResult = await CreateService().PrepareAsync(Renter(), deliveryRequest);
+
+        Assert.False(deliveryResult.IsSuccess);
+        Assert.Equal(CheckoutErrors.DeliveryNotConfigured, deliveryResult.Error);
+        Assert.Equal("DELIVERY_NOT_CONFIGURED", deliveryResult.Error.Code);
+
+        // 2. Pickup is allowed with 0 fee
+        var pickupRequest = Request(expectedTotal: 3_000_000m) with
+        {
+            DeliveryMethod = "Pickup",
+            ReturnMethod = "Pickup",
+            Delivery = null,
+            AddressId = null
+        };
+        _auth.FullName = "Nguyen Van A";
+        _auth.PhoneNumber = "0901234567";
+
+        CheckoutPreparationResult pickupResult = await CreateService().PrepareAsync(Renter(), pickupRequest);
+        Assert.True(pickupResult.IsSuccess);
+        Assert.Equal(0m, pickupResult.Plan.DeliveryFee);
+        Assert.Equal(0m, pickupResult.Plan.ReturnFee);
+    }
+
+    [Fact]
+    public async Task Prepare_WardSpecificZone_TakesPrecedenceOverWholeProvinceZone()
+    {
+        _inventory.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
+            _supplierId,
+            true,
+            new WarehouseAddressDto("123 Le Loi", "79", "Ward 1"),
+            new OperatingHoursDto("08:00", "18:00", []),
+            [
+                new DeliveryZoneDto("79", null, 100_000m, 100_000m), // Whole province
+                new DeliveryZoneDto("79", "25747", 40_000m, 40_000m)   // Specific ward (Phường Thủ Dầu Một)
+            ]);
+
+        // Specific ward matches ward zone (40k fee)
+        var wardRequest = Request(expectedTotal: 3_080_000m) with
+        {
+            DeliveryMethod = "Delivery",
+            ReturnMethod = "Return",
+            Delivery = new CheckoutDeliveryDto("Hồ Chí Minh", "123 Le Loi", "Nguyen Van A", "0901234567", null, "79", "25747")
+        };
+        CheckoutPreparationResult wardResult = await CreateService().PrepareAsync(Renter(), wardRequest);
+
+        Assert.True(wardResult.IsSuccess);
+        Assert.Equal(40_000m, wardResult.Plan.DeliveryFee);
+        Assert.Equal(40_000m, wardResult.Plan.ReturnFee);
+
+        // Other ward in province matches whole-province zone (100k fee)
+        var otherWardRequest = Request(expectedTotal: 3_200_000m) with
+        {
+            DeliveryMethod = "Delivery",
+            ReturnMethod = "Return",
+            Delivery = new CheckoutDeliveryDto("Hồ Chí Minh", "456 Nguyen Trai", "Nguyen Van A", "0901234567", null, "79", "25750")
+        };
+        CheckoutPreparationResult otherResult = await CreateService().PrepareAsync(Renter(), otherWardRequest);
+
+        Assert.True(otherResult.IsSuccess);
+        Assert.Equal(100_000m, otherResult.Plan.DeliveryFee);
+        Assert.Equal(100_000m, otherResult.Plan.ReturnFee);
+    }
+
+    [Fact]
+    public async Task Prepare_LegacyAddress_UnresolvableProvince_ReturnsDeliveryAddressIncomplete()
+    {
+        var request = Request(expectedTotal: 3_000_000m) with
+        {
+            DeliveryMethod = "Delivery",
+            Delivery = new CheckoutDeliveryDto("Sao Hỏa", "Khu căn cứ 1", "Nguyen Van A", "0901234567", null)
+        };
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(CheckoutErrors.DeliveryAddressIncomplete, result.Error);
+        Assert.Equal("DELIVERY_ADDRESS_INCOMPLETE", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Prepare_Pickup_MissingRecipientContact_ReturnsInvalidRequestFieldErrors()
+    {
+        _inventory.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
+            _supplierId,
+            true,
+            new WarehouseAddressDto("123 Le Loi", "79", "Ward 1"),
+            new OperatingHoursDto("08:00", "18:00", []),
+            DeliveryZones: []);
+
+        _auth.FullName = null;
+        _auth.PhoneNumber = null;
+
+        var request = Request(expectedTotal: 3_000_000m) with
+        {
+            DeliveryMethod = "Pickup",
+            Delivery = null,
+            AddressId = null
+        };
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), request);
+
+        Assert.False(result.IsSuccess);
+        Assert.NotNull(result.FieldErrors);
+        Assert.Contains(result.FieldErrors, e => e.Field == "delivery.recipientName" && e.Code == "REQUIRED");
+        Assert.Contains(result.FieldErrors, e => e.Field == "delivery.recipientPhone" && e.Code == "REQUIRED");
+    }
+
+    [Fact]
+    public async Task Prepare_PickupAtWarehouse_ReturnAtCustomerSite_MatchesSiteZoneNotWarehouse()
+    {
+        // Supplier warehouse is in TP.HCM (79)
+        _inventory.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
+            _supplierId,
+            true,
+            new WarehouseAddressDto("123 Le Loi, P. Ben Nghe", "79", "26734"),
+            new OperatingHoursDto("08:00", "18:00", []),
+            [
+                new DeliveryZoneDto("79", null, 30_000m, 30_000m),  // TP.HCM
+                new DeliveryZoneDto("48", null, 80_000m, 80_000m)   // Đà Nẵng
+            ]);
+
+        // Customer picks up at warehouse, but returns at customer construction site in Đà Nẵng
+        var request = Request(expectedTotal: 3_080_000m) with
+        {
+            DeliveryMethod = "Pickup",
+            ReturnMethod = "Return",
+            Delivery = new CheckoutDeliveryDto("Đà Nẵng", "Công trường Sơn Trà, Q. Sơn Trà", "Nguyen Van A", "0901234567", null, "48", null)
+        };
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(0m, result.Plan.DeliveryFee);
+        Assert.Equal(80_000m, result.Plan.ReturnFee); // Matched against Da Nang (48), NOT warehouse TP.HCM (79)!
+        Assert.Equal(3_080_000m, result.Plan.TotalAmount);
+    }
+
+    [Fact]
+    public async Task PreparePreview_ReadonlyWithoutSideEffects_AndNoRefundAccountOrTermsRequired()
+    {
+        var request = Request(expectedTotal: 3_000_000m) with
+        {
+            TermsAccepted = false,
+            RefundAccount = null,
+            RefundAccountId = null
+        };
+
+        CheckoutPreparationResult result = await CreateService().PreparePreviewAsync(Renter(), request);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Plan);
+        Assert.Equal(3_000_000m, result.Plan.TotalRentalAmount);
+        Assert.Equal(0m, result.Plan.TotalDepositAmount);
+        Assert.Equal(0m, result.Plan.DeliveryFee);
+        Assert.Equal(0m, result.Plan.ReturnFee);
+        Assert.Equal(3_000_000m, result.Plan.TotalAmount);
     }
 }

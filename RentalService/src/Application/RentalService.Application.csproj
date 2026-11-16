@@ -8,6 +8,9 @@
     <PackageReference Include="Confluent.Kafka" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Locations/vietnam-divisions.json" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Domain/RentalService.Domain.csproj" />
   </ItemGroup>
 </Project>

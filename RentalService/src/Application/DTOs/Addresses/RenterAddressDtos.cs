@@ -7,11 +7,15 @@ namespace Dprental.RentalService.Application.DTOs.Addresses;
 /// <param name="AddressDetail">Địa chỉ chi tiết (bắt buộc, 5 đến 200 ký tự).</param>
 /// <param name="RecipientName">Tên người nhận (bắt buộc, tối đa 100 ký tự).</param>
 /// <param name="RecipientPhone">Số điện thoại người nhận: bắt đầu bằng 0 hoặc +84, theo sau 9 chữ số.</param>
+/// <param name="ProvinceCode">Mã tỉnh/thành phố chuẩn (tùy chọn).</param>
+/// <param name="WardCode">Mã phường/xã chuẩn (tùy chọn).</param>
 public sealed record SaveRenterAddressRequest(
     string? Province,
     string? AddressDetail,
     string? RecipientName,
-    string? RecipientPhone);
+    string? RecipientPhone,
+    string? ProvinceCode = null,
+    string? WardCode = null);
 
 /// <summary>
 /// Một địa chỉ trong sổ địa chỉ của người thuê.
@@ -22,10 +26,14 @@ public sealed record SaveRenterAddressRequest(
 /// <param name="RecipientName">Tên người nhận.</param>
 /// <param name="RecipientPhone">Số điện thoại người nhận.</param>
 /// <param name="IsDefault">Địa chỉ mặc định, dùng để điền sẵn nơi giao lúc checkout.</param>
+/// <param name="ProvinceCode">Mã tỉnh/thành phố chuẩn.</param>
+/// <param name="WardCode">Mã phường/xã chuẩn.</param>
 public sealed record RenterAddressResponse(
     Guid Id,
     string Province,
     string AddressDetail,
     string RecipientName,
     string RecipientPhone,
-    bool IsDefault);
+    bool IsDefault,
+    string? ProvinceCode = null,
+    string? WardCode = null);

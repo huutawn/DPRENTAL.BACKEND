@@ -25,6 +25,12 @@ public static class CheckoutErrors
     public static readonly Error MultipleRentalPeriods =
         Error.Validation("CHECKOUT_MULTI_PERIOD_FORBIDDEN", "Mỗi đơn thanh toán chỉ được áp dụng cho các thiết bị có cùng khoảng thời gian thuê. Vui lòng thanh toán theo từng khoảng thời gian.");
 
+    public static readonly Error DeliveryNotConfigured =
+        Error.Validation("DELIVERY_NOT_CONFIGURED", "Nhà cung cấp chưa cấu hình khu vực giao hàng.");
+
+    public static readonly Error DeliveryAddressIncomplete =
+        Error.Validation("DELIVERY_ADDRESS_INCOMPLETE", "Thông tin địa chỉ giao hàng chưa đầy đủ. Vui lòng bổ sung tỉnh/thành phố và phường/xã.");
+
     public static readonly Error AddressOutsideDeliveryZone =
         Error.Validation("ADDRESS_OUTSIDE_DELIVERY_ZONE", "Địa chỉ giao hàng không nằm trong khu vực phục vụ của nhà cung cấp.");
 

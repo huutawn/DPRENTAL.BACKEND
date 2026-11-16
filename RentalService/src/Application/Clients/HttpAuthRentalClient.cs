@@ -168,7 +168,21 @@ public sealed class HttpAuthRentalClient : IAuthRentalClient
                 }
 
                 bool isProfileCompleted = pcProp.GetBoolean();
-                return new AuthUserSummaryDto(userId, isProfileCompleted);
+                string? fullName = null;
+                if ((root.TryGetProperty("fullName", out var fnProp) || root.TryGetProperty("FullName", out fnProp)) &&
+                    fnProp.ValueKind == JsonValueKind.String)
+                {
+                    fullName = fnProp.GetString();
+                }
+
+                string? phoneNumber = null;
+                if ((root.TryGetProperty("phoneNumber", out var pnProp) || root.TryGetProperty("PhoneNumber", out pnProp)) &&
+                    pnProp.ValueKind == JsonValueKind.String)
+                {
+                    phoneNumber = pnProp.GetString();
+                }
+
+                return new AuthUserSummaryDto(userId, isProfileCompleted, fullName, phoneNumber);
             }
             catch (JsonException ex)
             {
