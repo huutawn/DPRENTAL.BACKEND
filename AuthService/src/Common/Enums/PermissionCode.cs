@@ -24,6 +24,9 @@ public static class PermissionCode
     public const string InventoryCalendarRead = "inventory.calendar.read";
     public const string InventoryAllocationWrite = "inventory.allocation.write";
 
+    /// <summary>Permission duy nhất membership của organization Pending được giữ, đủ để tạo thiết bị nháp trong lúc chờ duyệt.</summary>
+    public static readonly IReadOnlyCollection<string> PendingOrganizationDraft = [InventoryAssetManage];
+
     public static readonly IReadOnlyCollection<string> All =
     [
         IdentityUsersRead,
