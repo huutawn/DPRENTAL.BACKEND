@@ -190,4 +190,45 @@ public sealed class UserAccessResolverTests
         Assert.Contains("inventory.manage", perms);
         Assert.DoesNotContain("secret.manage", perms);
     }
+
+    [Theory]
+    [InlineData(MembershipStatus.Active, OrganizationStatus.Active, true, true)]
+    [InlineData(MembershipStatus.Active, OrganizationStatus.Pending, true, false)]
+    [InlineData(MembershipStatus.Active, OrganizationStatus.Rejected, false, false)]
+    [InlineData(MembershipStatus.Active, OrganizationStatus.Suspended, false, false)]
+    [InlineData(MembershipStatus.Suspended, OrganizationStatus.Active, false, false)]
+    [InlineData(MembershipStatus.Suspended, OrganizationStatus.Pending, false, false)]
+    [InlineData(MembershipStatus.Invited, OrganizationStatus.Pending, false, false)]
+    public void Permissions_OwnerRole_GrantsDraftPermissionToPendingAndFullSetToActiveOnly(
+        MembershipStatus membershipStatus,
+        OrganizationStatus organizationStatus,
+        bool expectsDraftPermission,
+        bool expectsFullOwnerPermissions)
+    {
+        Permission draftPerm = new() { Id = Guid.NewGuid(), Code = PermissionCode.InventoryAssetManage };
+        Permission membersPerm = new() { Id = Guid.NewGuid(), Code = PermissionCode.IdentityMembersManage };
+        Role ownerRole = new() { Id = Guid.NewGuid(), Name = SystemRoleCode.Owner, Scope = RoleScope.Organization };
+        ownerRole.RolePermissions.Add(new RolePermission { RoleId = ownerRole.Id, PermissionId = draftPerm.Id, Permission = draftPerm });
+        ownerRole.RolePermissions.Add(new RolePermission { RoleId = ownerRole.Id, PermissionId = membersPerm.Id, Permission = membersPerm });
+        Organization org = new() { Id = Guid.NewGuid(), Name = "Org", Status = organizationStatus };
+        User user = new() { Id = Guid.NewGuid(), Email = "owner@test.local", IsActive = true };
+        user.OrganizationMemberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            OrganizationId = org.Id,
+            Organization = org,
+            RoleId = ownerRole.Id,
+            Role = ownerRole,
+            Status = membershipStatus
+        });
+
+        string[] perms = UserAccessResolver.Permissions(user);
+
+        Assert.Equal(expectsDraftPermission, perms.Contains(PermissionCode.InventoryAssetManage));
+        Assert.Equal(expectsFullOwnerPermissions, perms.Contains(PermissionCode.IdentityMembersManage));
+        // Chỉ organization Active đóng góp role và organization ID vào token.
+        Assert.Equal(expectsFullOwnerPermissions, UserAccessResolver.OrganizationIds(user).Contains(org.Id));
+        Assert.Equal(expectsFullOwnerPermissions, UserAccessResolver.EffectiveRoles(user).Contains(SystemRoleCode.Owner));
+    }
 }

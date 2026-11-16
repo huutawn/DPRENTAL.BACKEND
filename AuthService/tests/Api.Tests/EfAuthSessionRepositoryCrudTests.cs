@@ -12,7 +12,6 @@ public sealed class EfAuthSessionRepositoryCrudTests
     [InlineData(Dprental.AuthService.Common.Enums.MembershipStatus.Active, Dprental.AuthService.Common.Enums.OrganizationStatus.Active, true)]
     [InlineData(Dprental.AuthService.Common.Enums.MembershipStatus.Invited, Dprental.AuthService.Common.Enums.OrganizationStatus.Active, false)]
     [InlineData(Dprental.AuthService.Common.Enums.MembershipStatus.Suspended, Dprental.AuthService.Common.Enums.OrganizationStatus.Active, false)]
-    [InlineData(Dprental.AuthService.Common.Enums.MembershipStatus.Active, Dprental.AuthService.Common.Enums.OrganizationStatus.Pending, false)]
     [InlineData(Dprental.AuthService.Common.Enums.MembershipStatus.Active, Dprental.AuthService.Common.Enums.OrganizationStatus.Suspended, false)]
     public async Task NewSessionOnlyGrantsPermissionsFromActiveMemberships(
         Dprental.AuthService.Common.Enums.MembershipStatus membershipStatus,
@@ -43,6 +42,40 @@ public sealed class EfAuthSessionRepositoryCrudTests
         Assert.NotNull(principal);
         Assert.Equal(allowed, principal.Permissions.Contains(permission.Code));
         Assert.Equal(allowed, principal.OrganizationIds.Contains(organization.Id));
+    }
+
+    [Fact]
+    public async Task NewSessionForPendingOrganizationGrantsDraftPermissionWithoutOrganizationId()
+    {
+        await using var db = new AuthDbContext(new DbContextOptionsBuilder<AuthDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options);
+        var draft = new Permission { Id = Guid.NewGuid(), Code = "inventory.asset.manage" };
+        var members = new Permission { Id = Guid.NewGuid(), Code = "identity.members.manage" };
+        var role = new Role { Id = Guid.NewGuid(), Name = "Owner" };
+        role.RolePermissions.Add(new RolePermission { RoleId = role.Id, PermissionId = draft.Id, Permission = draft });
+        role.RolePermissions.Add(new RolePermission { RoleId = role.Id, PermissionId = members.Id, Permission = members });
+        var organization = new Organization { Id = Guid.NewGuid(), Status = Dprental.AuthService.Common.Enums.OrganizationStatus.Pending, Name = "Supplier", Slug = Guid.NewGuid().ToString("N") };
+        var user = new User { Id = Guid.NewGuid(), Email = "pending@test.local", IsActive = true };
+        user.OrganizationMemberships.Add(new OrganizationMembership
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            OrganizationId = organization.Id,
+            Organization = organization,
+            RoleId = role.Id,
+            Role = role,
+            Status = Dprental.AuthService.Common.Enums.MembershipStatus.Active
+        });
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        var repository = new EfAuthSessionRepository(db, TimeProvider.System);
+        var now = DateTime.UtcNow;
+        var principal = await repository.CreateAsync(user.Id, Guid.NewGuid().ToString("N"), now, now.AddDays(1), null, null);
+        Assert.NotNull(principal);
+        Assert.Contains(draft.Code, principal.Permissions);
+        Assert.DoesNotContain(members.Code, principal.Permissions);
+        Assert.Empty(principal.OrganizationIds);
+        Assert.DoesNotContain("Owner", principal.Roles);
     }
 
     [Fact]
