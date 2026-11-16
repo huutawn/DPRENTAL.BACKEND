@@ -634,4 +634,86 @@ public sealed class PaymentWorkflowIntegrationTests
         Assert.Equal(RentalOperationReceipt.StatusPending, refundReceipt.Status);
         Assert.False(refundReceipt.IsSuccess);
     }
+
+    [Fact]
+    public async Task InvoicePaid_ComputesDeadlineFromPaidAt_NotCurrentTime()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        var order = CreateOrder(orderId, renterId);
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        DateTimeOffset actualPaidAt = FixedNow;
+        DateTimeOffset workerDelayedExecutionTime = FixedNow.AddHours(5); // Worker runs 5 hours later
+
+        var service = CreateWorkflowService(db, new StubInventoryClient(), new StubPaymentClient(), now: workerDelayedExecutionTime);
+
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
+            Guid.NewGuid(),
+            "InvoicePaid",
+            1,
+            "payment-service",
+            orderId.ToString("D"),
+            workerDelayedExecutionTime,
+            "corr-delay",
+            null,
+            new InvoicePaidPayload(orderId, renterId, "INV-001", "PAY-001", order.TotalPayableAmount, "VND", actualPaidAt));
+
+        var result = await service.ProcessInvoicePaidAsync(envelope);
+
+        Assert.True(result.IsSuccess);
+        var reloaded = await db.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId);
+        var item = reloaded.Items.First();
+
+        DateTimeOffset expectedDeadline = RentalItem.CalculateSupplierConfirmationDeadline(actualPaidAt, item.ExpectedStartDate);
+        Assert.Equal(expectedDeadline, item.SupplierConfirmationDeadline);
+        Assert.NotEqual(workerDelayedExecutionTime.AddHours(24), item.SupplierConfirmationDeadline);
+    }
+
+    [Fact]
+    public async Task InvoicePaid_PublishesSupplierConfirmationRequested_WithCalculatedDeadline()
+    {
+        string dbName = Guid.NewGuid().ToString("N");
+        await using var db = CreateDbContext(dbName);
+        Guid orderId = Guid.NewGuid();
+        Guid renterId = Guid.NewGuid();
+        var order = CreateOrder(orderId, renterId);
+        db.RentalOrders.Add(order);
+        await db.SaveChangesAsync();
+
+        var service = CreateWorkflowService(db, new StubInventoryClient(), new StubPaymentClient());
+
+        var envelope = new KafkaMessageEnvelope<InvoicePaidPayload>(
+            Guid.NewGuid(),
+            "InvoicePaid",
+            1,
+            "payment-service",
+            orderId.ToString("D"),
+            FixedNow,
+            "corr-outbox-deadline",
+            null,
+            new InvoicePaidPayload(orderId, renterId, "INV-001", "PAY-001", order.TotalPayableAmount, "VND", FixedNow));
+
+        var result = await service.ProcessInvoicePaidAsync(envelope);
+        Assert.True(result.IsSuccess);
+
+        var replies = new InventoryReplySimulator(() => CreateDbContext(dbName), new TestTimeProvider(FixedNow));
+        var extendCmd = Assert.Single(await replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.ExtendHold));
+        var acceptRes = await replies.SucceedAsync(extendCmd);
+        Assert.True(acceptRes.IsSuccess);
+
+        await using var verify = CreateDbContext(dbName);
+        var outboxMessages = await verify.RentalOutboxMessages.ToListAsync();
+        var confirmMsg = outboxMessages.FirstOrDefault(m => m.MessageType == KafkaContractSpec.EventTypes.RentalSupplierConfirmationRequested);
+        Assert.NotNull(confirmMsg);
+
+        var confirmEnvelope = JsonSerializer.Deserialize<KafkaMessageEnvelope<RentalSupplierConfirmationRequestedPayload>>(confirmMsg.Payload, JsonOptions);
+        Assert.NotNull(confirmEnvelope);
+
+        var item = (await verify.RentalOrders.Include(o => o.Items).FirstAsync(o => o.Id == orderId)).Items.First();
+        Assert.Equal(item.SupplierConfirmationDeadline, confirmEnvelope.Payload.SupplierConfirmationDeadline);
+    }
 }

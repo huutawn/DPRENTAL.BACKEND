@@ -104,6 +104,19 @@ public sealed class HttpInventoryRentalClient : IInventoryRentalClient
             ct);
     }
 
+    public async Task<Result<WarehouseDeliveryPolicyResponse>> GetWarehouseDeliveryPolicyAsync(
+        Guid supplierId,
+        CancellationToken ct = default)
+    {
+        string route = InventoryContractSpec.Routes.DeliveryPolicy(supplierId);
+        return await SendAsync<object, WarehouseDeliveryPolicyResponse>(
+            HttpMethod.Get,
+            route,
+            null,
+            InventoryContractSpec.Scopes.ReadDeliveryPolicy,
+            ct);
+    }
+
     private async Task<Result<TResponse>> SendAsync<TRequest, TResponse>(
         HttpMethod method,
         string relativeRoute,

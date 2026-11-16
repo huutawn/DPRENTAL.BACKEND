@@ -165,7 +165,7 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
             orderCode,
             plan.RenterId,
             plan.Currency,
-            CheckoutRules.DeliveryMethod,
+            plan.DeliveryMethod,
             plan.Delivery.RecipientName!,
             plan.Delivery.RecipientPhone!,
             $"{plan.Delivery.AddressDetail}, {plan.Delivery.Province}",
@@ -177,7 +177,11 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
             checkoutOperationId,
             orderCreatedAt,
             heldLines.Select(ToInitialItem),
-            paymentDeadline: holdExpiresAt);
+            paymentDeadline: holdExpiresAt,
+            returnMethod: plan.ReturnMethod,
+            deliveryFee: plan.DeliveryFee,
+            returnFee: plan.ReturnFee,
+            deliverySnapshotJson: plan.DeliveryPolicySnapshotJson);
         // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (order.IsFailure)
         {
@@ -260,5 +264,7 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
         held.AssignedAssets
             .Select(a => new InitialRentalUnitAssignmentDto(Guid.NewGuid(), a.AssetId, a.AllocationId))
             .ToList(),
-        held.Line.ListingSnapshot);
+        held.Line.ListingSnapshot,
+        held.Line.DeliveryFee,
+        held.Line.ReturnFee);
 }

@@ -105,6 +105,17 @@ internal sealed class FakeInventoryRentalClient : IInventoryRentalClient
     public Task<Result<ListingRentalSnapshotsResponse>> GetListingRentalSnapshotsAsync(ListingRentalSnapshotsRequest request, CancellationToken ct = default) =>
         Listings?.GetListingRentalSnapshotsAsync(request, ct) ?? throw new NotSupportedException();
 
+    public Task<Result<WarehouseDeliveryPolicyResponse>> GetWarehouseDeliveryPolicyAsync(Guid supplierId, CancellationToken ct = default) =>
+        Listings?.GetWarehouseDeliveryPolicyAsync(supplierId, ct) ?? Task.FromResult(Result.Success(new WarehouseDeliveryPolicyResponse(
+            supplierId,
+            true,
+            new WarehouseAddressDto("123 Warehouse Rd", "79", "Ward 1"),
+            new OperatingHoursDto("08:00", "18:00", []),
+            [
+                new DeliveryZoneDto("79", null, 0m, 0m),
+                new DeliveryZoneDto("Hồ Chí Minh", null, 0m, 0m)
+            ])));
+
     public Task<Result<ExtendHoldResponse>> ExtendHoldAsync(string allocationGroupId, ExtendHoldRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException();
 

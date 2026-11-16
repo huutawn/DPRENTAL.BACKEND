@@ -12,4 +12,9 @@ public interface ICheckoutPreparationService
         CheckoutRenterContext renter,
         CheckoutRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<CheckoutPreparationResult> PreparePreviewAsync(
+        CheckoutRenterContext renter,
+        CheckoutRequest request,
+        CancellationToken cancellationToken = default);
 }

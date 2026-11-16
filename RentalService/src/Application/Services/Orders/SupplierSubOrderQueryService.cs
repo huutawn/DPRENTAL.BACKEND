@@ -64,11 +64,14 @@ public sealed class SupplierSubOrderQueryService(
                 r.Currency,
                 r.TotalRentalAmount,
                 r.TotalDepositAmount,
-                r.TotalRentalAmount + r.TotalDepositAmount,
+                r.TotalRentalAmount + r.TotalDepositAmount + r.DeliveryFee + r.ReturnFee,
                 r.ItemStatuses.Count,
                 r.PaidAt,
                 r.CreatedAt,
-                r.OrderVersion))
+                r.OrderVersion,
+                r.SupplierConfirmationDeadline,
+                r.DeliveryFee,
+                r.ReturnFee))
             .ToList();
 
         return OrderQueryMapper.ToPage(items, normalizedPage, normalizedPageSize, records.TotalCount);
@@ -107,10 +110,16 @@ public sealed class SupplierSubOrderQueryService(
             .ToList();
         decimal rental = subOrder.Items.Sum(i => i.RentalAmount);
         decimal deposit = subOrder.Items.Sum(i => i.DepositAmount);
+        decimal deliveryFee = subOrder.Items.Sum(i => i.DeliveryFee);
+        decimal returnFee = subOrder.Items.Sum(i => i.ReturnFee);
+        DateTimeOffset? deadline = subOrder.Items
+            .Select(i => i.SupplierConfirmationDeadline)
+            .FirstOrDefault(d => d.HasValue);
 
         return new SupplierSubOrderDetailResponse(
             subOrder.Id,
             subOrder.SubOrderCode,
+            order.Id,
             order.OrderCode,
             SubOrderStatusPolicy.Summarize(subOrder.Items.Select(i => i.Status).ToList()),
             order.Currency,
@@ -119,9 +128,12 @@ public sealed class SupplierSubOrderQueryService(
             OrderQueryMapper.ToDelivery(order),
             rental,
             deposit,
-            rental + deposit,
+            rental + deposit + deliveryFee + returnFee,
             items,
-            order.Version);
+            order.Version,
+            deadline,
+            deliveryFee,
+            returnFee);
     }
 
     public async Task<Result<SupplierUnitDetailResponse>> GetMyUnitAsync(

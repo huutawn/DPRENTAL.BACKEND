@@ -21,7 +21,9 @@ public sealed record RentalOrderCreatedPayload(
     [Required] DateTimeOffset PaymentDeadline,
     [Required] DateTimeOffset CreatedAt,
     [Required] IReadOnlyList<RentalOrderCreatedItemPayload> Items,
-    long OrderVersion = 1);
+    long OrderVersion = 1,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal TotalDeliveryFee = 0m,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal TotalReturnFee = 0m);
 
 public sealed record RentalOrderCreatedItemPayload(
     [Required] Guid RentalItemId,

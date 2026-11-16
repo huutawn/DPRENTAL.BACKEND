@@ -517,7 +517,8 @@ public sealed partial class RentalOperationExecutor
         // Lấy khóa đúng phạm vi trước khi đọc lại và thay đổi dữ liệu, tránh quyết định trên snapshot đã cũ.
         await using var orderLock = await _lockManager.AcquireOrderLockAsync(orderId, TimeSpan.FromSeconds(5), cancellationToken);
 
-        // Đọc dữ liệu/định danh từ repository để xác định đối tượng và trạng thái cần xử lý; kiểm tra không tồn tại ở nhánh kế tiếp.
+        // Bỏ tracked aggregate cũ để nạp lại version mới nhất từ cơ sở dữ liệu sau khi nhận khóa.
+        _unitOfWork.DiscardChanges();
         var order = await _orderRepository.GetByIdWithDetailsAsync(orderId, cancellationToken);
         // Kiểm tra dữ liệu tùy chọn hoặc kết quả tra cứu trước khi dùng; xử lý riêng trường hợp không có giá trị.
         if (order == null) return Error.NotFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng.");
@@ -623,7 +624,7 @@ public sealed partial class RentalOperationExecutor
         if (refundReceipt == null)
         {
             // Dựng request/command từ snapshot và định danh của luồng hiện tại để gửi đúng tác vụ sang service sở hữu.
-            var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount) };
+            var refundItems = new List<RefundItemRequest> { new(item.Id, item.RentalAmount, item.DepositAmount, item.DeliveryFee, item.ReturnFee) };
             var refundReq = new RequestRefundRequest(order.Id, order.InvoiceRef!, order.PaymentRef!, refundItems, reason, refundOpKey, RentalRefundKinds.CancellationRefund);
             var refundCmd = new RentalOperationCommand(
                 1,
@@ -641,7 +642,7 @@ public sealed partial class RentalOperationExecutor
                 order.Id,
                 refundOpKey,
                 "RequestRefund",
-                ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount}"),
+                ComputeFingerprint($"RequestRefund:{order.Id}:{item.RentalAmount + item.DepositAmount + item.DeliveryFee + item.ReturnFee}"),
                 isSuccess: false,
                 errorCode: null,
                 errorMessage: null,

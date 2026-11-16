@@ -151,7 +151,7 @@ public sealed class RenterOrderQueryService(
             OrderQueryMapper.ParseRefundAccount(order.RefundDestinationRef),
             totalRental,
             totalDeposit,
-            totalRental + totalDeposit,
+            totalRental + totalDeposit + order.DeliveryFee + order.ReturnFee,
             subOrders,
             order.Version,
             OrderQueryMapper.ToRefundProgress(refundLines.Count, refundLines.Values.Count(l => l.Confirmation is null)),

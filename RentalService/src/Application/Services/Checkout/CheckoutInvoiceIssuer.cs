@@ -102,9 +102,11 @@ public sealed class CheckoutInvoiceIssuer : ICheckoutInvoiceIssuer
             order.Currency,
             order.PaymentDeadline,
             order.Items
-                .Select(i => new CreateInvoiceItemRequest(i.Id, i.SupplierId, i.RentalAmount, i.DepositAmount))
+                .Select(i => new CreateInvoiceItemRequest(i.Id, i.SupplierId, i.RentalAmount, i.DepositAmount, i.DeliveryFee, i.ReturnFee))
                 .ToList(),
-            RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString()));
+            RentalOperationExecutor.ComputeOperationKey("CreateInvoice", order.Id.ToString()),
+            order.DeliveryFee,
+            order.ReturnFee);
 
         // Chạy validator/policy của bước hiện tại; chỉ chuyển sang bước sau khi kết quả hợp lệ.
         Result validation = request.Validate();

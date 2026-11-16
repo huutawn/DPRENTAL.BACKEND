@@ -19,6 +19,8 @@ public sealed record CheckoutRenterContext(Guid RenterId);
 /// <param name="AddressId">Mã địa chỉ trong sổ địa chỉ của người thuê, dùng thay cho Delivery. Gửi cái này hoặc Delivery, không gửi cả hai.</param>
 /// <param name="DeliveryNote">Ghi chú cho nhà cung cấp khi giao theo AddressId (tùy chọn, tối đa 500 ký tự). Nhập tay thì dùng Delivery.Note.</param>
 /// <param name="RefundAccountId">Mã tài khoản trong sổ tài khoản ngân hàng của người thuê, dùng thay cho RefundAccount. Gửi cái này hoặc RefundAccount, không gửi cả hai.</param>
+/// <param name="DeliveryMethod">Phương thức nhận máy: Delivery (giao tận nơi) hoặc Pickup (nhận tại kho).</param>
+/// <param name="ReturnMethod">Phương thức trả máy: Return (nhà cung cấp thu hồi) hoặc Pickup (trả tại kho).</param>
 public sealed record CheckoutRequest(
     IReadOnlyList<Guid>? CartItemIds,
     CheckoutDeliveryDto? Delivery,
@@ -33,7 +35,11 @@ public sealed record CheckoutRequest(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? DeliveryNote = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    Guid? RefundAccountId = null);
+    Guid? RefundAccountId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? DeliveryMethod = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ReturnMethod = null);
 
 /// <summary>
 /// Nơi giao thiết bị của đơn hàng.
@@ -59,7 +65,66 @@ public sealed record CheckoutDeliveryDto(
 public sealed record CheckoutRefundAccountDto(
     string? BankCode,
     string? AccountNumber,
-    string? AccountHolderName);
+    string? AccountHolderName)
+{
+    public override string ToString()
+    {
+        string masked = string.IsNullOrWhiteSpace(AccountNumber)
+            ? string.Empty
+            : AccountNumber.Length <= 4
+                ? new string('*', AccountNumber.Length)
+                : $"{new string('*', Math.Max(0, AccountNumber.Length - 4))}{AccountNumber[^4..]}";
+        return $"CheckoutRefundAccountDto {{ BankCode = {BankCode}, AccountNumber = {masked}, AccountHolderName = {AccountHolderName} }}";
+    }
+}
+
+/// <summary>
+/// DTO yêu cầu xem trước chi phí đơn hàng (preview) trước khi checkout.
+/// </summary>
+public sealed record CheckoutPreviewRequest(
+    IReadOnlyList<Guid>? CartItemIds = null,
+    CheckoutDeliveryDto? Delivery = null,
+    CheckoutRefundAccountDto? RefundAccount = null,
+    string? TermsVersion = null,
+    bool TermsAccepted = false,
+    decimal ExpectedTotalAmount = 0m,
+    CheckoutBuyNowDto? BuyNow = null,
+    Guid? AddressId = null,
+    string? DeliveryNote = null,
+    Guid? RefundAccountId = null,
+    string? DeliveryMethod = null,
+    string? ReturnMethod = null)
+{
+    public CheckoutRequest ToCheckoutRequest() => new(
+        CartItemIds,
+        Delivery,
+        RefundAccount,
+        TermsVersion,
+        TermsAccepted,
+        ExpectedTotalAmount,
+        BuyNow,
+        AddressId,
+        DeliveryNote,
+        RefundAccountId,
+        DeliveryMethod,
+        ReturnMethod);
+}
+
+/// <summary>
+/// DTO phản hồi xem trước chi phí đơn hàng gồm breakdown tiền thuê, tiền cọc, phí giao, phí thu hồi và tổng tiền.
+/// </summary>
+public sealed record CheckoutPreviewResponse(
+    decimal TotalRentalAmount,
+    decimal TotalDepositAmount,
+    decimal DeliveryFee,
+    decimal ReturnFee,
+    decimal TotalAmount,
+    string Currency,
+    string DeliveryMethod,
+    string ReturnMethod,
+    CheckoutDeliveryDto Delivery,
+    Dprental.RentalService.Application.DTOs.Inventory.ListingWarehouseDto? WarehouseAddress,
+    IReadOnlyList<CheckoutPlanLine> Lines);
 
 /// <summary>
 /// Kết quả validate checkout: dữ liệu đã chuẩn hóa và snapshot của từng dòng, chưa giữ lịch và chưa lưu.
@@ -73,13 +138,19 @@ public sealed record CheckoutPlan(
     string TermsDocumentRef,
     string TermsContentHash,
     string Currency,
-    IReadOnlyList<CheckoutPlanLine> Lines)
+    IReadOnlyList<CheckoutPlanLine> Lines,
+    string DeliveryMethod = "Delivery",
+    string ReturnMethod = "Pickup",
+    decimal DeliveryFee = 0m,
+    decimal ReturnFee = 0m,
+    Dprental.RentalService.Application.DTOs.Inventory.ListingWarehouseDto? WarehouseSnapshot = null,
+    string? DeliveryPolicySnapshotJson = null)
 {
     public decimal TotalRentalAmount => Lines.Sum(l => l.RentalAmount);
 
     public decimal TotalDepositAmount => Lines.Sum(l => l.DepositAmount);
 
-    public decimal TotalAmount => TotalRentalAmount + TotalDepositAmount;
+    public decimal TotalAmount => TotalRentalAmount + TotalDepositAmount + DeliveryFee + ReturnFee;
 }
 
 public sealed record CheckoutPlanLine(
@@ -96,7 +167,9 @@ public sealed record CheckoutPlanLine(
     int RentalDays,
     decimal RentalAmount,
     decimal DepositAmount,
-    string? PickupLocationSnapshot = null);
+    string? PickupLocationSnapshot = null,
+    decimal DeliveryFee = 0m,
+    decimal ReturnFee = 0m);
 
 public sealed record CheckoutFieldError(string Field, string Code, string Message);
 

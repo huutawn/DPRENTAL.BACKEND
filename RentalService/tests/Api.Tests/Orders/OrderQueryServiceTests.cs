@@ -413,6 +413,7 @@ public sealed class OrderQueryServiceTests
 
         Assert.True(result.IsSuccess);
         SupplierSubOrderDetailResponse subOrder = result.Value;
+        Assert.Equal(_paidMixedOrder.Id, subOrder.OrderId);
         Assert.Equal(_paidMixedOrder.OrderCode, subOrder.OrderCode);
         Assert.Equal("Máy xúc CAT 320", Assert.Single(subOrder.Items).Name);
         Assert.Equal(29_000_000m, subOrder.TotalAmount);
@@ -423,6 +424,29 @@ public sealed class OrderQueryServiceTests
         Assert.DoesNotContain("Máy trộn", json, StringComparison.Ordinal);
         Assert.DoesNotContain("0123456789", json, StringComparison.Ordinal);
         Assert.DoesNotContain("37400000", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSubOrder_ExposesSupplierConfirmationDeadline_AndFees()
+    {
+        await SeedAsync();
+        Guid binhsSubOrderId = _paidMixedOrder.SubOrders.Single(s => s.SupplierId == _binh).Id;
+
+        Result<SupplierSubOrderDetailResponse> detail =
+            await SupplierService().GetMySubOrderAsync(binhsSubOrderId, OrderTestData.User(_binh));
+
+        Assert.True(detail.IsSuccess);
+        Assert.NotNull(detail.Value.SupplierConfirmationDeadline);
+        Assert.Equal(0m, detail.Value.DeliveryFee);
+        Assert.Equal(0m, detail.Value.ReturnFee);
+
+        Result<PagedResponse<SupplierSubOrderSummaryResponse>> list =
+            await SupplierService().GetMySubOrdersAsync(1, 10, null, OrderTestData.User(_binh));
+
+        Assert.True(list.IsSuccess);
+        SupplierSubOrderSummaryResponse summary = list.Value.Items.Single(s => s.SubOrderId == binhsSubOrderId);
+        Assert.NotNull(summary.SupplierConfirmationDeadline);
+        Assert.Equal(detail.Value.SupplierConfirmationDeadline, summary.SupplierConfirmationDeadline);
     }
 
     [Fact]

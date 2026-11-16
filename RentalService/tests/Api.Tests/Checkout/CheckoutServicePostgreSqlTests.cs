@@ -710,6 +710,73 @@ public sealed class CheckoutServicePostgreSqlTests
             timeProvider: clock);
     }
 
+    [Fact]
+    public async Task Checkout_OrderSnapshotImmutability_WarehousePolicyChangeDoesNotAffectSavedOrder()
+    {
+        if (!await PostgresTestDatabaseHelper.IsPostgreSqlAvailableAsync())
+        {
+            throw new InvalidOperationException("PostgreSQL integration environment is not available at test connection string.");
+        }
+
+        var (connectionString, databaseName) = await PostgresTestDatabaseHelper.CreateTestDatabaseAsync();
+        try
+        {
+            DbContextOptions<RentalServiceDbContext> options = PostgresTestDatabaseHelper.CreateOptions(connectionString);
+            Guid cartItemId = await SeedAsync(options);
+            PostgresOrderLockManager locks = new(
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Postgres"] = connectionString })
+                    .Build(),
+                NullLogger<PostgresOrderLockManager>.Instance);
+
+            _listings.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
+                _supplierId,
+                true,
+                new WarehouseAddressDto("123 Original Le Loi", "79", "Ward 1"),
+                new OperatingHoursDto("08:00", "18:00", []),
+                [new DeliveryZoneDto("79", null, 50_000m, 50_000m), new DeliveryZoneDto("Hồ Chí Minh", null, 50_000m, 50_000m)]);
+
+            CheckoutRequest request = new(
+                [cartItemId],
+                new("Hồ Chí Minh", "123 Nguyễn Huệ, Quận 1", "Nguyễn Văn A", "0901234567", null),
+                new("VCB", "0123456789", "NGUYEN VAN A"),
+                "v1.0",
+                true,
+                3_100_000m); // 3M rental + 50k delivery + 50k return
+
+            FixedTimeProvider clock = new(Now);
+            CheckoutCompletion completion = new(
+                () => new RentalServiceDbContext(options), clock, _inventory, _payment, locks,
+                context => new PostgresOrderCodeGenerator(context));
+
+            CheckoutResult result = await SubmitAsync(options, locks, request, completion);
+            Assert.True(result.IsSuccess, result.Error.Code);
+
+            // Change supplier warehouse policy in inventory
+            _listings.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
+                _supplierId,
+                false, // disabled pickup
+                new WarehouseAddressDto("999 New Street, District 9", "79", "Ward 9"),
+                new OperatingHoursDto("09:00", "17:00", [0]),
+                [new DeliveryZoneDto("79", null, 250_000m, 250_000m), new DeliveryZoneDto("Hồ Chí Minh", null, 250_000m, 250_000m)]);
+
+            await using RentalServiceDbContext context = new(options);
+            RentalOrder savedOrder = await context.RentalOrders
+                .Include(o => o.Items)
+                .SingleAsync(o => o.Id == result.Order!.Id);
+
+            Assert.Equal(50_000m, savedOrder.DeliveryFee);
+            Assert.Equal(50_000m, savedOrder.ReturnFee);
+            Assert.NotNull(savedOrder.DeliverySnapshotJson);
+            Assert.Contains("123 Original Le Loi", savedOrder.DeliverySnapshotJson);
+            Assert.DoesNotContain("999 New Street", savedOrder.DeliverySnapshotJson);
+        }
+        finally
+        {
+            await PostgresTestDatabaseHelper.DropTestDatabaseAsync(databaseName);
+        }
+    }
+
 
 
     private async Task<Guid> SeedAsync(DbContextOptions<RentalServiceDbContext> options)

@@ -14,10 +14,12 @@ public sealed record CreateInvoiceItemRequest(
     [Required] Guid RentalItemId,
     [Required] Guid SupplierId,
     [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RentalAmount,
-    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal DepositAmount)
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal DepositAmount,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal DeliveryFee = 0m,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal ReturnFee = 0m)
 {
     [JsonIgnore]
-    public decimal TotalAmount => RentalAmount + DepositAmount;
+    public decimal TotalAmount => RentalAmount + DepositAmount + DeliveryFee + ReturnFee;
 
     public Result Validate()
     {
@@ -32,6 +34,12 @@ public sealed record CreateInvoiceItemRequest(
         var depositCheck = VndAmountValidator.ValidateVndAmount(DepositAmount, "Tiền cọc");
         if (depositCheck.IsFailure) return depositCheck.Error;
 
+        var deliveryCheck = VndAmountValidator.ValidateVndAmount(DeliveryFee, "Phí giao máy");
+        if (deliveryCheck.IsFailure) return deliveryCheck.Error;
+
+        var returnCheck = VndAmountValidator.ValidateVndAmount(ReturnFee, "Phí trả máy");
+        if (returnCheck.IsFailure) return returnCheck.Error;
+
         return Result.Success();
     }
 }
@@ -43,7 +51,9 @@ public sealed record CreateInvoiceRequest(
     [Required][StringLength(3, MinimumLength = 3)] string Currency,
     [Required] DateTimeOffset PaymentDeadline,
     [Required] IReadOnlyList<CreateInvoiceItemRequest> Items,
-    [Required][MaxLength(64)] string OperationKey)
+    [Required][MaxLength(64)] string OperationKey,
+    decimal TotalDeliveryFee = 0m,
+    decimal TotalReturnFee = 0m)
 {
     [JsonIgnore]
     public decimal TotalAmount => Items.Sum(i => i.TotalAmount);
@@ -189,10 +199,12 @@ public sealed record AcceptLatePaymentResponse(
 public sealed record RefundItemRequest(
     [Required] Guid RentalItemId,
     [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RefundRentalAmount,
-    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RefundDepositAmount)
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RefundDepositAmount,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RefundDeliveryFee = 0m,
+    [Range(0, (double)VndAmountValidator.MaxVndAmount)] decimal RefundReturnFee = 0m)
 {
     [JsonIgnore]
-    public decimal TotalRefundAmount => RefundRentalAmount + RefundDepositAmount;
+    public decimal TotalRefundAmount => RefundRentalAmount + RefundDepositAmount + RefundDeliveryFee + RefundReturnFee;
 
     public Result Validate()
     {
@@ -206,6 +218,12 @@ public sealed record RefundItemRequest(
 
         var depositCheck = VndAmountValidator.ValidateVndAmount(RefundDepositAmount, "Tiền cọc hoàn lại");
         if (depositCheck.IsFailure) return depositCheck.Error;
+
+        var deliveryCheck = VndAmountValidator.ValidateVndAmount(RefundDeliveryFee, "Phí giao máy hoàn lại");
+        if (deliveryCheck.IsFailure) return deliveryCheck.Error;
+
+        var returnCheck = VndAmountValidator.ValidateVndAmount(RefundReturnFee, "Phí trả máy hoàn lại");
+        if (returnCheck.IsFailure) return returnCheck.Error;
 
         return Result.Success();
     }

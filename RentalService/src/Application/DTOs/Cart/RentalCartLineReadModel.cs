@@ -15,6 +15,7 @@ namespace Dprental.RentalService.Application.DTOs.Cart;
 /// <param name="Status">Trạng thái kiểm tra tính khả dụng và hợp lệ của mục giỏ hàng.</param>
 /// <param name="InteractionStatus">Mức thao tác cho phép đối với mục giỏ hàng.</param>
 /// <param name="Message">Thông điệp chi tiết giải thích trạng thái nếu có lỗi hoặc cảnh báo.</param>
+/// <param name="SupplierId">Mã nhà cung cấp (chủ sở hữu thiết bị).</param>
 public sealed record RentalCartLineReadModel(
     Guid CartItemId,
     Guid EquipmentListingId,
@@ -27,4 +28,5 @@ public sealed record RentalCartLineReadModel(
     string? CurrentPriceVersion,
     RentalCartLineStatus Status,
     RentalCartItemInteractionStatus InteractionStatus,
-    string? Message);
+    string? Message,
+    Guid? SupplierId = null);

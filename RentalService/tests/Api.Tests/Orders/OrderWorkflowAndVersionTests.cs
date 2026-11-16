@@ -211,6 +211,7 @@ public sealed class OrderWorkflowAndVersionTests
         var supplierDetail = new SupplierSubOrderDetailResponse(
             Guid.NewGuid(),
             "SUB-001",
+            order.Id,
             order.OrderCode,
             RentalItemStatus.PendingSupplierConfirmation,
             order.Currency,

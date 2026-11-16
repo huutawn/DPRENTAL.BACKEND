@@ -19,6 +19,21 @@ public static class CheckoutErrors
     public static readonly Error InvalidRentalDates =
         Error.Validation("Checkout.InvalidRentalDates", "Ngày thuê của một số thiết bị không còn hợp lệ.");
 
+    public static readonly Error MultipleSuppliers =
+        Error.Validation("CHECKOUT_MULTI_SUPPLIER_FORBIDDEN", "Mỗi đơn thanh toán chỉ được áp dụng cho một nhà cung cấp. Vui lòng thanh toán theo từng nhóm nhà cung cấp.");
+
+    public static readonly Error MultipleRentalPeriods =
+        Error.Validation("CHECKOUT_MULTI_PERIOD_FORBIDDEN", "Mỗi đơn thanh toán chỉ được áp dụng cho các thiết bị có cùng khoảng thời gian thuê. Vui lòng thanh toán theo từng khoảng thời gian.");
+
+    public static readonly Error AddressOutsideDeliveryZone =
+        Error.Validation("ADDRESS_OUTSIDE_DELIVERY_ZONE", "Địa chỉ giao hàng không nằm trong khu vực phục vụ của nhà cung cấp.");
+
+    public static readonly Error PickupNotSupported =
+        Error.Validation("PICKUP_NOT_SUPPORTED", "Nhà cung cấp không hỗ trợ nhận tại kho.");
+
+    public static readonly Error WarehouseAddressIncomplete =
+        Error.Conflict("WAREHOUSE_ADDRESS_INCOMPLETE", "Thông tin địa chỉ kho nhà cung cấp chưa đầy đủ.");
+
     public static readonly Error ItemsUnavailable =
         Error.Conflict("Checkout.ItemsUnavailable", "Một số thiết bị đã chọn không còn cho thuê hoặc không đủ số lượng.");
 

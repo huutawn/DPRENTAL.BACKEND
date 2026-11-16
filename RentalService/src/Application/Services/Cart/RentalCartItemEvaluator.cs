@@ -242,7 +242,8 @@ public sealed class RentalCartItemEvaluator(
                 listing.PriceVersion,
                 evaluation.Status,
                 evaluation.InteractionStatus,
-                evaluation.Message);
+                evaluation.Message,
+                SupplierId: listing.OwnerId);
         }
 
         return new RentalCartLineReadModel(
@@ -257,6 +258,7 @@ public sealed class RentalCartItemEvaluator(
             CurrentPriceVersion: null,
             evaluation.Status,
             evaluation.InteractionStatus,
-            evaluation.Message);
+            evaluation.Message,
+            SupplierId: listing?.OwnerId);
     }
 }

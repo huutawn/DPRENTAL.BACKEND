@@ -34,8 +34,8 @@ public static class RentalRefundPolicy
     public static decimal DeductionOf(RentalRefundKind kind, decimal? finalDeductionAmount) =>
         kind == RentalRefundKind.DepositReturn ? finalDeductionAmount ?? 0m : 0m;
 
-    public static decimal AmountOf(RentalRefundKind kind, decimal rentalAmount, decimal depositAmount, decimal deductionAmount) =>
-        kind == RentalRefundKind.FullRefund ? rentalAmount + depositAmount : depositAmount - deductionAmount;
+    public static decimal AmountOf(RentalRefundKind kind, decimal rentalAmount, decimal depositAmount, decimal deductionAmount, decimal deliveryFee = 0m, decimal returnFee = 0m) =>
+        kind == RentalRefundKind.FullRefund ? rentalAmount + depositAmount + deliveryFee + returnFee : depositAmount - deductionAmount;
 
     /// <summary>
     /// Các khoản hoàn của đơn theo thứ tự yêu cầu, mỗi dòng thiết bị tối đa một khoản. Cần đơn đã nạp các receipt yêu cầu
@@ -58,7 +58,7 @@ public static class RentalRefundPolicy
             }
 
             decimal deduction = DeductionOf(kind, item.FinalDeductionAmount);
-            decimal amount = AmountOf(kind, item.RentalAmount, item.DepositAmount, deduction);
+            decimal amount = AmountOf(kind, item.RentalAmount, item.DepositAmount, deduction, item.DeliveryFee, item.ReturnFee);
             if (amount <= 0m)
             {
                 continue;

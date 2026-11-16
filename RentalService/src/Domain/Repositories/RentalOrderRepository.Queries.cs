@@ -250,7 +250,10 @@ public sealed partial class RentalOrderRepository
                 s.Items.Select(i => i.Status).ToList(),
                 s.RentalOrder.PaymentConfirmedAt,
                 s.CreatedAt,
-                s.RentalOrder.Version))
+                s.RentalOrder.Version,
+                s.Items.Where(i => i.SupplierConfirmationDeadline != null).Select(i => i.SupplierConfirmationDeadline).FirstOrDefault(),
+                s.Items.Sum(i => i.DeliveryFee),
+                s.Items.Sum(i => i.ReturnFee)))
             .ToListAsync(cancellationToken);
 
         return new RecordPage<SupplierSubOrderSummaryRecord>(items, totalCount);

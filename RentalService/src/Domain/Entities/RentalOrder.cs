@@ -41,6 +41,19 @@ public class RentalOrder
     public string DeliveryMethod { get; private set; } = string.Empty;
 
     [Required]
+    [MaxLength(64)]
+    public string ReturnMethod { get; private set; } = string.Empty;
+
+    [Precision(18, 2)]
+    public decimal DeliveryFee { get; private set; }
+
+    [Precision(18, 2)]
+    public decimal ReturnFee { get; private set; }
+
+    [Column(TypeName = "jsonb")]
+    public string? DeliverySnapshotJson { get; private set; }
+
+    [Required]
     [MaxLength(200)]
     public string RecipientName { get; private set; } = string.Empty;
 
@@ -106,7 +119,7 @@ public class RentalOrder
     public decimal TotalDepositAmount => _items.Sum(i => i.DepositAmount);
 
     [NotMapped]
-    public decimal TotalPayableAmount => TotalRentalAmount + TotalDepositAmount;
+    public decimal TotalPayableAmount => TotalRentalAmount + TotalDepositAmount + DeliveryFee + ReturnFee;
 
     public RentalTermsAcceptance? TermsAcceptance { get; private set; }
 
@@ -212,7 +225,11 @@ public class RentalOrder
         string checkoutOperationId,
         DateTimeOffset utcNow,
         IEnumerable<InitialRentalItemDto> initialItems,
-        DateTimeOffset? paymentDeadline = null)
+        DateTimeOffset? paymentDeadline = null,
+        string? returnMethod = null,
+        decimal deliveryFee = 0m,
+        decimal returnFee = 0m,
+        string? deliverySnapshotJson = null)
     {
         if (id == Guid.Empty || renterId == Guid.Empty)
         {
@@ -340,9 +357,23 @@ public class RentalOrder
             }
         }
 
+        string effectiveReturnMethod = string.IsNullOrWhiteSpace(returnMethod)
+            ? (string.Equals(deliveryMethod.Trim(), "Delivery", StringComparison.OrdinalIgnoreCase) ? "Return" : "Pickup")
+            : returnMethod.Trim();
+
+        if (effectiveReturnMethod.Length > 64)
+        {
+            return RentalErrors.InvalidSnapshot;
+        }
+
+        if (deliveryFee < 0m || returnFee < 0m)
+        {
+            return RentalErrors.InvalidSnapshot;
+        }
+
         decimal totalOrderPayable = itemsList.Sum(i =>
             (i.DailyRateSnapshot * i.Quantity * (i.ExpectedEndDate.DayNumber - i.ExpectedStartDate.DayNumber)) +
-            (i.DepositPerUnitSnapshot * i.Quantity));
+            (i.DepositPerUnitSnapshot * i.Quantity)) + deliveryFee + returnFee;
 
         var totalOrderCheck = VndAmountValidator.ValidateVndAmount(totalOrderPayable, "Tổng tiền đơn thuê");
         if (totalOrderCheck.IsFailure) return totalOrderCheck.Error;
@@ -355,6 +386,10 @@ public class RentalOrder
             Status = RentalOrderStatus.PendingPayment,
             Currency = currency.Trim().ToUpperInvariant(),
             DeliveryMethod = deliveryMethod.Trim(),
+            ReturnMethod = effectiveReturnMethod,
+            DeliveryFee = deliveryFee,
+            ReturnFee = returnFee,
+            DeliverySnapshotJson = deliverySnapshotJson,
             RecipientName = recipientName.Trim(),
             RecipientPhone = recipientPhone.Trim(),
             DeliveryAddress = deliveryAddress.Trim(),
@@ -410,7 +445,9 @@ public class RentalOrder
                 itemDto.DepositPerUnitSnapshot,
                 itemDto.AllocationGroupId.Trim(),
                 itemDto.Assignments,
-                itemDto.ListingSnapshot);
+                itemDto.ListingSnapshot,
+                itemDto.DeliveryFee,
+                itemDto.ReturnFee);
 
             item.RentalOrder = order;
             order._items.Add(item);

@@ -269,9 +269,13 @@ internal sealed class FakeInventoryListingClient : IInventoryRentalClient
 
     public Dictionary<Guid, int> AvailableQuantities { get; } = [];
 
+    public Dictionary<Guid, WarehouseDeliveryPolicyResponse> DeliveryPolicies { get; } = [];
+
     public bool FailListingRead { get; set; }
 
     public bool FailAvailabilityCheck { get; set; }
+
+    public bool FailDeliveryPolicy { get; set; }
 
     public int ListingReadCount { get; private set; }
 
@@ -312,6 +316,31 @@ internal sealed class FakeInventoryListingClient : IInventoryRentalClient
         return Task.FromResult(Result.Success(new ListingAvailabilityCheckResponse(
             request.ListingId, request.StartDate, request.EndDate, request.RequestedQuantity,
             available, available >= request.RequestedQuantity)));
+    }
+
+    public Task<Result<WarehouseDeliveryPolicyResponse>> GetWarehouseDeliveryPolicyAsync(Guid supplierId, CancellationToken ct = default)
+    {
+        if (FailDeliveryPolicy)
+        {
+            return Task.FromResult(Result.Failure<WarehouseDeliveryPolicyResponse>(Down));
+        }
+
+        if (DeliveryPolicies.TryGetValue(supplierId, out var policy))
+        {
+            return Task.FromResult(Result.Success(policy));
+        }
+
+        var defaultPolicy = new WarehouseDeliveryPolicyResponse(
+            supplierId,
+            true,
+            new WarehouseAddressDto("123 Le Loi", "79", "Ward 1"),
+            new OperatingHoursDto("08:00", "18:00", []),
+            [
+                new DeliveryZoneDto("79", null, 0m, 0m),
+                new DeliveryZoneDto("Hồ Chí Minh", null, 0m, 0m),
+                new DeliveryZoneDto("Bình Dương", null, 0m, 0m)
+            ]);
+        return Task.FromResult(Result.Success(defaultPolicy));
     }
 
     public Task<Result<CreateHoldResponse>> CreateHoldAsync(CreateHoldRequest request, CancellationToken ct = default) => throw new NotSupportedException();
