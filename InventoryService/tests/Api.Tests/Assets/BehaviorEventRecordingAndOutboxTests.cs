@@ -71,6 +71,8 @@ public sealed class BehaviorEventRecordingAndOutboxTests
         public Task<int> CleanupPublishedBehaviorMessagesAsync(DateTimeOffset publishedBefore, int maxBatchSize, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("Cleanup is tested against the real PostgreSQL store.");
 
+        public Task<DateTimeOffset?> GetNextWakeUpTimeAsync(DateTimeOffset now, CancellationToken cancellationToken = default) =>
+            Task.FromResult<DateTimeOffset?>(null);
     }
 
     private sealed class FakeListingRepo : IEquipmentListingRepository

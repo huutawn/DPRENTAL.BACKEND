@@ -54,4 +54,11 @@ public interface ICacheInvalidationStore
         DateTimeOffset olderThanUtc,
         int batchSize,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tính toán thời điểm cần kiểm tra tiếp theo dựa trên các job đang Pending hoặc Processing (chờ retry hoặc lease hết hạn).
+    /// </summary>
+    Task<DateTimeOffset?> GetNextWakeUpTimeAsync(
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken = default);
 }

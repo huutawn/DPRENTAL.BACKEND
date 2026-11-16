@@ -18,9 +18,19 @@ namespace Dprental.InventoryService.Application.Search.Workers;
 /// Meilisearch xác nhận task thành công; lease và khóa writer kiểm soát các worker chạy đồng thời.
 /// </summary>
 public sealed class SearchProjectionWorker(IServiceScopeFactory scopeFactory, MeilisearchClient client,
-    IOptions<MeilisearchOptions> options, TimeProvider? timeProvider = null,
-    ILogger<SearchProjectionWorker>? logger = null) : BackgroundService
+    IOptions<MeilisearchOptions> options, IQueueNotificationListener? notificationListener = null,
+    TimeProvider? timeProvider = null, ILogger<SearchProjectionWorker>? logger = null) : BackgroundService
 {
+    public SearchProjectionWorker(
+        IServiceScopeFactory scopeFactory,
+        MeilisearchClient client,
+        IOptions<MeilisearchOptions> options,
+        TimeProvider? timeProvider,
+        ILogger<SearchProjectionWorker>? logger = null)
+        : this(scopeFactory, client, options, null, timeProvider, logger)
+    {
+    }
+
     public const long SessionAdvisoryLockKey = SearchCoordination.WriterKey;
     public const int FanoutBatchSize = 500;
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
@@ -28,7 +38,6 @@ public sealed class SearchProjectionWorker(IServiceScopeFactory scopeFactory, Me
     public int BatchSize { get; set; } = 20;
     public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromSeconds(30);
     public TimeSpan RenewInterval { get; set; } = TimeSpan.FromSeconds(10);
-    public TimeSpan IdleDelay { get; set; } = TimeSpan.FromMilliseconds(200);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -36,15 +45,81 @@ public sealed class SearchProjectionWorker(IServiceScopeFactory scopeFactory, Me
         {
             try
             {
-                if (await ProcessBatchAsync(stoppingToken) == 0) await Task.Delay(IdleDelay, stoppingToken);
+                var processed = await ProcessBatchAsync(stoppingToken);
+                if (processed == BatchSize)
+                {
+                    // Lô đầy, còn backlog: tiếp tục ngay lập tức để drain
+                    continue;
+                }
+
+                var now = _clock.GetUtcNow();
+                DateTimeOffset? nextWakeUp = null;
+
+                try
+                {
+                    await using var scope = scopeFactory.CreateAsyncScope();
+                    var store = scope.ServiceProvider.GetRequiredService<ISearchProjectionStore>();
+                    nextWakeUp = await store.GetNextWakeUpTimeAsync(now, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogWarning(ex, "Search projection worker failed getting next wake up time.");
+                }
+
+                var delay = CalculateDelay(now, nextWakeUp);
+
+                if (delay > TimeSpan.Zero)
+                {
+                    if (notificationListener != null)
+                    {
+                        await notificationListener.WaitForWorkAsync(QueueWorkKind.SearchProjection, delay, stoppingToken);
+                    }
+                    else
+                    {
+                        await Task.Delay(delay, _clock, stoppingToken);
+                    }
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception ex)
             {
                 logger?.LogError(ex, "Search projection worker failed; retrying.");
-                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), _clock, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
             }
         }
+    }
+
+    private TimeSpan CalculateDelay(DateTimeOffset now, DateTimeOffset? nextWakeUp)
+    {
+        if (notificationListener != null && !notificationListener.IsConnected)
+        {
+            return TimeSpan.FromSeconds(1);
+        }
+
+        var maxDelay = TimeSpan.FromSeconds(30);
+
+        if (nextWakeUp.HasValue)
+        {
+            var untilWakeUp = nextWakeUp.Value - now;
+            if (untilWakeUp < TimeSpan.Zero) untilWakeUp = TimeSpan.Zero;
+            if (untilWakeUp < maxDelay)
+            {
+                maxDelay = untilWakeUp;
+            }
+        }
+
+        return maxDelay;
     }
 
     public async Task<int> ProcessBatchAsync(CancellationToken ct = default)
