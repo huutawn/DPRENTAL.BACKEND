@@ -167,6 +167,7 @@ Kiểm tra readiness nội bộ bằng `wget` trong container và public Gateway
 API Inventory yêu cầu token; Gateway health không chứng minh request Inventory đi hết downstream.
 Kiểm tra calendar bằng client đã đăng nhập có quyền tương ứng sau triển khai.
 Kafka dev chỉ có một broker, replication factor 1; backup database không bao gồm Kafka volume.
+Healthcheck của Kafka dev được đặt `interval: 60s`, `timeout: 10s`, `retries: 3` sử dụng `kafka-topics.sh --list` để giảm khoảng 6 lần tần suất khởi chạy tiến trình Java CLI định kỳ khi nhàn rỗi. Lưu ý: thời gian phát hiện lỗi broker sẽ dài hơn (tối đa ~3 phút trước khi đánh dấu unhealthy); chưa thay bằng TCP-only vì kiểm tra đó không xác nhận broker phục vụ Kafka thành công.
 Nếu Inventory đã tồn tại trong database riêng, restore schema inventory và chuyển migration history
 của Inventory từ public sang inventory trước release đầu; không chuyển history của service khác.
 Nếu database chung đã chứa Inventory với history public cũ, thực hiện cutover history trước khi migrate.
