@@ -50,6 +50,13 @@ public interface IInventoryWriteContext
         Task.CompletedTask;
 
     /// <summary>
+    /// Đếm listing và máy của chủ sở hữu trong cùng transaction. Gọi sau <see cref="AcquireWarehouseLockAsync"/>
+    /// để thấy dữ liệu đã commit của thao tác trước.
+    /// </summary>
+    Task<OwnerInventoryCounts> GetOwnerInventoryCountsAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Write context này không hỗ trợ đếm theo chủ sở hữu.");
+
+    /// <summary>
     /// Khóa bổ sung các đơn vị tài sản vật lý theo thứ tự ID tăng dần trong cùng transaction boundary.
     /// </summary>
     Task AcquireAssetLocksAsync(IEnumerable<Guid> assetIds, CancellationToken cancellationToken = default);
