@@ -1,3 +1,4 @@
+using Dprental.InventoryService.Common.Enums;
 using Dprental.InventoryService.Common.Utils;
 using Dprental.InventoryService.Domain.Entities;
 using Dprental.InventoryService.Domain.IRepositories;
@@ -87,6 +88,26 @@ public sealed class InventoryWriteContext : IInventoryWriteContext
                 [AssetLockKey.FromWarehouseOwnerUserId(ownerUserId)],
                 cancellationToken);
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<OwnerInventoryCounts> GetOwnerInventoryCountsAsync(Guid ownerUserId, CancellationToken cancellationToken = default)
+    {
+        if (ownerUserId == Guid.Empty)
+        {
+            throw new ArgumentException("OwnerUserId không được để trống khi đếm tài sản.", nameof(ownerUserId));
+        }
+
+        int countedListings = await _context.EquipmentListings.AsNoTracking()
+            .CountAsync(l => l.OwnerUserId == ownerUserId && l.Status != EquipmentListingStatus.Inactive, cancellationToken);
+        int allListings = await _context.EquipmentListings.AsNoTracking()
+            .CountAsync(l => l.OwnerUserId == ownerUserId, cancellationToken);
+        int countedAssets = await _context.Assets.AsNoTracking()
+            .CountAsync(a => a.Listing.OwnerUserId == ownerUserId && a.AcceptingBookings, cancellationToken);
+        int allAssets = await _context.Assets.AsNoTracking()
+            .CountAsync(a => a.Listing.OwnerUserId == ownerUserId, cancellationToken);
+
+        return new OwnerInventoryCounts(countedListings, allListings, countedAssets, allAssets);
     }
 
     /// <inheritdoc />

@@ -4,6 +4,7 @@ using Dprental.InventoryService.Application.IServices;
 using Dprental.InventoryService.Application.Services;
 using Dprental.InventoryService.Application.Validation;
 using Dprental.InventoryService.Application.Locations;
+using Dprental.InventoryService.Application.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Dprental.InventoryService.Application.DependencyInjection;
@@ -29,6 +30,9 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IInventoryMediaService, InventoryMediaService>();
         services.AddScoped<IInventoryAllocationService, InventoryAllocationService>();
         services.AddOptions<InventoryCacheOptions>();
+        services.AddOptions<UnapprovedInventoryLimitsOptions>()
+            .Validate(o => o.IsValid(), "Inventory:UnapprovedLimits: hạn mức phải dương và trần tuyệt đối không nhỏ hơn hạn mức thường.")
+            .ValidateOnStart();
         services.TryAddSingleton<IInventoryReadCache>(NoOpInventoryReadCache.Instance);
         services.AddScoped<IInventoryAvailabilityService, InventoryAvailabilityService>();
         services.AddHostedService<CacheInvalidationWorker>();

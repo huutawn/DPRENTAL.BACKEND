@@ -180,14 +180,19 @@ public sealed class EquipmentListingServiceTests
         public IWarehouseRepository Warehouses { get; }
         public IAssetAllocationRepository Allocations => throw new NotImplementedException();
         public ICalendarBlockRepository CalendarBlocks => throw new NotImplementedException();
+        private readonly OwnerInventoryCounts _ownerCounts;
 
-        public FakeWriteContext(Guid? listingId, IEquipmentListingRepository listings, IInventoryAssetRepository assets, IWarehouseRepository warehouses)
+        public FakeWriteContext(Guid? listingId, IEquipmentListingRepository listings, IInventoryAssetRepository assets, IWarehouseRepository warehouses, OwnerInventoryCounts ownerCounts)
         {
             ListingId = listingId;
             Listings = listings;
             Assets = assets;
             Warehouses = warehouses;
+            _ownerCounts = ownerCounts;
         }
+
+        public Task<OwnerInventoryCounts> GetOwnerInventoryCountsAsync(Guid ownerUserId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(_ownerCounts);
 
         public Task AcquireAssetLocksAsync(IEnumerable<Guid> assetIds, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public void StageOutbox(OutboxMessage message) { }
@@ -201,6 +206,7 @@ public sealed class EquipmentListingServiceTests
         private readonly FakeListingRepository _listings;
         private readonly FakeAssetRepository _assets;
         public readonly FakeWarehouseRepository Warehouses = new();
+        public OwnerInventoryCounts OwnerCounts { get; set; } = new(0, 0, 0, 0);
         public FakeWriteTransaction(FakeListingRepository listings, FakeAssetRepository assets)
         {
             _listings = listings;
@@ -208,16 +214,16 @@ public sealed class EquipmentListingServiceTests
         }
 
         public Task<Result<T>> ExecuteAsync<T>(Guid assetId, Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation, CancellationToken cancellationToken = default) =>
-            operation(new FakeWriteContext(null, _listings, _assets, Warehouses), cancellationToken);
+            operation(new FakeWriteContext(null, _listings, _assets, Warehouses, OwnerCounts), cancellationToken);
 
         public Task<Result<T>> ExecuteListingWriteAsync<T>(Guid listingId, Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation, CancellationToken cancellationToken = default) =>
-            operation(new FakeWriteContext(listingId, _listings, _assets, Warehouses), cancellationToken);
+            operation(new FakeWriteContext(listingId, _listings, _assets, Warehouses, OwnerCounts), cancellationToken);
 
         public Task<Result<T>> ExecuteGroupHoldAsync<T>(string sourceSystem, string groupReference, Guid listingId, Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation, CancellationToken cancellationToken = default) =>
-            operation(new FakeWriteContext(listingId, _listings, _assets, Warehouses), cancellationToken);
+            operation(new FakeWriteContext(listingId, _listings, _assets, Warehouses, OwnerCounts), cancellationToken);
 
         public Task<Result<T>> ExecuteAllocationCommandAsync<T>(string sourceSystem, string operationKey, string groupReference, Func<IInventoryWriteContext, CancellationToken, Task<Result<T>>> operation, CancellationToken cancellationToken = default) =>
-            operation(new FakeWriteContext(null, _listings, _assets, Warehouses), cancellationToken);
+            operation(new FakeWriteContext(null, _listings, _assets, Warehouses, OwnerCounts), cancellationToken);
     }
 
     private sealed class FakeCatalogClient : ICatalogServiceClient
@@ -1009,5 +1015,190 @@ public sealed class EquipmentListingServiceTests
 
         Assert.True(patch.IsFailure);
         Assert.Equal("FORBIDDEN", patch.Error.Code);
+    }
+
+    private static CreateEquipmentListingRequest CreateDraftRequest(bool withInitialUnit)
+    {
+        using var specDoc = JsonDocument.Parse("{}");
+        return new CreateEquipmentListingRequest(
+            EquipmentTypeId: Guid.NewGuid(),
+            BrandId: Guid.NewGuid(),
+            Name: "Máy xúc Komatsu PC200",
+            Model: "PC200",
+            SerialNumber: withInitialUnit ? "PC200-0001" : null,
+            SpecValues: specDoc.RootElement.Clone(),
+            RentalRate: null,
+            ManufactureYear: 2024,
+            CreateInitialUnit: withInitialUnit);
+    }
+
+    [Fact]
+    public async Task CreateListingAsync_UnapprovedCallerAtListingLimit_ReturnsConflictAndCreatesNothing()
+    {
+        var service = CreateService();
+        var caller = CreateHumanCaller(Guid.NewGuid(), "inventory.asset.manage");
+        _writeTx.OwnerCounts = new OwnerInventoryCounts(CountedListings: 5, AllListings: 5, CountedAssets: 0, AllAssets: 0);
+
+        var result = await service.CreateListingAsync(CreateDraftRequest(withInitialUnit: false), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(Dprental.InventoryService.Application.Policies.UnapprovedInventoryLimitPolicy.ListingLimitCode, result.Error.Code);
+        Assert.Empty(_listingRepo.Store.Values);
+    }
+
+    [Fact]
+    public async Task CreateListingAsync_UnapprovedCallerInitialUnitAtAssetLimit_ReturnsAssetLimitConflict()
+    {
+        var service = CreateService();
+        var caller = CreateHumanCaller(Guid.NewGuid(), "inventory.asset.manage");
+        _writeTx.OwnerCounts = new OwnerInventoryCounts(CountedListings: 1, AllListings: 1, CountedAssets: 30, AllAssets: 30);
+
+        var result = await service.CreateListingAsync(CreateDraftRequest(withInitialUnit: true), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(Dprental.InventoryService.Application.Policies.UnapprovedInventoryLimitPolicy.AssetLimitCode, result.Error.Code);
+    }
+
+    [Fact]
+    public async Task CreateListingAsync_CallerWithOrganization_IgnoresUnapprovedLimits()
+    {
+        var service = CreateService();
+        var caller = CreateHumanCaller(Guid.NewGuid(), "inventory.asset.manage");
+        caller.OrganizationId = Guid.NewGuid();
+        _writeTx.OwnerCounts = new OwnerInventoryCounts(CountedListings: 50, AllListings: 50, CountedAssets: 500, AllAssets: 500);
+
+        var result = await service.CreateListingAsync(CreateDraftRequest(withInitialUnit: true), caller);
+
+        Assert.True(result.IsSuccess);
+    }
+
+    [Fact]
+    public async Task AddAssetAsync_UnapprovedCallerAtAssetLimit_ReturnsConflict()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+        var listingId = Guid.NewGuid();
+        _listingRepo.Add(EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2023).Value);
+        _writeTx.OwnerCounts = new OwnerInventoryCounts(CountedListings: 1, AllListings: 1, CountedAssets: 30, AllAssets: 30);
+
+        var result = await service.AddAssetAsync(listingId, new AddListingAssetRequest("SN-LIMIT-1"), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(Dprental.InventoryService.Application.Policies.UnapprovedInventoryLimitPolicy.AssetLimitCode, result.Error.Code);
+        Assert.Empty(_assetRepo.Store.Values);
+    }
+
+    [Fact]
+    public async Task AddAssetAsync_DisabledAssetsFillHardCap_ReturnsConflictEvenWhenCountedIsLow()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+        var listingId = Guid.NewGuid();
+        _listingRepo.Add(EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2023).Value);
+        _writeTx.OwnerCounts = new OwnerInventoryCounts(CountedListings: 1, AllListings: 1, CountedAssets: 0, AllAssets: 60);
+
+        var result = await service.AddAssetAsync(listingId, new AddListingAssetRequest("SN-HARDCAP-1"), caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(Dprental.InventoryService.Application.Policies.UnapprovedInventoryLimitPolicy.AssetLimitCode, result.Error.Code);
+    }
+
+    [Fact]
+    public async Task BatchAddAssetsAsync_UnapprovedCallerBatchExceedsLimit_RejectsWholeBatch()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+        var listingId = Guid.NewGuid();
+        _listingRepo.Add(EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 100_000m, null, null, "VND", FixedNow, 2023).Value);
+        _writeTx.OwnerCounts = new OwnerInventoryCounts(CountedListings: 1, AllListings: 1, CountedAssets: 28, AllAssets: 28);
+
+        var batch = new BatchAddListingAssetsRequest([
+            new AddListingAssetRequest("SN-B-1"),
+            new AddListingAssetRequest("SN-B-2"),
+            new AddListingAssetRequest("SN-B-3")
+        ]);
+
+        var result = await service.BatchAddAssetsAsync(listingId, batch, caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(Dprental.InventoryService.Application.Policies.UnapprovedInventoryLimitPolicy.AssetLimitCode, result.Error.Code);
+        Assert.Empty(_assetRepo.Store.Values);
+    }
+
+    private Guid AddReadyDraftListing(Guid ownerId, bool withWarehouse = true)
+    {
+        if (withWarehouse)
+        {
+            _writeTx.Warehouses.Add(Warehouse.CreateWithAddress(ownerId, "123 Le Loi", "01", "Hà Nội", "00004", "Ba Đình", 21.0, 105.8, FixedNow).Value);
+        }
+
+        var listingId = Guid.NewGuid();
+        var media = Guid.NewGuid();
+        var listing = EquipmentListing.Create(
+            listingId, ownerId, Guid.NewGuid(), Guid.NewGuid(), "FX3", null, "FX3", 1, "{}", 500_000m, null, null, "VND", FixedNow, 2024,
+            mediaIds: [media], thumbnailMediaId: media).Value;
+        _listingRepo.Add(listing);
+        var asset = InventoryAsset.Create(Guid.NewGuid(), listingId, "SN-READY-1", FixedNow, 2024).Value;
+        _assetRepo.Add(asset);
+        listing.Assets.Add(asset);
+        return listingId;
+    }
+
+    [Fact]
+    public async Task PatchListingAsync_ToActiveWithoutOrganization_FailsOrganizationNotApproved()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId);
+        var listingId = AddReadyDraftListing(ownerId);
+
+        var result = await service.PatchListingAsync(
+            listingId,
+            new PatchEquipmentListingRequest { IsStatusSpecified = true, Status = EquipmentListingStatus.Active },
+            caller);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(Dprental.InventoryService.Application.Policies.EquipmentListingPublishPolicy.OrganizationNotApprovedCode, result.Error.Code);
+        Assert.Equal(EquipmentListingStatus.Draft, _listingRepo.Store[listingId].Status);
+        Assert.Null(_listingRepo.Store[listingId].OrganizationId);
+    }
+
+    [Fact]
+    public async Task PatchListingAsync_ToActiveWithOrganization_PublishesAndAssignsOrganization()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var organizationId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId);
+        caller.OrganizationId = organizationId;
+        var listingId = AddReadyDraftListing(ownerId);
+
+        var result = await service.PatchListingAsync(
+            listingId,
+            new PatchEquipmentListingRequest { IsStatusSpecified = true, Status = EquipmentListingStatus.Active },
+            caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(EquipmentListingStatus.Active, _listingRepo.Store[listingId].Status);
+        Assert.Equal(organizationId, _listingRepo.Store[listingId].OrganizationId);
+    }
+
+    [Fact]
+    public async Task CreateListingAsync_CallerWithoutOrganization_ResponseListsOrganizationRequirement()
+    {
+        var service = CreateService();
+        var ownerId = Guid.NewGuid();
+        var caller = CreateHumanCaller(ownerId, "inventory.asset.manage");
+
+        var result = await service.CreateListingAsync(CreateDraftRequest(withInitialUnit: false), caller);
+
+        Assert.True(result.IsSuccess);
+        Assert.Contains(Dprental.InventoryService.Application.Policies.EquipmentListingPublishPolicy.RequirementOrganizationApproved, result.Value.MissingRequirements!);
     }
 }

@@ -599,7 +599,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
         var admin = Guid.NewGuid();
         mediaClient.DefaultUploaderId = owner;
 
-        var ownerToken = secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        var ownerToken = secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage], orgId: Guid.NewGuid());
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
 
         var vid1 = Guid.NewGuid();
@@ -946,7 +946,7 @@ public sealed class EquipmentListingAcceptanceTests : IClassFixture<PostgresFixt
 
         var owner = Guid.NewGuid();
         mediaClient.DefaultUploaderId = owner;
-        var token = secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage]);
+        var token = secFactory.CreateHumanToken(owner, permissions: [InventoryAccessEvaluator.PermissionAssetManage], orgId: Guid.NewGuid());
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         var img1 = Guid.NewGuid();
