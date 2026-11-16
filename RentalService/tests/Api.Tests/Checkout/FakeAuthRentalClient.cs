@@ -10,6 +10,8 @@ public sealed class FakeAuthRentalClient : IAuthRentalClient
 {
     public Guid? UserId { get; set; }
     public bool IsProfileCompleted { get; set; } = true;
+    public string? FullName { get; set; } = "Nguyễn Văn A";
+    public string? PhoneNumber { get; set; } = "0901234567";
     public Error? Failure { get; set; }
     public int CallCount { get; private set; }
 
@@ -24,6 +26,6 @@ public sealed class FakeAuthRentalClient : IAuthRentalClient
         }
 
         return Task.FromResult<Result<AuthUserSummaryDto>>(
-            new AuthUserSummaryDto(UserId ?? Guid.Empty, IsProfileCompleted));
+            new AuthUserSummaryDto(UserId ?? Guid.Empty, IsProfileCompleted, FullName, PhoneNumber));
     }
 }

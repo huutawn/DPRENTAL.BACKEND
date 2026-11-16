@@ -87,7 +87,9 @@ internal static class OrderQueryMapper
         order.DeliveryNote,
         order.ReturnMethod,
         order.DeliveryFee,
-        order.ReturnFee);
+        order.ReturnFee,
+        order.ProvinceCode,
+        order.WardCode);
 
     // Dựng phần thông tin chung của item và cách hiển thị cho renter/supplier từ snapshot order.
     public static OrderItemResponse ToItem(RentalItem item, bool isSupplier = false)

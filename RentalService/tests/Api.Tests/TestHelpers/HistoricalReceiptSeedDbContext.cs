@@ -39,5 +39,17 @@ internal sealed class HistoricalReceiptSeedDbContext(DbContextOptions<RentalServ
         modelBuilder.Entity<RentalOrder>()
             .Property(o => o.DeliverySnapshotJson)
             .Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+        modelBuilder.Entity<RentalOrder>()
+            .Property(o => o.ProvinceCode)
+            .Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+        modelBuilder.Entity<RentalOrder>()
+            .Property(o => o.WardCode)
+            .Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+        modelBuilder.Entity<RenterAddress>()
+            .Property(a => a.ProvinceCode)
+            .Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
+        modelBuilder.Entity<RenterAddress>()
+            .Property(a => a.WardCode)
+            .Metadata.SetBeforeSaveBehavior(PropertySaveBehavior.Ignore);
     }
 }

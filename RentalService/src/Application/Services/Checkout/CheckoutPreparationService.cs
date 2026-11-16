@@ -31,6 +31,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     private readonly IAuthRentalClient _auth;
     private readonly RentalTermsOptions _terms;
     private readonly TimeProvider _timeProvider;
+    private readonly Locations.IVietnamDivisionsCatalog _divisionsCatalog;
 
     // Giỏ hàng cũng coi Listing có Status = Active là đang cho thuê (InventoryRentalCartReader).
     private const string ActiveStatus = "Active";
@@ -43,7 +44,8 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         IInventoryRentalClient inventory,
         IAuthRentalClient auth,
         IOptions<RentalTermsOptions> termsOptions,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        Locations.IVietnamDivisionsCatalog? divisionsCatalog = null)
     {
         // Kiểm tra tham số bắt buộc ở đầu hàm để không dùng một dependency/request rỗng trong các bước sau.
         ArgumentNullException.ThrowIfNull(termsOptions);
@@ -56,6 +58,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
         _terms = termsOptions.Value;
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _divisionsCatalog = divisionsCatalog ?? new Locations.VietnamDivisionsCatalog();
     }
 
     // Kiểm tra hồ sơ Auth, điều khoản, địa chỉ/tài khoản thuộc renter và các dòng được chọn; dựng snapshot rồi so tổng tiền client xác nhận.
@@ -150,9 +153,14 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         bool isPickup = string.Equals(request.DeliveryMethod?.Trim(), CheckoutRules.DeliveryMethodPickup, StringComparison.OrdinalIgnoreCase)
             || string.Equals(request.DeliveryMethod?.Trim(), "PickUpAtWarehouse", StringComparison.OrdinalIgnoreCase);
 
-        // Chuẩn bị snapshot giao nhận từ địa chỉ thuộc sở hữu hoặc dữ liệu trực tiếp đã validate trong request.
-        CheckoutDeliveryDto delivery;
-        // Điều kiện này quyết định có thể tiếp tục hay phải trả CheckoutPreparationResult.Failure theo contract của use case.
+        string? customerProvince = null;
+        string? customerProvinceCode = null;
+        string? customerWardCode = null;
+        string? customerAddressDetail = null;
+        string? recipientName = null;
+        string? recipientPhone = null;
+        string? deliveryNote = request.DeliveryNote;
+
         if (request.AddressId is { } addressId)
         {
             // Chọn từ sổ địa chỉ: chỉ địa chỉ của chính người thuê; đơn chép lại nội dung lúc đặt.
@@ -163,17 +171,63 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
                 return CheckoutPreparationResult.Failure(RenterAddressErrors.NotFound);
             }
 
-            // Chuẩn bị snapshot giao nhận/tài khoản từ dữ liệu đã chọn, tách khỏi sổ dữ liệu có thể được sửa sau checkout.
-            delivery = new(address.Province, address.AddressDetail, address.RecipientName, address.RecipientPhone, request.DeliveryNote);
+            customerProvince = address.Province;
+            customerProvinceCode = address.ProvinceCode;
+            customerWardCode = address.WardCode;
+            customerAddressDetail = address.AddressDetail;
+            recipientName = address.RecipientName;
+            recipientPhone = address.RecipientPhone;
         }
         else if (request.Delivery is not null)
         {
-            // Chuẩn bị snapshot giao nhận/tài khoản từ dữ liệu đã chọn, tách khỏi sổ dữ liệu có thể được sửa sau checkout.
-            delivery = request.Delivery;
+            customerProvince = request.Delivery.Province;
+            customerProvinceCode = request.Delivery.ProvinceCode;
+            customerWardCode = request.Delivery.WardCode;
+            customerAddressDetail = request.Delivery.AddressDetail;
+            recipientName = request.Delivery.RecipientName;
+            recipientPhone = request.Delivery.RecipientPhone;
+            deliveryNote = request.Delivery.Note ?? request.DeliveryNote;
         }
-        else
+        else if (!isPickup)
         {
             return CheckoutPreparationResult.Failure(CheckoutErrors.InvalidRequest);
+        }
+
+        if (isPickup)
+        {
+            if (string.IsNullOrWhiteSpace(recipientName))
+            {
+                recipientName = authUser.FullName;
+            }
+            if (string.IsNullOrWhiteSpace(recipientPhone))
+            {
+                recipientPhone = authUser.PhoneNumber;
+            }
+        }
+
+        // Bắt buộc tên và số điện thoại người nhận hợp lệ (cả pickup và delivery)
+        List<CheckoutFieldError> contactErrors = [];
+        CheckoutRequestValidator.ValidateRecipientName(recipientName, "delivery.recipientName", contactErrors);
+        CheckoutRequestValidator.ValidateRecipientPhone(recipientPhone, "delivery.recipientPhone", contactErrors);
+        if (contactErrors.Count > 0)
+        {
+            return CheckoutPreparationResult.InvalidRequest(contactErrors);
+        }
+
+        // Ánh xạ mã chuẩn cho địa chỉ cũ nếu thiếu; giữ tên địa phương để hiển thị
+        if (!string.IsNullOrWhiteSpace(customerProvince) && string.IsNullOrWhiteSpace(customerProvinceCode))
+        {
+            if (_divisionsCatalog.TryResolveProvince(customerProvince, out var resolvedProvCode, out _))
+            {
+                customerProvinceCode = resolvedProvCode;
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(customerProvinceCode) && string.IsNullOrWhiteSpace(customerProvince))
+        {
+            if (_divisionsCatalog.IsValidProvince(customerProvinceCode, out var canonicalProvName))
+            {
+                customerProvince = canonicalProvName;
+            }
         }
 
         // Chuẩn bị snapshot giao nhận/tài khoản từ dữ liệu đã chọn, tách khỏi sổ dữ liệu có thể được sửa sau checkout.
@@ -328,6 +382,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         }
 
         decimal deliveryFee;
+        CheckoutDeliveryDto delivery;
         if (effectiveDeliveryMethod == CheckoutRules.DeliveryMethodPickup)
         {
             if (!policy.IsPickupEnabled)
@@ -349,19 +404,44 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             delivery = new(
                 warehouseProvince,
                 warehouseAddressDetail,
-                delivery.RecipientName,
-                delivery.RecipientPhone,
-                delivery.Note);
+                recipientName,
+                recipientPhone,
+                deliveryNote,
+                warehouseSnapshot?.ProvinceCode ?? policy.WarehouseAddress?.ProvinceCode,
+                warehouseSnapshot?.WardCode ?? policy.WarehouseAddress?.WardCode);
             deliveryFee = 0m;
         }
         else
         {
-            var zone = MatchZone(policy.DeliveryZones, delivery.Province);
-            if (zone is null)
+            if (string.IsNullOrWhiteSpace(customerAddressDetail))
             {
-                return CheckoutPreparationResult.Failure(CheckoutErrors.AddressOutsideDeliveryZone);
+                return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryAddressIncomplete);
             }
-            deliveryFee = zone.DeliveryFeeVnd;
+
+            var zoneMatch = DeliveryZoneMatcher.Match(policy.DeliveryZones, customerProvinceCode, customerWardCode, _divisionsCatalog);
+            switch (zoneMatch.Status)
+            {
+                case ZoneMatchStatus.SupplierNotConfigured:
+                    return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryNotConfigured);
+                case ZoneMatchStatus.AddressIncomplete:
+                    return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryAddressIncomplete);
+                case ZoneMatchStatus.OutsideZone:
+                    return CheckoutPreparationResult.Failure(CheckoutErrors.AddressOutsideDeliveryZone);
+                case ZoneMatchStatus.Success:
+                    deliveryFee = zoneMatch.Zone!.DeliveryFeeVnd;
+                    break;
+                default:
+                    return CheckoutPreparationResult.Failure(CheckoutErrors.AddressOutsideDeliveryZone);
+            }
+
+            delivery = new(
+                customerProvince,
+                customerAddressDetail,
+                recipientName,
+                recipientPhone,
+                deliveryNote,
+                customerProvinceCode,
+                customerWardCode);
         }
 
         decimal returnFee;
@@ -375,15 +455,41 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         }
         else
         {
-            var zone = MatchZone(policy.DeliveryZones, delivery.Province);
-            if (zone is null)
+            // Thu hồi tại công trình: dùng địa chỉ công trình của khách, KHÔNG dùng địa chỉ kho
+            if (string.IsNullOrWhiteSpace(customerAddressDetail) || string.IsNullOrWhiteSpace(customerProvinceCode))
             {
-                return CheckoutPreparationResult.Failure(CheckoutErrors.AddressOutsideDeliveryZone);
+                return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryAddressIncomplete);
             }
-            returnFee = zone.ReturnFeeVnd;
+
+            var returnZoneMatch = DeliveryZoneMatcher.Match(policy.DeliveryZones, customerProvinceCode, customerWardCode, _divisionsCatalog);
+            switch (returnZoneMatch.Status)
+            {
+                case ZoneMatchStatus.SupplierNotConfigured:
+                    return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryNotConfigured);
+                case ZoneMatchStatus.AddressIncomplete:
+                    return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryAddressIncomplete);
+                case ZoneMatchStatus.OutsideZone:
+                    return CheckoutPreparationResult.Failure(CheckoutErrors.AddressOutsideDeliveryZone);
+                case ZoneMatchStatus.Success:
+                    returnFee = returnZoneMatch.Zone!.ReturnFeeVnd;
+                    break;
+                default:
+                    return CheckoutPreparationResult.Failure(CheckoutErrors.AddressOutsideDeliveryZone);
+            }
         }
 
         List<CheckoutPlanLine> linesWithFees = AllocateFeesToLines(outcome.Lines, deliveryFee, returnFee);
+
+        CheckoutDeliveryDto? customerSiteDto = (effectiveDeliveryMethod == CheckoutRules.DeliveryMethodDelivery || effectiveReturnMethod == CheckoutRules.ReturnMethodReturn)
+            ? new CheckoutDeliveryDto(
+                customerProvince,
+                customerAddressDetail,
+                recipientName,
+                recipientPhone,
+                deliveryNote,
+                customerProvinceCode,
+                customerWardCode)
+            : null;
 
         var deliverySnapshotObj = new
         {
@@ -394,6 +500,8 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             operatingHours = policy.OperatingHours,
             deliveryFee = deliveryFee,
             returnFee = returnFee,
+            deliveryAddress = effectiveDeliveryMethod == CheckoutRules.DeliveryMethodDelivery ? customerSiteDto : null,
+            returnAddress = effectiveReturnMethod == CheckoutRules.ReturnMethodReturn ? customerSiteDto : null,
             totalRentalAmount = linesWithFees.Sum(l => l.RentalAmount),
             totalDepositAmount = linesWithFees.Sum(l => l.DepositAmount),
             totalAmount = linesWithFees.Sum(l => l.RentalAmount) + linesWithFees.Sum(l => l.DepositAmount) + deliveryFee + returnFee
@@ -665,11 +773,13 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
     // Chuẩn hóa khoảng trắng của snapshot giao nhận hoặc tài khoản hoàn tiền trước khi ghi vào kế hoạch checkout.
     private static CheckoutDeliveryDto Normalize(CheckoutDeliveryDto delivery) =>
         new(
-            delivery.Province!.Trim(),
-            delivery.AddressDetail!.Trim(),
-            delivery.RecipientName!.Trim(),
-            delivery.RecipientPhone!.Trim(),
-            string.IsNullOrWhiteSpace(delivery.Note) ? null : delivery.Note.Trim());
+            delivery.Province?.Trim(),
+            delivery.AddressDetail?.Trim(),
+            delivery.RecipientName?.Trim(),
+            delivery.RecipientPhone?.Trim(),
+            string.IsNullOrWhiteSpace(delivery.Note) ? null : delivery.Note.Trim(),
+            string.IsNullOrWhiteSpace(delivery.ProvinceCode) ? null : delivery.ProvinceCode.Trim(),
+            string.IsNullOrWhiteSpace(delivery.WardCode) ? null : delivery.WardCode.Trim());
 
     // Chuẩn hóa khoảng trắng của snapshot giao nhận hoặc tài khoản hoàn tiền trước khi ghi vào kế hoạch checkout.
     private static CheckoutRefundAccountDto Normalize(CheckoutRefundAccountDto refundAccount) =>
@@ -677,72 +787,6 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             refundAccount.BankCode!.Trim(),
             refundAccount.AccountNumber!.Trim(),
             refundAccount.AccountHolderName!.Trim());
-
-    private static DeliveryZoneDto? MatchZone(IEnumerable<DeliveryZoneDto>? zones, string? province)
-    {
-        if (zones is null || string.IsNullOrWhiteSpace(province))
-        {
-            return null;
-        }
-
-        string normalizedProvince = province.Trim();
-        foreach (DeliveryZoneDto zone in zones)
-        {
-            if (string.IsNullOrWhiteSpace(zone.ProvinceCode))
-            {
-                continue;
-            }
-
-            if (string.Equals(zone.ProvinceCode.Trim(), normalizedProvince, StringComparison.OrdinalIgnoreCase))
-            {
-                return zone;
-            }
-
-            if (IsProvinceMatch(zone.ProvinceCode, normalizedProvince))
-            {
-                return zone;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool IsProvinceMatch(string zoneCode, string provinceName)
-    {
-        string z = zoneCode.Trim().ToLowerInvariant();
-        string p = provinceName.Trim().ToLowerInvariant();
-
-        if (z == p) return true;
-
-        string cleanP = p.Replace("thành phố", "").Replace("tp.", "").Replace("tp", "").Replace("tỉnh", "").Trim();
-        string cleanZ = z.Replace("thành phố", "").Replace("tp.", "").Replace("tp", "").Replace("tỉnh", "").Trim();
-        if (!string.IsNullOrEmpty(cleanP) && !string.IsNullOrEmpty(cleanZ) && (cleanP == cleanZ || cleanP.Contains(cleanZ) || cleanZ.Contains(cleanP)))
-        {
-            return true;
-        }
-
-        if ((z == "79" || z == "sg" || z == "hcm") && (cleanP.Contains("hồ chí minh") || cleanP.Contains("ho chi minh") || cleanP.Contains("sài gòn") || cleanP.Contains("sai gon") || cleanP == "79"))
-            return true;
-        if ((p == "79" || p == "sg" || p == "hcm") && (cleanZ.Contains("hồ chí minh") || cleanZ.Contains("ho chi minh") || cleanZ.Contains("sài gòn") || cleanZ.Contains("sai gon") || cleanZ == "79"))
-            return true;
-
-        if ((z == "01" || z == "hn") && (cleanP.Contains("hà nội") || cleanP.Contains("ha noi") || cleanP == "01"))
-            return true;
-        if ((p == "01" || p == "hn") && (cleanZ.Contains("hà nội") || cleanZ.Contains("ha noi") || cleanZ == "01"))
-            return true;
-
-        if ((z == "48" || z == "dn") && (cleanP.Contains("đà nẵng") || cleanP.Contains("da nang") || cleanP == "48"))
-            return true;
-        if ((p == "48" || p == "dn") && (cleanZ.Contains("đà nẵng") || cleanZ.Contains("da nang") || cleanZ == "48"))
-            return true;
-
-        if ((z == "74" || z == "bd") && (cleanP.Contains("bình dương") || cleanP.Contains("binh duong") || cleanP == "74"))
-            return true;
-        if ((p == "74" || p == "bd") && (cleanZ.Contains("bình dương") || cleanZ.Contains("binh duong") || cleanZ == "74"))
-            return true;
-
-        return false;
-    }
 
     private static List<CheckoutPlanLine> AllocateFeesToLines(
         List<CheckoutPlanLine> lines,

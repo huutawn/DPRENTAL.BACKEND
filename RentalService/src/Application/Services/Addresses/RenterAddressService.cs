@@ -2,6 +2,7 @@ using Dprental.RentalService.Application.DTOs.Addresses;
 using Dprental.RentalService.Application.DTOs.Checkout;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.IServices.Addresses;
+using Dprental.RentalService.Application.Locations;
 using Dprental.RentalService.Application.Validation;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Domain.Entities;
@@ -17,7 +18,8 @@ public sealed class RenterAddressService(
     IRenterAddressRepository addresses,
     IOrderLockManager locks,
     IUnitOfWork unitOfWork,
-    TimeProvider timeProvider) : IRenterAddressService
+    TimeProvider timeProvider,
+    IVietnamDivisionsCatalog? divisionsCatalog = null) : IRenterAddressService
 {
     public const int MaxAddresses = 10;
 
@@ -55,16 +57,38 @@ public sealed class RenterAddressService(
             // Giới hạn sổ địa chỉ ở 10 mục; kiểm tra dưới khóa để hai request đồng thời không cùng vượt giới hạn.
             if (existing.Count >= MaxAddresses) return RenterAddressErrors.LimitReached;
 
+            string province = request.Province!.Trim();
+            string? provinceCode = string.IsNullOrWhiteSpace(request.ProvinceCode) ? null : request.ProvinceCode.Trim();
+            string? wardCode = string.IsNullOrWhiteSpace(request.WardCode) ? null : request.WardCode.Trim();
+
+            if (divisionsCatalog != null)
+            {
+                if (!string.IsNullOrWhiteSpace(provinceCode))
+                {
+                    if (divisionsCatalog.IsValidProvince(provinceCode, out var canonicalName))
+                    {
+                        province = canonicalName;
+                    }
+                }
+                else if (divisionsCatalog.TryResolveProvince(province, out var resolvedCode, out var canonicalName))
+                {
+                    provinceCode = resolvedCode;
+                    province = canonicalName;
+                }
+            }
+
             // Địa chỉ đầu tiên tự thành mặc định.
             RenterAddress address = new(
                 Guid.NewGuid(),
                 renterId,
-                request.Province!.Trim(),
+                province,
                 request.AddressDetail!.Trim(),
                 request.RecipientName!.Trim(),
                 request.RecipientPhone!.Trim(),
                 isDefault: existing.Count == 0,
-                timeProvider.GetUtcNow());
+                timeProvider.GetUtcNow(),
+                provinceCode,
+                wardCode);
             addresses.Add(address);
             await unitOfWork.SaveChangesAsync(cancellationToken);
             return ToResponse(address);
@@ -89,13 +113,35 @@ public sealed class RenterAddressService(
             // Mục không có trong danh sách của renter thì trả NotFound, bao gồm ID có thật nhưng thuộc người khác.
             if (address is null) return RenterAddressErrors.NotFound;
 
+            string province = request.Province!.Trim();
+            string? provinceCode = string.IsNullOrWhiteSpace(request.ProvinceCode) ? null : request.ProvinceCode.Trim();
+            string? wardCode = string.IsNullOrWhiteSpace(request.WardCode) ? null : request.WardCode.Trim();
+
+            if (divisionsCatalog != null)
+            {
+                if (!string.IsNullOrWhiteSpace(provinceCode))
+                {
+                    if (divisionsCatalog.IsValidProvince(provinceCode, out var canonicalName))
+                    {
+                        province = canonicalName;
+                    }
+                }
+                else if (divisionsCatalog.TryResolveProvince(province, out var resolvedCode, out var canonicalName))
+                {
+                    provinceCode = resolvedCode;
+                    province = canonicalName;
+                }
+            }
+
             // Cập nhật các trường đã chuẩn hóa và mốc sửa, giữ nguyên ID/chủ sở hữu/cờ mặc định của mục hiện tại.
             address.Update(
-                request.Province!.Trim(),
+                province,
                 request.AddressDetail!.Trim(),
                 request.RecipientName!.Trim(),
                 request.RecipientPhone!.Trim(),
-                timeProvider.GetUtcNow());
+                timeProvider.GetUtcNow(),
+                provinceCode,
+                wardCode);
             await unitOfWork.SaveChangesAsync(cancellationToken);
             return ToResponse(address);
         }, cancellationToken);
@@ -208,5 +254,7 @@ public sealed class RenterAddressService(
         address.AddressDetail,
         address.RecipientName,
         address.RecipientPhone,
-        address.IsDefault);
+        address.IsDefault,
+        address.ProvinceCode,
+        address.WardCode);
 }

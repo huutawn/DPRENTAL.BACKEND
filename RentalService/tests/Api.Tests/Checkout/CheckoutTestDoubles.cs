@@ -338,6 +338,7 @@ internal sealed class FakeInventoryListingClient : IInventoryRentalClient
             [
                 new DeliveryZoneDto("79", null, 0m, 0m),
                 new DeliveryZoneDto("Hồ Chí Minh", null, 0m, 0m),
+                new DeliveryZoneDto("74", null, 0m, 0m),
                 new DeliveryZoneDto("Bình Dương", null, 0m, 0m)
             ]);
         return Task.FromResult(Result.Success(defaultPolicy));

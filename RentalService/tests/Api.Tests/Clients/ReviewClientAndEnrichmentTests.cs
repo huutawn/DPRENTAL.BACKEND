@@ -233,9 +233,8 @@ public sealed class ReviewClientAndEnrichmentTests
                 {
                     MaxObservedConcurrency = current;
                 }
+                ReceivedRequests.Add(request);
             }
-
-            ReceivedRequests.Add(request);
 
             try
             {
