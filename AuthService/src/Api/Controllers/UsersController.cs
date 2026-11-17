@@ -80,6 +80,14 @@ public sealed class UsersController(
     }
 
     /// <summary>Cập nhật thông tin hồ sơ cá nhân (họ tên, số điện thoại, ngày sinh, avatar, CCCD). Không yêu cầu hoàn thiện hồ sơ trước.</summary>
+    /// <param name="request">Thông tin hồ sơ cần cập nhật.</param>
+    /// <param name="expectedUserIdHeader">Header tùy chọn X-Expected-User-Id để đảm bảo cập nhật đúng tài khoản người dùng đã xác nhận.</param>
+    /// <param name="cancellationToken">Token hủy request.</param>
+    /// <response code="200">Cập nhật hồ sơ thành công.</response>
+    /// <response code="400">Dữ liệu yêu cầu không hợp lệ hoặc header X-Expected-User-Id rỗng/không đúng định dạng GUID.</response>
+    /// <response code="401">Chưa xác thực.</response>
+    /// <response code="404">Không tìm thấy người dùng.</response>
+    /// <response code="409">Trùng CCCD hoặc tài khoản phiên hiện tại không khớp với X-Expected-User-Id (Auth.Profile.SessionChanged).</response>
     [HttpPatch("profile")]
     [ProducesResponseType<CurrentUserResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -88,6 +96,7 @@ public sealed class UsersController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<CurrentUserResponse>> UpdateProfile(
         [FromBody] UpdateProfileRequest request,
+        [FromHeader(Name = "X-Expected-User-Id")] string? expectedUserIdHeader,
         CancellationToken cancellationToken)
     {
         if (User.GetJwtSub() is not Guid userId)
@@ -95,7 +104,21 @@ public sealed class UsersController(
             return Unauthorized();
         }
 
-        Result<CurrentUserResponse> result = await userAccountService.UpdateProfileAsync(userId, request, cancellationToken);
+        Guid? expectedUserId = null;
+        bool hasHeader = Request.Headers.TryGetValue("X-Expected-User-Id", out var rawExpectedUserId) || expectedUserIdHeader is not null;
+        if (hasHeader)
+        {
+            string? headerValue = expectedUserIdHeader ?? rawExpectedUserId.ToString();
+            if (string.IsNullOrWhiteSpace(headerValue) ||
+                !Guid.TryParse(headerValue, out Guid parsedGuid) ||
+                parsedGuid == Guid.Empty)
+            {
+                return this.ToProblem(Error.Validation("Validation.ExpectedUserId", "Header X-Expected-User-Id không hợp lệ."));
+            }
+            expectedUserId = parsedGuid;
+        }
+
+        Result<CurrentUserResponse> result = await userAccountService.UpdateProfileAsync(userId, request, expectedUserId, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 

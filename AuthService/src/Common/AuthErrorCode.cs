@@ -64,6 +64,7 @@ public static class AuthErrorCode
         public const string AlreadyCompleted = "Profile.AlreadyCompleted";
         public const string EmptyPatch = "Profile.EmptyPatch";
         public const string InvalidFullName = "Profile.InvalidFullName";
+        public const string SessionChanged = "Auth.Profile.SessionChanged";
     }
 
     public static class Media

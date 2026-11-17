@@ -118,15 +118,30 @@ public sealed class UserAccountService(
     public Task<Result<CurrentUserResponse>> UpdateProfileAsync(
         Guid userId,
         UpdateProfileRequest request,
+        Guid? expectedUserId = null,
         CancellationToken cancellationToken = default) =>
-        UpdateProfileCoreAsync(userId, request, clearPhoneWhenNull: false, cancellationToken: cancellationToken);
+        UpdateProfileCoreAsync(userId, request, expectedUserId, clearPhoneWhenNull: false, cancellationToken: cancellationToken);
 
     private async Task<Result<CurrentUserResponse>> UpdateProfileCoreAsync(
         Guid userId,
         UpdateProfileRequest request,
+        Guid? expectedUserId,
         bool clearPhoneWhenNull,
         CancellationToken cancellationToken)
     {
+        if (expectedUserId.HasValue)
+        {
+            if (expectedUserId.Value == Guid.Empty)
+            {
+                return Result.Failure<CurrentUserResponse>(Error.Validation("Validation.ExpectedUserId", "Header X-Expected-User-Id không hợp lệ."));
+            }
+
+            if (expectedUserId.Value != userId)
+            {
+                return Result.Failure<CurrentUserResponse>(AuthErrors.Profile.SessionChanged);
+            }
+        }
+
         if (!DtoValidator.TryValidateId(userId, nameof(userId), out Error? idError))
         {
             return Result.Failure<CurrentUserResponse>(idError);
@@ -271,6 +286,7 @@ public sealed class UserAccountService(
                 request.RemoveAvatar,
                 request.CitizenId,
                 request.AvatarUrl),
+            expectedUserId: null,
             clearPhoneWhenNull: true,
             cancellationToken: cancellationToken);
     }
