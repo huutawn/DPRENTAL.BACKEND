@@ -55,7 +55,7 @@ public sealed class UserServiceTests
 
         Assert.True(result.IsSuccess);
         User created = Assert.Single(repository.CreatedUsers);
-        // Đăng ký không thu thập CCCD — chỉ được set sau, qua đăng ký tổ chức hoặc hoàn thiện hồ sơ để thuê cá nhân.
+        // Đăng ký không thu thập CCCD — chỉ được set sau, qua đăng ký tổ chức hoặc hoàn thiện hồ sơ định danh cá nhân.
         Assert.Null(created.CitizenId);
         Assert.Null(created.AvatarMediaId);
         Assert.Equal("0901234567", created.PhoneNumber);

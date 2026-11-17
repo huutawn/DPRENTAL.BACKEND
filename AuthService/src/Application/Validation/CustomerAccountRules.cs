@@ -56,7 +56,7 @@ internal static class CustomerAccountRules
             Id = Guid.NewGuid(),
             Email = normalizedEmail,
             FullName = request.FullName.Trim(),
-            // CitizenId để trống lúc đăng ký — chỉ được set khi đăng ký tổ chức hoặc hoàn thiện hồ sơ để thuê cá nhân.
+            // CitizenId để trống lúc đăng ký — chỉ được set khi đăng ký tổ chức hoặc hoàn thiện hồ sơ định danh cá nhân.
             PhoneNumber = StringUtility.NullIfBlank(request.PhoneNumber),
             DateOfBirth = request.DateOfBirth,
             CreatedAt = utcNow,

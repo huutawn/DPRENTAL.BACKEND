@@ -159,6 +159,9 @@ public static class AuthErrors
 
         public static readonly Error InvalidFullName =
             Error.Validation(AuthErrorCode.Profile.InvalidFullName, "Họ và tên không được để trống hoặc chỉ chứa khoảng trắng (tối đa 100 ký tự).");
+
+        public static readonly Error SessionChanged =
+            Error.Conflict(AuthErrorCode.Profile.SessionChanged, "Phiên đăng nhập đã thay đổi. Không thể thực hiện cập nhật hồ sơ cho tài khoản trước.");
     }
 
     public static class Media

@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Dprental.AuthService.Application.IServices;
+using Microsoft.AspNetCore.Builder;
 
 using Dprental.AuthService.Application.DTOs.Organization;
 using Dprental.AuthService.Application.DTOs.User;
@@ -176,6 +177,38 @@ public sealed class ProfileEndpointTests
     }
 
     [Fact]
+    public async Task UpdateProfileWithFullNameAndPhoneNumberDoesNotRequireCccdOrDobAndDoesNotCompleteProfile()
+    {
+        Guid userId = Guid.NewGuid();
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedUserAsync(factory, userId, isCompleted: false);
+        using HttpClient client = CreateAuthenticatedClient(factory, userId);
+
+        UpdateProfileRequest request = new(
+            FullName: "New Customer Name",
+            PhoneNumber: "0912345678");
+
+        using HttpResponseMessage response = await client.PatchAsJsonAsync("/api/v1/auth/users/profile", request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement root = document.RootElement;
+        Assert.Equal("New Customer Name", root.GetProperty("fullName").GetString());
+        Assert.Equal("0912345678", root.GetProperty("phoneNumber").GetString());
+        Assert.False(root.GetProperty("isProfileCompleted").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("maskedCitizenId").ValueKind);
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("dateOfBirth").ValueKind);
+
+        // Verify GET /users/me reflects the same state
+        using HttpResponseMessage getResponse = await client.GetAsync("/api/v1/auth/users/me");
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+        using JsonDocument getDoc = JsonDocument.Parse(await getResponse.Content.ReadAsStringAsync());
+        Assert.Equal("New Customer Name", getDoc.RootElement.GetProperty("fullName").GetString());
+        Assert.Equal("0912345678", getDoc.RootElement.GetProperty("phoneNumber").GetString());
+        Assert.False(getDoc.RootElement.GetProperty("isProfileCompleted").GetBoolean());
+    }
+
+    [Fact]
     public async Task GetOwnCitizenIdReturnsFullNumberNotCachedWhileMeStaysMasked()
     {
         Guid userId = Guid.NewGuid();
@@ -202,6 +235,141 @@ public sealed class ProfileEndpointTests
 
         using HttpResponseMessage response = await client.GetAsync("/api/v1/auth/users/me/citizen-id");
 
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateProfileWithoutHeaderPreservesExistingCallers()
+    {
+        Guid userId = Guid.NewGuid();
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedUserAsync(factory, userId, isCompleted: false);
+        using HttpClient client = CreateAuthenticatedClient(factory, userId);
+
+        UpdateProfileRequest request = new(FullName: "No Header Caller", PhoneNumber: "0911223344");
+        using HttpResponseMessage response = await client.PatchAsJsonAsync("/api/v1/auth/users/profile", request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("No Header Caller", doc.RootElement.GetProperty("fullName").GetString());
+        Assert.Equal("0911223344", doc.RootElement.GetProperty("phoneNumber").GetString());
+        Assert.False(doc.RootElement.GetProperty("isProfileCompleted").GetBoolean());
+    }
+
+    [Fact]
+    public async Task UpdateProfileWithValidHeaderMatchingPrincipalUpdatesSuccessfully()
+    {
+        Guid userId = Guid.NewGuid();
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedUserAsync(factory, userId, isCompleted: false);
+        using HttpClient client = CreateAuthenticatedClient(factory, userId);
+
+        using HttpRequestMessage requestMessage = new(HttpMethod.Patch, "/api/v1/auth/users/profile")
+        {
+            Content = JsonContent.Create(new UpdateProfileRequest(FullName: "Matching Principal", PhoneNumber: "0912345678"))
+        };
+        requestMessage.Headers.Add("X-Expected-User-Id", userId.ToString());
+
+        using HttpResponseMessage response = await client.SendAsync(requestMessage);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Matching Principal", doc.RootElement.GetProperty("fullName").GetString());
+        Assert.Equal("0912345678", doc.RootElement.GetProperty("phoneNumber").GetString());
+        Assert.False(doc.RootElement.GetProperty("isProfileCompleted").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("not-a-guid")]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("   ")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task UpdateProfileWithMalformedHeaderReturns400AndDataUnchanged(string invalidHeader)
+    {
+        Guid userId = Guid.NewGuid();
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedUserAsync(factory, userId, isCompleted: false);
+        using HttpClient client = CreateAuthenticatedClient(factory, userId);
+
+        using HttpRequestMessage requestMessage = new(HttpMethod.Patch, "/api/v1/auth/users/profile")
+        {
+            Content = JsonContent.Create(new UpdateProfileRequest(FullName: "Should Not Update", PhoneNumber: "0999999999"))
+        };
+        if (invalidHeader == "")
+        {
+            requestMessage.Headers.Add("X-Test-Set-Empty-Expected-User-Id", "true");
+        }
+        else
+        {
+            requestMessage.Headers.TryAddWithoutValidation("X-Expected-User-Id", invalidHeader);
+        }
+
+        using HttpResponseMessage response = await client.SendAsync(requestMessage);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        // Verify database state is untouched
+        using IServiceScope scope = factory.Services.CreateScope();
+        AuthDbContext dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        User user = await dbContext.Users.FindAsync(userId) ?? throw new InvalidOperationException("User not found");
+        Assert.Equal("Seed User", user.FullName);
+        Assert.Null(user.PhoneNumber);
+        Assert.Null(user.ProfileCompletedAtUtc);
+    }
+
+    [Fact]
+    public async Task UpdateProfileWhenSessionBAndHeaderAReturns409SessionChangedAndNeitherUserModified()
+    {
+        Guid userAId = Guid.NewGuid();
+        Guid userBId = Guid.NewGuid();
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedUserAsync(factory, userAId, isCompleted: false);
+        await SeedUserAsync(factory, userBId, isCompleted: false);
+
+        // Client authenticated as User B
+        using HttpClient clientB = CreateAuthenticatedClient(factory, userBId);
+
+        // But sending User A's ID in X-Expected-User-Id
+        using HttpRequestMessage requestMessage = new(HttpMethod.Patch, "/api/v1/auth/users/profile")
+        {
+            Content = JsonContent.Create(new UpdateProfileRequest(FullName: "Hijack Attempt", PhoneNumber: "0988776655"))
+        };
+        requestMessage.Headers.Add("X-Expected-User-Id", userAId.ToString());
+
+        using HttpResponseMessage response = await clientB.SendAsync(requestMessage);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Auth.Profile.SessionChanged", doc.RootElement.GetProperty("title").GetString());
+
+        // Verify neither User A nor User B was modified in DB
+        using IServiceScope scope = factory.Services.CreateScope();
+        AuthDbContext dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        User userA = await dbContext.Users.FindAsync(userAId) ?? throw new InvalidOperationException("User A not found");
+        User userB = await dbContext.Users.FindAsync(userBId) ?? throw new InvalidOperationException("User B not found");
+
+        Assert.Equal("Seed User", userA.FullName);
+        Assert.Null(userA.PhoneNumber);
+        Assert.Null(userA.ProfileCompletedAtUtc);
+
+        Assert.Equal("Seed User", userB.FullName);
+        Assert.Null(userB.PhoneNumber);
+        Assert.Null(userB.ProfileCompletedAtUtc);
+    }
+
+    [Fact]
+    public async Task UpdateProfileUnauthenticatedReturns401()
+    {
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage requestMessage = new(HttpMethod.Patch, "/api/v1/auth/users/profile")
+        {
+            Content = JsonContent.Create(new UpdateProfileRequest(FullName: "Anon", PhoneNumber: "0900000000"))
+        };
+        requestMessage.Headers.Add("X-Expected-User-Id", Guid.NewGuid().ToString());
+
+        using HttpResponseMessage response = await client.SendAsync(requestMessage);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
@@ -302,7 +470,27 @@ public sealed class ProfileEndpointTests
                 services.AddDbContext<AuthDbContext>(options => options.UseInMemoryDatabase(inMemoryDatabaseName));
                 services.RemoveAll<IMediaServiceClient>();
                 services.AddSingleton<IMediaServiceClient>(new FakeMediaServiceClient { AutoVerify = true });
+                services.AddSingleton<IStartupFilter>(new TestHeaderStartupFilter());
             });
         });
+    }
+
+    private sealed class TestHeaderStartupFilter : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
+        {
+            return app =>
+            {
+                app.Use((context, nextMiddleware) =>
+                {
+                    if (context.Request.Headers.ContainsKey("X-Test-Set-Empty-Expected-User-Id"))
+                    {
+                        context.Request.Headers["X-Expected-User-Id"] = "";
+                    }
+                    return nextMiddleware();
+                });
+                next(app);
+            };
+        }
     }
 }

@@ -187,6 +187,37 @@ public sealed class UserAccountServiceTests
     }
 
     [Fact]
+    public async Task UpdateProfileAsyncUpdatingFullNameAndPhoneNumberDoesNotRequireCccdOrDobAndDoesNotCompleteProfile()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Email = "user@example.com",
+            FullName = "Original Name",
+            PhoneNumber = null,
+            CitizenId = null,
+            DateOfBirth = null,
+            ProfileCompletedAtUtc = null,
+            IsActive = true
+        };
+        FakeUserRepository userRepo = new() { User = user };
+        UserAccountService service = CreateService(userRepo);
+
+        UpdateProfileRequest request = new(FullName: "Updated Name", PhoneNumber: "0901234567");
+        Result<CurrentUserResponse> result = await service.UpdateProfileAsync(userId, request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Updated Name", user.FullName);
+        Assert.Equal("0901234567", user.PhoneNumber);
+        Assert.Null(user.CitizenId);
+        Assert.Null(user.DateOfBirth);
+        Assert.Null(user.ProfileCompletedAtUtc);
+        Assert.False(user.IsProfileCompleted);
+        Assert.False(result.Value.IsProfileCompleted);
+    }
+
+    [Fact]
     public async Task UpdateProfileAsyncDuplicateCitizenIdReturnsCitizenIdAlreadyExists()
     {
         Guid userId = Guid.NewGuid();
