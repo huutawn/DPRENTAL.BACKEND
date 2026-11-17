@@ -197,6 +197,14 @@ namespace RentalService.Domain.Migrations
                     b.Property<DateTimeOffset>("ActualHandoverAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ActualRecipientName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ActualRecipientPhone")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<string>("Note")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");

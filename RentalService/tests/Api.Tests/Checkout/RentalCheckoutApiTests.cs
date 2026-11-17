@@ -80,15 +80,18 @@ public sealed class RentalCheckoutApiTests
     }
 
     [Fact]
-    public async Task Submit_WithIncompleteProfile_Returns403()
+    public async Task Submit_WithIncompleteProfile_Proceeds()
     {
         using CheckoutApiFactory factory = new();
         using HttpClient client = factory.CreateRenterClient("key-1", profileCompleted: false);
+        factory.Auth.UserId = factory.RenterId;
+        factory.Auth.IsProfileCompleted = false;
 
         using HttpResponseMessage response = await client.PostAsJsonAsync(Route, factory.Request());
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        Assert.Equal("Checkout.ProfileIncomplete", (await ReadAsync(response)).GetProperty("title").GetString());
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        JsonElement body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("PendingPayment", body.GetProperty("status").GetString());
     }
 
     [Fact]
@@ -107,7 +110,7 @@ public sealed class RentalCheckoutApiTests
     }
 
     [Fact]
-    public async Task Submit_WhenTokenHasPcTrue_AndAuthReturnsIncomplete_Returns403AndDoesNotCreateHoldOrInvoice()
+    public async Task Submit_WhenTokenHasPcTrue_AndAuthReturnsIncomplete_Proceeds()
     {
         using CheckoutApiFactory factory = new();
         using HttpClient client = factory.CreateRenterClient("key-pc-true-auth-false", profileCompleted: true);
@@ -116,11 +119,9 @@ public sealed class RentalCheckoutApiTests
 
         using HttpResponseMessage response = await client.PostAsJsonAsync(Route, factory.Request());
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        Assert.Equal("Checkout.ProfileIncomplete", (await ReadAsync(response)).GetProperty("title").GetString());
-        Assert.Empty(factory.Inventory.HoldRequests);
-        Assert.Empty(factory.Payment.InvoiceRequests);
-        Assert.Empty(factory.LoadCreateHoldCommands());
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        JsonElement body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("PendingPayment", body.GetProperty("status").GetString());
     }
 
     [Fact]

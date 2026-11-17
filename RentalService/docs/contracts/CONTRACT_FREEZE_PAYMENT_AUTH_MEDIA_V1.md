@@ -300,7 +300,6 @@ RentalService relies strictly on verified JWT claims delivered in the `Authoriza
 | **Payment** | `REFUND_EXCEEDS_PAID_AMOUNT` | 409 Conflict | Requested refund exceeds captured payment. |
 | **Payment** | `SETTLEMENT_EXCEEDS_DEPOSIT` | 409 Conflict | Final deduction exceeds held deposit. |
 | **Auth** | `Auth.Unauthorized` | 401 Unauthorized | Caller is not authenticated. |
-| **Auth** | `Checkout.ProfileIncomplete` | 403 Forbidden | Renter has not completed identity profile (verified via AuthService GET /users/me). |
 | **Auth** | `Auth.Forbidden` | 403 Forbidden | Caller lacks ownership of the order/item. |
 | **Auth** | `Auth.ServiceTokenNotAllowed` | 403 Forbidden | Service token attempted interactive user operation. |
 | **Media** | `MEDIA_NOT_FOUND` | 404 Not Found | Media ID does not exist. |

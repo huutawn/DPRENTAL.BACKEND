@@ -161,7 +161,9 @@ internal static class OrderQueryMapper
             handover.Note,
             handover.RenterAcknowledgedAt,
             handover.RenterAcknowledgedById,
-            handover.RenterAcknowledgementNote)
+            handover.RenterAcknowledgementNote,
+            handover.ActualRecipientName,
+            handover.ActualRecipientPhone)
         : null;
 
     /// <summary>Mỗi lần trả kèm số máy bình thường và hư hỏng.</summary>

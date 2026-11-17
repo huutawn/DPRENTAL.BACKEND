@@ -4,7 +4,7 @@ namespace Dprental.RentalService.Application.Clients;
 
 public sealed record AuthUserSummaryDto(
     Guid Id,
-    bool IsProfileCompleted,
+    bool? IsProfileCompleted = null,
     string? FullName = null,
     string? PhoneNumber = null);
 
