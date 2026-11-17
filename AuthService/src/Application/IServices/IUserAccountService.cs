@@ -9,7 +9,7 @@ public interface IUserAccountService
     /// <summary>Hoàn thiện hồ sơ lần đầu với CCCD, số điện thoại và ngày sinh.</summary>
     Task<Result<CurrentUserResponse>> CompleteProfileAsync(Guid userId, CompleteProfileRequest request, CancellationToken cancellationToken = default);
 
-    /// <summary>Cập nhật thông tin hồ sơ cá nhân sau khi đã hoàn thiện.</summary>
+    /// <summary>Cập nhật thông tin hồ sơ cá nhân (họ tên, số điện thoại, ngày sinh, avatar, CCCD). Không yêu cầu hoàn thiện hồ sơ trước.</summary>
     Task<Result<CurrentUserResponse>> UpdateProfileAsync(Guid userId, UpdateProfileRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>Cập nhật hồ sơ người dùng hiện tại qua endpoint PUT /me.</summary>

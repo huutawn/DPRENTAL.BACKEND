@@ -13,7 +13,7 @@ public sealed record CompleteProfileRequest(
     [NonEmptyGuid] Guid? AvatarMediaId = null,
     [OptionalUrl, StringLength(500)] string? AvatarUrl = null);
 
-/// <summary>Yêu cầu cập nhật hồ sơ cá nhân sau khi đã hoàn thiện.</summary>
+/// <summary>Yêu cầu cập nhật thông tin hồ sơ cá nhân (họ tên, số điện thoại, ngày sinh, avatar, CCCD). Không yêu cầu hoàn thiện hồ sơ trước.</summary>
 public sealed record UpdateProfileRequest(
     [StringLength(100, MinimumLength = 1)] string? FullName = null,
     [RegularExpression(RegistrationPatterns.PhoneNumber, ErrorMessage = "Số điện thoại không hợp lệ.")] string? PhoneNumber = null,

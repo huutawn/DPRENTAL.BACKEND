@@ -5,8 +5,8 @@ namespace Dprental.AuthService.Application.DTOs.Auth;
 
 /// <summary>
 /// Đăng ký tài khoản customer. Tuổi tối thiểu 18 được kiểm tra ở service.
-/// Không thu thập CCCD ở bước này — CCCD chỉ được nhập khi user đăng ký tổ chức (người đại diện pháp luật)
-/// hoặc khi thuê với tư cách cá nhân (qua hoàn thiện hồ sơ, chưa xây dựng).
+/// Không thu thập CCCD ở bước này — CCCD được nhập khi user đăng ký tổ chức (người đại diện pháp luật)
+/// hoặc khi hoàn thiện hồ sơ định danh cá nhân.
 /// </summary>
 public sealed record RegisterRequest(
     [Required, StrictEmail, StringLength(254)] string Email,

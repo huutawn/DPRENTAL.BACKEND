@@ -79,7 +79,7 @@ public sealed class UsersController(
         return result.IsFailure ? this.ToProblem(result.Error) : StatusCode(StatusCodes.Status201Created, result.Value);
     }
 
-    /// <summary>Cập nhật thông tin hồ sơ cá nhân sau khi đã hoàn thiện.</summary>
+    /// <summary>Cập nhật thông tin hồ sơ cá nhân (họ tên, số điện thoại, ngày sinh, avatar, CCCD). Không yêu cầu hoàn thiện hồ sơ trước.</summary>
     [HttpPatch("profile")]
     [ProducesResponseType<CurrentUserResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]

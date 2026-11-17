@@ -176,6 +176,38 @@ public sealed class ProfileEndpointTests
     }
 
     [Fact]
+    public async Task UpdateProfileWithFullNameAndPhoneNumberDoesNotRequireCccdOrDobAndDoesNotCompleteProfile()
+    {
+        Guid userId = Guid.NewGuid();
+        using WebApplicationFactory<Program> factory = CreateFactory();
+        await SeedUserAsync(factory, userId, isCompleted: false);
+        using HttpClient client = CreateAuthenticatedClient(factory, userId);
+
+        UpdateProfileRequest request = new(
+            FullName: "New Customer Name",
+            PhoneNumber: "0912345678");
+
+        using HttpResponseMessage response = await client.PatchAsJsonAsync("/api/v1/auth/users/profile", request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement root = document.RootElement;
+        Assert.Equal("New Customer Name", root.GetProperty("fullName").GetString());
+        Assert.Equal("0912345678", root.GetProperty("phoneNumber").GetString());
+        Assert.False(root.GetProperty("isProfileCompleted").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("maskedCitizenId").ValueKind);
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("dateOfBirth").ValueKind);
+
+        // Verify GET /users/me reflects the same state
+        using HttpResponseMessage getResponse = await client.GetAsync("/api/v1/auth/users/me");
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+        using JsonDocument getDoc = JsonDocument.Parse(await getResponse.Content.ReadAsStringAsync());
+        Assert.Equal("New Customer Name", getDoc.RootElement.GetProperty("fullName").GetString());
+        Assert.Equal("0912345678", getDoc.RootElement.GetProperty("phoneNumber").GetString());
+        Assert.False(getDoc.RootElement.GetProperty("isProfileCompleted").GetBoolean());
+    }
+
+    [Fact]
     public async Task GetOwnCitizenIdReturnsFullNumberNotCachedWhileMeStaysMasked()
     {
         Guid userId = Guid.NewGuid();
