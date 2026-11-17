@@ -106,18 +106,15 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             return CheckoutPreparationResult.Failure(CheckoutErrors.DependencyUnavailable);
         }
 
-        // Yêu cầu hoàn thiện hồ sơ trước checkout để snapshot người thuê có thể được dùng cho luồng giao nhận.
-        if (!authUser.IsProfileCompleted)
-        {
-            return CheckoutPreparationResult.Failure(CheckoutErrors.ProfileIncomplete);
-        }
-
         // Chạy validator/policy của bước hiện tại; chỉ chuyển sang bước sau khi kết quả hợp lệ.
         IReadOnlyList<CheckoutFieldError> fieldErrors = CheckoutRequestValidator.Validate(request);
         if (isPreview)
         {
             fieldErrors = fieldErrors
-                .Where(e => e.Field != "termsAccepted" && e.Field != "refundAccount" && e.Field != "refundAccountId")
+                .Where(e => e.Field != "termsAccepted" &&
+                            e.Field != "refundAccount" &&
+                            e.Field != "refundAccountId" &&
+                            e.Field != "delivery.recipientPhone")
                 .ToList();
         }
 
@@ -208,7 +205,14 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
         // Bắt buộc tên và số điện thoại người nhận hợp lệ (cả pickup và delivery)
         List<CheckoutFieldError> contactErrors = [];
         CheckoutRequestValidator.ValidateRecipientName(recipientName, "delivery.recipientName", contactErrors);
-        CheckoutRequestValidator.ValidateRecipientPhone(recipientPhone, "delivery.recipientPhone", contactErrors);
+        if (!isPreview)
+        {
+            CheckoutRequestValidator.ValidateRecipientPhone(recipientPhone, "delivery.recipientPhone", contactErrors);
+        }
+        else if (!string.IsNullOrWhiteSpace(recipientPhone))
+        {
+            CheckoutRequestValidator.ValidateRecipientPhone(recipientPhone, "delivery.recipientPhone", contactErrors);
+        }
         if (contactErrors.Count > 0)
         {
             return CheckoutPreparationResult.InvalidRequest(contactErrors);

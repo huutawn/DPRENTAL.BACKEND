@@ -156,18 +156,13 @@ public sealed class HttpAuthRentalClient : IAuthRentalClient
                     return CheckoutErrors.DependencyUnavailable;
                 }
 
-                if (!root.TryGetProperty("isProfileCompleted", out var pcProp) &&
-                    !root.TryGetProperty("IsProfileCompleted", out pcProp))
+                bool? isProfileCompleted = null;
+                if ((root.TryGetProperty("isProfileCompleted", out var pcProp) ||
+                     root.TryGetProperty("IsProfileCompleted", out pcProp)) &&
+                    pcProp.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 {
-                    return CheckoutErrors.DependencyUnavailable;
+                    isProfileCompleted = pcProp.GetBoolean();
                 }
-
-                if (pcProp.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-                {
-                    return CheckoutErrors.DependencyUnavailable;
-                }
-
-                bool isProfileCompleted = pcProp.GetBoolean();
                 string? fullName = null;
                 if ((root.TryGetProperty("fullName", out var fnProp) || root.TryGetProperty("FullName", out fnProp)) &&
                     fnProp.ValueKind == JsonValueKind.String)

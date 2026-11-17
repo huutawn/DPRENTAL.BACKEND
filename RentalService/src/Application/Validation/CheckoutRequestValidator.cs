@@ -20,7 +20,7 @@ public static partial class CheckoutRequestValidator
     private const string Conflicting = "CONFLICTING";
 
     [GeneratedRegex(@"^(0|\+84)[0-9]{9}$")]
-    private static partial Regex PhoneRegex();
+    internal static partial Regex PhoneRegex();
 
     [GeneratedRegex(@"^[0-9]{6,20}$")]
     private static partial Regex AccountNumberRegex();

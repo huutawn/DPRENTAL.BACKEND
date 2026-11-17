@@ -31,6 +31,12 @@ public class HandoverRecord
     [MaxLength(2000)]
     public string? RenterAcknowledgementNote { get; private set; }
 
+    [MaxLength(200)]
+    public string? ActualRecipientName { get; private set; }
+
+    [MaxLength(32)]
+    public string? ActualRecipientPhone { get; private set; }
+
     [ForeignKey(nameof(RentalItemId))]
     public RentalItem? RentalItem { get; private set; }
 
@@ -48,7 +54,9 @@ public class HandoverRecord
         string? note,
         Guid submittedById,
         DateTimeOffset submittedAt,
-        DateTimeOffset supplierConfirmedAt)
+        DateTimeOffset supplierConfirmedAt,
+        string? actualRecipientName = null,
+        string? actualRecipientPhone = null)
     {
         Id = id;
         RentalItemId = rentalItemId;
@@ -57,6 +65,8 @@ public class HandoverRecord
         SubmittedById = submittedById;
         SubmittedAt = submittedAt;
         SupplierConfirmedAt = supplierConfirmedAt;
+        ActualRecipientName = actualRecipientName;
+        ActualRecipientPhone = actualRecipientPhone;
     }
 
     internal bool Acknowledge(Guid renterId, DateTimeOffset acknowledgedAt, string? note)

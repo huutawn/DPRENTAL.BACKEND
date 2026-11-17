@@ -225,23 +225,38 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         if (owned.IsFailure) return owned.Error;
         RentalItem item = owned.Value;
 
+        if (!string.IsNullOrWhiteSpace(request.ActualRecipientName) && request.ActualRecipientName.Trim().Length > 200)
+        {
+            return Error.Validation("INVALID_RECIPIENT_NAME", "Tên người nhận thực tế không được vượt quá 200 ký tự.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.ActualRecipientPhone))
+        {
+            string trimmedPhone = request.ActualRecipientPhone.Trim();
+            if (trimmedPhone.Length > 32 || !CheckoutRequestValidator.PhoneRegex().IsMatch(trimmedPhone))
+            {
+                return Error.Validation("INVALID_RECIPIENT_PHONE", "Số điện thoại người nhận thực tế không hợp lệ.");
+            }
+        }
+
+        string effectiveRecipientName = !string.IsNullOrWhiteSpace(request.ActualRecipientName)
+            ? request.ActualRecipientName.Trim()
+            : order.RecipientName;
+
+        string effectiveRecipientPhone = !string.IsNullOrWhiteSpace(request.ActualRecipientPhone)
+            ? request.ActualRecipientPhone.Trim()
+            : order.RecipientPhone;
+
         // Chuẩn hóa nội dung/key trước khi so sánh hoặc lưu, tránh khoảng trắng làm cùng dữ liệu bị coi là hai yêu cầu khác nhau.
         string opKey = idempotencyKey.Trim();
-        string fingerprint = RentalOperationExecutor.ComputeFingerprint(new
-        {
-            Action = "MarkAssetsHandedOver",
-            ItemId = item.Id,
-            ActualHandoverAt = request.ActualHandoverAt,
-            request.Note,
-            request.Confirmed,
-            Units = request.Units.OrderBy(u => u.AssignmentId).Select(u => new
-            {
-                u.AssignmentId,
-                u.Condition,
-                u.Note,
-                MediaIds = (u.MediaIds ?? []).OrderBy(m => m).ToList()
-            }).ToList()
-        });
+
+        // [RentalService compatibility owner] Fingerprint mới có thông tin người nhận thực tế cho mọi yêu cầu bàn giao mới
+        string fingerprint = ComputeHandoverFingerprint(
+            item.Id,
+            request,
+            effectiveRecipientName,
+            effectiveRecipientPhone,
+            includeRecipient: true);
 
         // Replay kiểm tra trước trạng thái/deadline: lần đầu có thể đã bàn giao xong.
         // Gửi lại cùng nội dung cần nhận trạng thái receipt cũ, không gửi lệnh bàn giao thứ hai.
@@ -249,15 +264,56 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
         // Xử lý dữ liệu/receipt đã tồn tại trước; dùng kết quả cũ hoặc kiểm tra xung đột để không tạo tác vụ trùng.
         if (existingReceipt != null)
         {
-            // Đối chiếu action, phạm vi và fingerprint; cùng key nhưng khác yêu cầu phải báo conflict thay vì dùng kết quả cũ.
+            // a) Kiểm tra action, phạm vi và target item
             if (existingReceipt.Action != "MarkAssetsHandedOver" ||
-                existingReceipt.TargetItemId != item.Id ||
-                !string.Equals(existingReceipt.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase))
+                existingReceipt.TargetItemId != item.Id)
             {
                 return Error.Conflict("IDEMPOTENCY_CONFLICT", "Khóa idempotency đã được dùng với payload khác.");
             }
 
-            return new HandoverItemResponse(item.HandoverRecord?.Id, request.ActualHandoverAt, existingReceipt.Status);
+            // b) Tính và so sánh fingerprint mới trước
+            bool isFingerprintMatch = string.Equals(existingReceipt.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase);
+            bool isLegacyReceiptMatch = false;
+
+            // c) Nhánh tương thích hẹp: Chỉ khi không khớp VÀ request không truyền cả hai trường người nhận thực tế
+            // (ActualRecipientName và ActualRecipientPhone đều null/whitespace), mới tính fingerprint theo đúng cấu trúc trước nâng cấp
+            if (!isFingerprintMatch &&
+                string.IsNullOrWhiteSpace(request.ActualRecipientName) &&
+                string.IsNullOrWhiteSpace(request.ActualRecipientPhone))
+            {
+                string legacyFingerprint = ComputeHandoverFingerprint(
+                    item.Id,
+                    request,
+                    includeRecipient: false);
+
+                if (string.Equals(existingReceipt.Fingerprint, legacyFingerprint, StringComparison.OrdinalIgnoreCase))
+                {
+                    isLegacyReceiptMatch = true;
+                }
+            }
+
+            // e) Các trường hợp còn lại -> trả IDEMPOTENCY_CONFLICT
+            if (!isFingerprintMatch && !isLegacyReceiptMatch)
+            {
+                return Error.Conflict("IDEMPOTENCY_CONFLICT", "Khóa idempotency đã được dùng với payload khác.");
+            }
+
+            // d) Nếu fingerprint khớp receipt đã lưu -> trả kết quả receipt hiện có mà không gửi thêm command.
+            // Đối với legacy receipt, không ghi đè hay gán người nhận suy ra vào dữ liệu lịch sử.
+            string? responseRecipientName = isLegacyReceiptMatch
+                ? item.HandoverRecord?.ActualRecipientName
+                : (item.HandoverRecord?.ActualRecipientName ?? effectiveRecipientName);
+
+            string? responseRecipientPhone = isLegacyReceiptMatch
+                ? item.HandoverRecord?.ActualRecipientPhone
+                : (item.HandoverRecord?.ActualRecipientPhone ?? effectiveRecipientPhone);
+
+            return new HandoverItemResponse(
+                item.HandoverRecord?.Id,
+                request.ActualHandoverAt,
+                existingReceipt.Status,
+                responseRecipientName,
+                responseRecipientPhone);
         }
 
         // Chặn cả receipt cần đối soát: chưa có phản hồi không có nghĩa máy chưa giao.
@@ -348,7 +404,9 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             utcNow,
             request.ActualHandoverAt,
             request.Note,
-            request.Units.Select(u => new HandoverUnitSnapshot(u.AssignmentId, u.Condition, u.Note, u.MediaIds)).ToList());
+            request.Units.Select(u => new HandoverUnitSnapshot(u.AssignmentId, u.Condition, u.Note, u.MediaIds)).ToList(),
+            effectiveRecipientName,
+            effectiveRecipientPhone);
 
         // Key phía Inventory được suy ra từ intent của Rental; receipt lưu cả hai để
         // ghép đúng kết quả Kafka, kể cả khi nhiều lần retry dùng lại cùng intent.
@@ -358,7 +416,9 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             order.Id,
             item.Id,
             providerKey,
-            request.ActualHandoverAt);
+            request.ActualHandoverAt,
+            ActualRecipientName: effectiveRecipientName,
+            ActualRecipientPhone: effectiveRecipientPhone);
 
         // Receipt chứa bằng chứng và outbox command phải commit cùng nhau: không được
         // có lệnh Inventory đã phát nhưng Rental không còn snapshot để hoàn tất biên bản.
@@ -398,7 +458,12 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             throw;
         }
 
-        return new HandoverItemResponse(null, request.ActualHandoverAt, "Processing");
+        return new HandoverItemResponse(
+            null,
+            request.ActualHandoverAt,
+            "Processing",
+            effectiveRecipientName,
+            effectiveRecipientPhone);
     }
 
     // Yêu cầu key không rỗng và trong giới hạn lưu trữ trước mọi quyết định có side effect.
@@ -410,6 +475,55 @@ public sealed class SupplierDecisionService : ISupplierDecisionService
             return Error.Validation("INVALID_IDEMPOTENCY_KEY", "Idempotency-Key là bắt buộc và không được vượt quá 64 ký tự.");
         }
         return Result.Success();
+    }
+
+    /// <summary>
+    /// [RentalService compatibility owner]
+    /// Tạo fingerprint cho yêu cầu bàn giao thiết bị.
+    /// - Khi includeRecipient = true (mặc định): bao gồm ActualRecipientName và ActualRecipientPhone theo cấu trúc mới.
+    /// - Khi includeRecipient = false: tái hiện chính xác cấu trúc và serializer của thuật toán cũ trước khi nâng cấp
+    ///   để hỗ trợ replay an toàn các receipt lịch sử đã tồn tại.
+    /// Cả hai nhánh dùng chung định dạng mảng units và cùng serializer RentalOperationExecutor.ComputeFingerprint.
+    /// </summary>
+    private static string ComputeHandoverFingerprint(
+        Guid itemId,
+        HandoverItemRequest request,
+        string? actualRecipientName = null,
+        string? actualRecipientPhone = null,
+        bool includeRecipient = true)
+    {
+        var orderedUnits = request.Units.OrderBy(u => u.AssignmentId).Select(u => new
+        {
+            u.AssignmentId,
+            u.Condition,
+            u.Note,
+            MediaIds = (u.MediaIds ?? []).OrderBy(m => m).ToList()
+        }).ToList();
+
+        if (includeRecipient)
+        {
+            return RentalOperationExecutor.ComputeFingerprint(new
+            {
+                Action = "MarkAssetsHandedOver",
+                ItemId = itemId,
+                ActualHandoverAt = request.ActualHandoverAt,
+                request.Note,
+                request.Confirmed,
+                ActualRecipientName = actualRecipientName,
+                ActualRecipientPhone = actualRecipientPhone,
+                Units = orderedUnits
+            });
+        }
+
+        return RentalOperationExecutor.ComputeFingerprint(new
+        {
+            Action = "MarkAssetsHandedOver",
+            ItemId = itemId,
+            ActualHandoverAt = request.ActualHandoverAt,
+            request.Note,
+            request.Confirmed,
+            Units = orderedUnits
+        });
     }
 
     private sealed class NoOpOrderLockManager : IOrderLockManager

@@ -7,9 +7,6 @@ public static class CheckoutErrors
     public static readonly Error Unauthenticated =
         Error.Unauthorized("Checkout.Unauthenticated", "Yêu cầu đăng nhập để gửi đơn hàng.");
 
-    public static readonly Error ProfileIncomplete =
-        Error.Forbidden("Checkout.ProfileIncomplete", "Bạn cần hoàn thiện hồ sơ trước khi gửi đơn hàng.");
-
     public static readonly Error InvalidRequest =
         Error.Validation("Checkout.InvalidRequest", "Thông tin gửi đơn hàng không hợp lệ.");
 

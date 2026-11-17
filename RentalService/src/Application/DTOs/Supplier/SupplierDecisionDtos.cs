@@ -61,10 +61,14 @@ public sealed record HandoverItemRequest(
     [Required] DateTimeOffset ActualHandoverAt,
     [MaxLength(2000)] string? Note = null,
     [Required] IReadOnlyList<HandoverUnitObservationRequest> Units = null!,
-    bool Confirmed = false);
+    bool Confirmed = false,
+    [MaxLength(200)] string? ActualRecipientName = null,
+    [MaxLength(32)] string? ActualRecipientPhone = null);
 
 public sealed record HandoverItemResponse(
     Guid? HandoverRecordId,
     DateTimeOffset HandoverAt,
-    string Status);
+    string Status,
+    string? ActualRecipientName = null,
+    string? ActualRecipientPhone = null);
 

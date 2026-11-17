@@ -202,13 +202,13 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
-    public async Task Prepare_RejectsIncompleteProfile_BeforeCallingInventory()
+    public async Task Prepare_DoesNotRequireProfileCompletion()
     {
         _auth.IsProfileCompleted = false;
         CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), Request());
 
-        Assert.Equal(CheckoutErrors.ProfileIncomplete, result.Error);
-        Assert.Equal(0, _inventory.ListingReadCount);
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Plan);
     }
 
     [Fact]
@@ -1028,5 +1028,42 @@ public sealed class CheckoutPreparationServiceTests
         Assert.Equal(0m, result.Plan.DeliveryFee);
         Assert.Equal(0m, result.Plan.ReturnFee);
         Assert.Equal(3_000_000m, result.Plan.TotalAmount);
+    }
+
+    [Fact]
+    public async Task PreparePreview_DoesNotRequirePhoneNumberRefundAccountOrTerms()
+    {
+        var request = Request(expectedTotal: 3_000_000m) with
+        {
+            TermsAccepted = false,
+            RefundAccount = null,
+            RefundAccountId = null,
+            Delivery = new(" Hồ Chí Minh ", "123 Nguyễn Huệ, Quận 1", "Nguyễn Văn A", null, null)
+        };
+
+        CheckoutPreparationResult result = await CreateService().PreparePreviewAsync(Renter(), request);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Plan);
+        Assert.Equal(3_000_000m, result.Plan.TotalAmount);
+    }
+
+    [Fact]
+    public async Task PrepareSubmit_StillRequiresPhoneNumberRefundAccountAndTerms()
+    {
+        var request = Request(expectedTotal: 3_000_000m) with
+        {
+            TermsAccepted = false,
+            RefundAccount = null,
+            RefundAccountId = null,
+            Delivery = new(" Hồ Chí Minh ", "123 Nguyễn Huệ, Quận 1", "Nguyễn Văn A", null, null)
+        };
+
+        CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), request);
+
+        Assert.True(result.IsFailure);
+        Assert.Contains(result.FieldErrors, e => e.Field == "termsAccepted");
+        Assert.Contains(result.FieldErrors, e => e.Field == "refundAccount");
+        Assert.Contains(result.FieldErrors, e => e.Field == "delivery.recipientPhone");
     }
 }
