@@ -823,7 +823,7 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
-    public async Task Prepare_Delivery_WhenAddressNotInZone_ReturnsAddressOutsideDeliveryZone()
+    public async Task Prepare_Delivery_OutsideFormerZone_IsFree()
     {
         _inventory.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
             _supplierId,
@@ -838,9 +838,7 @@ public sealed class CheckoutPreparationServiceTests
         };
         CheckoutPreparationResult result = await CreateService().PrepareAsync(Renter(), request);
 
-        Assert.False(result.IsSuccess);
-        Assert.Equal(CheckoutErrors.AddressOutsideDeliveryZone, result.Error);
-        Assert.Equal("ADDRESS_OUTSIDE_DELIVERY_ZONE", result.Error.Code);
+        Assert.True(result.IsSuccess);
     }
 
     [Fact]
@@ -859,7 +857,7 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
-    public async Task Prepare_SupplierWithoutDeliveryZones_PickupAllowed_DeliveryBlockedWithDeliveryNotConfigured()
+    public async Task Prepare_SupplierWithoutDeliveryZones_PickupAndDeliveryAllowed()
     {
         _inventory.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
             _supplierId,
@@ -868,7 +866,7 @@ public sealed class CheckoutPreparationServiceTests
             new OperatingHoursDto("08:00", "18:00", []),
             DeliveryZones: []);
 
-        // 1. Delivery is blocked with DELIVERY_NOT_CONFIGURED
+        // Delivery remains available without configured zones
         var deliveryRequest = Request(expectedTotal: 3_000_000m) with
         {
             DeliveryMethod = "Delivery",
@@ -876,9 +874,7 @@ public sealed class CheckoutPreparationServiceTests
         };
         CheckoutPreparationResult deliveryResult = await CreateService().PrepareAsync(Renter(), deliveryRequest);
 
-        Assert.False(deliveryResult.IsSuccess);
-        Assert.Equal(CheckoutErrors.DeliveryNotConfigured, deliveryResult.Error);
-        Assert.Equal("DELIVERY_NOT_CONFIGURED", deliveryResult.Error.Code);
+        Assert.True(deliveryResult.IsSuccess);
 
         // 2. Pickup is allowed with 0 fee
         var pickupRequest = Request(expectedTotal: 3_000_000m) with
@@ -898,7 +894,7 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
-    public async Task Prepare_WardSpecificZone_TakesPrecedenceOverWholeProvinceZone()
+    public async Task Prepare_FormerZoneFeesAreIgnored()
     {
         _inventory.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
             _supplierId,
@@ -911,7 +907,7 @@ public sealed class CheckoutPreparationServiceTests
             ]);
 
         // Specific ward matches ward zone (40k fee)
-        var wardRequest = Request(expectedTotal: 3_080_000m) with
+        var wardRequest = Request(expectedTotal: 3_000_000m) with
         {
             DeliveryMethod = "Delivery",
             ReturnMethod = "Return",
@@ -920,11 +916,11 @@ public sealed class CheckoutPreparationServiceTests
         CheckoutPreparationResult wardResult = await CreateService().PrepareAsync(Renter(), wardRequest);
 
         Assert.True(wardResult.IsSuccess);
-        Assert.Equal(40_000m, wardResult.Plan.DeliveryFee);
-        Assert.Equal(40_000m, wardResult.Plan.ReturnFee);
+        Assert.Equal(0m, wardResult.Plan.DeliveryFee);
+        Assert.Equal(0m, wardResult.Plan.ReturnFee);
 
         // Other ward in province matches whole-province zone (100k fee)
-        var otherWardRequest = Request(expectedTotal: 3_200_000m) with
+        var otherWardRequest = Request(expectedTotal: 3_000_000m) with
         {
             DeliveryMethod = "Delivery",
             ReturnMethod = "Return",
@@ -933,8 +929,8 @@ public sealed class CheckoutPreparationServiceTests
         CheckoutPreparationResult otherResult = await CreateService().PrepareAsync(Renter(), otherWardRequest);
 
         Assert.True(otherResult.IsSuccess);
-        Assert.Equal(100_000m, otherResult.Plan.DeliveryFee);
-        Assert.Equal(100_000m, otherResult.Plan.ReturnFee);
+        Assert.Equal(0m, otherResult.Plan.DeliveryFee);
+        Assert.Equal(0m, otherResult.Plan.ReturnFee);
     }
 
     [Fact]
@@ -980,7 +976,7 @@ public sealed class CheckoutPreparationServiceTests
     }
 
     [Fact]
-    public async Task Prepare_PickupAtWarehouse_ReturnAtCustomerSite_MatchesSiteZoneNotWarehouse()
+    public async Task Prepare_PickupAtWarehouse_ReturnAtCustomerSite_IsFree()
     {
         // Supplier warehouse is in TP.HCM (79)
         _inventory.DeliveryPolicies[_supplierId] = new WarehouseDeliveryPolicyResponse(
@@ -994,7 +990,7 @@ public sealed class CheckoutPreparationServiceTests
             ]);
 
         // Customer picks up at warehouse, but returns at customer construction site in Đà Nẵng
-        var request = Request(expectedTotal: 3_080_000m) with
+        var request = Request(expectedTotal: 3_000_000m) with
         {
             DeliveryMethod = "Pickup",
             ReturnMethod = "Return",
@@ -1005,8 +1001,8 @@ public sealed class CheckoutPreparationServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(0m, result.Plan.DeliveryFee);
-        Assert.Equal(80_000m, result.Plan.ReturnFee); // Matched against Da Nang (48), NOT warehouse TP.HCM (79)!
-        Assert.Equal(3_080_000m, result.Plan.TotalAmount);
+        Assert.Equal(0m, result.Plan.ReturnFee);
+        Assert.Equal(3_000_000m, result.Plan.TotalAmount);
     }
 
     [Fact]
