@@ -41,7 +41,9 @@ public sealed record MarkAssetsHandedOverCommandPayload(
     [property: JsonRequired] Guid RentalItemId,
     [property: JsonRequired] string OperationKey,
     [property: JsonRequired] DateTimeOffset HandedOverAt,
-    string? AllocationGroupId = null);
+    string? AllocationGroupId = null,
+    string? ActualRecipientName = null,
+    string? ActualRecipientPhone = null);
 public sealed record MarkAssetsOverdueCommandPayload(
     [property: JsonRequired] Guid RentalOrderId,
     [property: JsonRequired] Guid RentalItemId,

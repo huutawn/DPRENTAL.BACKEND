@@ -111,12 +111,16 @@ public sealed record OrderItemRefundResponse(
 /// <param name="RenterAcknowledgedAt">Thời điểm người thuê xác nhận đã nhận, rỗng khi chưa xác nhận.</param>
 /// <param name="RenterAcknowledgedById">Mã người thuê đã xác nhận nhận máy, rỗng khi chưa xác nhận.</param>
 /// <param name="RenterAcknowledgementNote">Ghi chú của người thuê lúc xác nhận nhận máy.</param>
+/// <param name="ActualRecipientName">Tên người nhận máy thực tế.</param>
+/// <param name="ActualRecipientPhone">Số điện thoại người nhận máy thực tế.</param>
 public sealed record OrderHandoverResponse(
     DateTimeOffset ActualHandoverAt,
     string? Note,
     DateTimeOffset? RenterAcknowledgedAt,
     Guid? RenterAcknowledgedById = null,
-    string? RenterAcknowledgementNote = null);
+    string? RenterAcknowledgementNote = null,
+    string? ActualRecipientName = null,
+    string? ActualRecipientPhone = null);
 
 /// <summary>
 /// Một lần nhà cung cấp ghi nhận trả máy.

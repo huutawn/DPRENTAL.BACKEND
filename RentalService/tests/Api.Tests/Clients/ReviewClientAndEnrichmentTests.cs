@@ -233,10 +233,6 @@ public sealed class ReviewClientAndEnrichmentTests
                 {
                     MaxObservedConcurrency = current;
                 }
-            }
-
-            lock (ReceivedRequests)
-            {
                 ReceivedRequests.Add(request);
             }
 

@@ -7,9 +7,6 @@ public static class CheckoutErrors
     public static readonly Error Unauthenticated =
         Error.Unauthorized("Checkout.Unauthenticated", "Yêu cầu đăng nhập để gửi đơn hàng.");
 
-    public static readonly Error ProfileIncomplete =
-        Error.Forbidden("Checkout.ProfileIncomplete", "Bạn cần hoàn thiện hồ sơ trước khi gửi đơn hàng.");
-
     public static readonly Error InvalidRequest =
         Error.Validation("Checkout.InvalidRequest", "Thông tin gửi đơn hàng không hợp lệ.");
 
@@ -25,8 +22,8 @@ public static class CheckoutErrors
     public static readonly Error MultipleRentalPeriods =
         Error.Validation("CHECKOUT_MULTI_PERIOD_FORBIDDEN", "Mỗi đơn thanh toán chỉ được áp dụng cho các thiết bị có cùng khoảng thời gian thuê. Vui lòng thanh toán theo từng khoảng thời gian.");
 
-    public static readonly Error AddressOutsideDeliveryZone =
-        Error.Validation("ADDRESS_OUTSIDE_DELIVERY_ZONE", "Địa chỉ giao hàng không nằm trong khu vực phục vụ của nhà cung cấp.");
+    public static readonly Error DeliveryAddressIncomplete =
+        Error.Validation("DELIVERY_ADDRESS_INCOMPLETE", "Thông tin địa chỉ giao hàng chưa đầy đủ. Vui lòng bổ sung tỉnh/thành phố và phường/xã.");
 
     public static readonly Error PickupNotSupported =
         Error.Validation("PICKUP_NOT_SUPPORTED", "Nhà cung cấp không hỗ trợ nhận tại kho.");

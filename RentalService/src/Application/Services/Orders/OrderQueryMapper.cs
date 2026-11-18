@@ -87,7 +87,9 @@ internal static class OrderQueryMapper
         order.DeliveryNote,
         order.ReturnMethod,
         order.DeliveryFee,
-        order.ReturnFee);
+        order.ReturnFee,
+        order.ProvinceCode,
+        order.WardCode);
 
     // Dựng phần thông tin chung của item và cách hiển thị cho renter/supplier từ snapshot order.
     public static OrderItemResponse ToItem(RentalItem item, bool isSupplier = false)
@@ -188,7 +190,9 @@ internal static class OrderQueryMapper
             handover.Note,
             handover.RenterAcknowledgedAt,
             handover.RenterAcknowledgedById,
-            handover.RenterAcknowledgementNote)
+            handover.RenterAcknowledgementNote,
+            handover.ActualRecipientName,
+            handover.ActualRecipientPhone)
         : null;
 
     /// <summary>Mỗi lần trả kèm số máy bình thường và hư hỏng.</summary>

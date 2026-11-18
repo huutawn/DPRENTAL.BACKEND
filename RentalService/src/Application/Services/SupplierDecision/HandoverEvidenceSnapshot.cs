@@ -13,9 +13,14 @@ public sealed record HandoverEvidenceSnapshot(
     DateTimeOffset SubmittedAt,
     DateTimeOffset ActualHandoverAt,
     string? Note,
-    IReadOnlyList<HandoverUnitSnapshot> Units)
+    IReadOnlyList<HandoverUnitSnapshot> Units,
+    string? ActualRecipientName = null,
+    string? ActualRecipientPhone = null)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+    };
 
     // Serialize snapshot bằng chứng bàn giao vào journal để dùng khi Inventory xác nhận, không lấy lại nội dung request đã thay đổi.
     public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);

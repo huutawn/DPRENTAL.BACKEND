@@ -20,7 +20,7 @@ public static partial class CheckoutRequestValidator
     private const string Conflicting = "CONFLICTING";
 
     [GeneratedRegex(@"^(0|\+84)[0-9]{9}$")]
-    private static partial Regex PhoneRegex();
+    internal static partial Regex PhoneRegex();
 
     [GeneratedRegex(@"^[0-9]{6,20}$")]
     private static partial Regex AccountNumberRegex();
@@ -144,16 +144,26 @@ public static partial class CheckoutRequestValidator
                 return;
             }
 
-            if (request.Delivery is null && request.AddressId is null)
-            {
-                errors.Add(new("delivery", Required, "Thiếu thông tin người nhận khi nhận tại kho."));
-                return;
-            }
-
             if (request.Delivery is not null)
             {
-                ValidateRecipientName(request.Delivery.RecipientName, "delivery.recipientName", errors);
-                ValidateRecipientPhone(request.Delivery.RecipientPhone, "delivery.recipientPhone", errors);
+                if (!string.IsNullOrWhiteSpace(request.Delivery.RecipientName))
+                {
+                    ValidateRecipientName(request.Delivery.RecipientName, "delivery.recipientName", errors);
+                }
+                if (!string.IsNullOrWhiteSpace(request.Delivery.RecipientPhone))
+                {
+                    ValidateRecipientPhone(request.Delivery.RecipientPhone, "delivery.recipientPhone", errors);
+                }
+
+                if (request.Delivery.ProvinceCode is not null && request.Delivery.ProvinceCode.Trim().Length > 20)
+                {
+                    errors.Add(new("delivery.provinceCode", InvalidLength, "Mã tỉnh tối đa 20 ký tự."));
+                }
+
+                if (request.Delivery.WardCode is not null && request.Delivery.WardCode.Trim().Length > 20)
+                {
+                    errors.Add(new("delivery.wardCode", InvalidLength, "Mã phường/xã tối đa 20 ký tự."));
+                }
 
                 if (request.Delivery.Note is not null && request.Delivery.Note.Trim().Length > MaxDeliveryNoteLength)
                 {
@@ -207,6 +217,16 @@ public static partial class CheckoutRequestValidator
         }
 
         ValidateAddress(delivery.Province, delivery.AddressDetail, delivery.RecipientName, delivery.RecipientPhone, "delivery.", errors);
+
+        if (delivery.ProvinceCode is not null && delivery.ProvinceCode.Trim().Length > 20)
+        {
+            errors.Add(new("delivery.provinceCode", InvalidLength, "Mã tỉnh tối đa 20 ký tự."));
+        }
+
+        if (delivery.WardCode is not null && delivery.WardCode.Trim().Length > 20)
+        {
+            errors.Add(new("delivery.wardCode", InvalidLength, "Mã phường/xã tối đa 20 ký tự."));
+        }
 
         if (delivery.Note is not null && delivery.Note.Trim().Length > MaxDeliveryNoteLength)
         {
@@ -302,7 +322,7 @@ public static partial class CheckoutRequestValidator
         }
     }
 
-    private static void ValidateRecipientName(string? recipientName, string fieldName, List<CheckoutFieldError> errors)
+    internal static void ValidateRecipientName(string? recipientName, string fieldName, List<CheckoutFieldError> errors)
     {
         if (string.IsNullOrWhiteSpace(recipientName))
         {
@@ -317,7 +337,7 @@ public static partial class CheckoutRequestValidator
         }
     }
 
-    private static void ValidateRecipientPhone(string? recipientPhone, string fieldName, List<CheckoutFieldError> errors)
+    internal static void ValidateRecipientPhone(string? recipientPhone, string fieldName, List<CheckoutFieldError> errors)
     {
         if (string.IsNullOrWhiteSpace(recipientPhone))
         {

@@ -29,6 +29,8 @@ public sealed record PagedResponse<T>(
 /// <param name="ReturnMethod">Hình thức trả máy.</param>
 /// <param name="DeliveryFee">Phí giao hàng (VND).</param>
 /// <param name="ReturnFee">Phí thu hồi máy (VND).</param>
+/// <param name="ProvinceCode">Mã tỉnh/thành phố chuẩn (tùy chọn).</param>
+/// <param name="WardCode">Mã phường/xã chuẩn (tùy chọn).</param>
 public sealed record OrderDeliveryResponse(
     string Method,
     string RecipientName,
@@ -37,7 +39,9 @@ public sealed record OrderDeliveryResponse(
     string? Note,
     string? ReturnMethod = null,
     decimal DeliveryFee = 0m,
-    decimal ReturnFee = 0m);
+    decimal ReturnFee = 0m,
+    string? ProvinceCode = null,
+    string? WardCode = null);
 
 /// <summary>
 /// Một dòng thiết bị trong đơn, lấy từ thông tin đã chụp lúc đặt hàng. Chỉ gồm những gì cần hiển thị;

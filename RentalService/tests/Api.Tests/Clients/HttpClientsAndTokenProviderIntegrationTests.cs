@@ -174,6 +174,58 @@ public sealed class HttpClientsAndTokenProviderIntegrationTests
     }
 
     [Fact]
+    public async Task HttpAuthRentalClient_DoesNotRequireIsProfileCompletedField()
+    {
+        const string expectedKey = "internal-auth-key-123";
+        const string bearerToken = "ey.sample.jwt.token";
+        Guid expectedUserId = Guid.NewGuid();
+
+        var mockHandler = new MockHttpMessageHandler
+        {
+            Handler = req =>
+            {
+                var responseJson = $$"""
+                {
+                    "id": "{{expectedUserId}}",
+                    "username": "renter1",
+                    "email": "renter1@example.com",
+                    "fullName": "Nguyen Van A",
+                    "phoneNumber": "0901234567"
+                }
+                """;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(responseJson, System.Text.Encoding.UTF8, "application/json")
+                };
+            }
+        };
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Headers["Authorization"] = $"Bearer {bearerToken}";
+        var accessor = new HttpContextAccessor { HttpContext = httpContext };
+        var tokenHandler = new AuthTokenPropagationHandler(accessor)
+        {
+            InnerHandler = mockHandler
+        };
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new[]
+            {
+                new KeyValuePair<string, string?>("Services:Auth:BaseUrl", "http://auth-service:8080"),
+                new KeyValuePair<string, string?>("InternalAuthentication:ApiKey", expectedKey)
+            }).Build();
+
+        var client = new HttpAuthRentalClient(new HttpClient(tokenHandler), config, NullLogger<HttpAuthRentalClient>.Instance);
+        var result = await client.GetCurrentUserAsync();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expectedUserId, result.Value.Id);
+        Assert.Null(result.Value.IsProfileCompleted);
+        Assert.Equal("Nguyen Van A", result.Value.FullName);
+        Assert.Equal("0901234567", result.Value.PhoneNumber);
+    }
+
+    [Fact]
     public async Task AuthTokenPropagationHandler_ConcurrentRequests_DoNotMixTokens()
     {
         var accessor = new HttpContextAccessor();
@@ -303,7 +355,6 @@ public sealed class HttpClientsAndTokenProviderIntegrationTests
     [InlineData("""{"id":true,"isProfileCompleted":true}""")]
     [InlineData("""{"id":"not-a-guid","isProfileCompleted":true}""")]
     [InlineData("""{"id":"00000000-0000-0000-0000-000000000000","isProfileCompleted":true}""")]
-    [InlineData("""{"id":"11111111-1111-1111-1111-111111111111"}""")]
     [InlineData("""{"isProfileCompleted":true}""")]
     public async Task HttpAuthRentalClient_MalformedOrMissingFields_ReturnsDependencyUnavailable(string json)
     {

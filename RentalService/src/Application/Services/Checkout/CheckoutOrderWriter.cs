@@ -181,7 +181,9 @@ public sealed class CheckoutOrderWriter : ICheckoutOrderWriter
             returnMethod: plan.ReturnMethod,
             deliveryFee: plan.DeliveryFee,
             returnFee: plan.ReturnFee,
-            deliverySnapshotJson: plan.DeliveryPolicySnapshotJson);
+            deliverySnapshotJson: plan.DeliveryPolicySnapshotJson,
+            provinceCode: plan.Delivery.ProvinceCode,
+            wardCode: plan.Delivery.WardCode);
         // Trả lỗi của bước vừa thực hiện; không chạy phần xử lý phía sau khi bước tiên quyết chưa thành công.
         if (order.IsFailure)
         {

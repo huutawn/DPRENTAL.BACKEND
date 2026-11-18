@@ -16,6 +16,7 @@ using Dprental.RentalService.Application.IServices.Payments;
 using Dprental.RentalService.Application.IServices.Returns;
 using Dprental.RentalService.Application.IServices.SupplierDecision;
 using Dprental.RentalService.Application.IServices.SupplierStatistics;
+using Dprental.RentalService.Application.Locations;
 using Dprental.RentalService.Application.Observability;
 using Dprental.RentalService.Application.Options;
 using Dprental.RentalService.Application.Policies;
@@ -68,6 +69,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<GetRentalCart>();
         // Giới hạn kỳ thuê và adapter đọc listing/availability từ Inventory.
         services.AddSingleton<IRentalCartPolicy, RentalCartOptions>();
+        services.AddSingleton<IVietnamDivisionsCatalog, VietnamDivisionsCatalog>();
         services.AddScoped<InventoryRentalCartReader>();
         services.AddScoped<IRentalListingReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());
         services.AddScoped<IRentalAvailabilityReader>(sp => sp.GetRequiredService<InventoryRentalCartReader>());

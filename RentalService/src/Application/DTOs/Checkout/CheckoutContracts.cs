@@ -44,17 +44,21 @@ public sealed record CheckoutRequest(
 /// <summary>
 /// Nơi giao thiết bị của đơn hàng.
 /// </summary>
-/// <param name="Province">Tỉnh, thành phố giao (bắt buộc, tối đa 100 ký tự).</param>
-/// <param name="AddressDetail">Địa chỉ chi tiết (bắt buộc, 5 đến 200 ký tự).</param>
+/// <param name="Province">Tỉnh, thành phố giao (bắt buộc khi giao tận nơi, tối đa 100 ký tự).</param>
+/// <param name="AddressDetail">Địa chỉ chi tiết (bắt buộc khi giao tận nơi, 5 đến 200 ký tự).</param>
 /// <param name="RecipientName">Tên người nhận (bắt buộc, tối đa 100 ký tự).</param>
 /// <param name="RecipientPhone">Số điện thoại người nhận: bắt đầu bằng 0 hoặc +84, theo sau 9 chữ số.</param>
 /// <param name="Note">Ghi chú cho nhà cung cấp (tùy chọn, tối đa 500 ký tự).</param>
+/// <param name="ProvinceCode">Mã tỉnh/thành phố chuẩn (tùy chọn).</param>
+/// <param name="WardCode">Mã phường/xã chuẩn (tùy chọn).</param>
 public sealed record CheckoutDeliveryDto(
     string? Province,
     string? AddressDetail,
     string? RecipientName,
     string? RecipientPhone,
-    string? Note);
+    string? Note,
+    string? ProvinceCode = null,
+    string? WardCode = null);
 
 /// <summary>
 /// Tài khoản ngân hàng nhận hoàn tiền của đơn hàng.

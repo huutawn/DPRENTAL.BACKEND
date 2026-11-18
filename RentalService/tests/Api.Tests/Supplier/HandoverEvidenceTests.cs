@@ -468,6 +468,476 @@ public sealed class HandoverEvidenceTests
         Assert.Equal("INVALID_UNITS", result.Error.Code);
     }
 
+    [Fact]
+    public async Task Handover_WhenActualRecipientOmitted_DefaultsToOrderSnapshot_AndIsIdempotent()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+
+        Result<HandoverItemResponse> first = await Service().HandoverItemAsync(_item.Id, request, "ho-default-1", OrderTestData.User(_binh));
+        Assert.True(first.IsSuccess, first.Error.Code);
+        Assert.Equal("Nguyễn Văn An", first.Value.ActualRecipientName);
+        Assert.Equal("0901234567", first.Value.ActualRecipientPhone);
+
+        // Replay with same idempotency key and same payload is idempotent
+        Result<HandoverItemResponse> replay = await Service().HandoverItemAsync(_item.Id, request, "ho-default-1", OrderTestData.User(_binh));
+        Assert.True(replay.IsSuccess, replay.Error.Code);
+        Assert.Equal("Nguyễn Văn An", replay.Value.ActualRecipientName);
+        Assert.Equal("0901234567", replay.Value.ActualRecipientPhone);
+
+        // Check command payload
+        InventoryCommand command = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver)).Single();
+        Assert.Equal("Nguyễn Văn An", command.Payload.GetProperty("actualRecipientName").GetString());
+        Assert.Equal("0901234567", command.Payload.GetProperty("actualRecipientPhone").GetString());
+
+        // Inventory confirms
+        Assert.True((await _replies.SucceedAsync(command)).IsSuccess);
+
+        await using RentalServiceDbContext context = NewContext();
+        RentalItem item = await context.RentalItems
+            .Include(i => i.UnitAssignments).Include(i => i.HandoverRecord).SingleAsync();
+        HandoverRecord record = Assert.IsType<HandoverRecord>(item.HandoverRecord);
+        Assert.Equal("Nguyễn Văn An", record.ActualRecipientName);
+        Assert.Equal("0901234567", record.ActualRecipientPhone);
+
+        var readModel = Dprental.RentalService.Application.Services.Orders.OrderQueryMapper.ToHandover(item);
+        Assert.NotNull(readModel);
+        Assert.Equal("Nguyễn Văn An", readModel.ActualRecipientName);
+        Assert.Equal("0901234567", readModel.ActualRecipientPhone);
+    }
+
+    [Fact]
+    public async Task Handover_WhenSupplierSpecifiesOtherRecipient_UsesSpecifiedRecipientWithoutChangingOrderOwnership()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request() with
+        {
+            ActualRecipientName = "Trần Thị B",
+            ActualRecipientPhone = "0987654321"
+        };
+
+        Result<HandoverItemResponse> first = await Service().HandoverItemAsync(_item.Id, request, "ho-other-1", OrderTestData.User(_binh));
+        Assert.True(first.IsSuccess, first.Error.Code);
+        Assert.Equal("Trần Thị B", first.Value.ActualRecipientName);
+        Assert.Equal("0987654321", first.Value.ActualRecipientPhone);
+
+        // Retrying with different recipient on same key causes conflict
+        HandoverItemRequest conflicting = request with { ActualRecipientName = "Lê Văn C" };
+        Result<HandoverItemResponse> conflict = await Service().HandoverItemAsync(_item.Id, conflicting, "ho-other-1", OrderTestData.User(_binh));
+        Assert.Equal("IDEMPOTENCY_CONFLICT", conflict.Error.Code);
+
+        // Replay with identical payload succeeds
+        Result<HandoverItemResponse> replay = await Service().HandoverItemAsync(_item.Id, request, "ho-other-1", OrderTestData.User(_binh));
+        Assert.True(replay.IsSuccess, replay.Error.Code);
+
+        // Verify order ownership unchanged
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            RentalOrder order = await context.RentalOrders.SingleAsync();
+            Assert.NotEqual(Guid.Empty, order.RenterId);
+            Assert.Equal("Nguyễn Văn An", order.RecipientName);
+            Assert.Equal("0901234567", order.RecipientPhone);
+        }
+
+        // Inventory confirms
+        InventoryCommand command = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver)).Single();
+        Assert.Equal("Trần Thị B", command.Payload.GetProperty("actualRecipientName").GetString());
+        Assert.Equal("0987654321", command.Payload.GetProperty("actualRecipientPhone").GetString());
+
+        Assert.True((await _replies.SucceedAsync(command)).IsSuccess);
+
+        await using (RentalServiceDbContext context = NewContext())
+        {
+            RentalItem item = await context.RentalItems
+                .Include(i => i.UnitAssignments).Include(i => i.HandoverRecord).SingleAsync();
+            HandoverRecord record = Assert.IsType<HandoverRecord>(item.HandoverRecord);
+            Assert.Equal("Trần Thị B", record.ActualRecipientName);
+            Assert.Equal("0987654321", record.ActualRecipientPhone);
+
+            var readModel = Dprental.RentalService.Application.Services.Orders.OrderQueryMapper.ToHandover(item);
+            Assert.NotNull(readModel);
+            Assert.Equal("Trần Thị B", readModel.ActualRecipientName);
+            Assert.Equal("0987654321", readModel.ActualRecipientPhone);
+        }
+    }
+
+    [Fact]
+    public async Task Handover_Validation_RejectsInvalidRecipientPhoneOrTooLongName()
+    {
+        await SeedAsync();
+
+        HandoverItemRequest invalidPhone = Request() with { ActualRecipientPhone = "12345" };
+        Result<HandoverItemResponse> res1 = await Service().HandoverItemAsync(_item.Id, invalidPhone, "val-phone", OrderTestData.User(_binh));
+        Assert.Equal("INVALID_RECIPIENT_PHONE", res1.Error.Code);
+
+        HandoverItemRequest invalidName = Request() with { ActualRecipientName = new string('A', 201) };
+        Result<HandoverItemResponse> res2 = await Service().HandoverItemAsync(_item.Id, invalidName, "val-name", OrderTestData.User(_binh));
+        Assert.Equal("INVALID_RECIPIENT_NAME", res2.Error.Code);
+    }
+
+    [Fact]
+    public async Task HistoricalHandoverRecord_WithoutActualRecipient_RemainsReadable()
+    {
+        await SeedAsync();
+
+        // Historical JSON without actualRecipientName and actualRecipientPhone
+        string historicalJson = """
+        {
+            "submittedById": "11111111-1111-1111-1111-111111111111",
+            "submittedAt": "2026-10-10T00:00:00+00:00",
+            "actualHandoverAt": "2026-10-10T00:00:00+00:00",
+            "note": "Historical note",
+            "units": [
+                {
+                    "assignmentId": "22222222-2222-2222-2222-222222222222",
+                    "condition": "Normal",
+                    "note": null,
+                    "mediaIds": ["33333333-3333-3333-3333-333333333333"]
+                }
+            ]
+        }
+        """;
+
+        var parsed = HandoverEvidenceSnapshot.TryParse(historicalJson);
+        Assert.NotNull(parsed);
+        Assert.Null(parsed.ActualRecipientName);
+        Assert.Null(parsed.ActualRecipientPhone);
+
+        var historicalRecord = new HandoverRecord(
+            Guid.NewGuid(),
+            _item.Id,
+            parsed.ActualHandoverAt,
+            parsed.Note,
+            parsed.SubmittedById,
+            parsed.SubmittedAt,
+            parsed.SubmittedAt);
+
+        Assert.Null(historicalRecord.ActualRecipientName);
+        Assert.Null(historicalRecord.ActualRecipientPhone);
+
+        _item.SetHandoverRecord(historicalRecord);
+        var readModel = Dprental.RentalService.Application.Services.Orders.OrderQueryMapper.ToHandover(_item);
+        Assert.NotNull(readModel);
+        Assert.Null(readModel.ActualRecipientName);
+        Assert.Null(readModel.ActualRecipientPhone);
+    }
+
+    [Fact]
+    public async Task LegacyReceipt_PendingAndSucceeded_SameKeyAndPayload_ReplaySucceedsWithoutNewCommand()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+
+        // 1. Compute legacy fingerprint (pre-upgrade, without recipient fields)
+        string legacyFp = RentalOperationExecutor.ComputeFingerprint(new
+        {
+            Action = "MarkAssetsHandedOver",
+            ItemId = _item.Id,
+            ActualHandoverAt = request.ActualHandoverAt,
+            request.Note,
+            request.Confirmed,
+            Units = request.Units.OrderBy(u => u.AssignmentId).Select(u => new
+            {
+                u.AssignmentId,
+                u.Condition,
+                u.Note,
+                MediaIds = (u.MediaIds ?? []).OrderBy(m => m).ToList()
+            }).ToList()
+        });
+
+        // Seed a legacy receipt in Pending status
+        string opKey = "legacy-op-pending";
+        var legacyReceipt = RentalOperationReceipt.CreatePending(
+            Guid.NewGuid(), _item.RentalOrderId, opKey, "MarkAssetsHandedOver", legacyFp,
+            OrderTestData.Now, _item.Id, "{}");
+
+        await using (var context = NewContext())
+        {
+            var order = await context.RentalOrders.Include(o => o.OperationReceipts).SingleAsync(o => o.Id == _item.RentalOrderId);
+            order.AddOperationReceipt(legacyReceipt);
+            await context.SaveChangesAsync();
+        }
+
+        int commandCountBefore = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver)).Count;
+
+        // Replay with no recipient in request -> should match legacy receipt and succeed
+        Result<HandoverItemResponse> replayPending = await Service().HandoverItemAsync(_item.Id, request, opKey, OrderTestData.User(_binh));
+        Assert.True(replayPending.IsSuccess, replayPending.Error.Code);
+        Assert.Equal("Pending", replayPending.Value.Status);
+        Assert.Null(replayPending.Value.HandoverRecordId);
+
+        // Verify NO new command was enqueued
+        int commandCountAfter = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver)).Count;
+        Assert.Equal(commandCountBefore, commandCountAfter);
+
+        // 2. Now test with Succeeded legacy receipt
+        string opKeySucceeded = "legacy-op-succeeded";
+        Guid handoverRecordId = Guid.NewGuid();
+        var succeededReceipt = RentalOperationReceipt.CreatePending(
+            Guid.NewGuid(), _item.RentalOrderId, opKeySucceeded, "MarkAssetsHandedOver", legacyFp,
+            OrderTestData.Now, _item.Id, "{}");
+        succeededReceipt.MarkSucceeded(OrderTestData.Now.AddMinutes(1), "{}");
+
+        var historicalRecord = new HandoverRecord(
+            handoverRecordId, _item.Id, request.ActualHandoverAt, request.Note, _binh, OrderTestData.Now, OrderTestData.Now);
+
+        await using (var context = NewContext())
+        {
+            var order = await context.RentalOrders.Include(o => o.OperationReceipts).Include(o => o.Items).SingleAsync(o => o.Id == _item.RentalOrderId);
+            order.AddOperationReceipt(succeededReceipt);
+            var item = order.Items.Single(i => i.Id == _item.Id);
+            item.SetHandoverRecord(historicalRecord);
+            context.HandoverRecords.Add(historicalRecord);
+            await context.SaveChangesAsync();
+        }
+
+        Result<HandoverItemResponse> replaySucceeded = await Service().HandoverItemAsync(_item.Id, request, opKeySucceeded, OrderTestData.User(_binh));
+        Assert.True(replaySucceeded.IsSuccess, replaySucceeded.Error.Code);
+        Assert.Equal("Succeeded", replaySucceeded.Value.Status);
+        Assert.Equal(handoverRecordId, replaySucceeded.Value.HandoverRecordId);
+        Assert.Null(replaySucceeded.Value.ActualRecipientName);
+        Assert.Null(replaySucceeded.Value.ActualRecipientPhone);
+
+        // Verify still no new commands enqueued
+        int commandCountFinal = (await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver)).Count;
+        Assert.Equal(commandCountBefore, commandCountFinal);
+    }
+
+    [Fact]
+    public async Task LegacyReceipt_WhenPayloadChangesTimeOrNoteOrUnits_ReturnsConflict()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+
+        string legacyFp = RentalOperationExecutor.ComputeFingerprint(new
+        {
+            Action = "MarkAssetsHandedOver",
+            ItemId = _item.Id,
+            ActualHandoverAt = request.ActualHandoverAt,
+            request.Note,
+            request.Confirmed,
+            Units = request.Units.OrderBy(u => u.AssignmentId).Select(u => new
+            {
+                u.AssignmentId,
+                u.Condition,
+                u.Note,
+                MediaIds = (u.MediaIds ?? []).OrderBy(m => m).ToList()
+            }).ToList()
+        });
+
+        string opKey = "legacy-op-conflict-test";
+        var legacyReceipt = RentalOperationReceipt.CreatePending(
+            Guid.NewGuid(), _item.RentalOrderId, opKey, "MarkAssetsHandedOver", legacyFp,
+            OrderTestData.Now, _item.Id, "{}");
+
+        await using (var context = NewContext())
+        {
+            var order = await context.RentalOrders.Include(o => o.OperationReceipts).SingleAsync(o => o.Id == _item.RentalOrderId);
+            order.AddOperationReceipt(legacyReceipt);
+            await context.SaveChangesAsync();
+        }
+
+        // 1. Change time
+        HandoverItemRequest changedTime = request with { ActualHandoverAt = request.ActualHandoverAt.AddMinutes(-10) };
+        Result<HandoverItemResponse> resTime = await Service().HandoverItemAsync(_item.Id, changedTime, opKey, OrderTestData.User(_binh));
+        Assert.Equal("IDEMPOTENCY_CONFLICT", resTime.Error.Code);
+
+        // 2. Change note
+        HandoverItemRequest changedNote = request with { Note = "Ghi chú hoàn toàn khác" };
+        Result<HandoverItemResponse> resNote = await Service().HandoverItemAsync(_item.Id, changedNote, opKey, OrderTestData.User(_binh));
+        Assert.Equal("IDEMPOTENCY_CONFLICT", resNote.Error.Code);
+
+        // 3. Change unit condition
+        var changedUnit = request.Units[0] with { Condition = UnitCondition.Damaged };
+        HandoverItemRequest changedUnits = request with { Units = [changedUnit, request.Units[1]] };
+        Result<HandoverItemResponse> resUnits = await Service().HandoverItemAsync(_item.Id, changedUnits, opKey, OrderTestData.User(_binh));
+        Assert.Equal("IDEMPOTENCY_CONFLICT", resUnits.Error.Code);
+    }
+
+    [Fact]
+    public async Task LegacyReceipt_WhenRequestProvidesNewRecipient_ReturnsConflict()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+
+        string legacyFp = RentalOperationExecutor.ComputeFingerprint(new
+        {
+            Action = "MarkAssetsHandedOver",
+            ItemId = _item.Id,
+            ActualHandoverAt = request.ActualHandoverAt,
+            request.Note,
+            request.Confirmed,
+            Units = request.Units.OrderBy(u => u.AssignmentId).Select(u => new
+            {
+                u.AssignmentId,
+                u.Condition,
+                u.Note,
+                MediaIds = (u.MediaIds ?? []).OrderBy(m => m).ToList()
+            }).ToList()
+        });
+
+        string opKey = "legacy-op-new-recipient-test";
+        var legacyReceipt = RentalOperationReceipt.CreatePending(
+            Guid.NewGuid(), _item.RentalOrderId, opKey, "MarkAssetsHandedOver", legacyFp,
+            OrderTestData.Now, _item.Id, "{}");
+
+        await using (var context = NewContext())
+        {
+            var order = await context.RentalOrders.Include(o => o.OperationReceipts).SingleAsync(o => o.Id == _item.RentalOrderId);
+            order.AddOperationReceipt(legacyReceipt);
+            await context.SaveChangesAsync();
+        }
+
+        // When request specifies an actual recipient name, it MUST NOT match legacy receipt
+        HandoverItemRequest reqWithName = request with { ActualRecipientName = "Người mới nhận máy" };
+        Result<HandoverItemResponse> resName = await Service().HandoverItemAsync(_item.Id, reqWithName, opKey, OrderTestData.User(_binh));
+        Assert.Equal("IDEMPOTENCY_CONFLICT", resName.Error.Code);
+
+        // When request specifies an actual recipient phone, it MUST NOT match legacy receipt
+        HandoverItemRequest reqWithPhone = request with { ActualRecipientPhone = "0987654321" };
+        Result<HandoverItemResponse> resPhone = await Service().HandoverItemAsync(_item.Id, reqWithPhone, opKey, OrderTestData.User(_binh));
+        Assert.Equal("IDEMPOTENCY_CONFLICT", resPhone.Error.Code);
+    }
+
+    [Fact]
+    public async Task NewReceipt_WhenNameOrPhoneChanges_ReturnsConflict()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request() with
+        {
+            ActualRecipientName = "Nguyễn Văn Nhận",
+            ActualRecipientPhone = "0912345678"
+        };
+
+        string opKey = "new-receipt-conflict-test";
+        Result<HandoverItemResponse> first = await Service().HandoverItemAsync(_item.Id, request, opKey, OrderTestData.User(_binh));
+        Assert.True(first.IsSuccess, first.Error.Code);
+
+        // Replay with identical recipient succeeds
+        Result<HandoverItemResponse> replay = await Service().HandoverItemAsync(_item.Id, request, opKey, OrderTestData.User(_binh));
+        Assert.True(replay.IsSuccess, replay.Error.Code);
+
+        // Changed name -> conflict
+        HandoverItemRequest changedName = request with { ActualRecipientName = "Trần Văn Khác" };
+        Result<HandoverItemResponse> resName = await Service().HandoverItemAsync(_item.Id, changedName, opKey, OrderTestData.User(_binh));
+        Assert.Equal("IDEMPOTENCY_CONFLICT", resName.Error.Code);
+
+        // Changed phone -> conflict
+        HandoverItemRequest changedPhone = request with { ActualRecipientPhone = "0987654321" };
+        Result<HandoverItemResponse> resPhone = await Service().HandoverItemAsync(_item.Id, changedPhone, opKey, OrderTestData.User(_binh));
+        Assert.Equal("IDEMPOTENCY_CONFLICT", resPhone.Error.Code);
+    }
+
+    [Fact]
+    public async Task ConcurrentReplay_DoesNotCreateSecondReceiptOrCommand()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request() with
+        {
+            ActualRecipientName = "Người Nhận",
+            ActualRecipientPhone = "0901234567"
+        };
+
+        string opKey = "concurrent-replay-test";
+
+        // First call
+        Result<HandoverItemResponse> first = await Service().HandoverItemAsync(_item.Id, request, opKey, OrderTestData.User(_binh));
+        Assert.True(first.IsSuccess, first.Error.Code);
+
+        // Run 2 concurrent replays with the same key and payload
+        Task<Result<HandoverItemResponse>> t1 = Service().HandoverItemAsync(_item.Id, request, opKey, OrderTestData.User(_binh));
+        Task<Result<HandoverItemResponse>> t2 = Service().HandoverItemAsync(_item.Id, request, opKey, OrderTestData.User(_binh));
+
+        Result<HandoverItemResponse>[] results = await Task.WhenAll(t1, t2);
+
+        Assert.All(results, r => Assert.True(r.IsSuccess));
+
+        // Check receipts in DB: exactly 1 receipt
+        await using (var context = NewContext())
+        {
+            var receipts = await context.RentalOperationReceipts.Where(r => r.OperationId == opKey).ToListAsync();
+            Assert.Single(receipts);
+        }
+
+        // Check commands in Outbox: exactly 1 command
+        var pending = await _replies.PendingCommandsAsync(KafkaContractSpec.CommandTypes.MarkAssetsHandedOver);
+        Assert.Single(pending);
+    }
+
+    [Fact]
+    public async Task HistoricalHandoverRecord_ReplayDoesNotModifyHistoricalData()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+
+        string legacyFp = RentalOperationExecutor.ComputeFingerprint(new
+        {
+            Action = "MarkAssetsHandedOver",
+            ItemId = _item.Id,
+            ActualHandoverAt = request.ActualHandoverAt,
+            request.Note,
+            request.Confirmed,
+            Units = request.Units.OrderBy(u => u.AssignmentId).Select(u => new
+            {
+                u.AssignmentId,
+                u.Condition,
+                u.Note,
+                MediaIds = (u.MediaIds ?? []).OrderBy(m => m).ToList()
+            }).ToList()
+        });
+
+        string opKey = "legacy-replay-no-modify";
+        Guid handoverRecordId = Guid.NewGuid();
+        var succeededReceipt = RentalOperationReceipt.CreatePending(
+            Guid.NewGuid(), _item.RentalOrderId, opKey, "MarkAssetsHandedOver", legacyFp,
+            OrderTestData.Now, _item.Id, "{}");
+        succeededReceipt.MarkSucceeded(OrderTestData.Now.AddMinutes(1), "{}");
+
+        var historicalRecord = new HandoverRecord(
+            handoverRecordId, _item.Id, request.ActualHandoverAt, request.Note, _binh, OrderTestData.Now, OrderTestData.Now,
+            actualRecipientName: null, actualRecipientPhone: null);
+
+        await using (var context = NewContext())
+        {
+            var order = await context.RentalOrders.Include(o => o.OperationReceipts).Include(o => o.Items).SingleAsync(o => o.Id == _item.RentalOrderId);
+            order.AddOperationReceipt(succeededReceipt);
+            var item = order.Items.Single(i => i.Id == _item.Id);
+            item.SetHandoverRecord(historicalRecord);
+            context.HandoverRecords.Add(historicalRecord);
+            await context.SaveChangesAsync();
+        }
+
+        Result<HandoverItemResponse> replay = await Service().HandoverItemAsync(_item.Id, request, opKey, OrderTestData.User(_binh));
+        Assert.True(replay.IsSuccess, replay.Error.Code);
+
+        // Verify that historical record in DB was NOT modified
+        await using (var context = NewContext())
+        {
+            var recordInDb = await context.HandoverRecords.SingleAsync(h => h.Id == handoverRecordId);
+            Assert.Null(recordInDb.ActualRecipientName);
+            Assert.Null(recordInDb.ActualRecipientPhone);
+        }
+    }
+
+    [Fact]
+    public async Task OtherSupplier_CannotReplayReceipt()
+    {
+        await SeedAsync();
+        HandoverItemRequest request = Request();
+
+        string opKey = "supplier-isolation-test";
+        Result<HandoverItemResponse> first = await Service().HandoverItemAsync(_item.Id, request, opKey, OrderTestData.User(_binh));
+        Assert.True(first.IsSuccess, first.Error.Code);
+
+        // Different supplier attempts to replay
+        Guid otherSupplierId = Guid.NewGuid();
+        Result<HandoverItemResponse> otherSupplierResult = await Service().HandoverItemAsync(
+            _item.Id, request, opKey, OrderTestData.User(otherSupplierId));
+
+        Assert.True(otherSupplierResult.IsFailure);
+        Assert.Equal(RentalErrors.ItemNotFound.Code, otherSupplierResult.Error.Code);
+    }
+
     private HandoverItemRequest Request(bool confirmed = true) => new(
         OrderTestData.Now.AddDays(1).AddHours(-2),
         "Giao tại công trường, máy chạy tốt",

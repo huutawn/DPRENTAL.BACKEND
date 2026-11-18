@@ -65,6 +65,12 @@ public class RentalOrder
     [MaxLength(500)]
     public string DeliveryAddress { get; private set; } = string.Empty;
 
+    [MaxLength(20)]
+    public string? ProvinceCode { get; private set; }
+
+    [MaxLength(20)]
+    public string? WardCode { get; private set; }
+
     [MaxLength(2000)]
     public string? DeliveryNote { get; private set; }
 
@@ -229,7 +235,9 @@ public class RentalOrder
         string? returnMethod = null,
         decimal deliveryFee = 0m,
         decimal returnFee = 0m,
-        string? deliverySnapshotJson = null)
+        string? deliverySnapshotJson = null,
+        string? provinceCode = null,
+        string? wardCode = null)
     {
         if (id == Guid.Empty || renterId == Guid.Empty)
         {
@@ -390,6 +398,8 @@ public class RentalOrder
             DeliveryFee = deliveryFee,
             ReturnFee = returnFee,
             DeliverySnapshotJson = deliverySnapshotJson,
+            ProvinceCode = string.IsNullOrWhiteSpace(provinceCode) ? null : provinceCode.Trim(),
+            WardCode = string.IsNullOrWhiteSpace(wardCode) ? null : wardCode.Trim(),
             RecipientName = recipientName.Trim(),
             RecipientPhone = recipientPhone.Trim(),
             DeliveryAddress = deliveryAddress.Trim(),

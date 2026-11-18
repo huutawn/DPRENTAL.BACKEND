@@ -837,7 +837,15 @@ public sealed class InventoryAllocationResultHandler : IInventoryAllocationResul
                 }
 
                 var record = new HandoverRecord(
-                    Guid.NewGuid(), item.Id, snapshot.ActualHandoverAt, snapshot.Note, snapshot.SubmittedById, snapshot.SubmittedAt, snapshot.SubmittedAt);
+                    Guid.NewGuid(),
+                    item.Id,
+                    snapshot.ActualHandoverAt,
+                    snapshot.Note,
+                    snapshot.SubmittedById,
+                    snapshot.SubmittedAt,
+                    snapshot.SubmittedAt,
+                    snapshot.ActualRecipientName,
+                    snapshot.ActualRecipientPhone);
                 item.SetHandoverRecord(record);
 
                 foreach (HandoverUnitData unit in unitData)

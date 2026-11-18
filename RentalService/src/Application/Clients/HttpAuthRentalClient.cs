@@ -156,19 +156,28 @@ public sealed class HttpAuthRentalClient : IAuthRentalClient
                     return CheckoutErrors.DependencyUnavailable;
                 }
 
-                if (!root.TryGetProperty("isProfileCompleted", out var pcProp) &&
-                    !root.TryGetProperty("IsProfileCompleted", out pcProp))
+                bool? isProfileCompleted = null;
+                if ((root.TryGetProperty("isProfileCompleted", out var pcProp) ||
+                     root.TryGetProperty("IsProfileCompleted", out pcProp)) &&
+                    pcProp.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 {
-                    return CheckoutErrors.DependencyUnavailable;
+                    isProfileCompleted = pcProp.GetBoolean();
+                }
+                string? fullName = null;
+                if ((root.TryGetProperty("fullName", out var fnProp) || root.TryGetProperty("FullName", out fnProp)) &&
+                    fnProp.ValueKind == JsonValueKind.String)
+                {
+                    fullName = fnProp.GetString();
                 }
 
-                if (pcProp.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                string? phoneNumber = null;
+                if ((root.TryGetProperty("phoneNumber", out var pnProp) || root.TryGetProperty("PhoneNumber", out pnProp)) &&
+                    pnProp.ValueKind == JsonValueKind.String)
                 {
-                    return CheckoutErrors.DependencyUnavailable;
+                    phoneNumber = pnProp.GetString();
                 }
 
-                bool isProfileCompleted = pcProp.GetBoolean();
-                return new AuthUserSummaryDto(userId, isProfileCompleted);
+                return new AuthUserSummaryDto(userId, isProfileCompleted, fullName, phoneNumber);
             }
             catch (JsonException ex)
             {
