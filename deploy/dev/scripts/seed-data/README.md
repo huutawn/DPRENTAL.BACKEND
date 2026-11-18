@@ -27,6 +27,8 @@ python3 seed-data.py --addresses-only --verify --state-dir .state-20261014-searc
 
 `--addresses-only` đăng nhập từng owner trong state, xác nhận inventory còn listing, rồi đọc kho qua API. Plan chỉ báo cáo; apply chỉ bổ sung địa chỉ khi kho chưa đầy đủ, gửi `expectedVersion` để tránh ghi đè cập nhật đồng thời và đọc lại sau khi ghi. Verify báo lỗi nếu owner có listing vẫn chưa có địa chỉ hợp lệ. Địa chỉ gắn nhãn mẫu và chỉ dùng cho demo.
 
+Dữ liệu mẫu dùng giao và thu hồi miễn phí. Kho không cần tạo vùng giao hàng.
+
 Mặc định Gateway là `https://dev-api.lazyops.cloud`. Có thể đặt `--base-url` và `--state-dir` riêng cho từng môi trường. `--plan` chỉ kiểm tra manifest và checksum, không gọi API ghi. `--apply` luôn chạy kiểm chứng sau khi tạo dữ liệu.
 
 `--request-interval` điều chỉnh khoảng nghỉ giữa các request (mặc định 0,65 giây). Khi Gateway trả 429, script chờ theo `Retry-After` với số lần thử hữu hạn. Hàng nghìn asset có thể mất nhiều thời gian theo hạn mức API; chỉ giảm khoảng nghỉ khi môi trường đích cho phép.
