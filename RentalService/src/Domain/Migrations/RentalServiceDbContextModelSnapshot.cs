@@ -98,6 +98,10 @@ namespace RentalService.Domain.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<decimal?>("ClaimedDamageAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
                     b.PrimitiveCollection<Guid[]>("EvidenceMediaIds")
                         .IsRequired()
                         .HasColumnType("uuid[]");
@@ -175,6 +179,16 @@ namespace RentalService.Domain.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("ResolvedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("SupplierOfferAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTimeOffset?>("SupplierOfferedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("SupplierOfferedById")
                         .HasColumnType("uuid");
 
                     b.Property<int>("Status")

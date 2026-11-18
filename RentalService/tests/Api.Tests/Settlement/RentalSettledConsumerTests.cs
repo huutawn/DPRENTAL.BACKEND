@@ -55,7 +55,13 @@ public sealed class RentalSettledConsumerTests
         var completedEvent = Assert.Single(eventProducer.CompletedEvents);
         Assert.Null(completedEvent.EquipmentTypeId);
         Assert.Equal(payload.CompletedAt, completedEvent.CompletedAt);
+        var depositEvent = Assert.Single(eventProducer.DepositSettlementEvents);
+        Assert.Equal(order.Id, depositEvent.RentalOrderId);
+        Assert.Equal(item.DepositAmount - amount, depositEvent.DepositRefundAmount);
+        Assert.Equal(amount, depositEvent.FinalDeductionAmount);
+        Assert.Equal("RENTER_ACCEPTED", depositEvent.FinalizationSource);
         Assert.True((await consumer.ApplyRentalSettledStagedAsync(order, envelope, inbox)).IsSuccess);
+        Assert.Single(eventProducer.DepositSettlementEvents);
 
         var wrong = envelope with { Payload = payload with { FinalDeductionAmount = amount + 1 } };
         Assert.True((await consumer.ApplyRentalSettledStagedAsync(order, wrong, inbox)).IsFailure);

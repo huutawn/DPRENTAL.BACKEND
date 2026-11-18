@@ -12,10 +12,13 @@ public interface IDeductionResponseService
 
     Task<int> ProcessRenterResponseTimeoutsAsync(CancellationToken cancellationToken = default);
 
-    Task<Result> ExpireSingleRenterResponseAsync(Guid itemId, CancellationToken cancellationToken = default);
+    Task<int> ProcessDisputeHoldTimeoutsAsync(CancellationToken cancellationToken = default);
 
-    Task<Result<ResolveDisputeResponse>> ResolveDisputeAsync(Guid itemId, IRentalCallerContext caller,
-        ResolveDisputeRequest request, string idempotencyKey, CancellationToken cancellationToken = default);
+    Task<Result<OfferDisputeAmountResponse>> OfferDisputeAmountAsync(Guid itemId,
+        IRentalCallerContext caller, OfferDisputeAmountRequest request, string idempotencyKey,
+        CancellationToken cancellationToken = default);
+
+    Task<Result> ExpireSingleRenterResponseAsync(Guid itemId, CancellationToken cancellationToken = default);
 
     Task<Result<DisputeDetailDto>> GetDisputeDetailAsync(Guid itemId, IRentalCallerContext caller,
         CancellationToken cancellationToken = default);

@@ -622,8 +622,7 @@ public sealed class ReviewClientAndEnrichmentTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(2, spyClient.ReceivedRequests.Count);
-        Assert.Contains(spyClient.ReceivedRequests, r => r.Items.Count == 100);
-        Assert.Contains(spyClient.ReceivedRequests, r => r.Items.Count == 20);
+        Assert.Equal([20, 100], spyClient.ReceivedRequests.Select(request => request.Items.Count).OrderBy(count => count).ToArray());
     }
 
     [Fact]

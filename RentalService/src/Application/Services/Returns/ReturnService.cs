@@ -292,7 +292,10 @@ public sealed partial class ReturnService(
             if (item.HasDamagedUnits && item.DepositAmount > 0m)
             {
                 // Ghi nhận phần xử lý trả máy trong aggregate; xác nhận đóng allocation tại Inventory vẫn là bước riêng.
-                item.SetReturnsCompleted(completedAt, completedAt.AddHours(48), null);
+                int windowHours = configuration.GetValue<int?>("Rental:Deduction:WindowHours") ?? 48;
+                if (windowHours is < 1 or > 168)
+                    return Error.Validation("INVALID_DEDUCTION_WINDOW", "Rental:Deduction:WindowHours must be between 1 and 168.");
+                item.SetReturnsCompleted(completedAt, completedAt.AddHours(windowHours), null);
             }
             else
             {

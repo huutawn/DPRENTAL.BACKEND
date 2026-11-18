@@ -160,10 +160,10 @@ public static class RentalAuthorizationPolicy
     }
 
     /// <summary>
-    /// Chỉ Admin hệ thống/nền tảng được chốt tranh chấp.
+    /// Chỉ Admin hệ thống/nền tảng được xem hồ sơ tranh chấp.
     /// </summary>
-    public static Result AuthorizeDisputeResolution(IRentalCallerContext caller) =>
-        RequireAdmin(caller, "Service token không được giải quyết khiếu nại.", RentalErrors.AdminOnlyResolution);
+    public static Result AuthorizeDisputeQuery(IRentalCallerContext caller) =>
+        RequireAdmin(caller, "Service token không được xem hồ sơ tranh chấp.", RentalErrors.AdminOnlyResolution);
 
     public static Result AuthorizeAdminReturnResolution(IRentalCallerContext caller) =>
         RequireAdmin(caller, "Service token không được giải quyết yêu cầu trả máy.", RentalErrors.AdminOnlyReturnResolution);

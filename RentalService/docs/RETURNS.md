@@ -117,9 +117,15 @@ The partial return flow allows renters to declare their intention to return spec
   - At creation time, `closedAt` is always `null`.
 - **Supplier SubOrder Detail**: `GET /api/v1/rental/supplier/sub-orders/{subOrderId}`
   - Item response includes `returnRequests`: array of return requests submitted for the supplier's items.
+  - Each item includes the listing `thumbnailMediaId` and `units` with per-assignment handover/return condition, note, and media IDs.
   - Isolated per supplier: suppliers only see return requests and items belonging to their suborder.
+- **Supplier Unit Detail**: `GET /api/v1/rental/supplier/sub-orders/{subOrderId}/items/{itemId}/units/{assignmentId}`
+  - Returns the listing snapshot and one assignment's handover/return evidence, plus only that assignment's renter-submitted return photos and request status.
+  - The initial thumbnail belongs to the listing; Rental does not store a separate original photo, asset code, or serial number for each physical machine.
+  - A supplier can read only assignments in their own paid suborder. A different supplier, item, or assignment returns `SubOrder.NotFound`.
 - **Supplier Record Return**: `POST /api/v1/rental/items/{itemId}/returns`
-  - Unchanged endpoint contract. Atomically closes matching open request units upon persisting the `ReturnRecord`.
+  - Accepts NORMAL/DAMAGED inspection for every submitted assignment. DAMAGED requires a description and supplier-uploaded photo; NORMAL may use no additional photo.
+  - Atomically closes matching open request units upon persisting the `ReturnRecord`. Partial return batches remain supported.
 
 ### 2. Return Eligibility & Single Source of Truth
 

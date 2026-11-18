@@ -281,7 +281,8 @@ public sealed class VersionPersistenceRegressionTests
                 new FakeOrderLockManager(),
                 db,
                 new StubMediaClient(),
-                TimeProvider.System);
+                TimeProvider.System,
+                new FakeRentalEventProducer());
 
             // 1. Schedule settlement: creates pending SettleRental receipt
             var schedResult = await deductionService.ScheduleSettlementAsync(itemId);

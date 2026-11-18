@@ -14,7 +14,8 @@ public static class SubOrderStatusPolicy
         RentalItemStatus.PendingSupplierConfirmation,
         RentalItemStatus.AwaitingHandover,
         RentalItemStatus.InRental,
-        RentalItemStatus.PendingSettlement
+        RentalItemStatus.PendingSettlement,
+        RentalItemStatus.Disputed
     ];
 
     public static RentalItemStatus Summarize(IReadOnlyCollection<RentalItemStatus> itemStatuses)

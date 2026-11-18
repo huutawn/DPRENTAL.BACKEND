@@ -6,7 +6,8 @@ public sealed record DamageAssessment(Guid AssetId, int Level);
 public sealed record SubmitDeductionRequest(
     IReadOnlyList<DamageAssessment> Assessments,
     string DamageDescription,
-    IReadOnlyList<Guid> EvidenceMediaIds);
+    IReadOnlyList<Guid> EvidenceMediaIds,
+    decimal? ClaimedDamageAmount = null);
 
 public sealed record SubmitDeductionResponse(
     Guid ProposalId,
@@ -14,4 +15,7 @@ public sealed record SubmitDeductionResponse(
     DateTimeOffset SubmittedAt,
     DateTimeOffset RenterResponseDeadline,
     Guid RentalItemId,
-    string ItemStatus);
+    string ItemStatus)
+{
+    public decimal? ClaimedDamageAmount { get; init; }
+}

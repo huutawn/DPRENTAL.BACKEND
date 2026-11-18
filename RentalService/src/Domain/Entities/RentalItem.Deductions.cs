@@ -73,19 +73,31 @@ public partial class RentalItem
     public Result<DeductionProposal> SubmitDeduction(
         Guid supplierId, decimal amount, string description,
         IReadOnlyCollection<Guid> mediaIds, IReadOnlyCollection<Guid> affectedAssetIds,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        decimal? claimedDamageAmount = null)
     {
         var validation = ValidateDeductionSubmission(supplierId, amount, description, mediaIds, affectedAssetIds, now);
         if (validation.IsFailure) return validation.Error;
 
+        if (claimedDamageAmount.HasValue &&
+            (claimedDamageAmount.Value < amount ||
+             decimal.Round(claimedDamageAmount.Value, 2) != claimedDamageAmount.Value))
+            return Error.Validation("INVALID_CLAIMED_DAMAGE_AMOUNT",
+                "Claimed damage must be at least the proposed deduction and have at most two decimal places.");
+
         var proposal = new DeductionProposal(Guid.NewGuid(), Id, supplierId, now.ToUniversalTime(),
-            now.ToUniversalTime().AddHours(48), amount, description, mediaIds);
+            DeductionDeadline!.Value, amount, description, mediaIds, claimedDamageAmount);
         foreach (var unit in _unitAssignments.Where(u => affectedAssetIds.Contains(u.AssetId)))
         {
             unit.RecordDeduction(proposal.Id, description, mediaIds);
             proposal.AddAssignment(unit);
         }
         DeductionProposal = proposal;
+        if (claimedDamageAmount > DepositAmount)
+        {
+            proposal.OpenOverCapDispute(supplierId, now.ToUniversalTime());
+            Status = RentalItemStatus.Disputed;
+        }
         return proposal;
     }
 
