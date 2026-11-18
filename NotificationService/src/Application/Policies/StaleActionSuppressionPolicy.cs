@@ -33,7 +33,9 @@ public static class StaleActionSuppressionPolicy
         "HANDOVER_REMINDER_SUPPLIER",
         "RETURN_REMINDER_RENTER",
         "RETURN_OVERDUE_SUPPLIER",
-        "RETURN_OVERDUE_RENTER"
+        "RETURN_OVERDUE_RENTER",
+        "DEDUCTION_DISPUTE_OPENED_RENTER",
+        "DEDUCTION_DISPUTE_OPENED_SUPPLIER"
     };
 
     /// <summary>

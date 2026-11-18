@@ -56,7 +56,8 @@ public sealed class NotificationIngestionTests
             new RentalReminderDueHandler(),
             new ReturnConfirmationOverdueHandler(),
             new RentalOrderCompletedHandler(),
-            new RentalDeductionDisputeResolvedHandler(),
+            new RentalDeductionDisputeOpenedHandler(),
+            new RentalDepositSettlementCompletedHandler(),
             new LatePaymentRefundRequestedHandler(),
             new RentalItemConfirmedHandler(),
             new RentalItemRejectedHandler(),
@@ -91,46 +92,120 @@ public sealed class NotificationIngestionTests
     }
 
     [Fact]
-    public async Task Ingestion_RentalDisputeResolved_CreatesBothNotificationsOnce()
+    public async Task Ingestion_RentalDeductionDisputeOpened_CreatesActionableNotificationsForBothPartiesOnce()
     {
-        var (service, db, _, _) = CreateTestIngestionService();
+        var (service, db, dlq, _) = CreateTestIngestionService();
         var messageId = Guid.NewGuid();
         var orderId = Guid.NewGuid();
         var renterId = Guid.NewGuid();
         var supplierId = Guid.NewGuid();
-        var raw = JsonSerializer.Serialize(new
-        {
-            messageId,
-            messageType = "RentalDeductionDisputeResolved",
-            version = 1,
-            producer = "RentalService",
-            aggregateId = orderId.ToString("D"),
-            occurredAt = DateTimeOffset.UtcNow,
-            payload = new
-            {
-                disputeId = Guid.NewGuid(),
-                deductionProposalId = Guid.NewGuid(),
-                rentalOrderId = orderId,
-                rentalItemId = Guid.NewGuid(),
-                renterId,
-                supplierId,
-                decision = "Partial",
-                finalDeductionAmount = 20_000m,
-                orderVersion = 5
-            }
-        });
+        var raw = ProducerFixtures.RentalDeductionDisputeOpened(
+            messageId, orderId, Guid.NewGuid(), Guid.NewGuid(), renterId, supplierId);
 
         Assert.Equal(IngestionOutcome.Processed,
             await service.IngestMessageAsync(raw, "rental.events.v1", 0, 1));
         Assert.Equal(IngestionOutcome.Duplicate,
             await service.IngestMessageAsync(raw, "rental.events.v1", 0, 1));
+
         var notifications = await db.Notifications.Where(n => n.SourceEventId == messageId).ToListAsync();
         Assert.Equal(2, notifications.Count);
-        Assert.Contains(notifications, n => n.RecipientUserId == renterId &&
-            n.NotificationType == "DEDUCTION_DISPUTE_RESOLVED_RENTER");
-        Assert.Contains(notifications, n => n.RecipientUserId == supplierId &&
-            n.NotificationType == "DEDUCTION_DISPUTE_RESOLVED_SUPPLIER" &&
-            n.DeepLinkUrl == "/own/orders");
+        var renter = Assert.Single(notifications, n => n.RecipientUserId == renterId);
+        Assert.Equal("DEDUCTION_DISPUTE_OPENED_RENTER", renter.NotificationType);
+        Assert.True(renter.IsActionable);
+        Assert.Contains("200.000 VND", renter.Body);
+        var supplier = Assert.Single(notifications, n => n.RecipientUserId == supplierId);
+        Assert.Equal("DEDUCTION_DISPUTE_OPENED_SUPPLIER", supplier.NotificationType);
+        Assert.Equal("/own/orders", supplier.DeepLinkUrl);
+        Assert.True(supplier.IsActionable);
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Ingestion_RentalDeductionDisputeOpened_MissingSupplier_IsQuarantined()
+    {
+        var (service, db, _, _) = CreateTestIngestionService();
+        var messageId = Guid.NewGuid();
+        var raw = ProducerFixtures.RentalDeductionDisputeOpened(
+            messageId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.Empty);
+
+        Assert.Equal(IngestionOutcome.Quarantined,
+            await service.IngestMessageAsync(raw, "rental.events.v1", 0, 1));
+        Assert.Empty(await db.Notifications.Where(n => n.SourceEventId == messageId).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Ingestion_RentalDepositSettlementCompleted_NotifiesRenterWithDeductionAndRefund()
+    {
+        var (service, db, _, _) = CreateTestIngestionService();
+        var messageId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var raw = ProducerFixtures.RentalDepositSettlementCompleted(messageId, Guid.NewGuid(), Guid.NewGuid(), renterId);
+
+        Assert.Equal(IngestionOutcome.Processed,
+            await service.IngestMessageAsync(raw, "rental.events.v1", 0, 1));
+
+        var notification = Assert.Single(await db.Notifications.Where(n => n.SourceEventId == messageId).ToListAsync());
+        Assert.Equal(renterId, notification.RecipientUserId);
+        Assert.Equal("DEPOSIT_SETTLEMENT_COMPLETED", notification.NotificationType);
+        Assert.Equal("PAYMENT", notification.Category);
+        Assert.Contains("khấu trừ 100.000 VND, đã hoàn 400.000 VND", notification.Body);
+        Assert.Contains("thiệt hại thiết bị 20%", notification.Body);
+        Assert.Single(await db.DeliveryJobs.Where(j => j.NotificationId == notification.Id).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Ingestion_RentalDepositSettlementCompleted_FullDeduction_SaysWholeDepositDeducted()
+    {
+        var (service, db, _, _) = CreateTestIngestionService();
+        var messageId = Guid.NewGuid();
+        var raw = ProducerFixtures.RentalDepositSettlementCompleted(messageId, Guid.NewGuid(), Guid.NewGuid(),
+            Guid.NewGuid(), finalDeductionAmount: 500000m, depositRefundAmount: 0m);
+
+        Assert.Equal(IngestionOutcome.Processed,
+            await service.IngestMessageAsync(raw, "rental.events.v1", 0, 1));
+
+        var notification = Assert.Single(await db.Notifications.Where(n => n.SourceEventId == messageId).ToListAsync());
+        Assert.Contains("đã được khấu trừ toàn bộ", notification.Body);
+        Assert.DoesNotContain("đã hoàn", notification.Body);
+    }
+
+    [Fact]
+    public async Task Ingestion_DepositSettlementAfterItemCompletedAtSameVersion_IsNotTreatedAsConflict()
+    {
+        var (service, db, dlq, _) = CreateTestIngestionService();
+        var orderId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var renterId = Guid.NewGuid();
+        var depositMessageId = Guid.NewGuid();
+
+        Assert.Equal(IngestionOutcome.Processed, await service.IngestMessageAsync(
+            ProducerFixtures.RentalItemCompleted(Guid.NewGuid(), orderId, itemId, renterId, Guid.NewGuid(), orderVersion: 7),
+            "rental.events.v1", 0, 1));
+        Assert.Equal(IngestionOutcome.Processed, await service.IngestMessageAsync(
+            ProducerFixtures.RentalDepositSettlementCompleted(depositMessageId, orderId, itemId, renterId, orderVersion: 7),
+            "rental.events.v1", 0, 2));
+
+        Assert.Single(await db.Notifications.Where(n => n.SourceEventId == depositMessageId).ToListAsync());
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Ingestion_RefundCompletedFinancial_SettlementDeposit_CreatesNoDuplicateNotification()
+    {
+        var (service, db, dlq, _) = CreateTestIngestionService();
+        var messageId = Guid.NewGuid();
+        var raw = ProducerFixtures.RefundCompletedFinancial(messageId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            amount: 400000m, refundKind: "SettlementDepositRefund");
+
+        Assert.Equal(IngestionOutcome.Processed,
+            await service.IngestMessageAsync(raw, "payment.analytics.v1", 0, 1));
+
+        Assert.Empty(await db.Notifications.Where(n => n.SourceEventId == messageId).ToListAsync());
+        Assert.Single(await db.InboxReceipts.Where(r => r.MessageId == messageId).ToListAsync());
+        dlq.Verify(d => d.PublishToDeadLetterQueueAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

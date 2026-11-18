@@ -176,7 +176,9 @@ public sealed class NotificationIngestionService : INotificationIngestionService
             ? (Guid.TryParse(intent.ResourceId, out var resGuid) ? resGuid : (intent.FinancialId ?? intent.OrderId ?? Guid.Empty))
             : (intent.OrderId ?? intent.FinancialId ?? Guid.Empty);
 
-        string? subType = intent.RenderData.TryGetValue("reminderType", out var st) ? st?.ToString() : null;
+        // subType: loại nhắc nhở của RentalReminderDue hoặc loại hoàn tiền của RefundCompletedFinancial.
+        string? subType = (intent.RenderData.TryGetValue("reminderType", out var st) ? st
+            : intent.RenderData.GetValueOrDefault("refundKind"))?.ToString();
         var recipientsResult = _recipientResolver.ResolveRecipients(
             intent.EventType,
             primaryId,
