@@ -233,6 +233,12 @@ public sealed partial class EquipmentListingService
         {
             await ctx.AcquireWarehouseLockAsync(listing.OwnerUserId, ct);
 
+            var limitCheck = await EnforceUnapprovedLimitsAsync(ctx, caller, listing.OwnerUserId, addingListings: 1, addingAssets: createUnit ? 1 : 0, ct);
+            if (limitCheck.IsFailure)
+            {
+                return limitCheck.Error;
+            }
+
             var warehouse = await ctx.Warehouses.GetByOwnerUserIdAsync(listing.OwnerUserId, ct);
             if (warehouse is null)
             {
@@ -265,7 +271,8 @@ public sealed partial class EquipmentListingService
         }
 
         int totalQuantity = initialAsset is not null ? 1 : 0;
-        var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(listing, totalQuantity > 0);
+        var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(
+            listing, totalQuantity > 0, EquipmentListingPublishPolicy.IsOrganizationApproved(listing, caller.OrganizationId));
 
         return EquipmentListingMapper.ToResponse(listing, totalQuantity, _mediaOptions.PublicGatewayUrl, missingRequirements);
     }
@@ -500,10 +507,14 @@ public sealed partial class EquipmentListingService
                 bool hasAcceptingBookingsUnit = false;
                 if (request.Status!.Value == EquipmentListingStatus.Active)
                 {
+
                     int totalActiveUnits = await ctx.Listings.GetTotalQuantityAsync(id, ct);
                     hasAcceptingBookingsUnit = totalActiveUnits > 0;
 
-                    var publishCheck = EquipmentListingPublishPolicy.CanPublish(listing, hasAcceptingBookingsUnit);
+                    var publishCheck = EquipmentListingPublishPolicy.CanPublish(
+                        listing,
+                        hasAcceptingBookingsUnit,
+                        EquipmentListingPublishPolicy.IsOrganizationApproved(listing, caller.OrganizationId));
                     if (publishCheck.IsFailure)
                     {
                         return publishCheck.Error;
@@ -514,6 +525,16 @@ public sealed partial class EquipmentListingService
                 if (statusRes.IsFailure)
                 {
                     return statusRes.Error;
+                }
+
+                // Listing nháp tạo khi tổ chức chưa duyệt chưa có OrganizationId; gán khi công khai thành công.
+                if (request.Status.Value == EquipmentListingStatus.Active && caller.OrganizationId is { } organizationId)
+                {
+                    var assignRes = listing.AssignOrganization(organizationId, now);
+                    if (assignRes.IsFailure)
+                    {
+                        return assignRes.Error;
+                    }
                 }
             }
 
@@ -549,7 +570,8 @@ public sealed partial class EquipmentListingService
 
         int totalQty = await _listingRepository.GetTotalQuantityAsync(id, cancellationToken);
 
-        var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(txResult.Value, totalQty > 0);
+        var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(
+            txResult.Value, totalQty > 0, EquipmentListingPublishPolicy.IsOrganizationApproved(txResult.Value, caller.OrganizationId));
         return EquipmentListingMapper.ToResponse(txResult.Value, totalQty, _mediaOptions.PublicGatewayUrl, missingRequirements);
     }
 
@@ -711,6 +733,12 @@ public sealed partial class EquipmentListingService
                 return Error.Forbidden("FORBIDDEN", "Không có quyền thêm thiết bị cho Listing của người dùng khác.");
             }
 
+            var limitCheck = await EnforceUnapprovedLimitsAsync(ctx, caller, listing.OwnerUserId, addingListings: 0, addingAssets: 1, ct);
+            if (limitCheck.IsFailure)
+            {
+                return limitCheck.Error;
+            }
+
             var now = _timeProvider.GetUtcNow();
             var yearValidation = EquipmentListing.ValidateManufactureYear(listing.ManufactureYear, now);
             if (yearValidation.IsFailure)
@@ -837,6 +865,12 @@ public sealed partial class EquipmentListingService
             if (!InventoryAccessEvaluator.CanAddListingAsset(caller, listing.OwnerUserId))
             {
                 return Error.Forbidden("FORBIDDEN", "Không có quyền thêm thiết bị cho Listing của người dùng khác.");
+            }
+
+            var limitCheck = await EnforceUnapprovedLimitsAsync(ctx, caller, listing.OwnerUserId, addingListings: 0, addingAssets: request.Assets.Count, ct);
+            if (limitCheck.IsFailure)
+            {
+                return limitCheck.Error;
             }
 
             var now = _timeProvider.GetUtcNow();

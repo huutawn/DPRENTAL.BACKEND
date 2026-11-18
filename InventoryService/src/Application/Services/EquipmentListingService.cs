@@ -35,6 +35,7 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
     private readonly IWarehouseRepository? _warehouseRepository;
     private readonly Dprental.InventoryService.Application.Caching.IInventoryReadCache _cache;
     private readonly Dprental.InventoryService.Application.Caching.InventoryCacheOptions _cacheOptions;
+    private readonly UnapprovedInventoryLimitsOptions _limitOptions;
 
     public EquipmentListingService(
         IEquipmentListingRepository listingRepository,
@@ -64,7 +65,8 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         TimeProvider? timeProvider = null,
         IInventorySearchIndexService? searchIndexService = null,
         ILogger<EquipmentListingService>? logger = null,
-        IWarehouseRepository? warehouseRepository = null)
+        IWarehouseRepository? warehouseRepository = null,
+        IOptions<UnapprovedInventoryLimitsOptions>? limitOptions = null)
     {
         _listingRepository = listingRepository ?? throw new ArgumentNullException(nameof(listingRepository));
         _assetRepository = assetRepository ?? throw new ArgumentNullException(nameof(assetRepository));
@@ -79,6 +81,7 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
         _searchIndexService = searchIndexService;
         _logger = logger;
         _warehouseRepository = warehouseRepository;
+        _limitOptions = limitOptions?.Value ?? new UnapprovedInventoryLimitsOptions();
     }
 
     /// <inheritdoc />
@@ -104,7 +107,7 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
 
         string scope = $"listing:{id:D}";
         string queryType = "owner-detail";
-        string inputHash = "detail";
+        string inputHash = caller.OrganizationId.HasValue ? "detail" : "detail:no-org";
 
         var pipelineResult = await _cache.GetOrCreateAsync<EquipmentListingResponse>(
             scope,
@@ -120,7 +123,8 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
 
                 int totalQuantity = await _listingRepository.GetTotalQuantityAsync(id, ct);
 
-                var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(listing, totalQuantity > 0);
+                var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(
+                    listing, totalQuantity > 0, EquipmentListingPublishPolicy.IsOrganizationApproved(listing, caller.OrganizationId));
                 var response = EquipmentListingMapper.ToResponse(listing, totalQuantity, _mediaOptions.PublicGatewayUrl, missingRequirements);
                 var ttl = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.MetadataTtlSeconds > 0 ? _cacheOptions.MetadataTtlSeconds : 120);
                 return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<EquipmentListingResponse>(response, ttl));
@@ -188,6 +192,10 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
             request.BrandId,
             request.Status,
             request.Sort);
+        if (!caller.OrganizationId.HasValue)
+        {
+            searchHash += ":no-org";
+        }
 
         int page = Math.Max(1, request.Page);
         int pageSize = Math.Clamp(request.PageSize, 1, 100);
@@ -278,7 +286,8 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
                 var items = searchResult.Items
                     .Select(item =>
                     {
-                        var missing = EquipmentListingPublishPolicy.GetMissingRequirements(item.Listing, item.TotalQuantity > 0);
+                        var missing = EquipmentListingPublishPolicy.GetMissingRequirements(
+                            item.Listing, item.TotalQuantity > 0, EquipmentListingPublishPolicy.IsOrganizationApproved(item.Listing, caller.OrganizationId));
                         return EquipmentListingMapper.ToResponse(item.Listing, item.TotalQuantity, _mediaOptions.PublicGatewayUrl, missing);
                     })
                     .ToList();
