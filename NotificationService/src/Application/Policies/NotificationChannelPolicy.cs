@@ -16,6 +16,7 @@ public static class NotificationChannelPolicy
             "ORDER_COMPLETED" => true,
             "REFUND_REQUESTED" => string.Equals(recipientRole, "Renter", StringComparison.OrdinalIgnoreCase),
             "REFUND_COMPLETED" => string.Equals(recipientRole, "Renter", StringComparison.OrdinalIgnoreCase),
+            "DEPOSIT_SETTLEMENT_COMPLETED" => string.Equals(recipientRole, "Renter", StringComparison.OrdinalIgnoreCase),
             "PAYOUT_COMPLETED" => string.Equals(recipientRole, "Supplier", StringComparison.OrdinalIgnoreCase),
             _ => false
         };

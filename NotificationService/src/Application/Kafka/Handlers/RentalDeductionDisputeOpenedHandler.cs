@@ -4,30 +4,31 @@ using Dprental.NotificationService.Domain.Entities;
 
 namespace Dprental.NotificationService.Application.Kafka.Handlers;
 
-public sealed class RentalDeductionDisputeResolvedHandler : IKafkaEventHandler
+/// <summary>Rental mở tranh chấp khấu trừ cọc: renter phản đối hoặc nhà cung cấp khai thiệt hại vượt cọc.</summary>
+public sealed class RentalDeductionDisputeOpenedHandler : IKafkaEventHandler
 {
-    public string EventType => "RentalDeductionDisputeResolved";
+    public string EventType => "RentalDeductionDisputeOpened";
 
     public Result<NotificationEventIntent> ParseIntent(KafkaMessageEnvelope envelope)
     {
         var payload = envelope.Payload;
         var orderId = payload.GetGuidOrDefault("rentalOrderId");
         var itemId = payload.GetGuidOrDefault("rentalItemId");
+        var disputeId = payload.GetGuidOrDefault("disputeId");
         var renterId = payload.GetGuidOrDefault("renterId");
         var supplierId = payload.GetGuidOrDefault("supplierId");
-        var decision = payload.GetStringOrDefault("decision");
         var version = payload.GetInt64OrDefault("orderVersion");
         if (orderId is null || orderId == Guid.Empty || itemId is null || itemId == Guid.Empty ||
-            renterId is null || renterId == Guid.Empty || supplierId is null || supplierId == Guid.Empty ||
-            version < 1 || decision is not ("UpheldInFull" or "Partial" or "Rejected"))
+            disputeId is null || disputeId == Guid.Empty || renterId is null || renterId == Guid.Empty ||
+            supplierId is null || supplierId == Guid.Empty || version < 1)
             return Result.Failure<NotificationEventIntent>(
-                Error.Validation("INVALID_DISPUTE_RESOLUTION_EVENT", "Dispute resolution event is missing required identifiers, version or decision."));
+                Error.Validation("INVALID_DISPUTE_OPENED_EVENT", "Dispute opened event is missing required identifiers or version."));
 
         return Result.Success(new NotificationEventIntent(
             EventType: EventType,
             OrderId: orderId.Value,
-            ResourceType: "RentalItem",
-            ResourceId: itemId.Value.ToString("D"),
+            ResourceType: "Dispute",
+            ResourceId: disputeId.Value.ToString("D"),
             WatermarkScope: NotificationWatermarkScope.RentalItem,
             WatermarkId: itemId.Value,
             OrderVersion: version,
@@ -40,8 +41,8 @@ public sealed class RentalDeductionDisputeResolvedHandler : IKafkaEventHandler
             {
                 ["rentalOrderId"] = orderId.Value,
                 ["rentalItemId"] = itemId.Value,
-                ["decision"] = decision,
-                ["finalDeductionAmount"] = payload.GetDecimalOrDefault("finalDeductionAmount"),
+                ["depositAmount"] = payload.GetDecimalOrDefault("depositAmount"),
+                ["proposedDeductionAmount"] = payload.GetDecimalOrDefault("proposedDeductionAmount"),
                 ["deepLinkUrl"] = $"/orders/{orderId.Value}"
             },
             RentalItemId: itemId.Value));

@@ -188,14 +188,35 @@ public sealed partial class NotificationTemplateRenderer : INotificationTemplate
                 emailBodyPattern = "<p>Kính gửi Quý khách,</p><p>Đơn thuê <strong>{displayOrderCode}</strong> đã hoàn tất thành công chu kỳ thuê vào lúc <strong>{completedAt:HH:mm dd/MM/yyyy}</strong>.</p><p>Tiền cọc và các chi phí phát sinh (nếu có) đã được quyết toán. Cảm ơn Quý khách đã tin tưởng sử dụng DPRental!</p>";
                 break;
 
-            case "DEDUCTION_DISPUTE_RESOLVED_RENTER":
-                titlePattern = "Khiếu nại khấu trừ cọc đã được giải quyết";
-                bodyPattern = "Quản trị viên đã chốt mức khấu trừ {finalDeductionAmount:N0} VND cho đơn thuê {displayOrderCode}. Xem chi tiết quyết định trong đơn. Việc hoàn tiền sẽ được xử lý riêng.";
+            case "DEDUCTION_DISPUTE_OPENED_RENTER":
+                titlePattern = "Khoản khấu trừ cọc đang tranh chấp";
+                bodyPattern = isStale
+                    ? "Tranh chấp khấu trừ cọc của đơn thuê {displayOrderCode} đã kết thúc (thông tin lưu trữ)."
+                    : "Đơn thuê {displayOrderCode} đang tranh chấp mức khấu trừ {proposedDeductionAmount:N0} VND trên tiền cọc {depositAmount:N0} VND. Bạn có thể đồng ý mức nhà cung cấp đề nghị trong chi tiết đơn.";
                 break;
 
-            case "DEDUCTION_DISPUTE_RESOLVED_SUPPLIER":
-                titlePattern = "Khiếu nại khấu trừ cọc đã được giải quyết";
-                bodyPattern = "Quản trị viên đã chốt mức khấu trừ {finalDeductionAmount:N0} VND cho đơn thuê {displayOrderCode}. Xem chi tiết quyết định trong đơn.";
+            case "DEDUCTION_DISPUTE_OPENED_SUPPLIER":
+                titlePattern = "Khoản khấu trừ cọc đang tranh chấp";
+                bodyPattern = isStale
+                    ? "Tranh chấp khấu trừ cọc của đơn thuê {displayOrderCode} đã kết thúc (thông tin lưu trữ)."
+                    : "Đơn thuê {displayOrderCode} đang tranh chấp mức khấu trừ {proposedDeductionAmount:N0} VND. Bạn có thể đề nghị mức khấu trừ thấp hơn trong chi tiết đơn.";
+                break;
+
+            case "DEPOSIT_SETTLEMENT_COMPLETED":
+                var isFullyDeducted = safeData.TryGetValue("depositRefundAmount", out var refundObj) &&
+                    refundObj is decimal refundValue && refundValue == 0m;
+                var reasonSuffix = safeData.TryGetValue("deductionReason", out var reasonObj) &&
+                    !string.IsNullOrWhiteSpace(reasonObj?.ToString()) ? " {deductionReason}." : string.Empty;
+                titlePattern = "Đã quyết toán tiền cọc đơn thuê #{displayOrderCode}";
+                bodyPattern = (isFullyDeducted
+                    ? "Tiền cọc {depositAmount:N0} VND của đơn thuê {displayOrderCode} đã được khấu trừ toàn bộ."
+                    : "Tiền cọc {depositAmount:N0} VND của đơn thuê {displayOrderCode}: khấu trừ {finalDeductionAmount:N0} VND, đã hoàn {depositRefundAmount:N0} VND.") + reasonSuffix;
+                emailSubjectPattern = "[DPRental] Quyết toán tiền cọc đơn thuê #{displayOrderCode}";
+                emailBodyPattern = (isFullyDeducted
+                    ? "<p>Kính gửi Quý khách,</p><p>Tiền cọc <strong>{depositAmount:N0} VND</strong> của đơn thuê <strong>{displayOrderCode}</strong> đã được khấu trừ toàn bộ.</p>"
+                    : "<p>Kính gửi Quý khách,</p><p>Tiền cọc <strong>{depositAmount:N0} VND</strong> của đơn thuê <strong>{displayOrderCode}</strong> đã được quyết toán: khấu trừ <strong>{finalDeductionAmount:N0} VND</strong>, đã hoàn <strong>{depositRefundAmount:N0} VND</strong>.</p>")
+                    + (reasonSuffix.Length > 0 ? "<p>{deductionReason}.</p>" : string.Empty)
+                    + "<p>Chi tiết: <a href=\"{deepLinkUrl}\">{deepLinkUrl}</a></p>";
                 break;
 
             case "LATE_PAYMENT_REFUND_REQUESTED":

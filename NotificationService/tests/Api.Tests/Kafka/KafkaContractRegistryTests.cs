@@ -25,7 +25,9 @@ public sealed class KafkaContractRegistryTests
         new RentalItemRejectedHandler(),
         new RefundRequestedFinancialHandler(),
         new RefundCompletedFinancialHandler(),
-        new SupplierPayoutCompletedHandler()
+        new SupplierPayoutCompletedHandler(),
+        new RentalDeductionDisputeOpenedHandler(),
+        new RentalDepositSettlementCompletedHandler()
     };
 
     private static KafkaContractRegistry CreateRegistry() => new(AllHandlers);
@@ -106,6 +108,21 @@ public sealed class KafkaContractRegistryTests
         Assert.Equal(ContractResolutionStatus.Handled, resolution.Status);
         Assert.NotNull(resolution.Handler);
         Assert.Equal("RentalOrderCreated", resolution.Handler.EventType);
+    }
+
+    [Theory]
+    [InlineData("RentalDeductionDisputeOpened")]
+    [InlineData("RentalDepositSettlementCompleted")]
+    public void Resolve_DepositDisputeEvents_BindToRentalTopic(string messageType)
+    {
+        var registry = CreateRegistry();
+
+        var rental = registry.Resolve("rental.events.v1", CreateEnvelope(messageType, "RentalService", 1));
+        var payment = registry.Resolve("payment.analytics.v1", CreateEnvelope(messageType, "PaymentService", 1));
+
+        Assert.Equal(ContractResolutionStatus.Handled, rental.Status);
+        Assert.Equal(messageType, rental.Handler!.EventType);
+        Assert.NotEqual(ContractResolutionStatus.Handled, payment.Status);
     }
 
     [Fact]

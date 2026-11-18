@@ -375,7 +375,8 @@ public static class ProducerFixtures
         Guid refundId,
         Guid orderId,
         Guid renterId,
-        decimal amount = 1500000m) => $$"""
+        decimal amount = 1500000m,
+        string refundKind = "FULL_CANCELLATION") => $$"""
     {
       "messageId": "{{messageId}}",
       "messageType": "RefundCompletedFinancial",
@@ -391,7 +392,7 @@ public static class ProducerFixtures
         "rentalOrderId": "{{orderId}}",
         "rentalItemId": null,
         "renterId": "{{renterId}}",
-        "refundKind": "FULL_CANCELLATION",
+        "refundKind": "{{refundKind}}",
         "amount": {{amount}},
         "currency": "VND",
         "completedAt": "2026-11-04T09:00:00.0000000+00:00"
@@ -634,6 +635,72 @@ public static class ProducerFixtures
         "userId": "{{renterId}}",
         "renterId": "{{renterId}}",
         "supplierId": {{(supplierId != Guid.Empty ? $"\"{supplierId}\"" : "null")}},
+        "completedAt": "2026-11-04T11:00:00.0000000+00:00",
+        "orderVersion": {{orderVersion}}
+      }
+    }
+    """;
+
+    public static string RentalDeductionDisputeOpened(
+        Guid messageId,
+        Guid orderId,
+        Guid itemId,
+        Guid disputeId,
+        Guid renterId,
+        Guid supplierId,
+        long orderVersion = 6) => $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RentalDeductionDisputeOpened",
+      "version": 1,
+      "producer": "RentalService",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-04T10:00:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "rentalOrderId": "{{orderId}}",
+        "rentalItemId": "{{itemId}}",
+        "deductionProposalId": "{{Guid.NewGuid()}}",
+        "disputeId": "{{disputeId}}",
+        "renterId": "{{renterId}}",
+        "supplierId": "{{supplierId}}",
+        "depositAmount": 500000,
+        "proposedDeductionAmount": 200000,
+        "openedAt": "2026-11-04T10:00:00.0000000+00:00",
+        "orderVersion": {{orderVersion}}
+      }
+    }
+    """;
+
+    public static string RentalDepositSettlementCompleted(
+        Guid messageId,
+        Guid orderId,
+        Guid itemId,
+        Guid renterId,
+        decimal finalDeductionAmount = 100000m,
+        decimal depositRefundAmount = 400000m,
+        long orderVersion = 5) => $$"""
+    {
+      "messageId": "{{messageId}}",
+      "messageType": "RentalDepositSettlementCompleted",
+      "version": 1,
+      "producer": "RentalService",
+      "aggregateId": "{{orderId}}",
+      "occurredAt": "2026-11-04T11:00:00.0000000+00:00",
+      "correlationId": "corr-{{orderId}}",
+      "causationId": null,
+      "payload": {
+        "rentalOrderId": "{{orderId}}",
+        "orderCode": "RNT-20261102-0001",
+        "rentalItemId": "{{itemId}}",
+        "renterId": "{{renterId}}",
+        "settlementRef": "STL-0001",
+        "depositAmount": 500000,
+        "finalDeductionAmount": {{finalDeductionAmount}},
+        "depositRefundAmount": {{depositRefundAmount}},
+        "deductionReason": "Hoàn cọc, khấu trừ do thiệt hại thiết bị 20%",
+        "finalizationSource": "RENTER_ACCEPTED",
         "completedAt": "2026-11-04T11:00:00.0000000+00:00",
         "orderVersion": {{orderVersion}}
       }
