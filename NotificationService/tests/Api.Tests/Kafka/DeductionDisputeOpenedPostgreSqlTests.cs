@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Dprental.NotificationService.Api.Tests.Fixtures;
 using Dprental.NotificationService.Application.Kafka.Services;
 using Dprental.NotificationService.Domain.Repositories;
@@ -7,11 +6,11 @@ using Xunit;
 
 namespace Dprental.NotificationService.Api.Tests.Kafka;
 
-public sealed class DisputeResolutionPostgreSqlTests
+public sealed class DeductionDisputeOpenedPostgreSqlTests
 {
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task RentalDisputeResolved_PersistsTwoRecipientsAndDeduplicatesReplay()
+    public async Task RentalDeductionDisputeOpened_PersistsTwoRecipientsAndDeduplicatesReplay()
     {
         var databaseName = $"notification_dispute_test_{Guid.NewGuid():N}";
         var testConnection = TestEnvironment.GetPostgreSqlConnectionString(databaseName);
@@ -26,31 +25,10 @@ public sealed class DisputeResolutionPostgreSqlTests
                 await db.Database.MigrateAsync();
                 var (service, _, _, _) = NotificationIngestionTests.CreateTestIngestionService(db);
                 var eventId = Guid.NewGuid();
-                var orderId = Guid.NewGuid();
                 var renterId = Guid.NewGuid();
                 var supplierId = Guid.NewGuid();
-                var raw = JsonSerializer.Serialize(new
-                {
-                    messageId = eventId,
-                    messageType = "RentalDeductionDisputeResolved",
-                    version = 1,
-                    producer = "RentalService",
-                    aggregateId = orderId.ToString("D"),
-                    occurredAt = DateTimeOffset.UtcNow,
-                    payload = new
-                    {
-                        disputeId = Guid.NewGuid(),
-                        deductionProposalId = Guid.NewGuid(),
-                        rentalOrderId = orderId,
-                        rentalItemId = Guid.NewGuid(),
-                        renterId,
-                        supplierId,
-                        decision = "Partial",
-                        finalDeductionAmount = 20_000m,
-                        resolvedAt = DateTimeOffset.UtcNow,
-                        orderVersion = 5
-                    }
-                });
+                var raw = ProducerFixtures.RentalDeductionDisputeOpened(
+                    eventId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), renterId, supplierId);
 
                 Assert.Equal(IngestionOutcome.Processed,
                     await service.IngestMessageAsync(raw, "rental.events.v1", 0, 1));
@@ -62,9 +40,9 @@ public sealed class DisputeResolutionPostgreSqlTests
                     .Where(n => n.SourceEventId == eventId).ToListAsync();
                 Assert.Equal(2, notifications.Count);
                 Assert.Contains(notifications, n => n.RecipientUserId == renterId &&
-                    n.NotificationType == "DEDUCTION_DISPUTE_RESOLVED_RENTER");
+                    n.NotificationType == "DEDUCTION_DISPUTE_OPENED_RENTER");
                 Assert.Contains(notifications, n => n.RecipientUserId == supplierId &&
-                    n.NotificationType == "DEDUCTION_DISPUTE_RESOLVED_SUPPLIER");
+                    n.NotificationType == "DEDUCTION_DISPUTE_OPENED_SUPPLIER");
                 Assert.Single(await check.InboxReceipts.AsNoTracking()
                     .Where(r => r.MessageId == eventId).ToListAsync());
             }

@@ -67,6 +67,8 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.True(NotificationChannelPolicy.ShouldSendEmail("REFUND_REQUESTED", "Renter"));
         Assert.False(NotificationChannelPolicy.ShouldSendEmail("REFUND_REQUESTED", "Supplier"));
         Assert.True(NotificationChannelPolicy.ShouldSendEmail("REFUND_COMPLETED", "Renter"));
+        Assert.True(NotificationChannelPolicy.ShouldSendEmail("DEPOSIT_SETTLEMENT_COMPLETED", "Renter"));
+        Assert.False(NotificationChannelPolicy.ShouldSendEmail("DEDUCTION_DISPUTE_OPENED_RENTER", "Renter"));
         Assert.False(NotificationChannelPolicy.ShouldSendEmail("REFUND_COMPLETED", "Supplier"));
         Assert.True(NotificationChannelPolicy.ShouldSendEmail("PAYOUT_COMPLETED", "Supplier"));
         Assert.False(NotificationChannelPolicy.ShouldSendEmail("PAYOUT_COMPLETED", "Renter"));
@@ -859,17 +861,33 @@ public sealed class NotificationPolicyAndTemplateTests
         Assert.Null(roRenter.ActionUrl);
         Assert.False(roRenter.IsActionable);
 
-        // 6. RentalDeductionDisputeResolved: Supplier = /own/orders (Not actionable), Renter = /orders/{orderId} (Not actionable)
-        var dispute = _recipientResolver.ResolveRecipients("RentalDeductionDisputeResolved", orderId, renterId, supplierId);
+        // 6. RentalDeductionDisputeOpened: Supplier = /own/orders (Actionable), Renter = /orders/{orderId} (Actionable)
+        var dispute = _recipientResolver.ResolveRecipients("RentalDeductionDisputeOpened", orderId, renterId, supplierId);
         Assert.True(dispute.IsSuccess);
         var dispSupplier = Assert.Single(dispute.Value, r => r.RecipientRole == "Supplier");
         var dispRenter = Assert.Single(dispute.Value, r => r.RecipientRole == "Renter");
         Assert.Equal("/own/orders", dispSupplier.DeepLinkUrl);
-        Assert.Null(dispSupplier.ActionUrl);
-        Assert.False(dispSupplier.IsActionable);
+        Assert.Equal("/own/orders", dispSupplier.ActionUrl);
+        Assert.True(dispSupplier.IsActionable);
         Assert.Equal($"/orders/{orderId}", dispRenter.DeepLinkUrl);
-        Assert.Null(dispRenter.ActionUrl);
-        Assert.False(dispRenter.IsActionable);
+        Assert.Equal($"/orders/{orderId}", dispRenter.ActionUrl);
+        Assert.True(dispRenter.IsActionable);
+
+        // 6b. RentalDepositSettlementCompleted: chỉ Renter, không có hành động
+        var deposit = _recipientResolver.ResolveRecipients("RentalDepositSettlementCompleted", orderId, renterId, null);
+        Assert.True(deposit.IsSuccess);
+        var depositRenter = Assert.Single(deposit.Value);
+        Assert.Equal("DEPOSIT_SETTLEMENT_COMPLETED", depositRenter.NotificationType);
+        Assert.False(depositRenter.IsActionable);
+
+        // 6c. Hoàn cọc từ Payment không tạo REFUND_COMPLETED trùng với thông báo cọc; các loại hoàn khác vẫn gửi
+        var depositRefund = _recipientResolver.ResolveRecipients("RefundCompletedFinancial", orderId, renterId, null,
+            subType: "SettlementDepositRefund");
+        Assert.True(depositRefund.IsSuccess);
+        Assert.Empty(depositRefund.Value);
+        var cancellationRefund = _recipientResolver.ResolveRecipients("RefundCompletedFinancial", orderId, renterId, null,
+            subType: "CancellationRefund");
+        Assert.Equal("REFUND_COMPLETED", Assert.Single(cancellationRefund.Value).NotificationType);
 
         // 7. SupplierPayoutCompleted: Supplier = /own/orders (Not actionable)
         var payout = _recipientResolver.ResolveRecipients("SupplierPayoutCompleted", orderId, null, supplierId);

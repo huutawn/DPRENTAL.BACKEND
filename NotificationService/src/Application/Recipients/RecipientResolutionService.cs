@@ -329,17 +329,27 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                     ActionUrl: null));
                 break;
 
-            case "RentalDeductionDisputeResolved":
+            case "RentalDeductionDisputeOpened":
                 if (!renterId.HasValue || renterId.Value == Guid.Empty ||
                     !supplierId.HasValue || supplierId.Value == Guid.Empty)
                     return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
-                        Error.Validation("MISSING_RECIPIENT", "Dispute resolution requires renterId and supplierId."));
+                        Error.Validation("MISSING_RECIPIENT", "RentalDeductionDisputeOpened yêu cầu renterId và supplierId hợp lệ."));
+                // Renter có thể đồng ý mức nhà cung cấp đề nghị; nhà cung cấp có thể đề nghị mức thấp hơn.
                 results.Add(new ResolvedRecipient(
-                    renterId.Value, "Renter", "DEDUCTION_DISPUTE_RESOLVED_RENTER",
-                    "SETTLEMENT", "INFO", false, $"/orders/{orderId}", null));
+                    renterId.Value, "Renter", "DEDUCTION_DISPUTE_OPENED_RENTER",
+                    "PAYMENT", "ACTION_REQUIRED", true, $"/orders/{orderId}", $"/orders/{orderId}"));
                 results.Add(new ResolvedRecipient(
-                    supplierId.Value, "Supplier", "DEDUCTION_DISPUTE_RESOLVED_SUPPLIER",
-                    "SETTLEMENT", "INFO", false, "/own/orders", null));
+                    supplierId.Value, "Supplier", "DEDUCTION_DISPUTE_OPENED_SUPPLIER",
+                    "PAYMENT", "ACTION_REQUIRED", true, "/own/orders", "/own/orders"));
+                break;
+
+            case "RentalDepositSettlementCompleted":
+                if (!renterId.HasValue || renterId.Value == Guid.Empty)
+                    return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
+                        Error.Validation("MISSING_RECIPIENT", "RentalDepositSettlementCompleted yêu cầu renterId hợp lệ."));
+                results.Add(new ResolvedRecipient(
+                    renterId.Value, "Renter", "DEPOSIT_SETTLEMENT_COMPLETED",
+                    "PAYMENT", "INFO", false, $"/orders/{orderId}", null));
                 break;
 
             case "LatePaymentRefundRequested":
@@ -415,6 +425,11 @@ public sealed class RecipientResolutionService : IRecipientResolutionService
                 {
                     return Result.Failure<IReadOnlyList<ResolvedRecipient>>(
                         Error.Validation("MISSING_RECIPIENT", "RefundCompletedFinancial yêu cầu renterId hợp lệ."));
+                }
+                // Hoàn cọc đã được báo đầy đủ qua DEPOSIT_SETTLEMENT_COMPLETED của Rental; không gửi thêm thông báo trùng.
+                if (string.Equals(subType, "SettlementDepositRefund", StringComparison.OrdinalIgnoreCase))
+                {
+                    break;
                 }
                 results.Add(new ResolvedRecipient(
                     RecipientUserId: renterId.Value,
