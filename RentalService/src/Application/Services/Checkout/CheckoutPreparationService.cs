@@ -365,13 +365,23 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
                 : (isPickup ? CheckoutRules.ReturnMethodPickup : CheckoutRules.ReturnMethodReturn));
 
         Guid supplierId = outcome.Lines.First().SupplierId;
-        Result<WarehouseDeliveryPolicyResponse> policyResult = await _inventory.GetWarehouseDeliveryPolicyAsync(supplierId, cancellationToken);
-        if (policyResult.IsFailure)
+        bool usesWarehouse = isPickup || effectiveReturnMethod == CheckoutRules.ReturnMethodPickup;
+        var policy = new WarehouseDeliveryPolicyResponse(supplierId, false, null, null, null);
+        if (usesWarehouse)
         {
-            return CheckoutPreparationResult.Failure(CheckoutErrors.DependencyUnavailable);
+            var policyResult = await _inventory.GetWarehouseDeliveryPolicyAsync(supplierId, cancellationToken);
+            if (policyResult.IsFailure)
+            {
+                return CheckoutPreparationResult.Failure(CheckoutErrors.DependencyUnavailable);
+            }
+
+            policy = policyResult.Value;
+            if (!policy.IsPickupEnabled)
+            {
+                return CheckoutPreparationResult.Failure(CheckoutErrors.PickupNotSupported);
+            }
         }
 
-        WarehouseDeliveryPolicyResponse policy = policyResult.Value;
         ListingWarehouseDto? warehouseSnapshot = outcome.Warehouse;
         if (warehouseSnapshot is null && policy.WarehouseAddress is not null)
         {
@@ -385,15 +395,10 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
                 null);
         }
 
-        decimal deliveryFee;
+        const decimal deliveryFee = 0m;
         CheckoutDeliveryDto delivery;
         if (effectiveDeliveryMethod == CheckoutRules.DeliveryMethodPickup)
         {
-            if (!policy.IsPickupEnabled)
-            {
-                return CheckoutPreparationResult.Failure(CheckoutErrors.PickupNotSupported);
-            }
-
             string? warehouseProvince = warehouseSnapshot?.ProvinceName
                 ?? warehouseSnapshot?.ProvinceCode
                 ?? policy.WarehouseAddress?.ProvinceCode;
@@ -413,30 +418,14 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
                 deliveryNote,
                 warehouseSnapshot?.ProvinceCode ?? policy.WarehouseAddress?.ProvinceCode,
                 warehouseSnapshot?.WardCode ?? policy.WarehouseAddress?.WardCode);
-            deliveryFee = 0m;
         }
         else
         {
-            if (string.IsNullOrWhiteSpace(customerAddressDetail))
+            if (string.IsNullOrWhiteSpace(customerAddressDetail) || string.IsNullOrWhiteSpace(customerProvinceCode))
             {
                 return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryAddressIncomplete);
             }
 
-            var zoneMatch = DeliveryZoneMatcher.Match(policy.DeliveryZones, customerProvinceCode, customerWardCode, _divisionsCatalog);
-            switch (zoneMatch.Status)
-            {
-                case ZoneMatchStatus.SupplierNotConfigured:
-                    return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryNotConfigured);
-                case ZoneMatchStatus.AddressIncomplete:
-                    return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryAddressIncomplete);
-                case ZoneMatchStatus.OutsideZone:
-                    return CheckoutPreparationResult.Failure(CheckoutErrors.AddressOutsideDeliveryZone);
-                case ZoneMatchStatus.Success:
-                    deliveryFee = zoneMatch.Zone!.DeliveryFeeVnd;
-                    break;
-                default:
-                    return CheckoutPreparationResult.Failure(CheckoutErrors.AddressOutsideDeliveryZone);
-            }
 
             delivery = new(
                 customerProvince,
@@ -448,41 +437,18 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
                 customerWardCode);
         }
 
-        decimal returnFee;
-        if (effectiveReturnMethod == CheckoutRules.ReturnMethodPickup)
+        if (usesWarehouse &&
+            string.IsNullOrWhiteSpace(warehouseSnapshot?.AddressDetail))
         {
-            if (!policy.IsPickupEnabled)
-            {
-                return CheckoutPreparationResult.Failure(CheckoutErrors.PickupNotSupported);
-            }
-            returnFee = 0m;
-        }
-        else
-        {
-            // Thu hồi tại công trình: dùng địa chỉ công trình của khách, KHÔNG dùng địa chỉ kho
-            if (string.IsNullOrWhiteSpace(customerAddressDetail) || string.IsNullOrWhiteSpace(customerProvinceCode))
-            {
-                return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryAddressIncomplete);
-            }
-
-            var returnZoneMatch = DeliveryZoneMatcher.Match(policy.DeliveryZones, customerProvinceCode, customerWardCode, _divisionsCatalog);
-            switch (returnZoneMatch.Status)
-            {
-                case ZoneMatchStatus.SupplierNotConfigured:
-                    return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryNotConfigured);
-                case ZoneMatchStatus.AddressIncomplete:
-                    return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryAddressIncomplete);
-                case ZoneMatchStatus.OutsideZone:
-                    return CheckoutPreparationResult.Failure(CheckoutErrors.AddressOutsideDeliveryZone);
-                case ZoneMatchStatus.Success:
-                    returnFee = returnZoneMatch.Zone!.ReturnFeeVnd;
-                    break;
-                default:
-                    return CheckoutPreparationResult.Failure(CheckoutErrors.AddressOutsideDeliveryZone);
-            }
+            return CheckoutPreparationResult.Failure(CheckoutErrors.WarehouseAddressIncomplete);
         }
 
-        List<CheckoutPlanLine> linesWithFees = AllocateFeesToLines(outcome.Lines, deliveryFee, returnFee);
+        const decimal returnFee = 0m;
+        if (effectiveReturnMethod == CheckoutRules.ReturnMethodReturn &&
+            string.IsNullOrWhiteSpace(customerAddressDetail))
+        {
+            return CheckoutPreparationResult.Failure(CheckoutErrors.DeliveryAddressIncomplete);
+        }
 
         CheckoutDeliveryDto? customerSiteDto = (effectiveDeliveryMethod == CheckoutRules.DeliveryMethodDelivery || effectiveReturnMethod == CheckoutRules.ReturnMethodReturn)
             ? new CheckoutDeliveryDto(
@@ -506,9 +472,9 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             returnFee = returnFee,
             deliveryAddress = effectiveDeliveryMethod == CheckoutRules.DeliveryMethodDelivery ? customerSiteDto : null,
             returnAddress = effectiveReturnMethod == CheckoutRules.ReturnMethodReturn ? customerSiteDto : null,
-            totalRentalAmount = linesWithFees.Sum(l => l.RentalAmount),
-            totalDepositAmount = linesWithFees.Sum(l => l.DepositAmount),
-            totalAmount = linesWithFees.Sum(l => l.RentalAmount) + linesWithFees.Sum(l => l.DepositAmount) + deliveryFee + returnFee
+            totalRentalAmount = outcome.Lines.Sum(l => l.RentalAmount),
+            totalDepositAmount = outcome.Lines.Sum(l => l.DepositAmount),
+            totalAmount = outcome.Lines.Sum(l => l.RentalAmount) + outcome.Lines.Sum(l => l.DepositAmount) + deliveryFee + returnFee
         };
         string deliverySnapshotJson = JsonSerializer.Serialize(deliverySnapshotObj);
 
@@ -522,7 +488,7 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             _terms.DocumentRef.Trim(),
             _terms.ContentHash.Trim(),
             CheckoutRules.Currency,
-            linesWithFees,
+            outcome.Lines,
             effectiveDeliveryMethod,
             effectiveReturnMethod,
             deliveryFee,
@@ -791,118 +757,6 @@ public sealed class CheckoutPreparationService : ICheckoutPreparationService
             refundAccount.BankCode!.Trim(),
             refundAccount.AccountNumber!.Trim(),
             refundAccount.AccountHolderName!.Trim());
-
-    private static List<CheckoutPlanLine> AllocateFeesToLines(
-        List<CheckoutPlanLine> lines,
-        decimal totalDeliveryFee,
-        decimal totalReturnFee)
-    {
-        if (lines.Count == 0)
-        {
-            return [];
-        }
-
-        if (lines.Count == 1)
-        {
-            CheckoutPlanLine l = lines[0];
-            return [new CheckoutPlanLine(
-                l.CartItemId,
-                l.EquipmentListingId,
-                l.SupplierId,
-                l.Quantity,
-                l.ExpectedStartDate,
-                l.ExpectedEndDate,
-                l.ListingName,
-                l.ListingSnapshot,
-                l.DailyRate,
-                l.DepositPerUnit,
-                l.RentalDays,
-                l.RentalAmount,
-                l.DepositAmount,
-                l.PickupLocationSnapshot,
-                totalDeliveryFee,
-                totalReturnFee)];
-        }
-
-        decimal totalRental = lines.Sum(l => l.RentalAmount);
-        decimal[] deliveryShares = AllocateLargestRemainder(lines, totalDeliveryFee, totalRental);
-        decimal[] returnShares = AllocateLargestRemainder(lines, totalReturnFee, totalRental);
-
-        List<CheckoutPlanLine> result = new(lines.Count);
-        for (int i = 0; i < lines.Count; i++)
-        {
-            CheckoutPlanLine l = lines[i];
-            result.Add(new CheckoutPlanLine(
-                l.CartItemId,
-                l.EquipmentListingId,
-                l.SupplierId,
-                l.Quantity,
-                l.ExpectedStartDate,
-                l.ExpectedEndDate,
-                l.ListingName,
-                l.ListingSnapshot,
-                l.DailyRate,
-                l.DepositPerUnit,
-                l.RentalDays,
-                l.RentalAmount,
-                l.DepositAmount,
-                l.PickupLocationSnapshot,
-                deliveryShares[i],
-                returnShares[i]));
-        }
-
-        return result;
-    }
-
-    private static decimal[] AllocateLargestRemainder(
-        List<CheckoutPlanLine> lines,
-        decimal totalFee,
-        decimal totalRental)
-    {
-        int count = lines.Count;
-        decimal[] shares = new decimal[count];
-        if (totalFee <= 0m || count == 0)
-        {
-            return shares;
-        }
-
-        if (totalRental <= 0m)
-        {
-            decimal baseShare = Math.Floor(totalFee / count);
-            decimal rem = totalFee - (baseShare * count);
-            for (int i = 0; i < count; i++)
-            {
-                shares[i] = baseShare + (i < rem ? 1m : 0m);
-            }
-            return shares;
-        }
-
-        decimal[] exactShares = new decimal[count];
-        decimal allocatedSum = 0m;
-        for (int i = 0; i < count; i++)
-        {
-            exactShares[i] = (lines[i].RentalAmount / totalRental) * totalFee;
-            shares[i] = Math.Floor(exactShares[i]);
-            allocatedSum += shares[i];
-        }
-
-        decimal remainder = totalFee - allocatedSum;
-        if (remainder > 0)
-        {
-            var remaindersWithIndex = exactShares
-                .Select((exact, idx) => (Fraction: exact - shares[idx], Index: idx))
-                .OrderByDescending(x => x.Fraction)
-                .ThenBy(x => x.Index)
-                .ToList();
-
-            for (int i = 0; i < (int)remainder && i < count; i++)
-            {
-                shares[remaindersWithIndex[i].Index] += 1m;
-            }
-        }
-
-        return shares;
-    }
 
     private sealed record LineBuildOutcome(
         bool DependencyFailed,
