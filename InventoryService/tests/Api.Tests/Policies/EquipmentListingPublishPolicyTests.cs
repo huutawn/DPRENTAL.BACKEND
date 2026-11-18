@@ -32,7 +32,7 @@ public sealed class EquipmentListingPublishPolicyTests
             mediaIds: [media1],
             thumbnailMediaId: media1).Value;
 
-        var missing = EquipmentListingPublishPolicy.GetMissingRequirements(listing, hasValidWarehouseAddress: true, hasUnitAcceptingBookings: true, organizationApproved: true);
+        var missing = EquipmentListingPublishPolicy.GetMissingRequirements(listing, hasUnitAcceptingBookings: true, organizationApproved: true);
 
         Assert.Empty(missing);
     }
@@ -81,9 +81,8 @@ public sealed class EquipmentListingPublishPolicyTests
             mediaIds: [media1],
             thumbnailMediaId: media1).Value;
 
-        var missing = EquipmentListingPublishPolicy.GetMissingRequirements(validListing, hasValidWarehouseAddress: false, hasUnitAcceptingBookings: false, organizationApproved: true);
+        var missing = EquipmentListingPublishPolicy.GetMissingRequirements(validListing, hasUnitAcceptingBookings: false, organizationApproved: true);
 
-        Assert.Contains(EquipmentListingPublishPolicy.RequirementWarehouseAddress, missing);
         Assert.Contains(EquipmentListingPublishPolicy.RequirementAcceptingUnit, missing);
     }
 
@@ -107,7 +106,7 @@ public sealed class EquipmentListingPublishPolicyTests
             FixedNow,
             2024).Value;
 
-        var missing = EquipmentListingPublishPolicy.GetMissingRequirements(listing, hasValidWarehouseAddress: true, hasUnitAcceptingBookings: true, organizationApproved: true);
+        var missing = EquipmentListingPublishPolicy.GetMissingRequirements(listing, hasUnitAcceptingBookings: true, organizationApproved: true);
 
         Assert.Contains(EquipmentListingPublishPolicy.RequirementPhotos, missing);
         Assert.Contains(EquipmentListingPublishPolicy.RequirementThumbnail, missing);
@@ -137,10 +136,9 @@ public sealed class EquipmentListingPublishPolicyTests
             mediaIds: [media1],
             thumbnailMediaId: media1).Value;
 
-        var result = EquipmentListingPublishPolicy.CanPublish(listing, hasValidWarehouseAddress: false, hasUnitAcceptingBookings: true, organizationApproved: true);
+        var result = EquipmentListingPublishPolicy.CanPublish(listing, hasUnitAcceptingBookings: true, organizationApproved: true);
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("WAREHOUSE_ADDRESS_REQUIRED", result.Error.Code);
+        Assert.True(result.IsSuccess);
     }
 
     [Fact]
@@ -166,7 +164,7 @@ public sealed class EquipmentListingPublishPolicyTests
             mediaIds: [media1],
             thumbnailMediaId: media1).Value;
 
-        var result = EquipmentListingPublishPolicy.CanPublish(listing, hasValidWarehouseAddress: true, hasUnitAcceptingBookings: false, organizationApproved: true);
+        var result = EquipmentListingPublishPolicy.CanPublish(listing, hasUnitAcceptingBookings: false, organizationApproved: true);
 
         Assert.True(result.IsFailure);
         Assert.Equal("LISTING_NEEDS_ACTIVE_UNIT", result.Error.Code);
@@ -192,7 +190,7 @@ public sealed class EquipmentListingPublishPolicyTests
             FixedNow,
             2024).Value; // missing media
 
-        var result = EquipmentListingPublishPolicy.CanPublish(listing, hasValidWarehouseAddress: true, hasUnitAcceptingBookings: true, organizationApproved: true);
+        var result = EquipmentListingPublishPolicy.CanPublish(listing, hasUnitAcceptingBookings: true, organizationApproved: true);
 
         Assert.True(result.IsFailure);
         Assert.Equal("LISTING_NOT_ELIGIBLE_FOR_PUBLISH", result.Error.Code);
@@ -221,7 +219,7 @@ public sealed class EquipmentListingPublishPolicyTests
             mediaIds: [media1],
             thumbnailMediaId: media1).Value;
 
-        var result = EquipmentListingPublishPolicy.CanPublish(listing, hasValidWarehouseAddress: true, hasUnitAcceptingBookings: true, organizationApproved: true);
+        var result = EquipmentListingPublishPolicy.CanPublish(listing, hasUnitAcceptingBookings: true, organizationApproved: true);
 
         Assert.True(result.IsSuccess);
     }

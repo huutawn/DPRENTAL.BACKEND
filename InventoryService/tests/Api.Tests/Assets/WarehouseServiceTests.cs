@@ -305,6 +305,23 @@ public sealed class WarehouseServiceTests
     }
 
     [Fact]
+    public async Task InitializeWarehouse_WithoutCoordinates_DoesNotReplaceExistingAddress()
+    {
+        var service = CreateService();
+        var caller = new TestCaller { UserId = Guid.NewGuid() };
+        var initial = new UpdateWarehouseRequest("123 Lê Lợi", "01", "00070", InitializeOnly: true);
+        var created = await service.UpdateMyWarehouseAsync(initial, caller);
+        Assert.True(created.IsSuccess);
+        Assert.True(created.Value.HasValidAddress);
+        Assert.Null(created.Value.Latitude);
+
+        var duplicate = await service.UpdateMyWarehouseAsync(
+            initial with { AddressDetail = "456 Lê Lợi" }, caller);
+        Assert.True(duplicate.IsSuccess);
+        Assert.Equal("123 Lê Lợi", duplicate.Value.AddressDetail);
+    }
+
+    [Fact]
     public async Task UpdateMyWarehouse_ZeroCoordinates_Succeeds()
     {
         var service = CreateService();

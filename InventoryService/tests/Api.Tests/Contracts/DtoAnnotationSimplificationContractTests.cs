@@ -17,7 +17,7 @@ public sealed class DtoAnnotationSimplificationContractTests
     private static readonly JsonSerializerOptions WebOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]
-    public void UpdateWarehouseRequest_JsonRequired_And_CamelCase_Preserved()
+    public void UpdateWarehouseRequest_OptionalCoordinates_And_CamelCase()
     {
         // 1. Valid payload deserializes and serializes
         string validJson = """
@@ -46,7 +46,9 @@ public sealed class DtoAnnotationSimplificationContractTests
             "longitude": 106.7009
         }
         """;
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<UpdateWarehouseRequest>(missingLatJson, WebOptions));
+        var partial = JsonSerializer.Deserialize<UpdateWarehouseRequest>(missingLatJson, WebOptions);
+        Assert.NotNull(partial);
+        Assert.Null(partial.Latitude);
     }
 
     [Fact]

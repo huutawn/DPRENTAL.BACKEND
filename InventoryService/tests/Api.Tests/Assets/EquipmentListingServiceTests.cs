@@ -501,7 +501,7 @@ public sealed class EquipmentListingServiceTests
         Assert.NotNull(result.Value.MissingRequirements);
         Assert.Contains("Hình ảnh thiết bị (tối thiểu 1 ảnh)", result.Value.MissingRequirements);
         Assert.Contains("Giá thuê theo ngày", result.Value.MissingRequirements);
-        Assert.Contains("Ít nhất một máy vật lý sẵn sàng nhận lịch (AcceptingBookings)", result.Value.MissingRequirements);
+        Assert.Contains("Ít nhất một máy vật lý sẵn sàng nhận lịch", result.Value.MissingRequirements);
     }
 
     [Fact]
@@ -563,7 +563,7 @@ public sealed class EquipmentListingServiceTests
     }
 
     [Fact]
-    public async Task PatchListingAsync_ToActiveWithoutWarehouseAddress_FailsWithWarehouseAddressRequired()
+    public async Task PatchListingAsync_ToActiveWithoutWarehouseAddress_StillRequiresMachine()
     {
         var service = CreateService();
         var ownerId = Guid.NewGuid();
@@ -583,7 +583,7 @@ public sealed class EquipmentListingServiceTests
         var result = await service.PatchListingAsync(listingId, patch, caller);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("WAREHOUSE_ADDRESS_REQUIRED", result.Error.Code);
+        Assert.Equal("LISTING_NEEDS_ACTIVE_UNIT", result.Error.Code);
     }
 
     [Fact]

@@ -39,7 +39,7 @@ public sealed class EquipmentListingPublishPolicyOrganizationTests
     public void GetMissingRequirements_OrganizationNotApproved_ContainsOrganizationRequirement()
     {
         var missing = EquipmentListingPublishPolicy.GetMissingRequirements(
-            CreateReadyListing(), hasValidWarehouseAddress: true, hasUnitAcceptingBookings: true, organizationApproved: false);
+            CreateReadyListing(), hasUnitAcceptingBookings: true, organizationApproved: false);
 
         Assert.Equal([EquipmentListingPublishPolicy.RequirementOrganizationApproved], missing);
     }
@@ -48,7 +48,7 @@ public sealed class EquipmentListingPublishPolicyOrganizationTests
     public void CanPublish_OrganizationNotApproved_ReturnsDistinctConflictCode()
     {
         var result = EquipmentListingPublishPolicy.CanPublish(
-            CreateReadyListing(), hasValidWarehouseAddress: true, hasUnitAcceptingBookings: true, organizationApproved: false);
+            CreateReadyListing(), hasUnitAcceptingBookings: true, organizationApproved: false);
 
         Assert.True(result.IsFailure);
         Assert.Equal(EquipmentListingPublishPolicy.OrganizationNotApprovedCode, result.Error.Code);
@@ -56,13 +56,13 @@ public sealed class EquipmentListingPublishPolicyOrganizationTests
     }
 
     [Fact]
-    public void CanPublish_MissingInfoAndOrganizationNotApproved_ReportsInfoFirst()
+    public void CanPublish_ReadyListingStillRequiresApprovedOrganization()
     {
         var result = EquipmentListingPublishPolicy.CanPublish(
-            CreateReadyListing(), hasValidWarehouseAddress: false, hasUnitAcceptingBookings: true, organizationApproved: false);
+            CreateReadyListing(), hasUnitAcceptingBookings: true, organizationApproved: false);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("WAREHOUSE_ADDRESS_REQUIRED", result.Error.Code);
+        Assert.Equal(EquipmentListingPublishPolicy.OrganizationNotApprovedCode, result.Error.Code);
     }
 
     [Fact]

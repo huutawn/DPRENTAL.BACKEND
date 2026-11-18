@@ -14,8 +14,7 @@ public static class EquipmentListingPublishPolicy
     public const string RequirementPhotos = "Hình ảnh thiết bị (tối thiểu 1 ảnh)";
     public const string RequirementThumbnail = "Ảnh đại diện (Thumbnail)";
     public const string RequirementDailyRate = "Giá thuê theo ngày";
-    public const string RequirementWarehouseAddress = "Địa chỉ kho hàng hợp lệ";
-    public const string RequirementAcceptingUnit = "Ít nhất một máy vật lý sẵn sàng nhận lịch (AcceptingBookings)";
+    public const string RequirementAcceptingUnit = "Ít nhất một máy vật lý sẵn sàng nhận lịch";
     public const string RequirementOrganizationApproved = "Tổ chức đã được Platform duyệt";
 
     /// <summary>Mã lỗi để frontend làm mới token một lần rồi thử lại (người vừa được duyệt có thể còn token cũ).</summary>
@@ -37,7 +36,6 @@ public static class EquipmentListingPublishPolicy
     /// <param name="organizationApproved">Người gọi có organizationId trong JWT (tổ chức của chủ listing đã được duyệt).</param>
     public static IReadOnlyList<string> GetMissingRequirements(
         EquipmentListing listing,
-        bool hasValidWarehouseAddress,
         bool hasUnitAcceptingBookings,
         bool organizationApproved)
     {
@@ -73,12 +71,6 @@ public static class EquipmentListingPublishPolicy
             missing.Add(RequirementDailyRate);
         }
 
-        // 4. Kho hàng
-        if (!hasValidWarehouseAddress)
-        {
-            missing.Add(RequirementWarehouseAddress);
-        }
-
         // 5. Đơn vị máy nhận lịch
         if (!hasUnitAcceptingBookings)
         {
@@ -99,16 +91,10 @@ public static class EquipmentListingPublishPolicy
     /// </summary>
     public static Result CanPublish(
         EquipmentListing listing,
-        bool hasValidWarehouseAddress,
         bool hasUnitAcceptingBookings,
         bool organizationApproved)
     {
         ArgumentNullException.ThrowIfNull(listing);
-
-        if (!hasValidWarehouseAddress)
-        {
-            return Error.Validation("WAREHOUSE_ADDRESS_REQUIRED", "Cần thiết lập địa chỉ kho hợp lệ trước khi chuyển Listing sang trạng thái Active.");
-        }
 
         if (!hasUnitAcceptingBookings)
         {
@@ -116,7 +102,7 @@ public static class EquipmentListingPublishPolicy
         }
 
         // Điều kiện tổ chức kiểm tra sau cùng và có mã lỗi riêng; các điều kiện thông tin máy được đánh giá như cũ.
-        var missing = GetMissingRequirements(listing, hasValidWarehouseAddress, hasUnitAcceptingBookings, organizationApproved: true);
+        var missing = GetMissingRequirements(listing, hasUnitAcceptingBookings, organizationApproved: true);
         if (missing.Count > 0)
         {
             return Error.Validation("LISTING_NOT_ELIGIBLE_FOR_PUBLISH", $"Không thể xuất bản Listing vì còn thiếu các điều kiện: {string.Join(", ", missing)}.");

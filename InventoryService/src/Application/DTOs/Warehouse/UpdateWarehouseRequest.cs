@@ -10,7 +10,8 @@ public sealed record UpdateWarehouseRequest(
     string AddressDetail,
     string ProvinceCode,
     string WardCode,
-    [property: JsonRequired] double? Latitude,
-    [property: JsonRequired] double? Longitude,
-    uint? ExpectedVersion = null
+    double? Latitude = null,
+    double? Longitude = null,
+    uint? ExpectedVersion = null,
+    bool InitializeOnly = false
 );

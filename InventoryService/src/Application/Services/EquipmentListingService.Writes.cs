@@ -270,11 +270,9 @@ public sealed partial class EquipmentListingService
             return txResult.Error;
         }
 
-        var warehouseEntity = txResult.Value;
         int totalQuantity = initialAsset is not null ? 1 : 0;
-        bool hasWarehouse = warehouseEntity is not null && warehouseEntity.HasValidAddress;
         var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(
-            listing, hasWarehouse, totalQuantity > 0, EquipmentListingPublishPolicy.IsOrganizationApproved(listing, caller.OrganizationId));
+            listing, totalQuantity > 0, EquipmentListingPublishPolicy.IsOrganizationApproved(listing, caller.OrganizationId));
 
         return EquipmentListingMapper.ToResponse(listing, totalQuantity, _mediaOptions.PublicGatewayUrl, missingRequirements);
     }
@@ -485,46 +483,6 @@ public sealed partial class EquipmentListingService
 
             var now = _timeProvider.GetUtcNow();
 
-            // Xử lý status transition nếu có
-            if (request.IsStatusSpecified)
-            {
-                bool hasAcceptingBookingsUnit = false;
-                bool hasValidWarehouseAddress = true;
-                if (request.Status!.Value == EquipmentListingStatus.Active)
-                {
-                    var warehouse = await ctx.Warehouses.GetByOwnerUserIdAsync(listing.OwnerUserId, ct);
-                    hasValidWarehouseAddress = warehouse is not null && warehouse.HasValidAddress;
-                    int totalActiveUnits = await ctx.Listings.GetTotalQuantityAsync(id, ct);
-                    hasAcceptingBookingsUnit = totalActiveUnits > 0;
-
-                    var publishCheck = EquipmentListingPublishPolicy.CanPublish(
-                        listing,
-                        hasValidWarehouseAddress,
-                        hasAcceptingBookingsUnit,
-                        EquipmentListingPublishPolicy.IsOrganizationApproved(listing, caller.OrganizationId));
-                    if (publishCheck.IsFailure)
-                    {
-                        return publishCheck.Error;
-                    }
-                }
-
-                var statusRes = listing.UpdateStatus(request.Status.Value, hasAcceptingBookingsUnit, now, hasValidWarehouseAddress);
-                if (statusRes.IsFailure)
-                {
-                    return statusRes.Error;
-                }
-
-                // Listing nháp tạo khi tổ chức chưa duyệt chưa có OrganizationId; gán khi công khai thành công.
-                if (request.Status.Value == EquipmentListingStatus.Active && caller.OrganizationId is { } organizationId)
-                {
-                    var assignRes = listing.AssignOrganization(organizationId, now);
-                    if (assignRes.IsFailure)
-                    {
-                        return assignRes.Error;
-                    }
-                }
-            }
-
             // Xử lý details update
             var detailsRes = listing.UpdateDetails(
                 request.IsBrandIdSpecified ? request.BrandId : null,
@@ -541,6 +499,43 @@ public sealed partial class EquipmentListingService
             if (detailsRes.IsFailure)
             {
                 return detailsRes.Error;
+            }
+
+            // Xử lý status transition nếu có
+            if (request.IsStatusSpecified)
+            {
+                bool hasAcceptingBookingsUnit = false;
+                if (request.Status!.Value == EquipmentListingStatus.Active)
+                {
+
+                    int totalActiveUnits = await ctx.Listings.GetTotalQuantityAsync(id, ct);
+                    hasAcceptingBookingsUnit = totalActiveUnits > 0;
+
+                    var publishCheck = EquipmentListingPublishPolicy.CanPublish(
+                        listing,
+                        hasAcceptingBookingsUnit,
+                        EquipmentListingPublishPolicy.IsOrganizationApproved(listing, caller.OrganizationId));
+                    if (publishCheck.IsFailure)
+                    {
+                        return publishCheck.Error;
+                    }
+                }
+
+                var statusRes = listing.UpdateStatus(request.Status.Value, hasAcceptingBookingsUnit, now);
+                if (statusRes.IsFailure)
+                {
+                    return statusRes.Error;
+                }
+
+                // Listing nháp tạo khi tổ chức chưa duyệt chưa có OrganizationId; gán khi công khai thành công.
+                if (request.Status.Value == EquipmentListingStatus.Active && caller.OrganizationId is { } organizationId)
+                {
+                    var assignRes = listing.AssignOrganization(organizationId, now);
+                    if (assignRes.IsFailure)
+                    {
+                        return assignRes.Error;
+                    }
+                }
             }
 
             if (request.IsDepositAmountSpecified)
@@ -574,10 +569,9 @@ public sealed partial class EquipmentListingService
         }
 
         int totalQty = await _listingRepository.GetTotalQuantityAsync(id, cancellationToken);
-        var warehouse = _warehouseRepository is not null ? await _warehouseRepository.GetByOwnerUserIdAsync(txResult.Value.OwnerUserId, cancellationToken) : null;
-        bool hasWarehouse = warehouse is not null && warehouse.HasValidAddress;
+
         var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(
-            txResult.Value, hasWarehouse, totalQty > 0, EquipmentListingPublishPolicy.IsOrganizationApproved(txResult.Value, caller.OrganizationId));
+            txResult.Value, totalQty > 0, EquipmentListingPublishPolicy.IsOrganizationApproved(txResult.Value, caller.OrganizationId));
         return EquipmentListingMapper.ToResponse(txResult.Value, totalQty, _mediaOptions.PublicGatewayUrl, missingRequirements);
     }
 

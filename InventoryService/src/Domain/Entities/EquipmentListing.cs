@@ -363,8 +363,7 @@ public sealed class EquipmentListing
     public Result UpdateStatus(
         EquipmentListingStatus newStatus,
         bool hasUnitAcceptingBookings,
-        DateTimeOffset now,
-        bool hasValidWarehouseAddress = true)
+        DateTimeOffset now)
     {
         if (!Enum.IsDefined(newStatus))
         {
@@ -377,10 +376,6 @@ public sealed class EquipmentListing
         }
         if (newStatus == EquipmentListingStatus.Active)
         {
-            if (!hasValidWarehouseAddress)
-            {
-                return Error.Validation("WAREHOUSE_ADDRESS_REQUIRED", "Cần thiết lập địa chỉ kho hợp lệ trước khi chuyển Listing sang trạng thái Active.");
-            }
 
             if (!hasUnitAcceptingBookings)
             {
