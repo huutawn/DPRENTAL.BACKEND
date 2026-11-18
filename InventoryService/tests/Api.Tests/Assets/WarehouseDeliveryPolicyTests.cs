@@ -189,13 +189,7 @@ public sealed class WarehouseDeliveryPolicyTests
         Assert.Equal("17:30", policy.OperatingHours.CloseTime);
         Assert.Contains(0, policy.OperatingHours.ClosedDays);
 
-        Assert.Single(policy.DeliveryZones);
-        Assert.Equal("79", policy.DeliveryZones[0].ProvinceCode);
-        Assert.Equal("25747", policy.DeliveryZones[0].WardCode);
-        Assert.Equal("Thành phố Hồ Chí Minh", policy.DeliveryZones[0].ProvinceName);
-        Assert.Equal("Phường Thủ Dầu Một", policy.DeliveryZones[0].WardName);
-        Assert.Equal(150000m, policy.DeliveryZones[0].DeliveryFeeVnd);
-        Assert.Equal(120000m, policy.DeliveryZones[0].ReturnFeeVnd);
+        Assert.Empty(policy.DeliveryZones);
     }
 
     [Fact]
@@ -223,7 +217,7 @@ public sealed class WarehouseDeliveryPolicyTests
     }
 
     [Fact]
-    public async Task GetMyDeliveryPolicy_Configured_ReturnsPolicyWithEnrichedNames()
+    public async Task GetMyDeliveryPolicy_Configured_ReturnsWarehouseNames()
     {
         var service = CreateService();
         var ownerId = Guid.NewGuid();
@@ -260,9 +254,7 @@ public sealed class WarehouseDeliveryPolicyTests
         Assert.Equal(ownerId, policy.SupplierId);
         Assert.Equal("Thành phố Hồ Chí Minh", policy.WarehouseAddress?.ProvinceName);
         Assert.Equal("Phường Bến Nghé", policy.WarehouseAddress?.WardName);
-        Assert.Single(policy.DeliveryZones);
-        Assert.Equal("Thành phố Hồ Chí Minh", policy.DeliveryZones[0].ProvinceName);
-        Assert.Equal("Phường Thủ Dầu Một", policy.DeliveryZones[0].WardName);
+        Assert.Empty(policy.DeliveryZones);
     }
 
     [Fact]
@@ -413,7 +405,7 @@ public sealed class WarehouseDeliveryPolicyTests
             [new DeliveryZoneDto("79", "25747", -100m, 50000m)]);
         var resDelivery = await service.UpdateDeliveryPolicyAsync(reqDelivery, caller);
         Assert.True(resDelivery.IsFailure);
-        Assert.Equal("INVALID_DELIVERY_FEE", resDelivery.Error.Code);
+        Assert.Equal("DELIVERY_ZONES_RETIRED", resDelivery.Error.Code);
 
         var reqReturn = new UpdateWarehouseDeliveryPolicyRequest(
             false,
@@ -421,7 +413,7 @@ public sealed class WarehouseDeliveryPolicyTests
             [new DeliveryZoneDto("79", "25747", 50000m, -100m)]);
         var resReturn = await service.UpdateDeliveryPolicyAsync(reqReturn, caller);
         Assert.True(resReturn.IsFailure);
-        Assert.Equal("INVALID_RETURN_FEE", resReturn.Error.Code);
+        Assert.Equal("DELIVERY_ZONES_RETIRED", resReturn.Error.Code);
     }
 
     [Fact]
@@ -442,7 +434,7 @@ public sealed class WarehouseDeliveryPolicyTests
             [new DeliveryZoneDto("999", null, 50000m, 50000m)]);
         var resBadProv = await service.UpdateDeliveryPolicyAsync(reqBadProv, caller);
         Assert.True(resBadProv.IsFailure);
-        Assert.Equal("INVALID_LOCATION_ZONE", resBadProv.Error.Code);
+        Assert.Equal("DELIVERY_ZONES_RETIRED", resBadProv.Error.Code);
 
         // Mismatched ward in province (Ward 00070 is in Hanoi 01, not HCM 79)
         var reqBadPair = new UpdateWarehouseDeliveryPolicyRequest(
@@ -451,7 +443,7 @@ public sealed class WarehouseDeliveryPolicyTests
             [new DeliveryZoneDto("79", "00070", 50000m, 50000m)]);
         var resBadPair = await service.UpdateDeliveryPolicyAsync(reqBadPair, caller);
         Assert.True(resBadPair.IsFailure);
-        Assert.Equal("INVALID_LOCATION_ZONE", resBadPair.Error.Code);
+        Assert.Equal("DELIVERY_ZONES_RETIRED", resBadPair.Error.Code);
     }
 
     [Fact]
@@ -474,7 +466,7 @@ public sealed class WarehouseDeliveryPolicyTests
             ]);
         var resDup = await service.UpdateDeliveryPolicyAsync(reqDup, caller);
         Assert.True(resDup.IsFailure);
-        Assert.Equal("DUPLICATE_DELIVERY_ZONE", resDup.Error.Code);
+        Assert.Equal("DELIVERY_ZONES_RETIRED", resDup.Error.Code);
     }
 
     [Fact]
@@ -501,7 +493,7 @@ public sealed class WarehouseDeliveryPolicyTests
     }
 
     [Fact]
-    public async Task UpdateDeliveryPolicy_ValidRequest_SucceedsAndSyncsZones()
+    public async Task UpdateDeliveryPolicy_UpdatesHoursAndPreservesRetiredZones()
     {
         var service = CreateService();
         var ownerId = Guid.NewGuid();
@@ -518,14 +510,10 @@ public sealed class WarehouseDeliveryPolicyTests
         warehouse.DeliveryZones.Add(removedZone);
         _warehouseRepo.Add(warehouse);
 
-        // New request: updates 25747, adds province-level 01 (Hanoi), removes 25750
         var req = new UpdateWarehouseDeliveryPolicyRequest(
             true,
             new OperatingHoursDto("09:00", "19:00", [0, 6]),
-            [
-                new DeliveryZoneDto("79", "25747", 150000m, 120000m),
-                new DeliveryZoneDto("01", null, 0m, 0m) // 0 VND free delivery test
-            ]);
+            []);
 
         var result = await service.UpdateDeliveryPolicyAsync(req, caller);
 
@@ -536,20 +524,9 @@ public sealed class WarehouseDeliveryPolicyTests
         Assert.Equal("19:00", policy.OperatingHours.CloseTime);
         Assert.Equal([0, 6], policy.OperatingHours.ClosedDays);
 
-        Assert.Equal(2, policy.DeliveryZones.Count);
-        // Sorted by ProvinceCode then WardCode
-        var hanoiZone = policy.DeliveryZones.First(z => z.ProvinceCode == "01");
-        Assert.Null(hanoiZone.WardCode);
-        Assert.Equal(0m, hanoiZone.DeliveryFeeVnd);
-        Assert.Equal(0m, hanoiZone.ReturnFeeVnd);
-
-        var hcmZone = policy.DeliveryZones.First(z => z.ProvinceCode == "79");
-        Assert.Equal("25747", hcmZone.WardCode);
-        Assert.Equal(150000m, hcmZone.DeliveryFeeVnd);
-        Assert.Equal(120000m, hcmZone.ReturnFeeVnd);
-
-        // Verify underlying warehouse entity was updated
+        Assert.Empty(policy.DeliveryZones);
         Assert.Equal(2, warehouse.DeliveryZones.Count);
-        Assert.DoesNotContain(warehouse.DeliveryZones, z => z.WardCode == "25750");
+        Assert.Equal(100000m, existingZone.DeliveryFeeVnd);
+        Assert.Contains(removedZone, warehouse.DeliveryZones);
     }
 }

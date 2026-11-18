@@ -82,11 +82,7 @@ public sealed class Warehouse
         !string.IsNullOrWhiteSpace(ProvinceCode) &&
         !string.IsNullOrWhiteSpace(ProvinceName) &&
         !string.IsNullOrWhiteSpace(WardCode) &&
-        !string.IsNullOrWhiteSpace(WardName) &&
-        Latitude.HasValue &&
-        Longitude.HasValue &&
-        Latitude.Value >= MinLatitude && Latitude.Value <= MaxLatitude &&
-        Longitude.Value >= MinLongitude && Longitude.Value <= MaxLongitude;
+        !string.IsNullOrWhiteSpace(WardName);
 
     private Warehouse()
     {
@@ -106,8 +102,8 @@ public sealed class Warehouse
         string provinceName,
         string wardCode,
         string wardName,
-        double latitude,
-        double longitude,
+        double? latitude,
+        double? longitude,
         DateTimeOffset now)
     {
         OwnerUserId = ownerUserId;
@@ -139,8 +135,8 @@ public sealed class Warehouse
         string provinceName,
         string wardCode,
         string wardName,
-        double latitude,
-        double longitude,
+        double? latitude,
+        double? longitude,
         DateTimeOffset now)
     {
         if (ownerUserId == Guid.Empty)
@@ -172,8 +168,8 @@ public sealed class Warehouse
         string provinceName,
         string wardCode,
         string wardName,
-        double latitude,
-        double longitude,
+        double? latitude,
+        double? longitude,
         DateTimeOffset now)
     {
         var validationResult = ValidateAddressInputs(addressDetail, provinceCode, provinceName, wardCode, wardName, latitude, longitude);
@@ -200,8 +196,8 @@ public sealed class Warehouse
         string provinceName,
         string wardCode,
         string wardName,
-        double latitude,
-        double longitude)
+        double? latitude,
+        double? longitude)
     {
         if (string.IsNullOrWhiteSpace(addressDetail))
         {
@@ -234,12 +230,17 @@ public sealed class Warehouse
             return Error.Validation("INVALID_WARD_NAME", "Tên phường/xã không hợp lệ.");
         }
 
-        if (double.IsNaN(latitude) || double.IsInfinity(latitude) || latitude < MinLatitude || latitude > MaxLatitude)
+        if (latitude.HasValue != longitude.HasValue)
+        {
+            return Error.Validation("INVALID_COORDINATES", "Vui lòng nhập đủ cặp tọa độ.");
+        }
+
+        if (latitude is double lat && (!double.IsFinite(lat) || lat < MinLatitude || lat > MaxLatitude))
         {
             return Error.Validation("INVALID_COORDINATES", $"Vĩ độ (latitude) phải nằm trong khoảng [{MinLatitude}, {MaxLatitude}].");
         }
 
-        if (double.IsNaN(longitude) || double.IsInfinity(longitude) || longitude < MinLongitude || longitude > MaxLongitude)
+        if (longitude is double lon && (!double.IsFinite(lon) || lon < MinLongitude || lon > MaxLongitude))
         {
             return Error.Validation("INVALID_COORDINATES", $"Kinh độ (longitude) phải nằm trong khoảng [{MinLongitude}, {MaxLongitude}].");
         }

@@ -126,7 +126,7 @@ public sealed class PostgresWarehouseIntegrationTests
                 // Listing 1 của Hà Nội (Active + unit)
                 var l1 = EquipmentListing.Create(
                     Guid.NewGuid(), ownerHanoi, Guid.NewGuid(), Guid.NewGuid(), "Cam Hanoi", null, "FX3", 1, "{}", 100_000m, null, null, "VND", now, 2024).Value;
-                l1.UpdateStatus(EquipmentListingStatus.Active, true, now, true);
+                l1.UpdateStatus(EquipmentListingStatus.Active, true, now);
                 db.EquipmentListings.Add(l1);
 
                 var a1 = InventoryAsset.Create(Guid.NewGuid(), l1.Id, "SN-HN-01", now).Value;
@@ -135,7 +135,7 @@ public sealed class PostgresWarehouseIntegrationTests
                 // Listing 2 của HCM (Active + unit)
                 var l2 = EquipmentListing.Create(
                     Guid.NewGuid(), ownerHcm, Guid.NewGuid(), Guid.NewGuid(), "Cam HCM", null, "FX3", 1, "{}", 100_000m, null, null, "VND", now, 2024).Value;
-                l2.UpdateStatus(EquipmentListingStatus.Active, true, now, true);
+                l2.UpdateStatus(EquipmentListingStatus.Active, true, now);
                 db.EquipmentListings.Add(l2);
 
                 var a2 = InventoryAsset.Create(Guid.NewGuid(), l2.Id, "SN-HCM-01", now).Value;

@@ -119,9 +119,8 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
                 }
 
                 int totalQuantity = await _listingRepository.GetTotalQuantityAsync(id, ct);
-                var warehouse = _warehouseRepository is not null ? await _warehouseRepository.GetByOwnerUserIdAsync(listing.OwnerUserId, ct) : null;
-                bool hasWarehouse = warehouse is not null && warehouse.HasValidAddress;
-                var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(listing, hasWarehouse, totalQuantity > 0);
+
+                var missingRequirements = EquipmentListingPublishPolicy.GetMissingRequirements(listing, totalQuantity > 0);
                 var response = EquipmentListingMapper.ToResponse(listing, totalQuantity, _mediaOptions.PublicGatewayUrl, missingRequirements);
                 var ttl = _timeProvider.GetUtcNow().AddSeconds(_cacheOptions.MetadataTtlSeconds > 0 ? _cacheOptions.MetadataTtlSeconds : 120);
                 return Result.Success(new Dprental.InventoryService.Application.Caching.CachedRead<EquipmentListingResponse>(response, ttl));
@@ -275,13 +274,11 @@ public sealed partial class EquipmentListingService : IEquipmentListingService
                 var searchResult = await _listingRepository.SearchOwnerAsync(criteria, ct);
                 int totalPages = searchResult.TotalCount == 0 ? 0 : (int)Math.Ceiling((double)searchResult.TotalCount / pageSize);
 
-                var warehouse = _warehouseRepository is not null ? await _warehouseRepository.GetByOwnerUserIdAsync(ownerUserId, ct) : null;
-                bool hasWarehouse = warehouse is not null && warehouse.HasValidAddress;
 
                 var items = searchResult.Items
                     .Select(item =>
                     {
-                        var missing = EquipmentListingPublishPolicy.GetMissingRequirements(item.Listing, hasWarehouse, item.TotalQuantity > 0);
+                        var missing = EquipmentListingPublishPolicy.GetMissingRequirements(item.Listing, item.TotalQuantity > 0);
                         return EquipmentListingMapper.ToResponse(item.Listing, item.TotalQuantity, _mediaOptions.PublicGatewayUrl, missing);
                     })
                     .ToList();

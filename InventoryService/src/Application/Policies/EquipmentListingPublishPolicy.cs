@@ -14,15 +14,13 @@ public static class EquipmentListingPublishPolicy
     public const string RequirementPhotos = "Hình ảnh thiết bị (tối thiểu 1 ảnh)";
     public const string RequirementThumbnail = "Ảnh đại diện (Thumbnail)";
     public const string RequirementDailyRate = "Giá thuê theo ngày";
-    public const string RequirementWarehouseAddress = "Địa chỉ kho hàng hợp lệ";
-    public const string RequirementAcceptingUnit = "Ít nhất một máy vật lý sẵn sàng nhận lịch (AcceptingBookings)";
+    public const string RequirementAcceptingUnit = "Ít nhất một máy vật lý sẵn sàng nhận lịch";
 
     /// <summary>
     /// Đánh giá danh sách các điều kiện còn thiếu để Listing có thể chuyển từ Draft sang Active.
     /// </summary>
     public static IReadOnlyList<string> GetMissingRequirements(
         EquipmentListing listing,
-        bool hasValidWarehouseAddress,
         bool hasUnitAcceptingBookings)
     {
         ArgumentNullException.ThrowIfNull(listing);
@@ -58,11 +56,6 @@ public static class EquipmentListingPublishPolicy
         }
 
         // 4. Kho hàng
-        if (!hasValidWarehouseAddress)
-        {
-            missing.Add(RequirementWarehouseAddress);
-        }
-
         // 5. Đơn vị máy nhận lịch
         if (!hasUnitAcceptingBookings)
         {
@@ -77,22 +70,16 @@ public static class EquipmentListingPublishPolicy
     /// </summary>
     public static Result CanPublish(
         EquipmentListing listing,
-        bool hasValidWarehouseAddress,
         bool hasUnitAcceptingBookings)
     {
         ArgumentNullException.ThrowIfNull(listing);
-
-        if (!hasValidWarehouseAddress)
-        {
-            return Error.Validation("WAREHOUSE_ADDRESS_REQUIRED", "Cần thiết lập địa chỉ kho hợp lệ trước khi chuyển Listing sang trạng thái Active.");
-        }
 
         if (!hasUnitAcceptingBookings)
         {
             return Error.Validation("LISTING_NEEDS_ACTIVE_UNIT", "Listing cần ít nhất một thiết bị nhận đặt lịch để chuyển sang trạng thái Active.");
         }
 
-        var missing = GetMissingRequirements(listing, hasValidWarehouseAddress, hasUnitAcceptingBookings);
+        var missing = GetMissingRequirements(listing, hasUnitAcceptingBookings);
         if (missing.Count > 0)
         {
             return Error.Validation("LISTING_NOT_ELIGIBLE_FOR_PUBLISH", $"Không thể xuất bản Listing vì còn thiếu các điều kiện: {string.Join(", ", missing)}.");
