@@ -110,7 +110,7 @@ public static class RentalOrderStatusPolicy
         }
 
         // 4. Có active item PendingSettlement -> PendingSettlement
-        if (activeItems.Any(i => i.Status == RentalItemStatus.PendingSettlement))
+        if (activeItems.Any(i => i.Status is RentalItemStatus.PendingSettlement or RentalItemStatus.Disputed))
         {
             return RentalOrderStatus.PendingSettlement;
         }

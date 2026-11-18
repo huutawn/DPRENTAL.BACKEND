@@ -1,4 +1,4 @@
-using Dprental.RentalService.Api.Tests.TestHelpers;
+﻿using Dprental.RentalService.Api.Tests.TestHelpers;
 using System.Text.Json;
 using Dprental.RentalService.Application.Clients;
 using Dprental.RentalService.Application.DTOs.Settlement;
@@ -45,65 +45,91 @@ public sealed class DeductionResponseServiceTests
         Assert.Single(order.OperationReceipts, r => r.Action == "RenterRespondDeduction");
         var foreign = await service.RespondAsync(item.Id, Caller(Guid.NewGuid()), request, "foreign-key");
         Assert.True(foreign.IsFailure);
-        // DPR-199: đơn của renter khác trả như không tồn tại để không lộ dữ liệu.
+        // DPR-199: Ä‘Æ¡n cá»§a renter khÃ¡c tráº£ nhÆ° khÃ´ng tá»“n táº¡i Ä‘á»ƒ khÃ´ng lá»™ dá»¯ liá»‡u.
         Assert.Equal(Dprental.RentalService.Common.ErrorType.NotFound, foreign.Error.Type);
     }
 
     [Fact]
-    public async Task AdminResolutionPersistsDecision_AndRenterCannotResolve()
+    public async Task SupplierOfferAndRenterAgreement_PersistOnceWithoutAdmin()
     {
         await using var db = NewDb();
         var order = SeedProposed(db);
         var item = order.Items.Single();
-        var service = NewService(db);
-        var dispute = await service.RespondAsync(item.Id, Caller(order.RenterId),
-            new RespondDeductionRequest(RenterDeductionDecision.Dispute, "Disagree", null), "dispute-key");
-        Assert.True(dispute.IsSuccess, dispute.Error.Message);
-        var request = new ResolveDisputeRequest(0m, "Evidence does not support deduction", null);
-        Assert.True((await service.ResolveDisputeAsync(item.Id, Caller(order.RenterId), request, "resolve-key")).IsFailure);
-        var admin = Caller(Guid.NewGuid(), admin: true);
-        var result = await service.ResolveDisputeAsync(item.Id, admin, request, "resolve-key");
-        Assert.True(result.IsSuccess, result.Error.Message);
-        Assert.Equal(0m, item.FinalDeductionAmount);
-        Assert.Equal(DisputeStatus.Resolved, item.DeductionProposal!.Dispute!.Status);
-        Assert.True((await service.ResolveDisputeAsync(item.Id, admin, request, "resolve-key")).IsSuccess);
-        Assert.Single(order.OperationReceipts, r => r.Action == "AdminResolveDispute");
-        var emitted = Assert.Single(db.RentalOutboxMessages);
-        Assert.Equal(KafkaContractSpec.EventTypes.RentalDeductionDisputeResolved, emitted.MessageType);
-        Assert.Equal("rental.events.v1", emitted.Topic);
-        using var eventJson = JsonDocument.Parse(emitted.Payload);
-        var eventPayload = eventJson.RootElement.GetProperty("payload");
-        Assert.Equal(item.DeductionProposal.Dispute.Id,
-            eventPayload.GetProperty("disputeId").GetGuid());
-        Assert.Equal(item.Id, eventPayload.GetProperty("rentalItemId").GetGuid());
-        Assert.Equal(order.Version, eventPayload.GetProperty("orderVersion").GetInt64());
-        Assert.Equal("Rejected", eventPayload.GetProperty("decision").GetString());
-        Assert.False(eventPayload.TryGetProperty("resolutionMediaIds", out _));
-        Assert.False(eventPayload.TryGetProperty("refundAccount", out _));
+        var events = new FakeRentalEventProducer();
+        var service = NewService(db, eventProducer: events);
+        Assert.True((await service.RespondAsync(item.Id, Caller(order.RenterId),
+            new RespondDeductionRequest(RenterDeductionDecision.Dispute, "Disagree", null),
+            "dispute-key")).IsSuccess);
+        var opened = Assert.Single(events.DisputeOpenedEvents);
+        Assert.Equal(item.DeductionProposal!.Dispute!.Id, opened.DisputeId);
+        Assert.Equal(order.RenterId, opened.RenterId);
+        Assert.True((await service.RespondAsync(item.Id, Caller(order.RenterId),
+            new RespondDeductionRequest(RenterDeductionDecision.Dispute, "Disagree", null),
+            "dispute-key")).IsSuccess);
+        Assert.Single(events.DisputeOpenedEvents);
+        var request = new OfferDisputeAmountRequest(50_000m);
+        Assert.True((await service.OfferDisputeAmountAsync(item.Id, Caller(Guid.NewGuid()),
+            request, "foreign-offer")).IsFailure);
+        var offered = await service.OfferDisputeAmountAsync(item.Id, Caller(item.SupplierId),
+            request, "offer-key");
+        Assert.True(offered.IsSuccess, offered.Error.Message);
+        Assert.True((await service.OfferDisputeAmountAsync(item.Id, Caller(item.SupplierId),
+            request, "offer-key")).IsSuccess);
+        Assert.True((await service.OfferDisputeAmountAsync(item.Id, Caller(item.SupplierId),
+            new OfferDisputeAmountRequest(40_000m), "offer-key")).IsFailure);
+        Assert.True((await service.RespondAsync(item.Id, Caller(order.RenterId),
+            new RespondDeductionRequest(RenterDeductionDecision.Accept, null, null),
+            "accept-key")).IsSuccess);
+        Assert.Equal(50_000m, item.FinalDeductionAmount);
+        Assert.Equal(RentalItemStatus.PendingSettlement, item.Status);
+        Assert.Single(order.OperationReceipts, r => r.Action == "SupplierDisputeOffer");
     }
 
     [Fact]
-    public async Task AdminResolution_SignalRFailure_DoesNotFailCommittedDecision()
+    public async Task SupplierOffer_SignalRFailure_DoesNotUndoSavedOffer()
     {
         await using var db = NewDb();
         var order = SeedProposed(db);
         var item = order.Items.Single();
-        var failingNotifier = new Mock<IOrderHubNotifier>();
-        failingNotifier.Setup(x => x.NotifyRenterOrderChangedAsync(
-                It.IsAny<Guid>(), It.IsAny<RenterOrderChangedNotification>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("SignalR unavailable"));
         Assert.True((await NewService(db).RespondAsync(item.Id, Caller(order.RenterId),
-            new RespondDeductionRequest(RenterDeductionDecision.Dispute, "Disagree", null), "dispute-key")).IsSuccess);
-        var service = NewService(db, notifier: failingNotifier.Object);
+            new RespondDeductionRequest(RenterDeductionDecision.Dispute, "Disagree", null),
+            "dispute-key")).IsSuccess);
+        var notifier = new Mock<IOrderHubNotifier>();
+        notifier.Setup(x => x.NotifyRenterOrderChangedAsync(It.IsAny<Guid>(),
+                It.IsAny<RenterOrderChangedNotification>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("SignalR unavailable"));
 
-        var result = await service.ResolveDisputeAsync(item.Id, Caller(Guid.NewGuid(), admin: true),
-            new ResolveDisputeRequest(0m, "Evidence does not support deduction", null), "resolve-key");
+        var result = await NewService(db, notifier: notifier.Object).OfferDisputeAmountAsync(
+            item.Id, Caller(item.SupplierId), new OfferDisputeAmountRequest(50_000m), "offer-key");
 
         Assert.True(result.IsSuccess, result.Error.Message);
-        Assert.Single(db.RentalOutboxMessages);
-        Assert.Equal(DisputeStatus.Resolved, item.DeductionProposal!.Dispute!.Status);
+        Assert.Equal(50_000m, item.DeductionProposal!.Dispute!.SupplierOfferAmount);
     }
 
+    [Fact]
+    public async Task AdminDisputeDetail_ShowsRenterReturnEvidence_WithoutGrantingRenterAdminAccess()
+    {
+        await using var db = NewDb();
+        var order = SeedProposed(db);
+        var item = order.Items.Single();
+        var unit = item.UnitAssignments.Single();
+        Guid mediaId = Guid.NewGuid();
+        Guid requestId = Guid.NewGuid();
+        item.AddReturnRequest(new ReturnRequest(requestId, item.Id, Now, null,
+            order.RenterId, Now, [new ReturnRequestUnit(Guid.NewGuid(), requestId, unit.Id, [mediaId])]));
+        await db.SaveChangesAsync();
+        var service = NewService(db);
+        Assert.True((await service.RespondAsync(item.Id, Caller(order.RenterId),
+            new RespondDeductionRequest(RenterDeductionDecision.Dispute, "Disagree", null),
+            "dispute-key")).IsSuccess);
+
+        Assert.True((await service.GetDisputeDetailAsync(item.Id, Caller(order.RenterId))).IsFailure);
+        var detail = await service.GetDisputeDetailAsync(item.Id, Caller(Guid.NewGuid(), admin: true));
+        Assert.True(detail.IsSuccess, detail.Error.Message);
+        Assert.Contains(mediaId, Assert.Single(detail.Value.Units).RenterReturnMediaIds);
+        Assert.Equal(item.DeductionProposal!.TotalProposedAmount,
+            detail.Value.CurrentSupplierOfferAmount);
+    }
     [Fact]
     public async Task RenterDeadlineWorkerAutoAcceptsOnlyOnce()
     {
@@ -115,6 +141,28 @@ public sealed class DeductionResponseServiceTests
         Assert.Equal(0, await service.ProcessRenterResponseTimeoutsAsync());
         Assert.Equal(item.DeductionProposal.TotalProposedAmount, item.FinalDeductionAmount);
         Assert.Equal(DeductionProposalStatus.AcceptedByTimeout, item.DeductionProposal.Status);
+    }
+
+    [Fact]
+    public async Task DisputeHoldWorker_FinalizesProposedAmountOnceAfterSevenDays()
+    {
+        await using var db = NewDb();
+        var order = SeedProposed(db);
+        var item = order.Items.Single();
+        Assert.True((await NewService(db).RespondAsync(item.Id, Caller(order.RenterId),
+            new RespondDeductionRequest(RenterDeductionDecision.Dispute, "Disagree", null),
+            "dispute-key")).IsSuccess);
+
+        var before = NewService(db, item.ReturnsCompletedAt!.Value.AddDays(7).AddTicks(-1));
+        Assert.Equal(0, await before.ProcessDisputeHoldTimeoutsAsync());
+        Assert.Null(item.FinalDeductionAmount);
+
+        var after = NewService(db, item.ReturnsCompletedAt.Value.AddDays(7));
+        Assert.Equal(1, await after.ProcessDisputeHoldTimeoutsAsync());
+        Assert.Equal(0, await after.ProcessDisputeHoldTimeoutsAsync());
+        Assert.Equal(item.DeductionProposal!.TotalProposedAmount, item.FinalDeductionAmount);
+        Assert.Equal(item.DepositAmount - item.FinalDeductionAmount, item.DepositRefundAmount);
+        Assert.Equal(RentalItemStatus.PendingSettlement, item.Status);
     }
 
     [Fact]
@@ -132,7 +180,7 @@ public sealed class DeductionResponseServiceTests
         typeof(RentalOrder).GetProperty(nameof(RentalOrder.PaymentRef))!.SetValue(order, "payment-1");
         await db.SaveChangesAsync();
         var service = new DeductionService(new RentalOrderRepository(db), NewLocks(), db,
-            Mock.Of<IRentalMediaClient>(), new FakeTimeProvider(Now.AddHours(2)));
+            Mock.Of<IRentalMediaClient>(), new FakeTimeProvider(Now.AddHours(2)), new FakeRentalEventProducer());
 
         Assert.Equal(1, await service.ScheduleReadySettlementsAsync());
         Assert.Equal(0, await service.ScheduleReadySettlementsAsync());
@@ -159,13 +207,13 @@ public sealed class DeductionResponseServiceTests
     }
 
     private static DeductionResponseService NewService(
-        RentalServiceDbContext db, DateTimeOffset? now = null, IOrderHubNotifier? notifier = null)
+        RentalServiceDbContext db, DateTimeOffset? now = null, IOrderHubNotifier? notifier = null,
+        FakeRentalEventProducer? eventProducer = null)
     {
         return new DeductionResponseService(new RentalOrderRepository(db), NewLocks(), db,
             Mock.Of<IRentalMediaClient>(), new FakeTimeProvider(now ?? Now.AddHours(1)),
             new ConfigurationBuilder().Build(), NullLogger<DeductionResponseService>.Instance,
-            new RentalEventProducer(new KafkaOutboxWriter(new OutboxRepository(db)), Options.Create(new KafkaOptions())),
-            notifier);
+            eventProducer ?? new FakeRentalEventProducer(), notifier);
     }
 
     private static IOrderLockManager NewLocks()

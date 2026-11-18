@@ -123,13 +123,30 @@ public sealed partial class RentalOrderRepository
     {
         return await _dbContext.RentalItems
             .AsNoTracking()
-            .Where(i => i.Status == RentalItemStatus.PendingSettlement
+            .Where(i => i.Status == RentalItemStatus.Disputed
                      && i.FinalDeductionAmount == null
                      && i.DeductionProposal != null
                      && i.DeductionProposal.Status == DeductionProposalStatus.Disputed)
             .OrderBy(i => i.DeductionProposal!.RespondedAt)     // khiếu nại cũ nhất lên đầu
             .Select(i => i.Id)
             .Skip(skip).Take(take)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetDisputeHoldTimeoutItemIdsAsync(
+        DateTimeOffset returnCutoff, int batchSize, CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RentalItems
+            .AsNoTracking()
+            .Where(i => i.Status == RentalItemStatus.Disputed
+                     && i.ReturnsCompletedAt <= returnCutoff
+                     && i.FinalDeductionAmount == null
+                     && i.DeductionProposal != null
+                     && i.DeductionProposal.Status == DeductionProposalStatus.Disputed)
+            .OrderBy(i => i.ReturnsCompletedAt)
+            .ThenBy(i => i.Id)
+            .Select(i => i.Id)
+            .Take(batchSize)
             .ToListAsync(cancellationToken);
     }
     public async Task<IReadOnlyList<Guid>> GetSettlementReadyItemIdsAsync(

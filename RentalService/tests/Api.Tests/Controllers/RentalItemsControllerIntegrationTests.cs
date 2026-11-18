@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Dprental.RentalService.Api.Tests.TestHelpers;
 using System.Security.Claims;
 using Dprental.RentalService.Application.Clients;
@@ -158,6 +159,60 @@ public sealed class RentalItemsControllerIntegrationTests
             targetItemId: order.Items.First().Id);
         order.AddOperationReceipt(holdReceipt);
         return (order, order.Items.First());
+    }
+
+    [Fact]
+    public async Task SupplierUnitDetail_RouteReturnsSelectedUnit_AndUnknownUnitReturns404()
+    {
+        Guid supplierId = Guid.NewGuid();
+        string dbName = Guid.NewGuid().ToString("N");
+        var (order, item) = CreatePaidOrderWithItem(supplierId);
+        RentalUnitAssignment unit = Assert.Single(item.UnitAssignments);
+
+        using var factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("ConnectionStrings:Postgres", "Host=localhost;Database=test;Username=test;Password=test");
+                builder.ConfigureTestServices(services =>
+                {
+                    services.RemoveAll<DbContextOptions<RentalServiceDbContext>>();
+                    services.RemoveAll<IDbContextOptionsConfiguration<RentalServiceDbContext>>();
+                    services.AddDbContext<RentalServiceDbContext>(options =>
+                        options.UseInMemoryDatabase(dbName));
+                    services.AddAuthentication("TestScheme")
+                        .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("TestScheme", _ => { });
+                    TestAuthHandler.Claims =
+                    [
+                        new Claim(RentalAuthClaims.Subject, supplierId.ToString("D")),
+                        new Claim(RentalAuthClaims.ProfileCompleted, "true"),
+                        new Claim(RentalAuthClaims.Roles, "owner")
+                    ];
+                });
+            });
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RentalServiceDbContext>();
+            db.RentalOrders.Add(order);
+            await db.SaveChangesAsync();
+        }
+
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", "dev-internal-api-key-dprental-2026");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("TestScheme");
+        string url = $"/api/v1/rental/supplier/sub-orders/{item.RentalSubOrderId}/items/{item.Id}/units/{unit.Id}";
+
+        using HttpResponseMessage response = await client.GetAsync(url);
+        Assert.True(response.StatusCode == HttpStatusCode.OK,
+            $"Expected 200, received {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+        using JsonDocument detail = (await response.Content.ReadFromJsonAsync<JsonDocument>())!;
+        Assert.Equal(unit.Id, detail.RootElement.GetProperty("unit").GetProperty("assignmentId").GetGuid());
+        Assert.Equal(item.ThumbnailMediaIdSnapshot?.ToString("D"),
+            detail.RootElement.GetProperty("listing").GetProperty("thumbnailMediaId").GetString());
+
+        using HttpResponseMessage unknown = await client.GetAsync(
+            $"/api/v1/rental/supplier/sub-orders/{item.RentalSubOrderId}/items/{item.Id}/units/{Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
     }
 
     [Fact]

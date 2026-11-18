@@ -5,6 +5,7 @@ using Dprental.RentalService.Application.Kafka.Contracts;
 using Dprental.RentalService.Application.Kafka.Events;
 using Dprental.RentalService.Application.Kafka.Producers;
 using Dprental.RentalService.Application.Services.Operations;
+using Dprental.RentalService.Application.Services.Orders;
 using Dprental.RentalService.Application.Policies;
 using Dprental.RentalService.Common;
 using Dprental.RentalService.Common.Enums;
@@ -129,6 +130,25 @@ public sealed class RentalSettledConsumer(
             if (enqueueResult.IsFailure)
             {
                 return enqueueResult.Error;
+            }
+
+            if (item.DepositAmount > 0m)
+            {
+                var settlement = OrderQueryMapper.ToSettlement(item);
+                var depositEvent = await eventProducer.EnqueueDomainEventAsync(
+                    KafkaContractSpec.EventTypes.RentalDepositSettlementCompleted,
+                    item.Id.ToString("D"), order.Id.ToString("D"), itemCompletedAt,
+                    new RentalDepositSettlementCompletedPayload(
+                        order.Id, order.OrderCode, item.Id, order.RenterId,
+                        payload.SettlementRef, item.DepositAmount,
+                        item.FinalDeductionAmount!.Value, item.DepositRefundAmount,
+                        settlement?.DeductionReason,
+                        settlement?.FinalizationSource ?? "NO_DEDUCTION",
+                        itemCompletedAt, order.Version),
+                    correlationId: envelope.CorrelationId,
+                    causationId: envelope.MessageId,
+                    cancellationToken: cancellationToken);
+                if (depositEvent.IsFailure) return depositEvent.Error;
             }
         }
 

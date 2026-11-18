@@ -28,9 +28,9 @@ public sealed class DeductionAuthorizationApiTests
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         using var dispute = await client.GetAsync($"/api/v1/rental/items/{itemId}/deductions/dispute");
         Assert.Equal(HttpStatusCode.Unauthorized, dispute.StatusCode);
-        using var resolve = await client.PostAsJsonAsync($"/api/v1/rental/items/{itemId}/deductions/dispute/resolution",
-            new { finalDeductionAmount = 0, decisionNote = "Reviewed" });
-        Assert.Equal(HttpStatusCode.Unauthorized, resolve.StatusCode);
+        using var offer = await client.PostAsJsonAsync($"/api/v1/rental/items/{itemId}/deductions/dispute/offer",
+            new { amount = 0 });
+        Assert.Equal(HttpStatusCode.Unauthorized, offer.StatusCode);
         using var adminList = await client.GetAsync("/api/v1/rental/admin/disputes");
         Assert.Equal(HttpStatusCode.Unauthorized, adminList.StatusCode);
     }

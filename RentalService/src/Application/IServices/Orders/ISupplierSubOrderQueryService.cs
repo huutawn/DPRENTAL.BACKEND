@@ -23,4 +23,11 @@ public interface ISupplierSubOrderQueryService
         Guid subOrderId,
         IRentalCallerContext caller,
         CancellationToken cancellationToken = default);
+
+    Task<Result<SupplierUnitDetailResponse>> GetMyUnitAsync(
+        Guid subOrderId,
+        Guid itemId,
+        Guid assignmentId,
+        IRentalCallerContext caller,
+        CancellationToken cancellationToken = default);
 }

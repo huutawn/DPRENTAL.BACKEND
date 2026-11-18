@@ -21,6 +21,7 @@ public sealed class RentalCalendarService : IRentalCalendarService
         RentalItemStatus.AwaitingHandover,
         RentalItemStatus.InRental,
         RentalItemStatus.PendingSettlement,
+        RentalItemStatus.Disputed,
         RentalItemStatus.Completed
     ];
 

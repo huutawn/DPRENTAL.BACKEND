@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Dprental.RentalService.Application.DTOs.Orders;
 using Dprental.RentalService.Application.Errors;
 using Dprental.RentalService.Application.IServices.Orders;
@@ -201,17 +200,7 @@ public sealed class RenterOrderQueryService(
             item.Id,
             item.EquipmentListingId,
             item.Status,
-            new OrderListingSnapshotResponse(
-                item.ListingDescriptionSnapshot,
-                item.ThumbnailMediaIdSnapshot,
-                item.EquipmentTypeNameSnapshot,
-                item.BrandNameSnapshot,
-                item.ModelSnapshot,
-                ToSpecValues(item.SpecValuesSnapshot),
-                basics.PickupLocation,
-                item.EquipmentTypeId,
-                item.BrandId,
-                item.SpecSchemaVersionSnapshot),
+            OrderQueryMapper.ToListingSnapshot(item),
             item.RentalDays,
             item.DailyRateSnapshot,
             item.DepositPerUnitSnapshot,
@@ -243,26 +232,4 @@ public sealed class RenterOrderQueryService(
         return Result.Success<bool?>(progress.Value is { } p ? p == OrderRefundProgress.Refunded : null);
     }
 
-    /// <summary>Thông số được lưu dạng chuỗi JSON; trả ra dạng object. Chuỗi hỏng thì bỏ qua thay vì làm lỗi cả đơn.</summary>
-    private static JsonElement? ToSpecValues(string? specValuesJson)
-    {
-        // Phân biệt dữ liệu thiếu với nội dung có thể sử dụng trước khi chuẩn hóa, parse hoặc gửi sang bước kế tiếp.
-        if (string.IsNullOrWhiteSpace(specValuesJson))
-        {
-            return null;
-        }
-
-        // Parse dữ liệu JSON có thể hỏng hoặc không còn đúng dạng; xử lý lỗi ở nhánh catch thay vì dùng dữ liệu chưa xác minh.
-        try
-        {
-            // Đọc dữ liệu đã serialize; các nhánh kiểm tra/catch phía sau quyết định có thể tiếp tục hay cần báo lỗi.
-            using JsonDocument document = JsonDocument.Parse(specValuesJson);
-            return document.RootElement.ValueKind == JsonValueKind.Object ? document.RootElement.Clone() : null;
-        }
-        // Dữ liệu JSON không đọc được: trả lỗi hoặc đi nhánh fallback đã định nghĩa, không dùng một snapshot dựng từ dữ liệu hỏng.
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
 }

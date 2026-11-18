@@ -1,6 +1,6 @@
 # FE Guide — Bàn giao, yêu cầu trả, thu hồi và bất đồng
 
-Ngày đối chiếu: 28/10/2026. Nền tích hợp Task 1–4: `659efa41`; bản sửa đã review: Rental `88b0035f`, Recommendation `0aa2a9a9`. Đối tượng: FE Renter, Supplier, Admin và mock API.
+Ngày đối chiếu ban đầu: 28/10/2026. Cập nhật contract Rental: 11/11/2026. Nền tích hợp Task 1–4: `659efa41`; bản sửa đã review: Rental `88b0035f`, Recommendation `0aa2a9a9`. Đối tượng: FE Renter, Supplier, Admin và mock API.
 
 ## 1. Phạm vi và mức độ sẵn sàng
 
@@ -183,12 +183,12 @@ Renter không nhận AssetId/AllocationId. AssignmentId là opaque ID để gử
   "actualReturnAt": "2026-10-28T08:00:00Z",
   "note": "Đã trả máy thứ nhất tại kho",
   "units": [
-    { "rentalUnitAssignmentId": "20000000-0000-4000-8000-000000000001", "mediaIds": [] }
+    { "rentalUnitAssignmentId": "20000000-0000-4000-8000-000000000001", "mediaIds": ["40000000-0000-4000-8000-000000000001"] }
   ]
 }
 ```
 
-Ảnh optional ở request của B; cần gửi collection `[]` nếu không có. Không gửi field `condition`; inspection thực tế do A thực hiện.
+Mỗi máy B khai báo trả phải có 1–10 ảnh Private/Ready do chính B tải lên; collection rỗng bị từ chối. Không gửi field `condition`; inspection thực tế do A thực hiện.
 
 Response `200 OK` tại bản tích hợp Task 1–4:
 
@@ -200,7 +200,7 @@ Response `200 OK` tại bản tích hợp Task 1–4:
   "note": "Đã trả máy thứ nhất tại kho",
   "submittedAt": "2026-10-28T08:05:00Z",
   "units": [
-    { "rentalUnitAssignmentId": "20000000-0000-4000-8000-000000000001", "assignmentId": "20000000-0000-4000-8000-000000000001", "mediaIds": [], "closedAt": null, "rejectedAt": null, "status": "PendingSupplierConfirmation", "isOverdue": false, "overdueNotifiedAt": null }
+    { "rentalUnitAssignmentId": "20000000-0000-4000-8000-000000000001", "assignmentId": "20000000-0000-4000-8000-000000000001", "mediaIds": ["40000000-0000-4000-8000-000000000001"], "closedAt": null, "rejectedAt": null, "status": "PendingSupplierConfirmation", "isOverdue": false, "overdueNotifiedAt": null }
   ],
   "status": "PendingSupplierConfirmation",
   "confirmationDeadlineAt": "2026-10-29T08:05:00Z",
@@ -217,6 +217,10 @@ Sau POST, reload GET: u1 có `hasOpenReturnRequest=true`, `canRequestReturn=fals
 Renter/Supplier xem lịch sử qua `returnRequests` trong detail. GET phản ánh ClosedAt mới nhất; replay POST luôn trả snapshot cũ, nên replay có thể vẫn `closedAt: null` sau khi A đã nhận. Không dùng replay response để ghi đè lịch sử GET mới hơn.
 
 ## 7. Task 3 — A kiểm tra và ghi nhận thực nhận
+
+Chi tiết đơn con Supplier có `items[].thumbnailMediaId` (ảnh listing lúc đặt) và `items[].units[]` (mỗi máy có `assignmentId`, `assetId`, tình trạng và ảnh bàn giao/thu hồi). Khi cần chi tiết một máy, gọi `GET /supplier/sub-orders/{subOrderId}/items/{itemId}/units/{assignmentId}`. Response trả `name` và `listing` (snapshot mô tả, hãng, model, thông số, thumbnail), `unit` (tình trạng và ảnh do A ghi nhận) và `renterReturnEvidence` (ảnh B gửi cho đúng máy). Thumbnail là ảnh listing dùng chung; backend Rental hiện không có ảnh ban đầu riêng cho từng asset. MediaId cần được MediaService cấp URL xem ảnh.
+
+Chọn NORMAL/DAMAGED ở chi tiết từng máy rồi gửi các máy đã chọn trong `units[]` của POST bên dưới. Backend kiểm tra tình trạng của từng máy trong batch; có thể thu hồi một phần, các máy còn lại vẫn ở trạng thái đang thuê.
 
 `POST /items/{itemId}/returns` — `200 OK`. Không gọi `/return-requests/{id}/confirm`; không có route này trong implementation hiện tại.
 
@@ -294,7 +298,7 @@ Response mẫu sau B báo issue; cũng là shape trong `item.returnRequests`:
   "confirmationDeadlineAt": "2026-10-29T08:05:00Z",
   "isOverdue": false,
   "units": [
-    { "rentalUnitAssignmentId": "20000000-0000-4000-8000-000000000001", "assignmentId": "20000000-0000-4000-8000-000000000001", "mediaIds": [], "closedAt": null, "rejectedAt": null, "status": "Disputed", "isOverdue": false, "overdueNotifiedAt": null }
+    { "rentalUnitAssignmentId": "20000000-0000-4000-8000-000000000001", "assignmentId": "20000000-0000-4000-8000-000000000001", "mediaIds": ["40000000-0000-4000-8000-000000000001"], "closedAt": null, "rejectedAt": null, "status": "Disputed", "isOverdue": false, "overdueNotifiedAt": null }
   ],
   "issues": [
     {

@@ -37,6 +37,13 @@ public class Dispute
 
     public DateTimeOffset? ResolvedAt { get; private set; }
 
+    [Precision(18, 2)]
+    public decimal? SupplierOfferAmount { get; private set; }
+
+    public DateTimeOffset? SupplierOfferedAt { get; private set; }
+
+    public Guid? SupplierOfferedById { get; private set; }
+
     private readonly List<Guid> _resolutionMediaIds = [];
     public IReadOnlyList<Guid> ResolutionMediaIds => _resolutionMediaIds.AsReadOnly();
 
@@ -71,7 +78,7 @@ public class Dispute
     internal void Resolve(
         decimal finalDeductionAmount,
         string reason,
-        Guid resolvedById,
+        Guid? resolvedById,
         DateTimeOffset resolvedAt,
         IEnumerable<Guid>? mediaIds)
     {
@@ -85,5 +92,12 @@ public class Dispute
             _resolutionMediaIds.AddRange(mediaIds);
         }
         Status = DisputeStatus.Resolved;
+    }
+
+    internal void Offer(decimal amount, Guid supplierId, DateTimeOffset now)
+    {
+        SupplierOfferAmount = amount;
+        SupplierOfferedById = supplierId;
+        SupplierOfferedAt = now.ToUniversalTime();
     }
 }
