@@ -552,4 +552,127 @@ public sealed class ReturnRequestTests : IAsyncLifetime
         Assert.Equal(RentalAuthorizationPolicy.ErrorCodes.EvidenceNotFound, strangerAuth.Error.Code);
     }
 
+    [Fact]
+    public async Task GetReturnUnitMediaAccessAsync_AllowsRenterSupplierAdmin_AndRejectsStranger()
+    {
+        var (order, item) = await SeedOrderAsync(2);
+        var u1 = item.UnitAssignments.First();
+        Guid mediaId = Guid.NewGuid();
+
+        Guid reqId = Guid.NewGuid();
+        var unitReq = new ReturnRequestUnit(Guid.NewGuid(), reqId, u1.Id, [mediaId]);
+        var req = new ReturnRequest(reqId, item.Id, Now.AddHours(-1), "Evidence auth", order.RenterId, Now, [unitReq]);
+        item.AddReturnRequest(req);
+
+        await using (var db = NewDb())
+        {
+            db.Add(req);
+            await db.SaveChangesAsync();
+        }
+
+        await using var testDb = NewDb();
+        var service = Service(testDb);
+
+        // 1. Renter caller succeeds
+        var renterResult = await service.GetReturnUnitMediaAccessAsync(
+            item.Id, reqId, u1.Id, mediaId, RentalCallerContext.ForUser(order.RenterId));
+        Assert.True(renterResult.IsSuccess);
+        Assert.Equal(mediaId, renterResult.Value.MediaId);
+        Assert.Contains(mediaId.ToString(), renterResult.Value.Url);
+
+        // 2. Supplier caller succeeds
+        var supplierResult = await service.GetReturnUnitMediaAccessAsync(
+            item.Id, reqId, u1.Id, mediaId, RentalCallerContext.ForUser(item.SupplierId));
+        Assert.True(supplierResult.IsSuccess);
+        Assert.Equal(mediaId, supplierResult.Value.MediaId);
+
+        // 3. Admin caller succeeds
+        var adminResult = await service.GetReturnUnitMediaAccessAsync(
+            item.Id, reqId, u1.Id, mediaId, RentalCallerContext.ForUser(Guid.NewGuid(), roles: ["admin"]));
+        Assert.True(adminResult.IsSuccess);
+        Assert.Equal(mediaId, adminResult.Value.MediaId);
+
+        // 4. Stranger caller is rejected
+        var strangerResult = await service.GetReturnUnitMediaAccessAsync(
+            item.Id, reqId, u1.Id, mediaId, RentalCallerContext.ForUser(Guid.NewGuid()));
+        Assert.True(strangerResult.IsFailure);
+        Assert.Equal(RentalAuthorizationPolicy.ErrorCodes.EvidenceNotFound, strangerResult.Error.Code);
+    }
+
+    [Fact]
+    public async Task GetReturnUnitMediaAccessAsync_WrongAssignmentOrWrongMedia_RejectsNotFound()
+    {
+        var (order, item) = await SeedOrderAsync(2);
+        var u1 = item.UnitAssignments.ElementAt(0);
+        var u2 = item.UnitAssignments.ElementAt(1);
+        Guid media1 = Guid.NewGuid();
+        Guid media2 = Guid.NewGuid();
+
+        Guid reqId = Guid.NewGuid();
+        var unitReq1 = new ReturnRequestUnit(Guid.NewGuid(), reqId, u1.Id, [media1]);
+        var unitReq2 = new ReturnRequestUnit(Guid.NewGuid(), reqId, u2.Id, [media2]);
+        var req = new ReturnRequest(reqId, item.Id, Now.AddHours(-1), "Two unit return", order.RenterId, Now, [unitReq1, unitReq2]);
+        item.AddReturnRequest(req);
+
+        await using (var db = NewDb())
+        {
+            db.Add(req);
+            await db.SaveChangesAsync();
+        }
+
+        await using var testDb = NewDb();
+        var service = Service(testDb);
+        var caller = RentalCallerContext.ForUser(order.RenterId);
+
+        // Requesting media1 under u2 assignment fails
+        var crossResult = await service.GetReturnUnitMediaAccessAsync(item.Id, reqId, u2.Id, media1, caller);
+        Assert.True(crossResult.IsFailure);
+        Assert.Equal(RentalAuthorizationPolicy.ErrorCodes.EvidenceNotFound, crossResult.Error.Code);
+
+        // Requesting non-existent media fails
+        var nonExistentMedia = await service.GetReturnUnitMediaAccessAsync(item.Id, reqId, u1.Id, Guid.NewGuid(), caller);
+        Assert.True(nonExistentMedia.IsFailure);
+        Assert.Equal(RentalAuthorizationPolicy.ErrorCodes.EvidenceNotFound, nonExistentMedia.Error.Code);
+
+        // Requesting non-existent return request fails
+        var nonExistentReq = await service.GetReturnUnitMediaAccessAsync(item.Id, Guid.NewGuid(), u1.Id, media1, caller);
+        Assert.True(nonExistentReq.IsFailure);
+        Assert.Equal(RentalAuthorizationPolicy.ErrorCodes.EvidenceNotFound, nonExistentReq.Error.Code);
+    }
+
+    [Fact]
+    public async Task GetReturnUnitMediaAccessAsync_OldRequestWithDuplicateMedia_AllowsAccessForBothRecordedUnits()
+    {
+        var (order, item) = await SeedOrderAsync(2);
+        var u1 = item.UnitAssignments.ElementAt(0);
+        var u2 = item.UnitAssignments.ElementAt(1);
+        Guid sharedMedia = Guid.NewGuid();
+
+        Guid reqId = Guid.NewGuid();
+        // Legacy request where the same shared media was saved for both units
+        var unitReq1 = new ReturnRequestUnit(Guid.NewGuid(), reqId, u1.Id, [sharedMedia]);
+        var unitReq2 = new ReturnRequestUnit(Guid.NewGuid(), reqId, u2.Id, [sharedMedia]);
+        var req = new ReturnRequest(reqId, item.Id, Now.AddHours(-1), "Legacy duplicate", order.RenterId, Now, [unitReq1, unitReq2]);
+        item.AddReturnRequest(req);
+
+        await using (var db = NewDb())
+        {
+            db.Add(req);
+            await db.SaveChangesAsync();
+        }
+
+        await using var testDb = NewDb();
+        var service = Service(testDb);
+        var caller = RentalCallerContext.ForUser(order.RenterId);
+
+        // Access for u1 works
+        var res1 = await service.GetReturnUnitMediaAccessAsync(item.Id, reqId, u1.Id, sharedMedia, caller);
+        Assert.True(res1.IsSuccess);
+        Assert.Equal(sharedMedia, res1.Value.MediaId);
+
+        // Access for u2 also works, preserving legacy record without break
+        var res2 = await service.GetReturnUnitMediaAccessAsync(item.Id, reqId, u2.Id, sharedMedia, caller);
+        Assert.True(res2.IsSuccess);
+        Assert.Equal(sharedMedia, res2.Value.MediaId);
+    }
 }

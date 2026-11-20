@@ -216,6 +216,30 @@ Sau POST, reload GET: u1 có `hasOpenReturnRequest=true`, `canRequestReturn=fals
 
 Renter/Supplier xem lịch sử qua `returnRequests` trong detail. GET phản ánh ClosedAt mới nhất; replay POST luôn trả snapshot cũ, nên replay có thể vẫn `closedAt: null` sau khi A đã nhận. Không dùng replay response để ghi đè lịch sử GET mới hơn.
 
+### 6.1. Quyền xem ảnh thiết bị trong yêu cầu trả (Return Request Unit Media Access)
+
+Khi bên thuê khai báo trả thiết bị, mỗi máy được gán 1–10 ảnh bằng chứng riêng tư tương ứng với `rentalUnitAssignmentId`. Để hiển thị ảnh của từng máy cho bên thuê, nhà cung cấp sở hữu hoặc quản trị viên (Admin), gọi endpoint cấp URL đọc ngắn hạn (signed read URL) với `Cache-Control: no-store`:
+
+`GET /api/v1/rental/items/{itemId}/return-requests/{returnRequestId}/units/{assignmentId}/media/{mediaId}/access`
+
+- **Authorization**: Bearer Token của Renter đơn hàng, Supplier sở hữu dòng máy, hoặc Admin.
+- **Cache-Control**: `no-store` (URL có thời hạn ngắn hạn từ MediaService).
+- **Validation**:
+  - Xác nhận caller có quyền với order/item (chống IDOR).
+  - Xác nhận `returnRequestId` thuộc đúng `itemId`.
+  - Xác nhận `assignmentId` thuộc đúng `returnRequestId`.
+  - Xác nhận `mediaId` thuộc đúng `MediaIds` của unit đó.
+  - Từ chối người ngoài đơn hoặc yêu cầu mediaId sai máy / sai request (`404 Not Found` / `Evidence.NotFound`).
+  - Hỗ trợ tương thích ngược với các yêu cầu cũ từng bị gán trùng ảnh trên nhiều máy (cho phép truy cập cho các máy đã ghi nhận liên kết).
+- **Response `200 OK`**:
+```json
+{
+  "mediaId": "40000000-0000-4000-8000-000000000001",
+  "url": "https://...",
+  "expiresAtUtc": "2026-10-28T08:20:00Z"
+}
+```
+
 ## 7. Task 3 — A kiểm tra và ghi nhận thực nhận
 
 Chi tiết đơn con Supplier có `items[].thumbnailMediaId` (ảnh listing lúc đặt) và `items[].units[]` (mỗi máy có `assignmentId`, `assetId`, tình trạng và ảnh bàn giao/thu hồi). Khi cần chi tiết một máy, gọi `GET /supplier/sub-orders/{subOrderId}/items/{itemId}/units/{assignmentId}`. Response trả `name` và `listing` (snapshot mô tả, hãng, model, thông số, thumbnail), `unit` (tình trạng và ảnh do A ghi nhận) và `renterReturnEvidence` (ảnh B gửi cho đúng máy). Thumbnail là ảnh listing dùng chung; backend Rental hiện không có ảnh ban đầu riêng cho từng asset. MediaId cần được MediaService cấp URL xem ảnh.

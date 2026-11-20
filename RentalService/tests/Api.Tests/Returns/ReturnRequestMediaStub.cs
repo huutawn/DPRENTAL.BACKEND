@@ -24,6 +24,9 @@ internal static class ReturnRequestMediaStub
         media.Setup(client => client.GetMetadataAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns<Guid, CancellationToken>((id, _) =>
                 Task.FromResult(Result.Success(new MediaMetadataDto(id, "Private", "Ready"))));
+        media.Setup(client => client.CreatePrivateReadAccessAsync(It.IsAny<Guid>(), It.IsAny<CreateMediaAccessRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<Guid, CreateMediaAccessRequest, CancellationToken>((id, req, _) =>
+                Task.FromResult(Result.Success(new MediaAccessDto(id, $"https://media.dprental.local/private/{id}?action={req.Action}", DateTimeOffset.UtcNow.AddMinutes(15)))));
         return media.Object;
     }
 }
