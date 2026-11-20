@@ -7,6 +7,7 @@ using Dprental.RentalService.Application.IServices.BankAccounts;
 using Dprental.RentalService.Application.IServices.Refunds;
 using Dprental.RentalService.Application.IServices.Calendar;
 using Dprental.RentalService.Application.IServices.Checkout;
+using Dprental.RentalService.Application.IServices.Evidence;
 using Dprental.RentalService.Application.IServices.Expiry;
 using Dprental.RentalService.Application.IServices.Integration;
 using Dprental.RentalService.Application.IServices.Operations;
@@ -28,6 +29,7 @@ using Dprental.RentalService.Application.Services.Calendar;
 using Dprental.RentalService.Application.Services.Cart;
 using Dprental.RentalService.Application.Services.Checkout;
 using Dprental.RentalService.Application.Services.Orders;
+using Dprental.RentalService.Application.Services.Evidence;
 using Dprental.RentalService.Application.Services.Expiry;
 using Dprental.RentalService.Application.Services.Integration;
 using Dprental.RentalService.Application.Services.Operations;
@@ -102,6 +104,9 @@ public static class ApplicationServiceCollectionExtensions
 
         // Trả máy: request, vấn đề, Admin xử lý và ghi nhận trả dùng cùng ReturnService.
         services.AddScoped<IReturnService, ReturnService>();
+
+        // Cấp link đọc ảnh bằng chứng riêng tư sau khi kiểm tra người xem thuộc khoản thuê.
+        services.AddScoped<IRentalEvidenceAccessService, RentalEvidenceAccessService>();
 
         // Truy vấn lịch thuê cá nhân.
         services.AddScoped<IRentalCalendarService, RentalCalendarService>();
