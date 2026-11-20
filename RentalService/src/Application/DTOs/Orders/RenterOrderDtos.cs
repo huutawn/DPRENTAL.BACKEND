@@ -288,4 +288,13 @@ public sealed record RenterUnitResponse(
 {
     public bool IsAffectedByDeduction { get; init; }
     public string? DeductionReason { get; init; }
+
+    /// <summary>Tình trạng nhà cung cấp ghi lúc bàn giao, rỗng khi chưa bàn giao xong.</summary>
+    public UnitCondition? HandoverCondition { get; init; }
+
+    /// <summary>Ghi chú của nhà cung cấp cho máy này lúc bàn giao.</summary>
+    public string? HandoverNote { get; init; }
+
+    /// <summary>Ảnh bàn giao của máy; lấy link xem qua GET items/{itemId}/evidence/{mediaId}/access.</summary>
+    public IReadOnlyList<Guid> HandoverMediaIds { get; init; } = [];
 }
