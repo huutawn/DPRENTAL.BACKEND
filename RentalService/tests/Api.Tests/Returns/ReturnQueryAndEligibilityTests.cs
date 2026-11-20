@@ -125,8 +125,10 @@ public sealed class ReturnQueryAndEligibilityTests
     [Fact]
     public void ToRenterUnits_MapsPropertiesAndExcludesInternalIds_StablySorted()
     {
-        var (_, item, u1, _) = CreateTestOrder();
+        var (_, item, u1, handover) = CreateTestOrder();
         var u2 = item.UnitAssignments.ElementAt(1);
+        var handoverMediaId = Guid.NewGuid();
+        u2.RecordHandover(handover.Id, UnitCondition.Damaged, "Xước vỏ máy", [handoverMediaId]);
 
         // Add open request for u1
         var req = new ReturnRequest(Guid.NewGuid(), item.Id, Now, "Unit 1 request",
@@ -146,6 +148,13 @@ public sealed class ReturnQueryAndEligibilityTests
         var mappedU2 = units.Single(u => u.AssignmentId == u2.Id);
         Assert.False(mappedU2.HasOpenReturnRequest);
         Assert.True(mappedU2.CanRequestReturn);
+
+        // Ảnh và tình trạng bàn giao được trả theo từng máy cho người thuê.
+        Assert.Equal(UnitCondition.Damaged, mappedU2.HandoverCondition);
+        Assert.Equal("Xước vỏ máy", mappedU2.HandoverNote);
+        Assert.Equal([handoverMediaId], mappedU2.HandoverMediaIds);
+        Assert.Equal(UnitCondition.Normal, mappedU1.HandoverCondition);
+        Assert.Empty(mappedU1.HandoverMediaIds);
     }
 
     [Fact]
