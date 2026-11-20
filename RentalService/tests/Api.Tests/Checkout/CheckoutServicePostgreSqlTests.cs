@@ -742,7 +742,11 @@ public sealed class CheckoutServicePostgreSqlTests
                 new("VCB", "0123456789", "NGUYEN VAN A"),
                 "v1.0",
                 true,
-                3_100_000m); // 3M rental + 50k delivery + 50k return
+                3_000_000m) // Giao/trả miễn phí: phí theo vùng của kho không còn được tính.
+            {
+                // Chỉ đơn có dùng kho mới đọc và chụp địa chỉ kho từ chính sách giao nhận.
+                DeliveryMethod = CheckoutRules.DeliveryMethodPickup
+            };
 
             FixedTimeProvider clock = new(Now);
             CheckoutCompletion completion = new(
@@ -765,8 +769,8 @@ public sealed class CheckoutServicePostgreSqlTests
                 .Include(o => o.Items)
                 .SingleAsync(o => o.Id == result.Order!.Id);
 
-            Assert.Equal(50_000m, savedOrder.DeliveryFee);
-            Assert.Equal(50_000m, savedOrder.ReturnFee);
+            Assert.Equal(0m, savedOrder.DeliveryFee);
+            Assert.Equal(0m, savedOrder.ReturnFee);
             Assert.NotNull(savedOrder.DeliverySnapshotJson);
             Assert.Contains("123 Original Le Loi", savedOrder.DeliverySnapshotJson);
             Assert.DoesNotContain("999 New Street", savedOrder.DeliverySnapshotJson);

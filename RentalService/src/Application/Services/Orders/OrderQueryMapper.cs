@@ -225,7 +225,10 @@ internal static class OrderQueryMapper
             {
                 IsAffectedByDeduction = item.DeductionProposal is { } proposal &&
                     u.DeductionProposalId == proposal.Id,
-                DeductionReason = u.DeductionReason
+                DeductionReason = u.DeductionReason,
+                HandoverCondition = u.HandoverCondition,
+                HandoverNote = u.HandoverNote,
+                HandoverMediaIds = u.HandoverMediaIds.ToList()
             })
             .ToList();
     }
