@@ -1,4 +1,5 @@
 using Dprental.RentalService.Api.Filters;
+using Dprental.RentalService.Application.DTOs.Media;
 using Dprental.RentalService.Application.DTOs.Returns;
 using Dprental.RentalService.Application.IServices.Returns;
 using Dprental.RentalService.Application.Security;
@@ -45,6 +46,29 @@ public sealed class RentalReturnsController(IReturnService returns, IRentalCalle
         CancellationToken cancellationToken)
     {
         var result = await returns.ReportReturnIssueAsync(itemId, returnRequestId, caller, request, idempotencyKey ?? string.Empty, cancellationToken);
+        return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
+    }
+
+    /// <summary>Cấp URL xem ảnh riêng tư ngắn hạn của thiết bị trong yêu cầu trả máy.</summary>
+    [HttpGet("return-requests/{returnRequestId:guid}/units/{assignmentId:guid}/media/{mediaId:guid}/access")]
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+    [ProducesResponseType(typeof(MediaAccessDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetReturnUnitMediaAccess(
+        Guid itemId,
+        Guid returnRequestId,
+        Guid assignmentId,
+        Guid mediaId,
+        CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl = "no-store";
+        var result = await returns.GetReturnUnitMediaAccessAsync(
+            itemId, returnRequestId, assignmentId, mediaId, caller, cancellationToken);
         return result.IsFailure ? this.ToProblem(result.Error) : Ok(result.Value);
     }
 
