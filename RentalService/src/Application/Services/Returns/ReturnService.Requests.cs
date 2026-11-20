@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Dprental.RentalService.Application.DTOs.Media;
 using Dprental.RentalService.Application.DTOs.Returns;
 using Dprental.RentalService.Application.Hubs;
 using Microsoft.Extensions.Logging;
@@ -230,42 +229,6 @@ public sealed partial class ReturnService
             if (validation.IsFailure) return validation.Error;
         }
         return Result.Success();
-    }
-
-    public async Task<Result<MediaAccessDto>> GetReturnUnitMediaAccessAsync(
-        Guid itemId,
-        Guid returnRequestId,
-        Guid assignmentId,
-        Guid mediaId,
-        IRentalCallerContext caller,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(caller);
-        var orderId = await repository.GetOrderIdByItemIdAsync(itemId, cancellationToken);
-        if (!orderId.HasValue) return RentalErrors.ItemNotFound;
-
-        var order = await repository.GetByIdWithDetailsAsync(orderId.Value, cancellationToken);
-        if (order is null) return RentalErrors.ItemNotFound;
-
-        var item = order.Items.FirstOrDefault(i => i.Id == itemId);
-        if (item is null) return RentalErrors.ItemNotFound;
-
-        var auth = RentalAuthorizationPolicy.AuthorizeEvidenceRead(caller, order, item, mediaId);
-        if (auth.IsFailure) return auth.Error;
-
-        var returnRequest = item.ReturnRequests.FirstOrDefault(r => r.Id == returnRequestId);
-        if (returnRequest is null)
-            return Error.NotFound(RentalAuthorizationPolicy.ErrorCodes.EvidenceNotFound, "Yêu cầu trả không tồn tại hoặc không thuộc dòng thuê này.");
-
-        var unit = returnRequest.Units.FirstOrDefault(u => u.RentalUnitAssignmentId == assignmentId);
-        if (unit is null)
-            return Error.NotFound(RentalAuthorizationPolicy.ErrorCodes.EvidenceNotFound, "Thiết bị không thuộc yêu cầu trả này.");
-
-        if (!unit.MediaIds.Contains(mediaId))
-            return Error.NotFound(RentalAuthorizationPolicy.ErrorCodes.EvidenceNotFound, "Ảnh không thuộc thiết bị này trong yêu cầu trả.");
-
-        return await mediaClient.CreatePrivateReadAccessAsync(
-            mediaId, new CreateMediaAccessRequest("read", Download: false), cancellationToken);
     }
 
     // Ghi cảnh báo khi gửi thông báo yêu cầu trả thất bại mà không ghi nội dung Media vào log.

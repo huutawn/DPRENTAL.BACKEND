@@ -216,21 +216,16 @@ Sau POST, reload GET: u1 có `hasOpenReturnRequest=true`, `canRequestReturn=fals
 
 Renter/Supplier xem lịch sử qua `returnRequests` trong detail. GET phản ánh ClosedAt mới nhất; replay POST luôn trả snapshot cũ, nên replay có thể vẫn `closedAt: null` sau khi A đã nhận. Không dùng replay response để ghi đè lịch sử GET mới hơn.
 
-### 6.1. Quyền xem ảnh thiết bị trong yêu cầu trả (Return Request Unit Media Access)
+### 6.1. Xem ảnh bằng chứng riêng tư (bàn giao, trả máy, khấu trừ, tranh chấp)
 
-Khi bên thuê khai báo trả thiết bị, mỗi máy được gán 1–10 ảnh bằng chứng riêng tư tương ứng với `rentalUnitAssignmentId`. Để hiển thị ảnh của từng máy cho bên thuê, nhà cung cấp sở hữu hoặc quản trị viên (Admin), gọi endpoint cấp URL đọc ngắn hạn (signed read URL) với `Cache-Control: no-store`:
+Ảnh bằng chứng là ảnh riêng tư: FE không gọi MediaService trực tiếp được. Mọi ảnh bằng chứng của một mục thuê đều xem qua một endpoint duy nhất, trả URL đọc ngắn hạn (signed read URL):
 
-`GET /api/v1/rental/items/{itemId}/return-requests/{returnRequestId}/units/{assignmentId}/media/{mediaId}/access`
+`GET /api/v1/rental/items/{itemId}/evidence/{mediaId}/access`
 
-- **Authorization**: Bearer Token của Renter đơn hàng, Supplier sở hữu dòng máy, hoặc Admin.
-- **Cache-Control**: `no-store` (URL có thời hạn ngắn hạn từ MediaService).
-- **Validation**:
-  - Xác nhận caller có quyền với order/item (chống IDOR).
-  - Xác nhận `returnRequestId` thuộc đúng `itemId`.
-  - Xác nhận `assignmentId` thuộc đúng `returnRequestId`.
-  - Xác nhận `mediaId` thuộc đúng `MediaIds` của unit đó.
-  - Từ chối người ngoài đơn hoặc yêu cầu mediaId sai máy / sai request (`404 Not Found` / `Evidence.NotFound`).
-  - Hỗ trợ tương thích ngược với các yêu cầu cũ từng bị gán trùng ảnh trên nhiều máy (cho phép truy cập cho các máy đã ghi nhận liên kết).
+- **Lấy `mediaId` từ**: `units[].handoverMediaIds` (bàn giao, cả người thuê lẫn nhà cung cấp), `returnRequests[].units[].mediaIds` (yêu cầu trả của từng máy), `returnMediaIds`, ảnh khấu trừ, tranh chấp, issue hoặc resolution của mục thuê đó.
+- **Authorization**: Bearer Token của Renter đơn hàng, Supplier sở hữu dòng máy, hoặc Admin. Service token bị từ chối.
+- **Cache-Control**: `no-store`. URL hết hạn theo `expiresAtUtc`; ảnh tải lỗi do hết hạn thì gọi lại để lấy URL mới.
+- **Lỗi**: người ngoài đơn, `mediaId` không thuộc bằng chứng của mục thuê, hoặc `itemId` không tồn tại đều trả cùng `404 Media.EvidenceNotFound` để không dò được ID.
 - **Response `200 OK`**:
 ```json
 {

@@ -1,5 +1,4 @@
-﻿using Dprental.RentalService.Application.DTOs.Media;
-using Dprental.RentalService.Application.DTOs.Orders;
+﻿using Dprental.RentalService.Application.DTOs.Orders;
 using Dprental.RentalService.Application.DTOs.Returns;
 using Dprental.RentalService.Application.Security;
 using Dprental.RentalService.Common;
@@ -27,8 +26,4 @@ public interface IReturnService
     Task<Result<ReturnRequestResponse>> ResolveReturnRequestAsync(
         Guid itemId, Guid returnRequestId, IRentalCallerContext caller,
         AdminResolveReturnRequest request, string idempotencyKey, CancellationToken cancellationToken = default);
-
-    Task<Result<MediaAccessDto>> GetReturnUnitMediaAccessAsync(
-        Guid itemId, Guid returnRequestId, Guid assignmentId, Guid mediaId,
-        IRentalCallerContext caller, CancellationToken cancellationToken = default);
 }
